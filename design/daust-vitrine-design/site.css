@@ -1,0 +1,65 @@
+/* DAUST website — global resets, layout helpers, scroll-reveal, responsive */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: 'Montserrat', system-ui, sans-serif;
+  background: #fff;
+  color: var(--fg1);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a { color: inherit; }
+img { max-width: 100%; display: block; }
+
+/* image-slot defaults so empty placeholders look on-brand */
+image-slot {
+  --slot-bg: linear-gradient(135deg, #153b6a 0%, #1d4a82 60%, #0f2c50 130%);
+  display: block;
+  background: var(--slot-bg);
+  color: rgba(255,255,255,.75);
+  font-family: 'Montserrat', system-ui, sans-serif;
+  font-size: 12.5px;
+  letter-spacing: .04em;
+}
+
+/* Scroll reveal — content is ALWAYS fully opaque so it can never get stuck
+   invisible if the animation timeline is throttled. Only a gentle upward
+   slide animates in; if the transition can't run, content still shows. */
+.reveal { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .reveal { transition: transform .6s cubic-bezier(.2,.7,.3,1); }
+  .reveal:not(.in) { transform: translateY(22px); }
+  .reveal.in.d1 { transition-delay: .07s; }
+  .reveal.in.d2 { transition-delay: .14s; }
+  .reveal.in.d3 { transition-delay: .21s; }
+  .reveal.in.d4 { transition-delay: .28s; }
+  .reveal.in.d5 { transition-delay: .35s; }
+}
+.reveal.instant { transition: none !important; transform: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+/* Hide phone on small headers */
+@media (max-width: 1280px) { .hdr-phone { display: none !important; } }
+@media (max-width: 1080px) { .hdr-nav { display: none !important; } }
+@media (max-width: 1080px) { .hdr-burger { display: inline-flex !important; } }
+
+/* Generic responsive: collapse multi-col grids */
+@media (max-width: 900px) {
+  .grid-3 { grid-template-columns: 1fr !important; }
+  .grid-2 { grid-template-columns: 1fr !important; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr) !important; }
+  .grid-5 { grid-template-columns: repeat(2, 1fr) !important; gap: 32px 18px !important; }
+  .acad-line { display: none !important; }
+}
+@media (max-width: 560px) {
+  .grid-4 { grid-template-columns: 1fr !important; }
+  .grid-5 { grid-template-columns: 1fr !important; }
+}
+/* Campus mosaic: collapse spans on small screens */
+@media (max-width: 760px) {
+  .campus-mosaic { grid-template-columns: repeat(2, 1fr) !important; grid-auto-rows: 150px !important; }
+  .campus-mosaic > div { grid-column: span 1 !important; grid-row: span 1 !important; }
+}

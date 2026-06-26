@@ -1,0 +1,70 @@
+@import url('daust-tokens.css');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-body);
+  color: var(--fg1);
+  background: #0c1d36;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+button { font-family: inherit; }
+::selection { background: rgba(237,132,37,.25); }
+
+/* ---- App stage: holds hub or a framed surface ---- */
+#root, .stage {
+  width: 100vw; height: 100vh; height: 100dvh;
+  position: relative;
+}
+.stage-bg {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(1200px 700px at 80% -10%, rgba(237,132,37,.10), transparent 60%),
+    radial-gradient(1000px 800px at -10% 110%, rgba(29,74,130,.55), transparent 60%),
+    linear-gradient(160deg, #0f2c50 0%, #0c1d36 55%, #0a1830 100%);
+}
+
+/* device-frame fit wrapper (controls live outside, unscaled) */
+.fit-host { position: absolute; inset: 0; display: grid; place-items: center; }
+
+/* thin on-brand scrollbars inside surfaces */
+.scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--gray-300) transparent; }
+.scroll::-webkit-scrollbar { width: 9px; height: 9px; }
+.scroll::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+.scroll::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* generic helpers */
+.eyebrow { font-family: var(--font-body); font-weight: 600; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--daust-orange); }
+.mono { font-family: var(--font-mono); }
+.tri { display: inline-flex; gap: 6px; align-items: center; }
+.tri > i { display: block; width: 26px; height: 4px; border-radius: 999px; }
+.tri > i:nth-child(1) { background: var(--daust-navy); }
+.tri > i:nth-child(2) { background: var(--daust-orange); }
+.tri > i:nth-child(3) { background: var(--daust-steel); }
+
+.btn { font-family: var(--font-body); font-weight: 600; font-size: 14px; letter-spacing: .02em; border: none; border-radius: 999px; padding: 12px 24px; cursor: pointer; transition: all .16s cubic-bezier(.2,.7,.3,1); display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn-orange { background: var(--daust-orange); color: #fff; }
+.btn-orange:hover { background: var(--daust-orange-600); }
+.btn-navy { background: var(--daust-navy); color: #fff; }
+.btn-navy:hover { background: var(--daust-navy-700); }
+.btn-outline { background: transparent; color: var(--daust-navy); box-shadow: inset 0 0 0 1.5px var(--daust-navy); }
+.btn-outline:hover { background: var(--daust-navy); color: #fff; }
+.btn-ghost { background: transparent; color: var(--fg2); }
+.btn-ghost:hover { background: var(--gray-100); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* fade/slide keyframes used across surfaces */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popIn { 0% { opacity: 0; transform: scale(.85); } 60% { opacity: 1; } 100% { transform: scale(1); } }
+@keyframes scanSweep { 0% { top: 4%; } 50% { top: 92%; } 100% { top: 4%; } }
+@keyframes drawCheck { to { stroke-dashoffset: 0; } }
+@keyframes ringPulse { 0% { transform: scale(.6); opacity: .55; } 100% { transform: scale(1.5); opacity: 0; } }
+@keyframes shakeX { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-9px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(3px)} }
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes drawerIn { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes spin { to { transform: rotate(360deg); } }

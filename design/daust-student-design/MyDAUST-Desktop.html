@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MyDAUST — Desktop</title>
+<script>
+  /* Suppress the benign "ResizeObserver loop completed with undelivered
+     notifications" notice (a harness/browser false-positive, not a real error). */
+  (function () {
+    var RO = 'ResizeObserver loop';
+    var hit = function (m) { return typeof m === 'string' && m.indexOf(RO) !== -1; };
+    window.addEventListener('error', function (e) {
+      if (e && hit(e.message)) { e.stopImmediatePropagation(); e.preventDefault(); return false; }
+    }, true);
+    var _oe = window.onerror;
+    window.onerror = function (m) { if (hit(m)) return true; return _oe ? _oe.apply(this, arguments) : false; };
+    var _ce = console.error;
+    console.error = function () { if (arguments[0] && hit(String(arguments[0]))) return; return _ce.apply(console, arguments); };
+  })();
+</script>
+<link rel="stylesheet" href="daust/colors_and_type.css" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: var(--bg-subtle); font-family: var(--font-body); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  button { -webkit-tap-highlight-color: transparent; font-family: var(--font-body); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 999px; border: 2px solid var(--bg-subtle); }
+  aside::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); }
+  .d-fade { animation: none; }
+  @keyframes dFade { from { transform: none; } to { transform: none; } }
+  .dlg-scrim { animation: dScrim .2s ease; }
+  @keyframes dScrim { from { opacity: 0; } to { opacity: 1; } }
+  .dlg-pop { animation: dPop .26s cubic-bezier(.2,.9,.3,1); }
+  @keyframes dPop { from { opacity: 0; transform: scale(.96) translateY(8px); } to { opacity: 1; transform: none; } }
+  .pop-in { animation: pIn .4s cubic-bezier(.2,1.4,.4,1); }
+  @keyframes pIn { from { transform: scale(.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+</style>
+<template id="__bundler_thumbnail">
+  <div style="width:100%;height:100%;background:linear-gradient(160deg,#1d4a82,#0f2c50);display:flex;align-items:center;justify-content:center;">
+    <div style="text-align:center;">
+      <div style="font-family:sans-serif;font-weight:800;font-size:64px;letter-spacing:.06em;color:#fff;">DAUST</div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;">
+        <span style="width:40px;height:6px;border-radius:9px;background:#fff;opacity:.7;"></span>
+        <span style="width:40px;height:6px;border-radius:9px;background:#ed8425;"></span>
+        <span style="width:40px;height:6px;border-radius:9px;background:#9da6ae;"></span>
+      </div>
+    </div>
+  </div>
+</template>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="daust/tweaks-panel.jsx"></script>
+<script type="text/babel" src="daust/data.jsx"></script>
+<script type="text/babel" src="daust/desktop-data.jsx"></script>
+<script type="text/babel" src="daust/ui.jsx"></script>
+<script type="text/babel" src="daust/desktop-screens.jsx"></script>
+<script type="text/babel" src="daust/desktop-screens2.jsx"></script>
+<script type="text/babel" src="daust/desktop-courses.jsx"></script>
+<script type="text/babel" src="daust/desktop-inbox.jsx"></script>
+<script type="text/babel" src="daust/desktop-app.jsx"></script>
+</body>
+</html>
