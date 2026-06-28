@@ -1,0 +1,100 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Admin Portal
+      - generic [ref=e12]:
+        - generic [ref=e13]: Main
+        - link "Dashboard" [ref=e14] [cursor=pointer]:
+          - /url: /admin
+      - generic [ref=e15]:
+        - generic [ref=e16]: Academic
+        - link "Students" [ref=e17] [cursor=pointer]:
+          - /url: /admin/students
+        - link "Programs & Courses" [ref=e18] [cursor=pointer]:
+          - /url: /admin/programs
+      - generic [ref=e19]:
+        - generic [ref=e20]: Operations
+        - link "Finance" [ref=e21] [cursor=pointer]:
+          - /url: /admin/finance
+      - generic [ref=e22]:
+        - generic [ref=e23]: Engagement
+        - link "Announcements" [ref=e24] [cursor=pointer]:
+          - /url: /admin/announcements
+      - generic [ref=e25]:
+        - generic [ref=e26]: DD
+        - generic [ref=e27]:
+          - generic [ref=e28]: Director DAUST
+          - generic [ref=e29]: admin, bursar
+        - button "⏻" [ref=e30] [cursor=pointer]
+    - generic [ref=e31]:
+      - banner [ref=e32]:
+        - generic [ref=e33]: Finance
+        - generic [ref=e34]: Search courses, people, invoices…
+        - generic [ref=e35]: admin@daust.edu
+      - generic [ref=e36]:
+        - paragraph [ref=e37]: Student account
+        - heading "Aïssatou Diallo" [level=1] [ref=e38]
+        - paragraph [ref=e39]: DAUST-CE-23-0142 · B.Sc. Computer Engineering · aissatou.diallo@daust.edu
+        - generic [ref=e40]:
+          - generic [ref=e41]:
+            - generic [ref=e42]: Billed
+            - generic [ref=e43]: 3 500 000 F CFA
+          - generic [ref=e44]:
+            - generic [ref=e45]: Paid
+            - generic [ref=e46]: 0 F CFA
+          - generic [ref=e47]:
+            - generic [ref=e48]: Balance
+            - generic [ref=e49]: 3 500 000 F CFA
+        - generic [ref=e50]:
+          - generic [ref=e51]:
+            - paragraph [ref=e52]: Tuition — Fall 2026
+            - generic [ref=e53]: open
+            - generic [ref=e54]: 0 F CFA / 3 500 000 F CFA
+          - table [ref=e55]:
+            - rowgroup [ref=e56]:
+              - row "# Due Amount Paid Status" [ref=e57]:
+                - columnheader "#" [ref=e58]
+                - columnheader "Due" [ref=e59]
+                - columnheader "Amount" [ref=e60]
+                - columnheader "Paid" [ref=e61]
+                - columnheader "Status" [ref=e62]
+            - rowgroup [ref=e63]:
+              - row "1 15 sept. 2026 1 500 000 F CFA 0 F CFA pending" [ref=e64]:
+                - cell "1" [ref=e65]
+                - cell "15 sept. 2026" [ref=e66]
+                - cell "1 500 000 F CFA" [ref=e67]
+                - cell "0 F CFA" [ref=e68]
+                - cell "pending" [ref=e69]:
+                  - generic [ref=e70]: pending
+              - row "2 15 oct. 2026 1 000 000 F CFA 0 F CFA pending" [ref=e71]:
+                - cell "2" [ref=e72]
+                - cell "15 oct. 2026" [ref=e73]
+                - cell "1 000 000 F CFA" [ref=e74]
+                - cell "0 F CFA" [ref=e75]
+                - cell "pending" [ref=e76]:
+                  - generic [ref=e77]: pending
+              - row "3 15 nov. 2026 1 000 000 F CFA 0 F CFA pending" [ref=e78]:
+                - cell "3" [ref=e79]
+                - cell "15 nov. 2026" [ref=e80]
+                - cell "1 000 000 F CFA" [ref=e81]
+                - cell "0 F CFA" [ref=e82]
+                - cell "pending" [ref=e83]:
+                  - generic [ref=e84]: pending
+          - paragraph [ref=e85]: Payments
+          - table [ref=e86]:
+            - rowgroup [ref=e87]:
+              - row "Date Amount Method Status" [ref=e88]:
+                - columnheader "Date" [ref=e89]
+                - columnheader "Amount" [ref=e90]
+                - columnheader "Method" [ref=e91]
+                - columnheader "Status" [ref=e92]
+            - rowgroup [ref=e93]:
+              - row "27 juin 2026 1 500 000 F CFA wave pending" [ref=e94]:
+                - cell "27 juin 2026" [ref=e95]
+                - cell "1 500 000 F CFA" [ref=e96]
+                - cell "wave" [ref=e97]
+                - cell "pending" [ref=e98]:
+                  - generic [ref=e99]: pending

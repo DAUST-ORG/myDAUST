@@ -1,0 +1,69 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Admin Portal
+      - generic [ref=e12]:
+        - generic [ref=e13]: Main
+        - link "Dashboard" [ref=e14] [cursor=pointer]:
+          - /url: /admin
+      - generic [ref=e15]:
+        - generic [ref=e16]: Academic
+        - link "Admissions" [ref=e17] [cursor=pointer]:
+          - /url: /admin/admissions
+        - link "Students" [ref=e18] [cursor=pointer]:
+          - /url: /admin/students
+        - link "Programs & Courses" [ref=e19] [cursor=pointer]:
+          - /url: /admin/programs
+      - generic [ref=e20]:
+        - generic [ref=e21]: Finance
+        - link "Director overview" [ref=e22] [cursor=pointer]:
+          - /url: /admin/finance/director
+        - link "Collections" [ref=e23] [cursor=pointer]:
+          - /url: /admin/finance
+        - link "Expenses" [ref=e24] [cursor=pointer]:
+          - /url: /admin/finance/expenses
+        - link "Budgets" [ref=e25] [cursor=pointer]:
+          - /url: /admin/finance/budgets
+      - generic [ref=e26]:
+        - generic [ref=e27]: Operations
+        - link "Faculty & Staff" [ref=e28] [cursor=pointer]:
+          - /url: /admin/staff
+        - link "Housing" [ref=e29] [cursor=pointer]:
+          - /url: /admin/housing
+        - link "Library" [ref=e30] [cursor=pointer]:
+          - /url: /admin/library
+      - generic [ref=e31]:
+        - generic [ref=e32]: Engagement
+        - link "Announcements" [ref=e33] [cursor=pointer]:
+          - /url: /admin/announcements
+        - link "Reports" [ref=e34] [cursor=pointer]:
+          - /url: /admin/reports
+      - generic [ref=e35]:
+        - generic [ref=e36]: System
+        - link "Settings" [ref=e37] [cursor=pointer]:
+          - /url: /admin/settings
+      - generic [ref=e38]:
+        - generic [ref=e39]: DD
+        - generic [ref=e40]:
+          - generic [ref=e41]: Director DAUST
+          - generic [ref=e42]: admin, bursar
+        - button "⏻" [ref=e43] [cursor=pointer]
+    - generic [ref=e44]:
+      - banner [ref=e45]:
+        - generic [ref=e46]: Faculty & Staff
+        - generic [ref=e47]: Search courses, people, invoices…
+        - generic [ref=e48]: admin@daust.edu
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: Operations
+        - heading "Faculty & Staff" [level=1] [ref=e51]
+        - table [ref=e53]:
+          - rowgroup [ref=e54]:
+            - row "Name Email Type Roles" [ref=e55]:
+              - columnheader "Name" [ref=e56]
+              - columnheader "Email" [ref=e57]
+              - columnheader "Type" [ref=e58]
+              - columnheader "Roles" [ref=e59]
+          - rowgroup

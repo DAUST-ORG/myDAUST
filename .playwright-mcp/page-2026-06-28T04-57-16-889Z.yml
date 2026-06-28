@@ -1,0 +1,68 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Student Portal
+      - generic [ref=e12]:
+        - link "Dashboard" [ref=e13] [cursor=pointer]:
+          - /url: /student
+        - link "Student ID" [ref=e14] [cursor=pointer]:
+          - /url: /student/id
+      - generic [ref=e15]:
+        - generic [ref=e16]: Academics
+        - link "Courses" [ref=e17] [cursor=pointer]:
+          - /url: /student/courses
+        - link "Schedule" [ref=e18] [cursor=pointer]:
+          - /url: /student/schedule
+        - link "Assignments" [ref=e19] [cursor=pointer]:
+          - /url: /student/assignments
+        - link "Grades" [ref=e20] [cursor=pointer]:
+          - /url: /student/grades
+        - link "Innovation" [ref=e21] [cursor=pointer]:
+          - /url: /student/innovation
+      - generic [ref=e22]:
+        - generic [ref=e23]: Campus
+        - link "Announcements" [ref=e24] [cursor=pointer]:
+          - /url: /student/announcements
+        - link "Inbox" [ref=e25] [cursor=pointer]:
+          - /url: /student/inbox
+        - link "Dining" [ref=e26] [cursor=pointer]:
+          - /url: /student/dining
+        - link "Events" [ref=e27] [cursor=pointer]:
+          - /url: /student/events
+        - link "Library" [ref=e28] [cursor=pointer]:
+          - /url: /student/library
+        - link "Documents" [ref=e29] [cursor=pointer]:
+          - /url: /student/documents
+      - generic [ref=e30]:
+        - generic [ref=e31]: Account
+        - link "Billing" [ref=e32] [cursor=pointer]:
+          - /url: /student/billing
+      - generic [ref=e33]:
+        - generic [ref=e34]: AD
+        - generic [ref=e35]:
+          - generic [ref=e36]: Aïssatou Diallo
+          - generic [ref=e37]: student
+        - button "⏻" [ref=e38] [cursor=pointer]
+    - generic [ref=e39]:
+      - banner [ref=e40]:
+        - generic [ref=e41]: Student ID
+        - generic [ref=e42]: Search courses, people, invoices…
+        - generic [ref=e43]: aissatou.diallo@daust.edu
+      - generic [ref=e44]:
+        - paragraph [ref=e45]: Identity
+        - heading "Student ID" [level=1] [ref=e46]
+        - generic [ref=e48]:
+          - generic [ref=e49]:
+            - generic [ref=e50]: DAUST
+            - generic [ref=e55]: STUDENT ID
+          - generic [ref=e56]:
+            - generic [ref=e57]: AD
+            - generic [ref=e58]:
+              - generic [ref=e59]: Aïssatou Diallo
+              - generic [ref=e60]: DAUST-CE-23-0142
+              - generic [ref=e61]: aissatou.diallo@daust.edu
+              - generic [ref=e63]: Active · full meal plan
+          - paragraph [ref=e66]: Scan for campus access & dining entry

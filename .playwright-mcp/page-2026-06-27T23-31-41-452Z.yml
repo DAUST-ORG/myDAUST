@@ -1,0 +1,198 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Admin Portal
+      - generic [ref=e12]:
+        - generic [ref=e13]: Main
+        - link "Dashboard" [ref=e14] [cursor=pointer]:
+          - /url: /admin
+      - generic [ref=e15]:
+        - generic [ref=e16]: Academic
+        - link "Admissions" [ref=e17] [cursor=pointer]:
+          - /url: /admin/admissions
+        - link "Students" [ref=e18] [cursor=pointer]:
+          - /url: /admin/students
+        - link "Programs & Courses" [ref=e19] [cursor=pointer]:
+          - /url: /admin/programs
+      - generic [ref=e20]:
+        - generic [ref=e21]: Finance
+        - link "Director overview" [ref=e22] [cursor=pointer]:
+          - /url: /admin/finance/director
+        - link "Collections" [ref=e23] [cursor=pointer]:
+          - /url: /admin/finance
+        - link "Expenses" [ref=e24] [cursor=pointer]:
+          - /url: /admin/finance/expenses
+        - link "Budgets" [ref=e25] [cursor=pointer]:
+          - /url: /admin/finance/budgets
+      - generic [ref=e26]:
+        - generic [ref=e27]: Operations
+        - link "Faculty & Staff" [ref=e28] [cursor=pointer]:
+          - /url: /admin/staff
+        - link "Housing" [ref=e29] [cursor=pointer]:
+          - /url: /admin/housing
+        - link "Library" [ref=e30] [cursor=pointer]:
+          - /url: /admin/library
+      - generic [ref=e31]:
+        - generic [ref=e32]: Engagement
+        - link "Announcements" [ref=e33] [cursor=pointer]:
+          - /url: /admin/announcements
+        - link "Reports" [ref=e34] [cursor=pointer]:
+          - /url: /admin/reports
+      - generic [ref=e35]:
+        - generic [ref=e36]: System
+        - link "Settings" [ref=e37] [cursor=pointer]:
+          - /url: /admin/settings
+      - generic [ref=e38]:
+        - generic [ref=e39]: DD
+        - generic [ref=e40]:
+          - generic [ref=e41]: Director DAUST
+          - generic [ref=e42]: admin, bursar
+        - button "⏻" [ref=e43] [cursor=pointer]
+    - generic [ref=e44]:
+      - banner [ref=e45]:
+        - generic [ref=e46]: Director overview
+        - generic [ref=e47]: Search courses, people, invoices…
+        - generic [ref=e48]: admin@daust.edu
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: Operations · FY2026
+        - heading "Director — money in & out" [level=1] [ref=e51]
+        - generic [ref=e52]:
+          - generic [ref=e53]:
+            - generic [ref=e54]: Money in (collected)
+            - generic [ref=e55]: 2 491 666 F CFA
+          - generic [ref=e56]:
+            - generic [ref=e57]: Money out (expenses)
+            - generic [ref=e58]: 38 250 000 F CFA
+          - generic [ref=e59]:
+            - generic [ref=e60]: Net
+            - generic [ref=e61]: "-35 758 334 F CFA"
+          - generic [ref=e62]:
+            - generic [ref=e63]: Cash position
+            - generic [ref=e64]: "-35 758 334 F CFA"
+        - generic [ref=e65]:
+          - paragraph [ref=e66]: By division (cost-center group)
+          - table [ref=e67]:
+            - rowgroup [ref=e68]:
+              - row "Division In Out Flow Net" [ref=e69]:
+                - columnheader "Division" [ref=e70]
+                - columnheader "In" [ref=e71]
+                - columnheader "Out" [ref=e72]
+                - columnheader "Flow" [ref=e73]
+                - columnheader "Net" [ref=e74]
+            - rowgroup [ref=e75]:
+              - row "Academic Affairs 0 F CFA 19 200 000 F CFA -19 200 000 F CFA" [ref=e76]:
+                - cell "Academic Affairs" [ref=e77]
+                - cell "0 F CFA" [ref=e78]
+                - cell "19 200 000 F CFA" [ref=e79]
+                - cell [ref=e80]
+                - cell "-19 200 000 F CFA" [ref=e85]
+              - row "Student Affairs 0 F CFA 3 000 000 F CFA -3 000 000 F CFA" [ref=e86]:
+                - cell "Student Affairs" [ref=e87]
+                - cell "0 F CFA" [ref=e88]
+                - cell "3 000 000 F CFA" [ref=e89]
+                - cell [ref=e90]
+                - cell "-3 000 000 F CFA" [ref=e95]
+              - row "Finance & Administration 0 F CFA 16 050 000 F CFA -16 050 000 F CFA" [ref=e96]:
+                - cell "Finance & Administration" [ref=e97]
+                - cell "0 F CFA" [ref=e98]
+                - cell "16 050 000 F CFA" [ref=e99]
+                - cell [ref=e100]
+                - cell "-16 050 000 F CFA" [ref=e105]
+              - row "Enrollment & External 0 F CFA 0 F CFA 0 F CFA" [ref=e106]:
+                - cell "Enrollment & External" [ref=e107]
+                - cell "0 F CFA" [ref=e108]
+                - cell "0 F CFA" [ref=e109]
+                - cell [ref=e110]
+                - cell "0 F CFA" [ref=e114]
+              - row "Innovation 0 F CFA 0 F CFA 0 F CFA" [ref=e115]:
+                - cell "Innovation" [ref=e116]
+                - cell "0 F CFA" [ref=e117]
+                - cell "0 F CFA" [ref=e118]
+                - cell [ref=e119]
+                - cell "0 F CFA" [ref=e123]
+              - row "Institutional / Central 2 491 666 F CFA 0 F CFA 2 491 666 F CFA" [ref=e124]:
+                - cell "Institutional / Central" [ref=e125]
+                - cell "2 491 666 F CFA" [ref=e126]
+                - cell "0 F CFA" [ref=e127]
+                - cell [ref=e128]
+                - cell "2 491 666 F CFA" [ref=e133]
+          - paragraph [ref=e134]: ■ in (collected tuition/fees) · ■ out (expenses, incl. estimates)
+        - generic [ref=e135]:
+          - paragraph [ref=e136]: Budget vs actual (FY)
+          - table [ref=e137]:
+            - rowgroup [ref=e138]:
+              - row "Cost center Allocated Spent Used" [ref=e139]:
+                - columnheader "Cost center" [ref=e140]
+                - columnheader "Allocated" [ref=e141]
+                - columnheader "Spent" [ref=e142]
+                - columnheader "Used" [ref=e143]
+            - rowgroup [ref=e144]:
+              - row "1100 Academic Programs & Faculty 800 000 000 F CFA 19 200 000 F CFA 2%" [ref=e145]:
+                - cell "1100 Academic Programs & Faculty" [ref=e146]
+                - cell "800 000 000 F CFA" [ref=e147]
+                - cell "19 200 000 F CFA" [ref=e148]
+                - cell "2%" [ref=e149]:
+                  - generic [ref=e152]: 2%
+              - row "1200 Registrar 60 000 000 F CFA 0 F CFA 0%" [ref=e153]:
+                - cell "1200 Registrar" [ref=e154]
+                - cell "60 000 000 F CFA" [ref=e155]
+                - cell "0 F CFA" [ref=e156]
+                - cell "0%" [ref=e157]:
+                  - generic [ref=e159]: 0%
+              - row "2100 Student Life 40 000 000 F CFA 0 F CFA 0%" [ref=e160]:
+                - cell "2100 Student Life" [ref=e161]
+                - cell "40 000 000 F CFA" [ref=e162]
+                - cell "0 F CFA" [ref=e163]
+                - cell "0%" [ref=e164]:
+                  - generic [ref=e166]: 0%
+              - row "2200 Co-curricular & Engagement 46 500 000 F CFA 3 000 000 F CFA 6%" [ref=e167]:
+                - cell "2200 Co-curricular & Engagement" [ref=e168]
+                - cell "46 500 000 F CFA" [ref=e169]
+                - cell "3 000 000 F CFA" [ref=e170]
+                - cell "6%" [ref=e171]:
+                  - generic [ref=e174]: 6%
+              - row "3100 Finance & Accounting 50 000 000 F CFA 350 000 F CFA 1%" [ref=e175]:
+                - cell "3100 Finance & Accounting" [ref=e176]
+                - cell "50 000 000 F CFA" [ref=e177]
+                - cell "350 000 F CFA" [ref=e178]
+                - cell "1%" [ref=e179]:
+                  - generic [ref=e182]: 1%
+              - row "3300 Human Resources 45 000 000 F CFA 9 000 000 F CFA 20%" [ref=e183]:
+                - cell "3300 Human Resources" [ref=e184]
+                - cell "45 000 000 F CFA" [ref=e185]
+                - cell "9 000 000 F CFA" [ref=e186]
+                - cell "20%" [ref=e187]:
+                  - generic [ref=e190]: 20%
+              - row "3400 Facilities & Maintenance 300 000 000 F CFA 4 500 000 F CFA 2%" [ref=e191]:
+                - cell "3400 Facilities & Maintenance" [ref=e192]
+                - cell "300 000 000 F CFA" [ref=e193]
+                - cell "4 500 000 F CFA" [ref=e194]
+                - cell "2%" [ref=e195]:
+                  - generic [ref=e198]: 2%
+              - row "3500 IT / Information Systems 80 000 000 F CFA 2 200 000 F CFA 3%" [ref=e199]:
+                - cell "3500 IT / Information Systems" [ref=e200]
+                - cell "80 000 000 F CFA" [ref=e201]
+                - cell "2 200 000 F CFA" [ref=e202]
+                - cell "3%" [ref=e203]:
+                  - generic [ref=e206]: 3%
+              - row "4100 Marketing & Communications 35 000 000 F CFA 0 F CFA 0%" [ref=e207]:
+                - cell "4100 Marketing & Communications" [ref=e208]
+                - cell "35 000 000 F CFA" [ref=e209]
+                - cell "0 F CFA" [ref=e210]
+                - cell "0%" [ref=e211]:
+                  - generic [ref=e213]: 0%
+              - row "4200 Admissions 30 000 000 F CFA 0 F CFA 0%" [ref=e214]:
+                - cell "4200 Admissions" [ref=e215]
+                - cell "30 000 000 F CFA" [ref=e216]
+                - cell "0 F CFA" [ref=e217]
+                - cell "0%" [ref=e218]:
+                  - generic [ref=e220]: 0%
+              - row "5100 Innovation Studio 25 000 000 F CFA 0 F CFA 0%" [ref=e221]:
+                - cell "5100 Innovation Studio" [ref=e222]
+                - cell "25 000 000 F CFA" [ref=e223]
+                - cell "0 F CFA" [ref=e224]
+                - cell "0%" [ref=e225]:
+                  - generic [ref=e227]: 0%

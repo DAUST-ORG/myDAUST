@@ -1,0 +1,154 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Admin Portal
+      - generic [ref=e12]:
+        - generic [ref=e13]: Main
+        - link "Dashboard" [ref=e14] [cursor=pointer]:
+          - /url: /admin
+      - generic [ref=e15]:
+        - generic [ref=e16]: Academic
+        - link "Admissions" [ref=e17] [cursor=pointer]:
+          - /url: /admin/admissions
+        - link "Students" [ref=e18] [cursor=pointer]:
+          - /url: /admin/students
+        - link "Programs & Courses" [ref=e19] [cursor=pointer]:
+          - /url: /admin/programs
+      - generic [ref=e20]:
+        - generic [ref=e21]: Finance
+        - link "Director overview" [ref=e22] [cursor=pointer]:
+          - /url: /admin/finance/director
+        - link "Collections" [ref=e23] [cursor=pointer]:
+          - /url: /admin/finance
+        - link "Expenses" [ref=e24] [cursor=pointer]:
+          - /url: /admin/finance/expenses
+        - link "Budgets" [ref=e25] [cursor=pointer]:
+          - /url: /admin/finance/budgets
+      - generic [ref=e26]:
+        - generic [ref=e27]: Operations
+        - link "Faculty & Staff" [ref=e28] [cursor=pointer]:
+          - /url: /admin/staff
+        - link "Housing" [ref=e29] [cursor=pointer]:
+          - /url: /admin/housing
+        - link "Library" [ref=e30] [cursor=pointer]:
+          - /url: /admin/library
+      - generic [ref=e31]:
+        - generic [ref=e32]: Engagement
+        - link "Announcements" [ref=e33] [cursor=pointer]:
+          - /url: /admin/announcements
+        - link "Reports" [ref=e34] [cursor=pointer]:
+          - /url: /admin/reports
+      - generic [ref=e35]:
+        - generic [ref=e36]: System
+        - link "Settings" [ref=e37] [cursor=pointer]:
+          - /url: /admin/settings
+      - generic [ref=e38]:
+        - generic [ref=e39]: DD
+        - generic [ref=e40]:
+          - generic [ref=e41]: Director DAUST
+          - generic [ref=e42]: admin, bursar
+        - button "⏻" [ref=e43] [cursor=pointer]
+    - generic [ref=e44]:
+      - banner [ref=e45]:
+        - generic [ref=e46]: Admissions
+        - generic [ref=e47]: Search courses, people, invoices…
+        - generic [ref=e48]: admin@daust.edu
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: Academic
+        - heading "Admissions" [level=1] [ref=e51]
+        - generic [ref=e52]:
+          - generic [ref=e53]:
+            - generic [ref=e54]: submitted
+            - generic [ref=e55]: "2"
+          - generic [ref=e56]:
+            - generic [ref=e57]: review
+            - generic [ref=e58]: "1"
+          - generic [ref=e59]:
+            - generic [ref=e60]: interview
+            - generic [ref=e61]: "1"
+          - generic [ref=e62]:
+            - generic [ref=e63]: offer
+            - generic [ref=e64]: "1"
+          - generic [ref=e65]:
+            - generic [ref=e66]: accepted
+            - generic [ref=e67]: "1"
+          - generic [ref=e68]:
+            - generic [ref=e69]: rejected
+            - generic [ref=e70]: "1"
+        - generic [ref=e71]:
+          - paragraph [ref=e72]: Applicants
+          - table [ref=e73]:
+            - rowgroup [ref=e74]:
+              - row "Name Program Country BAC Stage" [ref=e75]:
+                - columnheader "Name" [ref=e76]
+                - columnheader "Program" [ref=e77]
+                - columnheader "Country" [ref=e78]
+                - columnheader "BAC" [ref=e79]
+                - columnheader "Stage" [ref=e80]
+            - rowgroup [ref=e81]:
+              - row "Moussa Traoré moussa.traore@example.ml BSCE Mali 18 accepted" [ref=e82]:
+                - cell "Moussa Traoré moussa.traore@example.ml" [ref=e83]:
+                  - text: Moussa Traoré
+                  - text: moussa.traore@example.ml
+                - cell "BSCE" [ref=e84]
+                - cell "Mali" [ref=e85]
+                - cell "18" [ref=e86]
+                - cell "accepted" [ref=e87]:
+                  - generic [ref=e88]: accepted
+              - row "Fatima Diallo fatima.diallo@example.gn BSCE Guinea 17 offer" [ref=e89]:
+                - cell "Fatima Diallo fatima.diallo@example.gn" [ref=e90]:
+                  - text: Fatima Diallo
+                  - text: fatima.diallo@example.gn
+                - cell "BSCE" [ref=e91]
+                - cell "Guinea" [ref=e92]
+                - cell "17" [ref=e93]
+                - cell "offer" [ref=e94]:
+                  - generic [ref=e95]: offer
+              - row "Aminata Bâ aminata.ba@example.sn BSCE Senegal 16 review" [ref=e96]:
+                - cell "Aminata Bâ aminata.ba@example.sn" [ref=e97]:
+                  - text: Aminata Bâ
+                  - text: aminata.ba@example.sn
+                - cell "BSCE" [ref=e98]
+                - cell "Senegal" [ref=e99]
+                - cell "16" [ref=e100]
+                - cell "review" [ref=e101]:
+                  - generic [ref=e102]: review
+              - row "John Mensah john.mensah@example.gh BSCE Ghana 15 interview" [ref=e103]:
+                - cell "John Mensah john.mensah@example.gh" [ref=e104]:
+                  - text: John Mensah
+                  - text: john.mensah@example.gh
+                - cell "BSCE" [ref=e105]
+                - cell "Ghana" [ref=e106]
+                - cell "15" [ref=e107]
+                - cell "interview" [ref=e108]:
+                  - generic [ref=e109]: interview
+              - row "Cheikh Ndoye cheikh.ndoye@example.sn BSCE Senegal 14 submitted" [ref=e110]:
+                - cell "Cheikh Ndoye cheikh.ndoye@example.sn" [ref=e111]:
+                  - text: Cheikh Ndoye
+                  - text: cheikh.ndoye@example.sn
+                - cell "BSCE" [ref=e112]
+                - cell "Senegal" [ref=e113]
+                - cell "14" [ref=e114]
+                - cell "submitted" [ref=e115]:
+                  - generic [ref=e116]: submitted
+              - row "Awa Sy awa.sy@example.sn BSCE Senegal 13 submitted" [ref=e117]:
+                - cell "Awa Sy awa.sy@example.sn" [ref=e118]:
+                  - text: Awa Sy
+                  - text: awa.sy@example.sn
+                - cell "BSCE" [ref=e119]
+                - cell "Senegal" [ref=e120]
+                - cell "13" [ref=e121]
+                - cell "submitted" [ref=e122]:
+                  - generic [ref=e123]: submitted
+              - row "Ousmane Kane ousmane.kane@example.sn BSCE Senegal 9 rejected" [ref=e124]:
+                - cell "Ousmane Kane ousmane.kane@example.sn" [ref=e125]:
+                  - text: Ousmane Kane
+                  - text: ousmane.kane@example.sn
+                - cell "BSCE" [ref=e126]
+                - cell "Senegal" [ref=e127]
+                - cell "9" [ref=e128]
+                - cell "rejected" [ref=e129]:
+                  - generic [ref=e130]: rejected

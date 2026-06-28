@@ -1,0 +1,78 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Student Portal
+      - link "Dashboard" [ref=e13] [cursor=pointer]:
+        - /url: /student
+      - generic [ref=e14]:
+        - generic [ref=e15]: Academics
+        - link "Courses" [ref=e16] [cursor=pointer]:
+          - /url: /student/courses
+        - link "Schedule" [ref=e17] [cursor=pointer]:
+          - /url: /student/schedule
+        - link "Assignments" [ref=e18] [cursor=pointer]:
+          - /url: /student/assignments
+        - link "Grades" [ref=e19] [cursor=pointer]:
+          - /url: /student/grades
+      - generic [ref=e20]:
+        - generic [ref=e21]: Campus
+        - link "Announcements" [ref=e22] [cursor=pointer]:
+          - /url: /student/announcements
+      - generic [ref=e23]:
+        - generic [ref=e24]: Account
+        - link "Billing" [ref=e25] [cursor=pointer]:
+          - /url: /student/billing
+      - generic [ref=e26]:
+        - generic [ref=e27]: AD
+        - generic [ref=e28]:
+          - generic [ref=e29]: Aïssatou Diallo
+          - generic [ref=e30]: student
+        - button "⏻" [ref=e31] [cursor=pointer]
+    - generic [ref=e32]:
+      - banner [ref=e33]:
+        - generic [ref=e34]: Assignments
+        - generic [ref=e35]: Search courses, people, invoices…
+        - generic [ref=e36]: aissatou.diallo@daust.edu
+      - generic [ref=e37]:
+        - paragraph [ref=e38]: Coursework
+        - heading "Assignments" [level=1] [ref=e39]
+        - generic [ref=e40]:
+          - generic [ref=e41]:
+            - generic [ref=e42]: To do
+            - generic [ref=e43]: "0"
+            - generic [ref=e44]: not submitted
+          - generic [ref=e45]:
+            - generic [ref=e46]: Awaiting grade
+            - generic [ref=e47]: "2"
+            - generic [ref=e48]: submitted
+          - generic [ref=e49]:
+            - generic [ref=e50]: Graded
+            - generic [ref=e51]: "0"
+            - generic [ref=e52]: returned
+        - generic [ref=e53]:
+          - paragraph [ref=e54]: To do
+          - paragraph [ref=e55]: Nothing due — you're caught up.
+        - generic [ref=e56]:
+          - paragraph [ref=e57]: Awaiting grade
+          - generic [ref=e59]:
+            - generic [ref=e60]:
+              - strong [ref=e61]: MTH 210
+              - text: · Problem Set 1
+              - generic [ref=e62]: (homework)
+              - generic [ref=e63]: Due Sep 15 · 80d left
+            - generic [ref=e64]: submitted
+            - button "Resubmit" [ref=e65] [cursor=pointer]
+          - generic [ref=e67]:
+            - generic [ref=e68]:
+              - strong [ref=e69]: ENG 250
+              - text: · Reflective Essay
+              - generic [ref=e70]: (project)
+              - generic [ref=e71]: Due Sep 25 · 90d left
+            - generic [ref=e72]: submitted
+            - button "Resubmit" [ref=e73] [cursor=pointer]
+        - generic [ref=e74]:
+          - paragraph [ref=e75]: Graded
+          - paragraph [ref=e76]: No graded work yet.

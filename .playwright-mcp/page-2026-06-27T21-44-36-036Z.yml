@@ -1,0 +1,109 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e20] [cursor=pointer]:
+    - img [ref=e21]
+  - alert [ref=e14]
+  - generic [ref=e24]:
+    - complementary [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]: DAUST
+        - generic [ref=e32]: Faculty Portal
+      - link "Dashboard" [ref=e34] [cursor=pointer]:
+        - /url: /faculty
+      - generic [ref=e35]:
+        - generic [ref=e36]: Teaching
+        - link "My Sections" [ref=e37] [cursor=pointer]:
+          - /url: /faculty/roster
+      - generic [ref=e38]:
+        - generic [ref=e39]: Campus
+        - link "Announcements" [ref=e40] [cursor=pointer]:
+          - /url: /faculty/announcements
+      - generic [ref=e41]:
+        - generic [ref=e42]: AB
+        - generic [ref=e43]:
+          - generic [ref=e44]: Amadou Ba
+          - generic [ref=e45]: faculty
+        - button "⏻" [ref=e46] [cursor=pointer]
+    - generic [ref=e47]:
+      - banner [ref=e48]:
+        - generic [ref=e49]: Dashboard
+        - generic [ref=e50]: Search courses, people, invoices…
+        - generic [ref=e51]: amadou.ba@daust.edu
+      - generic [ref=e52]:
+        - paragraph [ref=e53]: Fall 2026
+        - heading "Welcome, Ba" [level=1] [ref=e54]
+        - paragraph [ref=e55]: Your teaching at a glance.
+        - generic [ref=e56]:
+          - generic [ref=e57]:
+            - generic [ref=e58]: Active sections
+            - generic [ref=e59]: "5"
+            - generic [ref=e60]: this term
+          - generic [ref=e61]:
+            - generic [ref=e62]: Students taught
+            - generic [ref=e63]: "1"
+            - generic [ref=e64]: across sections
+          - generic [ref=e65]:
+            - generic [ref=e66]: Total sections
+            - generic [ref=e67]: "6"
+            - generic [ref=e68]: all terms
+        - generic [ref=e69]:
+          - generic [ref=e70]:
+            - generic [ref=e71]:
+              - paragraph [ref=e72]: My sections
+              - link "Rosters →" [ref=e73] [cursor=pointer]:
+                - /url: /faculty/roster
+            - table [ref=e74]:
+              - rowgroup [ref=e75]:
+                - row "Course Term Schedule Enrolled" [ref=e76]:
+                  - columnheader "Course" [ref=e77]
+                  - columnheader "Term" [ref=e78]
+                  - columnheader "Schedule" [ref=e79]
+                  - columnheader "Enrolled" [ref=e80]
+              - rowgroup [ref=e81]:
+                - row "CE 201 — Digital Systems Fall 2026 TTh 09:00–10:30 1/30" [ref=e82]:
+                  - cell "CE 201 — Digital Systems" [ref=e83]
+                  - cell "Fall 2026" [ref=e84]
+                  - cell "TTh 09:00–10:30" [ref=e85]
+                  - cell "1/30" [ref=e86]
+                - row "CSC 101 — Introduction to Computer Science Fall 2026 MWF 09:00–10:00 0/2" [ref=e87]:
+                  - cell "CSC 101 — Introduction to Computer Science" [ref=e88]
+                  - cell "Fall 2026" [ref=e89]
+                  - cell "MWF 09:00–10:00" [ref=e90]
+                  - cell "0/2" [ref=e91]
+                - row "CSC 201 — Data Structures Fall 2026 MWF 10:00–11:00 0/2" [ref=e92]:
+                  - cell "CSC 201 — Data Structures" [ref=e93]
+                  - cell "Fall 2026" [ref=e94]
+                  - cell "MWF 10:00–11:00" [ref=e95]
+                  - cell "0/2" [ref=e96]
+                - row "ENG 250 — Technical Writing Fall 2026 T 14:00–16:00 0/25" [ref=e97]:
+                  - cell "ENG 250 — Technical Writing" [ref=e98]
+                  - cell "Fall 2026" [ref=e99]
+                  - cell "T 14:00–16:00" [ref=e100]
+                  - cell "0/25" [ref=e101]
+                - row "MTH 210 — Linear Algebra Fall 2026 MWF 08:00–09:00 0/30" [ref=e102]:
+                  - cell "MTH 210 — Linear Algebra" [ref=e103]
+                  - cell "Fall 2026" [ref=e104]
+                  - cell "MWF 08:00–09:00" [ref=e105]
+                  - cell "0/30" [ref=e106]
+                - row "CSC 101 — Introduction to Computer Science Spring 2026 MWF 10:00–11:00 0/30" [ref=e107]:
+                  - cell "CSC 101 — Introduction to Computer Science" [ref=e108]
+                  - cell "Spring 2026" [ref=e109]
+                  - cell "MWF 10:00–11:00" [ref=e110]
+                  - cell "0/30" [ref=e111]
+          - generic [ref=e112]:
+            - paragraph [ref=e113]: Announcements
+            - generic [ref=e114]:
+              - generic [ref=e115]: Registrar
+              - generic [ref=e116]: Fall 2026 registration is open
+              - generic [ref=e117]: Add/drop closes two weeks after term start. Register early — popular sections fill fast.
+            - generic [ref=e118]:
+              - generic [ref=e119]: Life @ DAUST
+              - generic [ref=e120]: Career Fair — Atlantic Atrium
+              - generic [ref=e121]: 60+ employers on campus June 12. Bring your CV.
+            - generic [ref=e122]:
+              - generic [ref=e123]: Library
+              - generic [ref=e124]: Library extended hours
+              - generic [ref=e125]: The library is open until midnight during finals week.
+            - generic [ref=e126]:
+              - generic [ref=e127]: Academics
+              - generic [ref=e128]: Grade submission deadline
+              - generic [ref=e129]: Submit Fall midterm grades by the end of week 8.

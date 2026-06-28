@@ -1,0 +1,766 @@
+// myDAUST data model — Phase 1 (payments domain).
+// All money is integer XOF (zero-decimal CFA). Per-transaction amounts (millions FCFA)
+// fit comfortably in Int; billion-scale aggregates are computed, never stored as Int.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PersonKind {
+  student
+  faculty
+  staff
+}
+
+enum PaymentMethod {
+  wave
+  orange_money
+  card
+}
+
+enum PaymentStatus {
+  pending
+  success
+  failed
+  cancelled
+  refunded
+}
+
+enum InstallmentStatus {
+  pending
+  partial
+  paid
+  overdue
+}
+
+enum InvoiceStatus {
+  open
+  partial
+  paid
+  void
+}
+
+enum EnrollmentStatus {
+  enrolled
+  dropped
+  completed
+}
+
+enum AttendanceStatus {
+  present
+  late
+  absent
+}
+
+enum AssignmentType {
+  homework
+  quiz
+  exam
+  project
+}
+
+enum SubmissionStatus {
+  assigned
+  submitted
+  graded
+}
+
+enum CostCenterType {
+  group
+  operating
+  auxiliary
+  revenue
+  reserve
+  capital
+  restricted
+}
+
+model CostCenter {
+  code       String         @id
+  name       String
+  type       CostCenterType
+  parentCode String?
+  parent     CostCenter?    @relation("CostCenterTree", fields: [parentCode], references: [code])
+  children   CostCenter[]   @relation("CostCenterTree")
+  invoices   Invoice[]
+  expenses   Expense[]
+  budgets    Budget[]
+
+  @@index([parentCode])
+}
+
+// Management-accounting expense (manual/estimated). Financial accounting (GL) deferred to ERP.
+model Expense {
+  id             String     @id @default(uuid())
+  costCenterCode String
+  costCenter     CostCenter @relation(fields: [costCenterCode], references: [code])
+  category       String // Salary | Facilities | Procurement | IT | Operations | ...
+  description    String?
+  payee          String? // human-readable label only (vendor or employee display name)
+  // Canonical employee link for salary rows — payslips join on this, never on the mutable payee name.
+  personId       String?
+  amount         Int // integer XOF
+  isEstimate     Boolean    @default(false)
+  incurredOn     DateTime
+  createdById    String?
+  createdAt      DateTime   @default(now())
+
+  @@index([costCenterCode])
+  @@index([incurredOn])
+  @@index([personId])
+}
+
+model Budget {
+  id             String     @id @default(uuid())
+  costCenterCode String
+  costCenter     CostCenter @relation(fields: [costCenterCode], references: [code])
+  fiscalYear     String // e.g. "FY2026"
+  allocated      Int // integer XOF
+
+  @@unique([costCenterCode, fiscalYear])
+}
+
+model Person {
+  id        String     @id @default(uuid())
+  email     String     @unique
+  firstName String
+  lastName  String
+  kind      PersonKind
+  // App RBAC roles (a person can hold several). Validated against AppRole in code.
+  roles     String[]   @default([])
+  // bcrypt hash; null until a password is set.
+  passwordHash String?
+  createdAt DateTime   @default(now())
+  student   Student?
+  taughtSections Section[] @relation("Instructor")
+  threadParticipations ThreadParticipant[]
+  messagesSent Message[]
+  projectMemberships ProjectMember[]
+}
+
+model Student {
+  id          String       @id @default(uuid())
+  personId    String       @unique
+  person      Person       @relation(fields: [personId], references: [id])
+  studentNo   String       @unique
+  programId   String?
+  program     Program?     @relation(fields: [programId], references: [id])
+  invoices    Invoice[]
+  payments    Payment[]
+  enrollments Enrollment[]
+  mealPlan    MealPlan?
+  diningOrders DiningOrder[]
+  diningScans DiningScan[]
+  housing     HousingAssignment?
+  roommateProfile RoommateProfile?
+  createdAt   DateTime     @default(now())
+}
+
+model Term {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  startDate DateTime
+  endDate   DateTime
+  invoices  Invoice[]
+  sections  Section[]
+}
+
+model Invoice {
+  id             String        @id @default(uuid())
+  studentId      String
+  student        Student       @relation(fields: [studentId], references: [id])
+  termId         String
+  term           Term          @relation(fields: [termId], references: [id])
+  totalAmount    Int
+  amountPaid     Int           @default(0)
+  status         InvoiceStatus @default(open)
+  // Revenue dimension for the director dashboard (tuition -> 9100).
+  costCenterCode String        @default("9100")
+  costCenter     CostCenter    @relation(fields: [costCenterCode], references: [code])
+  plan           PaymentPlan?
+  payments       Payment[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([studentId])
+  @@index([termId])
+  @@index([status])
+}
+
+model PaymentPlan {
+  id           String        @id @default(uuid())
+  invoiceId    String        @unique
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id])
+  createdById  String?
+  installments Installment[]
+  createdAt    DateTime      @default(now())
+}
+
+model Installment {
+  id          String            @id @default(uuid())
+  planId      String
+  plan        PaymentPlan       @relation(fields: [planId], references: [id])
+  sequence    Int
+  dueDate     DateTime
+  amountDue   Int
+  amountPaid  Int               @default(0)
+  status      InstallmentStatus @default(pending)
+  allocations PaymentAllocation[]
+
+  @@unique([planId, sequence])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model Payment {
+  id          String              @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice             @relation(fields: [invoiceId], references: [id])
+  studentId   String
+  student     Student             @relation(fields: [studentId], references: [id])
+  amount      Int
+  method      PaymentMethod
+  status      PaymentStatus       @default(pending)
+  provider    String              @default("paytech")
+  // Idempotency anchor: the gateway transaction reference is unique.
+  providerRef String              @unique
+  ipnPayload  Json?
+  allocations PaymentAllocation[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([invoiceId])
+  @@index([status])
+}
+
+model PaymentAllocation {
+  id            String      @id @default(uuid())
+  paymentId     String
+  payment       Payment     @relation(fields: [paymentId], references: [id])
+  installmentId String
+  installment   Installment @relation(fields: [installmentId], references: [id])
+  amount        Int
+
+  @@index([paymentId])
+  @@index([installmentId])
+}
+
+// Idempotent webhook processing: each delivered IPN is recorded once by its token.
+model WebhookEvent {
+  id          String   @id @default(uuid())
+  provider    String   @default("paytech")
+  token       String   @unique
+  paymentRef  String?
+  payload     Json
+  processedAt DateTime @default(now())
+
+  @@index([paymentRef])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  entity    String
+  entityId  String
+  action    String
+  actorId   String?
+  data      Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model Applicant {
+  id          String   @id @default(uuid())
+  firstName   String
+  lastName    String
+  email       String
+  programCode String?
+  stage       String   @default("submitted") // submitted|review|interview|offer|accepted|rejected
+  score       Int? // BAC score (0–20)
+  country     String?
+  createdAt   DateTime @default(now())
+
+  @@index([stage])
+}
+
+model Announcement {
+  id        String   @id @default(uuid())
+  title     String
+  body      String
+  category  String
+  audience  String   @default("all") // all | student | faculty | staff
+  author    String?
+  createdAt DateTime @default(now())
+
+  @@index([audience])
+}
+
+// --- Academic core: Course is the catalog entity; Section is a term offering; Enrollment is the join. ---
+
+model Department {
+  id       String    @id @default(uuid())
+  code     String    @unique
+  name     String
+  programs Program[]
+  courses  Course[]
+}
+
+model Program {
+  id           String     @id @default(uuid())
+  code         String     @unique
+  name         String
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
+  students     Student[]
+}
+
+model Course {
+  id            String     @id @default(uuid())
+  code          String     @unique
+  title         String
+  credits       Int
+  departmentId  String
+  department    Department @relation(fields: [departmentId], references: [id])
+  sections      Section[]
+  // Self many-to-many: a course's prerequisite courses.
+  prerequisites Course[]   @relation("CoursePrereq")
+  requiredFor   Course[]   @relation("CoursePrereq")
+}
+
+model Section {
+  id           String       @id @default(uuid())
+  courseId     String
+  course       Course       @relation(fields: [courseId], references: [id])
+  termId       String
+  term         Term         @relation(fields: [termId], references: [id])
+  instructorId String?
+  instructor   Person?      @relation("Instructor", fields: [instructorId], references: [id])
+  sectionCode  String
+  capacity     Int
+  days         String // e.g. "MWF"
+  startTime    String // "10:00"
+  endTime      String // "11:00"
+  room         String?
+  enrollments  Enrollment[]
+  assignments  Assignment[]
+
+  @@unique([courseId, termId, sectionCode])
+  @@index([termId])
+}
+
+model Enrollment {
+  id         String           @id @default(uuid())
+  studentId  String
+  student    Student          @relation(fields: [studentId], references: [id])
+  sectionId  String
+  section    Section          @relation(fields: [sectionId], references: [id])
+  status     EnrollmentStatus @default(enrolled)
+  grade      String?
+  enrolledAt DateTime         @default(now())
+  attendance AttendanceRecord[]
+  submissions Submission[]
+
+  @@unique([studentId, sectionId])
+  @@index([sectionId])
+  @@index([studentId])
+}
+
+model AttendanceRecord {
+  id           String           @id @default(uuid())
+  enrollmentId String
+  enrollment   Enrollment       @relation(fields: [enrollmentId], references: [id])
+  sectionId    String
+  date         DateTime // class day (date only)
+  status       AttendanceStatus @default(present)
+  createdAt    DateTime         @default(now())
+
+  @@unique([enrollmentId, date])
+  @@index([sectionId, date])
+}
+
+// Coursework: an Assignment belongs to a Section; a Submission is the Enrollment<->Assignment join
+// carrying the student's work + the faculty's score/feedback. Weighted scores feed a section grade
+// suggestion, but the final letter grade stays the faculty's explicit call (Enrollment.grade).
+model Assignment {
+  id          String         @id @default(uuid())
+  sectionId   String
+  section     Section        @relation(fields: [sectionId], references: [id])
+  title       String
+  description String?
+  type        AssignmentType @default(homework)
+  maxPoints   Int            @default(100)
+  // Percent weight toward the final grade; 0 = practice/ungraded.
+  weight      Int            @default(0)
+  dueDate     DateTime
+  createdAt   DateTime       @default(now())
+  submissions Submission[]
+
+  @@index([sectionId])
+}
+
+model Submission {
+  id           String           @id @default(uuid())
+  assignmentId String
+  assignment   Assignment       @relation(fields: [assignmentId], references: [id])
+  enrollmentId String
+  enrollment   Enrollment       @relation(fields: [enrollmentId], references: [id])
+  status       SubmissionStatus @default(submitted)
+  text         String?
+  fileUrl      String?
+  fileName     String?
+  score        Int?
+  feedback     String?
+  submittedAt  DateTime         @default(now())
+  gradedAt     DateTime?
+
+  @@unique([assignmentId, enrollmentId])
+  @@index([assignmentId])
+  @@index([enrollmentId])
+}
+
+// --- Messaging: direct/threaded conversations between people (student<->faculty<->staff). ---
+
+model Thread {
+  id           String              @id @default(uuid())
+  subject      String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  participants ThreadParticipant[]
+  messages     Message[]
+
+  @@index([updatedAt])
+}
+
+model ThreadParticipant {
+  id         String    @id @default(uuid())
+  threadId   String
+  thread     Thread    @relation(fields: [threadId], references: [id])
+  personId   String
+  person     Person    @relation(fields: [personId], references: [id])
+  lastReadAt DateTime?
+
+  @@unique([threadId, personId])
+  @@index([personId])
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  threadId  String
+  thread    Thread   @relation(fields: [threadId], references: [id])
+  senderId  String
+  sender    Person   @relation(fields: [senderId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([threadId])
+}
+
+// --- Campus: events + library catalog. ---
+
+model Event {
+  id          String    @id @default(uuid())
+  title       String
+  description String?
+  location    String?
+  category    String    @default("Campus") // Campus | Academics | Career | Sports | Arts
+  startsAt    DateTime
+  endsAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([startsAt])
+}
+
+model LibraryResource {
+  id         String  @id @default(uuid())
+  title      String
+  author     String?
+  kind       String  @default("book") // book | journal | ebook | database
+  subject    String?
+  callNumber String?
+  available  Boolean @default(true)
+
+  @@index([title])
+}
+
+// --- Dining: meal plans (weekday pass) + weekend orders (PayTech) + entrance scans. ---
+
+enum MealPeriod {
+  breakfast
+  lunch
+  dinner
+}
+
+enum MealPlanType {
+  none
+  half
+  full
+}
+
+enum DiningOrderStatus {
+  cart
+  paid
+  preparing
+  ready
+  collected
+  cancelled
+}
+
+enum ScanResult {
+  served
+  turned_away
+}
+
+model MealPlan {
+  id        String       @id @default(uuid())
+  studentId String       @unique
+  student   Student      @relation(fields: [studentId], references: [id])
+  type      MealPlanType @default(none)
+  term      String
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+}
+
+model MenuItem {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  category    String   @default("weekend") // breakfast | lunch | dinner | weekend
+  priceXof    Int      @default(0)
+  imageUrl    String?
+  available   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  orderItems DiningOrderItem[]
+}
+
+model DiningOrder {
+  id        String            @id @default(uuid())
+  studentId String
+  student   Student           @relation(fields: [studentId], references: [id])
+  status    DiningOrderStatus @default(cart)
+  totalXof  Int               @default(0)
+  pickupAt  DateTime?
+  createdAt DateTime          @default(now())
+  items     DiningOrderItem[]
+
+  @@index([studentId])
+  @@index([status])
+}
+
+model DiningOrderItem {
+  id         String      @id @default(uuid())
+  orderId    String
+  order      DiningOrder @relation(fields: [orderId], references: [id])
+  menuItemId String
+  menuItem   MenuItem    @relation(fields: [menuItemId], references: [id])
+  qty        Int         @default(1)
+  priceXof   Int
+
+  @@index([orderId])
+}
+
+model DiningScan {
+  id        String     @id @default(uuid())
+  studentId String
+  student   Student    @relation(fields: [studentId], references: [id])
+  period    MealPeriod
+  date      DateTime // date only
+  result    ScanResult
+  reason    String?
+  createdAt DateTime   @default(now())
+
+  @@unique([studentId, period, date])
+  @@index([date, period])
+}
+
+// --- Student Affairs: housing, roommate matching, conduct, clubs, co-curricular budget. ---
+
+enum HousingStatus {
+  pending
+  assigned
+}
+
+enum ConductStage {
+  intake
+  investigation
+  mediation
+  hearing
+  resolved
+}
+
+enum ConductSeverity {
+  low
+  med
+  high
+}
+
+model Hall {
+  id          String              @id @default(uuid())
+  name        String              @unique
+  kind        String // "First-year · Mixed", etc.
+  beds        Int
+  color       String              @default("#153b6a")
+  assignments HousingAssignment[]
+}
+
+model HousingAssignment {
+  id        String        @id @default(uuid())
+  studentId String        @unique
+  student   Student       @relation(fields: [studentId], references: [id])
+  hallId    String?
+  hall      Hall?         @relation(fields: [hallId], references: [id])
+  room      String?
+  status    HousingStatus @default(pending)
+  note      String?
+  updatedAt DateTime      @updatedAt
+}
+
+model RoommateProfile {
+  id        String  @id @default(uuid())
+  studentId String  @unique
+  student   Student @relation(fields: [studentId], references: [id])
+  sleep     String // early | late
+  tidy      String // very | moderate | relaxed
+  social    String // low | moderate | high
+  study     String // quiet | music | flexible
+}
+
+model ConductCase {
+  id        String          @id @default(uuid())
+  subject   String
+  type      String
+  stage     ConductStage    @default(intake)
+  severity  ConductSeverity @default(med)
+  officer   String?
+  openedAt  DateTime        @default(now())
+  slaDueAt  DateTime?
+
+  @@index([stage])
+}
+
+model Club {
+  id        String   @id @default(uuid())
+  name      String
+  category  String
+  members   Int      @default(0)
+  budgetXof Int      @default(0)
+  status    String   @default("active") // active | review
+  lead      String?
+  createdAt DateTime @default(now())
+}
+
+model CoCurricularLine {
+  id           String @id @default(uuid())
+  line         String @unique
+  allocatedXof Int    @default(0)
+  spentXof     Int    @default(0)
+  color        String @default("#153b6a")
+}
+
+// --- Innovation Studio: 7-phase project tracker (student build + admin review). ---
+
+enum ProjectPhase {
+  proposal
+  research
+  design
+  build
+  test
+  showcase
+  final
+}
+
+model Project {
+  id          String         @id @default(uuid())
+  name        String
+  description String?
+  phase       ProjectPhase   @default(proposal)
+  advisor     String?
+  status      String         @default("active") // active | graded | archived
+  grade       String?
+  createdAt   DateTime       @default(now())
+  members     ProjectMember[]
+  tasks       ProjectTask[]
+  submissions ProjectSubmission[]
+}
+
+model ProjectMember {
+  id        String  @id @default(uuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+  personId  String
+  person    Person  @relation(fields: [personId], references: [id])
+  role      String  @default("member")
+
+  @@unique([projectId, personId])
+  @@index([personId])
+}
+
+model ProjectTask {
+  id        String       @id @default(uuid())
+  projectId String
+  project   Project      @relation(fields: [projectId], references: [id])
+  title     String
+  phase     ProjectPhase
+  status    String       @default("todo") // todo | done
+  dueDate   DateTime?
+
+  @@index([projectId])
+}
+
+model ProjectSubmission {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  title     String
+  kind      String   @default("Document") // Document | Video | Demo | Poster
+  fileUrl   String?
+  fileName  String?
+  status    String   @default("submitted") // submitted | reviewed
+  grade     String?
+  feedback  String?
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// --- HR-lite: leave requests + room/lab bookings. Payslips derive from salary Expenses. ---
+
+enum LeaveStatus {
+  pending
+  approved
+  rejected
+}
+
+model LeaveRequest {
+  id        String      @id @default(uuid())
+  personId  String
+  type      String // Annual | Sick | Personal | Conference
+  startDate DateTime
+  endDate   DateTime
+  reason    String?
+  status    LeaveStatus @default(pending)
+  createdAt DateTime    @default(now())
+
+  @@index([personId])
+}
+
+model RoomBooking {
+  id        String   @id @default(uuid())
+  personId  String
+  room      String
+  date      DateTime
+  startTime String
+  endTime   String
+  purpose   String?
+  status    String   @default("confirmed")
+  createdAt DateTime @default(now())
+
+  @@index([personId])
+  @@index([room, date])
+}

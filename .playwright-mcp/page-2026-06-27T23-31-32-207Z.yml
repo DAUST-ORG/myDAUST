@@ -1,0 +1,131 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e19] [cursor=pointer]:
+    - img [ref=e20]
+  - alert [ref=e23]
+  - generic [ref=e24]:
+    - complementary [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]: DAUST
+        - generic [ref=e32]: Admin Portal
+      - generic [ref=e33]:
+        - generic [ref=e34]: Main
+        - link "Dashboard" [ref=e35] [cursor=pointer]:
+          - /url: /admin
+      - generic [ref=e36]:
+        - generic [ref=e37]: Academic
+        - link "Admissions" [ref=e38] [cursor=pointer]:
+          - /url: /admin/admissions
+        - link "Students" [ref=e39] [cursor=pointer]:
+          - /url: /admin/students
+        - link "Programs & Courses" [ref=e40] [cursor=pointer]:
+          - /url: /admin/programs
+      - generic [ref=e41]:
+        - generic [ref=e42]: Finance
+        - link "Director overview" [ref=e43] [cursor=pointer]:
+          - /url: /admin/finance/director
+        - link "Collections" [ref=e44] [cursor=pointer]:
+          - /url: /admin/finance
+        - link "Expenses" [ref=e45] [cursor=pointer]:
+          - /url: /admin/finance/expenses
+        - link "Budgets" [ref=e46] [cursor=pointer]:
+          - /url: /admin/finance/budgets
+      - generic [ref=e47]:
+        - generic [ref=e48]: Operations
+        - link "Faculty & Staff" [ref=e49] [cursor=pointer]:
+          - /url: /admin/staff
+        - link "Housing" [ref=e50] [cursor=pointer]:
+          - /url: /admin/housing
+        - link "Library" [ref=e51] [cursor=pointer]:
+          - /url: /admin/library
+      - generic [ref=e52]:
+        - generic [ref=e53]: Engagement
+        - link "Announcements" [ref=e54] [cursor=pointer]:
+          - /url: /admin/announcements
+        - link "Reports" [ref=e55] [cursor=pointer]:
+          - /url: /admin/reports
+      - generic [ref=e56]:
+        - generic [ref=e57]: System
+        - link "Settings" [ref=e58] [cursor=pointer]:
+          - /url: /admin/settings
+      - generic [ref=e59]:
+        - generic [ref=e60]: DD
+        - generic [ref=e61]:
+          - generic [ref=e62]: Director DAUST
+          - generic [ref=e63]: admin, bursar
+        - button "⏻" [ref=e64] [cursor=pointer]
+    - generic [ref=e65]:
+      - banner [ref=e66]:
+        - generic [ref=e67]: Dashboard
+        - generic [ref=e68]: Search courses, people, invoices…
+        - generic [ref=e69]: admin@daust.edu
+      - generic [ref=e70]:
+        - paragraph [ref=e71]: Operations overview
+        - heading "Welcome back, Director DAUST" [level=1] [ref=e72]
+        - paragraph [ref=e73]: How DAUST is running today.
+        - generic [ref=e74]:
+          - generic [ref=e75]:
+            - generic [ref=e76]: Total enrollment
+            - generic [ref=e77]: "3"
+            - generic [ref=e78]: students
+          - generic [ref=e79]:
+            - generic [ref=e80]: Tuition collected
+            - generic [ref=e81]: 2 491 666 F CFA
+            - generic [ref=e82]: 25% of billed
+          - generic [ref=e83]:
+            - generic [ref=e84]: Outstanding fees
+            - generic [ref=e85]: 7 483 334 F CFA
+            - generic [ref=e86]: to collect
+          - generic [ref=e87]:
+            - generic [ref=e88]: Open applications
+            - generic [ref=e89]: "5"
+            - generic [ref=e90]: in pipeline
+          - generic [ref=e91]:
+            - generic [ref=e92]: Money out (FY)
+            - generic [ref=e93]: 38 250 000 F CFA
+            - generic [ref=e94]: expenses
+          - generic [ref=e95]:
+            - generic [ref=e96]: Cash position
+            - generic [ref=e97]: "-35 758 334 F CFA"
+            - generic [ref=e98]: in − out
+        - generic [ref=e99]:
+          - generic [ref=e100]:
+            - generic [ref=e101]:
+              - paragraph [ref=e102]: Money in vs out — by division
+              - link "Details →" [ref=e103] [cursor=pointer]:
+                - /url: /admin/finance/director
+            - table [ref=e104]:
+              - rowgroup [ref=e105]:
+                - row "Division In Out" [ref=e106]:
+                  - columnheader "Division" [ref=e107]
+                  - columnheader "In" [ref=e108]
+                  - columnheader "Out" [ref=e109]
+              - rowgroup [ref=e110]:
+                - row "Academic Affairs 0 F CFA 19 200 000 F CFA" [ref=e111]:
+                  - cell "Academic Affairs" [ref=e112]
+                  - cell "0 F CFA" [ref=e113]
+                  - cell "19 200 000 F CFA" [ref=e114]
+                - row "Student Affairs 0 F CFA 3 000 000 F CFA" [ref=e115]:
+                  - cell "Student Affairs" [ref=e116]
+                  - cell "0 F CFA" [ref=e117]
+                  - cell "3 000 000 F CFA" [ref=e118]
+                - row "Finance & Administration 0 F CFA 16 050 000 F CFA" [ref=e119]:
+                  - cell "Finance & Administration" [ref=e120]
+                  - cell "0 F CFA" [ref=e121]
+                  - cell "16 050 000 F CFA" [ref=e122]
+                - row "Institutional / Central 2 491 666 F CFA 0 F CFA" [ref=e123]:
+                  - cell "Institutional / Central" [ref=e124]
+                  - cell "2 491 666 F CFA" [ref=e125]
+                  - cell "0 F CFA" [ref=e126]
+          - generic [ref=e127]:
+            - paragraph [ref=e128]: Enrollment by program
+            - table [ref=e129]:
+              - rowgroup [ref=e130]:
+                - row "Program Code Students" [ref=e131]:
+                  - columnheader "Program" [ref=e132]
+                  - columnheader "Code" [ref=e133]
+                  - columnheader "Students" [ref=e134]
+              - rowgroup [ref=e135]:
+                - row "B.Sc. Computer Engineering BSCE 3" [ref=e136]:
+                  - cell "B.Sc. Computer Engineering" [ref=e137]
+                  - cell "BSCE" [ref=e138]
+                  - cell "3" [ref=e139]

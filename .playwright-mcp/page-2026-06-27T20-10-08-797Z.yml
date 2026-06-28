@@ -1,0 +1,78 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e20] [cursor=pointer]:
+    - img [ref=e21]
+  - alert [ref=e14]
+  - generic [ref=e24]:
+    - complementary [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]: D
+        - generic [ref=e28]:
+          - text: DAUST
+          - generic [ref=e29]: Admin Portal
+      - generic [ref=e30]:
+        - generic [ref=e31]: Main
+        - link "Dashboard" [ref=e32] [cursor=pointer]:
+          - /url: /admin
+      - generic [ref=e33]:
+        - generic [ref=e34]: Academic
+        - link "Students" [ref=e35] [cursor=pointer]:
+          - /url: /admin/students
+        - link "Programs & Courses" [ref=e36] [cursor=pointer]:
+          - /url: /admin/programs
+      - generic [ref=e37]:
+        - generic [ref=e38]: Operations
+        - link "Finance" [ref=e39] [cursor=pointer]:
+          - /url: /admin/finance
+      - generic [ref=e40]:
+        - generic [ref=e41]: Engagement
+        - link "Announcements" [ref=e42] [cursor=pointer]:
+          - /url: /admin/announcements
+      - generic [ref=e43]:
+        - generic [ref=e44]: DD
+        - generic [ref=e45]:
+          - generic [ref=e46]: Director DAUST
+          - generic [ref=e47]: admin, bursar
+        - button "⏻" [ref=e48] [cursor=pointer]
+    - generic [ref=e49]:
+      - banner [ref=e50]:
+        - generic [ref=e51]: Dashboard
+        - generic [ref=e52]: Search courses, people, invoices…
+        - generic [ref=e53]: admin@daust.edu
+      - generic [ref=e54]:
+        - paragraph [ref=e55]: Operations overview
+        - heading "Welcome back, Director DAUST" [level=1] [ref=e56]
+        - paragraph [ref=e57]: How DAUST is running today.
+        - generic [ref=e58]:
+          - generic [ref=e59]:
+            - generic [ref=e60]: Total students
+            - generic [ref=e61]: "3"
+            - generic [ref=e62]: enrolled in programs
+          - generic [ref=e63]:
+            - generic [ref=e64]: Course enrollments
+            - generic [ref=e65]: "1"
+            - generic [ref=e66]: active this term
+          - generic [ref=e67]:
+            - generic [ref=e68]: Tuition collected
+            - generic [ref=e69]: 0 F CFA
+            - generic [ref=e70]: 0% of billed
+          - generic [ref=e71]:
+            - generic [ref=e72]: Outstanding
+            - generic [ref=e73]: 9 975 000 F CFA
+            - generic [ref=e74]: to collect
+        - generic [ref=e75]:
+          - generic [ref=e76]:
+            - paragraph [ref=e77]: Enrollment by program
+            - table [ref=e78]:
+              - rowgroup [ref=e79]:
+                - row "Program Code Students" [ref=e80]:
+                  - columnheader "Program" [ref=e81]
+                  - columnheader "Code" [ref=e82]
+                  - columnheader "Students" [ref=e83]
+              - rowgroup [ref=e84]:
+                - row "B.Sc. Computer Engineering BSCE 3" [ref=e85]:
+                  - cell "B.Sc. Computer Engineering" [ref=e86]
+                  - cell "BSCE" [ref=e87]
+                  - cell "3" [ref=e88]
+          - generic [ref=e89]:
+            - paragraph [ref=e90]: Collections by method
+            - paragraph [ref=e91]: No payments collected yet.

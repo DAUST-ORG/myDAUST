@@ -1,0 +1,79 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e20] [cursor=pointer]:
+    - img [ref=e21]
+  - alert [ref=e14]
+  - generic [ref=e24]:
+    - complementary [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]: DAUST
+        - generic [ref=e32]: Student Affairs
+      - link "Dashboard" [ref=e34] [cursor=pointer]:
+        - /url: /affairs
+      - generic [ref=e35]:
+        - generic [ref=e36]: Residence
+        - link "Housing & Residence" [ref=e37] [cursor=pointer]:
+          - /url: /affairs/housing
+        - link "Roommate Matching" [ref=e38] [cursor=pointer]:
+          - /url: /affairs/roommate
+      - generic [ref=e39]:
+        - generic [ref=e40]: Community
+        - link "Conduct & Disputes" [ref=e41] [cursor=pointer]:
+          - /url: /affairs/conduct
+        - link "Clubs & Orgs" [ref=e42] [cursor=pointer]:
+          - /url: /affairs/clubs
+        - link "Co-curricular Budget" [ref=e43] [cursor=pointer]:
+          - /url: /affairs/budget
+      - generic [ref=e44]:
+        - generic [ref=e45]: KD
+        - generic [ref=e46]:
+          - generic [ref=e47]: Khady Diop
+          - generic [ref=e48]: student_affairs
+        - button "⏻" [ref=e49] [cursor=pointer]
+    - generic [ref=e50]:
+      - banner [ref=e51]:
+        - generic [ref=e52]: Dashboard
+        - generic [ref=e53]: Search courses, people, invoices…
+        - generic [ref=e54]: studentaffairs@daust.edu
+      - generic [ref=e55]:
+        - paragraph [ref=e56]: Student Affairs
+        - heading "Dashboard" [level=1] [ref=e57]
+        - generic [ref=e58]:
+          - generic [ref=e59]:
+            - img [ref=e62]
+            - generic [ref=e66]: 0%
+            - generic [ref=e67]: Residence occupancy · 2/1256 beds
+          - generic [ref=e68]:
+            - img [ref=e71]
+            - generic [ref=e74]: "2"
+            - generic [ref=e75]: Pending assignments
+          - generic [ref=e76]:
+            - img [ref=e79]
+            - generic [ref=e85]: "4"
+            - generic [ref=e86]: Open conduct cases
+          - generic [ref=e87]:
+            - img [ref=e90]
+            - generic [ref=e93]: 61%
+            - generic [ref=e94]: Co-curricular budget · 28.4M FCFA of 46.5M FCFA
+        - generic [ref=e95]:
+          - paragraph [ref=e96]: Residence halls
+          - generic [ref=e97]:
+            - generic [ref=e100]:
+              - generic [ref=e101]: Atlantic Hall
+              - generic [ref=e102]: Exchange · Mixed
+              - generic [ref=e104]: 0/188 beds · 0%
+            - generic [ref=e107]:
+              - generic [ref=e108]: Baobab Hall
+              - generic [ref=e109]: Graduate · Mixed
+              - generic [ref=e111]: 0/196 beds · 0%
+            - generic [ref=e114]:
+              - generic [ref=e115]: Gorée Hall
+              - generic [ref=e116]: Upper-year · Women
+              - generic [ref=e118]: 1/264 beds · 0%
+            - generic [ref=e121]:
+              - generic [ref=e122]: Sahel Hall
+              - generic [ref=e123]: Upper-year · Men
+              - generic [ref=e125]: 0/288 beds · 0%
+            - generic [ref=e128]:
+              - generic [ref=e129]: Teranga Hall
+              - generic [ref=e130]: First-year · Mixed
+              - generic [ref=e132]: 1/320 beds · 0%

@@ -1,0 +1,10 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]: myDAUST
+    - link "Student billing" [ref=e4] [cursor=pointer]:
+      - /url: /student/billing
+    - link "Bursar" [ref=e5] [cursor=pointer]:
+      - /url: /bursar
+  - main [ref=e6]:
+    - paragraph [ref=e7]: "Error: Failed to fetch"
+  - alert [ref=e8]

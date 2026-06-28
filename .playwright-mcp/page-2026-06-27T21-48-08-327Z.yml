@@ -1,0 +1,48 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Admin Portal
+      - generic [ref=e12]:
+        - generic [ref=e13]: Main
+        - link "Dashboard" [ref=e14] [cursor=pointer]:
+          - /url: /admin
+      - generic [ref=e15]:
+        - generic [ref=e16]: Academic
+        - link "Students" [ref=e17] [cursor=pointer]:
+          - /url: /admin/students
+        - link "Programs & Courses" [ref=e18] [cursor=pointer]:
+          - /url: /admin/programs
+      - generic [ref=e19]:
+        - generic [ref=e20]: Operations
+        - link "Finance" [ref=e21] [cursor=pointer]:
+          - /url: /admin/finance
+      - generic [ref=e22]:
+        - generic [ref=e23]: Engagement
+        - link "Announcements" [ref=e24] [cursor=pointer]:
+          - /url: /admin/announcements
+      - generic [ref=e25]:
+        - generic [ref=e26]: DD
+        - generic [ref=e27]:
+          - generic [ref=e28]: Director DAUST
+          - generic [ref=e29]: admin, bursar
+        - button "⏻" [ref=e30] [cursor=pointer]
+    - generic [ref=e31]:
+      - banner [ref=e32]:
+        - generic [ref=e33]: Students
+        - generic [ref=e34]: Search courses, people, invoices…
+        - generic [ref=e35]: admin@daust.edu
+      - generic [ref=e36]:
+        - paragraph [ref=e37]: Academic
+        - heading "Students" [level=1] [ref=e38]
+        - table [ref=e40]:
+          - rowgroup [ref=e41]:
+            - 'row "Student # Name Program Balance" [ref=e42]':
+              - 'columnheader "Student #" [ref=e43]'
+              - columnheader "Name" [ref=e44]
+              - columnheader "Program" [ref=e45]
+              - columnheader "Balance" [ref=e46]
+              - columnheader [ref=e47]
+          - rowgroup

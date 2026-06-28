@@ -1,0 +1,67 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Faculty Portal
+      - link "Dashboard" [ref=e13] [cursor=pointer]:
+        - /url: /faculty
+      - generic [ref=e14]:
+        - generic [ref=e15]: Teaching
+        - link "My Sections" [ref=e16] [cursor=pointer]:
+          - /url: /faculty/roster
+      - generic [ref=e17]:
+        - generic [ref=e18]: Campus
+        - link "Announcements" [ref=e19] [cursor=pointer]:
+          - /url: /faculty/announcements
+      - generic [ref=e20]:
+        - generic [ref=e21]: AB
+        - generic [ref=e22]:
+          - generic [ref=e23]: Amadou Ba
+          - generic [ref=e24]: faculty
+        - button "⏻" [ref=e25] [cursor=pointer]
+    - generic [ref=e26]:
+      - banner [ref=e27]:
+        - generic [ref=e28]: Dashboard
+        - generic [ref=e29]: Search courses, people, invoices…
+        - generic [ref=e30]: amadou.ba@daust.edu
+      - generic [ref=e31]:
+        - paragraph [ref=e32]:
+          - link "← My sections" [ref=e33] [cursor=pointer]:
+            - /url: /faculty/roster
+        - heading "Gradebook — CE 201 — Digital Systems · Sec A" [level=1] [ref=e34]
+        - generic [ref=e35]:
+          - table [ref=e36]:
+            - rowgroup [ref=e37]:
+              - 'row "Student # Name Final grade Status" [ref=e38]':
+                - 'columnheader "Student #" [ref=e39]'
+                - columnheader "Name" [ref=e40]
+                - columnheader "Final grade" [ref=e41]
+                - columnheader "Status" [ref=e42]
+            - rowgroup [ref=e43]:
+              - row "DAUST-EE-24-0210 Mamadou Sy A- completed" [ref=e44]:
+                - cell "DAUST-EE-24-0210" [ref=e45]
+                - cell "Mamadou Sy" [ref=e46]
+                - cell "A-" [ref=e47]:
+                  - combobox [ref=e48] [cursor=pointer]:
+                    - option "—"
+                    - option "A"
+                    - option "A-" [selected]
+                    - option "B+"
+                    - option "B"
+                    - option "B-"
+                    - option "C+"
+                    - option "C"
+                    - option "C-"
+                    - option "D"
+                    - option "F"
+                - cell "completed" [ref=e49]:
+                  - generic [ref=e50]: completed
+          - generic [ref=e51]:
+            - button "Save draft" [ref=e52] [cursor=pointer]
+            - button "Submit final grades" [ref=e53] [cursor=pointer]
+          - paragraph [ref=e54]:
+            - text: Submitting marks graded students
+            - strong [ref=e55]: completed
+            - text: — it flows to their transcript & GPA.

@@ -1,0 +1,25 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - paragraph [ref=e3]: Sign in
+    - generic [ref=e4]:
+      - text: Email
+      - textbox [ref=e5]: aissatou.diallo@daust.edu
+      - text: Password
+      - textbox [ref=e6]: wrong-pass
+      - paragraph [ref=e24]: Invalid email or password
+      - button "Sign in" [ref=e7] [cursor=pointer]
+    - paragraph [ref=e8]:
+      - text: Dev seed users (password
+      - code [ref=e9]: daust-dev-2026
+      - text: "):"
+      - code [ref=e10]: aissatou.diallo@daust.edu
+      - text: (student),
+      - code [ref=e11]: bursar@daust.edu
+      - text: ","
+      - code [ref=e12]: admin@daust.edu
+      - text: ","
+      - code [ref=e13]: registrar@daust.edu
+      - text: ", etc. Google Workspace SSO replaces this later."
+  - button "Open Next.js Dev Tools" [ref=e20] [cursor=pointer]:
+    - img [ref=e21]
+  - alert [ref=e14]

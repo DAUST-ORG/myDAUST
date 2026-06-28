@@ -1,0 +1,90 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e20] [cursor=pointer]:
+    - img [ref=e21]
+  - alert [ref=e14]
+  - generic [ref=e24]:
+    - complementary [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]: D
+        - generic [ref=e28]:
+          - text: DAUST
+          - generic [ref=e29]: Student Portal
+      - link "Dashboard" [ref=e31] [cursor=pointer]:
+        - /url: /student
+      - generic [ref=e32]:
+        - generic [ref=e33]: Academics
+        - link "Courses" [ref=e34] [cursor=pointer]:
+          - /url: /student/courses
+        - link "Schedule" [ref=e35] [cursor=pointer]:
+          - /url: /student/schedule
+        - link "Grades" [ref=e36] [cursor=pointer]:
+          - /url: /student/grades
+      - generic [ref=e37]:
+        - generic [ref=e38]: Campus
+        - link "Announcements" [ref=e39] [cursor=pointer]:
+          - /url: /student/announcements
+      - generic [ref=e40]:
+        - generic [ref=e41]: Account
+        - link "Billing" [ref=e42] [cursor=pointer]:
+          - /url: /student/billing
+      - generic [ref=e43]:
+        - generic [ref=e44]: AD
+        - generic [ref=e45]:
+          - generic [ref=e46]: Aïssatou Diallo
+          - generic [ref=e47]: student
+        - button "⏻" [ref=e48] [cursor=pointer]
+    - generic [ref=e49]:
+      - banner [ref=e50]:
+        - generic [ref=e51]: Dashboard
+        - generic [ref=e52]: Search courses, people, invoices…
+        - generic [ref=e53]: aissatou.diallo@daust.edu
+      - generic [ref=e54]:
+        - paragraph [ref=e55]: Fall 2026
+        - heading "Welcome back, Aïssatou" [level=1] [ref=e56]
+        - paragraph [ref=e57]: Here's where things stand this term.
+        - generic [ref=e58]:
+          - generic [ref=e59]:
+            - generic [ref=e60]: Enrolled courses
+            - generic [ref=e61]: "0"
+            - generic [ref=e62]: 0 credits
+          - generic [ref=e63]:
+            - generic [ref=e64]: GPA
+            - generic [ref=e65]: "4.00"
+            - generic [ref=e66]: 3 credits completed
+          - generic [ref=e67]:
+            - generic [ref=e68]: Balance due
+            - generic [ref=e69]: 3 500 000 F CFA
+            - generic [ref=e70]: Payment due
+          - generic [ref=e71]:
+            - generic [ref=e72]: Announcements
+            - generic [ref=e73]: "4"
+            - generic [ref=e74]: campus updates
+        - generic [ref=e75]:
+          - generic [ref=e76]:
+            - generic [ref=e77]:
+              - paragraph [ref=e78]: My courses
+              - link "Register →" [ref=e79] [cursor=pointer]:
+                - /url: /student/courses
+            - paragraph [ref=e80]:
+              - text: Not enrolled yet.
+              - link "Browse sections" [ref=e81] [cursor=pointer]:
+                - /url: /student/courses
+              - text: .
+          - generic [ref=e82]:
+            - paragraph [ref=e83]: Announcements
+            - generic [ref=e84]:
+              - generic [ref=e85]: Registrar
+              - generic [ref=e86]: Fall 2026 registration is open
+              - generic [ref=e87]: Add/drop closes two weeks after term start. Register early — popular sections fill fast.
+            - generic [ref=e88]:
+              - generic [ref=e89]: Bursar
+              - generic [ref=e90]: Tuition installment 1 due Sept 15
+              - generic [ref=e91]: Pay via Wave, Orange Money, or card from the Billing page.
+            - generic [ref=e92]:
+              - generic [ref=e93]: Life @ DAUST
+              - generic [ref=e94]: Career Fair — Atlantic Atrium
+              - generic [ref=e95]: 60+ employers on campus June 12. Bring your CV.
+            - generic [ref=e96]:
+              - generic [ref=e97]: Library
+              - generic [ref=e98]: Library extended hours
+              - generic [ref=e99]: The library is open until midnight during finals week.

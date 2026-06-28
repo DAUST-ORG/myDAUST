@@ -1,0 +1,112 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]: myDAUST
+    - link "Student billing" [ref=e4] [cursor=pointer]:
+      - /url: /student/billing
+    - link "Bursar" [ref=e5] [cursor=pointer]:
+      - /url: /bursar
+    - link "Sign in" [ref=e6] [cursor=pointer]:
+      - /url: /login
+  - main [ref=e7]:
+    - paragraph [ref=e8]: Sign in
+    - paragraph [ref=e9]: Dev login (no password) — pick a seeded user. Replaced by Google Workspace SSO later.
+    - table [ref=e11]:
+      - rowgroup [ref=e12]:
+        - row "User Email Roles" [ref=e13]:
+          - columnheader "User" [ref=e14]
+          - columnheader "Email" [ref=e15]
+          - columnheader "Roles" [ref=e16]
+          - columnheader [ref=e17]
+      - rowgroup [ref=e18]:
+        - row "Director DAUST admin@daust.edu admin bursar Sign in" [ref=e19]:
+          - cell "Director DAUST" [ref=e20]
+          - cell "admin@daust.edu" [ref=e21]
+          - cell "admin bursar" [ref=e22]:
+            - generic [ref=e23]: admin
+            - generic [ref=e24]: bursar
+          - cell "Sign in" [ref=e25]:
+            - button "Sign in" [ref=e26] [cursor=pointer]
+        - row "Aïssatou Diallo DAUST-CE-23-0142 aissatou.diallo@daust.edu student Sign in" [ref=e27]:
+          - cell "Aïssatou Diallo DAUST-CE-23-0142" [ref=e28]:
+            - text: Aïssatou Diallo
+            - text: DAUST-CE-23-0142
+          - cell "aissatou.diallo@daust.edu" [ref=e29]
+          - cell "student" [ref=e30]:
+            - generic [ref=e31]: student
+          - cell "Sign in" [ref=e32]:
+            - button "Sign in" [ref=e33] [cursor=pointer]
+        - row "Amadou Ba amadou.ba@daust.edu faculty Sign in" [ref=e34]:
+          - cell "Amadou Ba" [ref=e35]
+          - cell "amadou.ba@daust.edu" [ref=e36]
+          - cell "faculty" [ref=e37]:
+            - generic [ref=e38]: faculty
+          - cell "Sign in" [ref=e39]:
+            - button "Sign in" [ref=e40] [cursor=pointer]
+        - row "Bineta Faye DAUST-CS-25-0033 bineta.faye@daust.edu student Sign in" [ref=e41]:
+          - cell "Bineta Faye DAUST-CS-25-0033" [ref=e42]:
+            - text: Bineta Faye
+            - text: DAUST-CS-25-0033
+          - cell "bineta.faye@daust.edu" [ref=e43]
+          - cell "student" [ref=e44]:
+            - generic [ref=e45]: student
+          - cell "Sign in" [ref=e46]:
+            - button "Sign in" [ref=e47] [cursor=pointer]
+        - row "Mariama Ndiaye bursar@daust.edu bursar Sign in" [ref=e48]:
+          - cell "Mariama Ndiaye" [ref=e49]
+          - cell "bursar@daust.edu" [ref=e50]
+          - cell "bursar" [ref=e51]:
+            - generic [ref=e52]: bursar
+          - cell "Sign in" [ref=e53]:
+            - button "Sign in" [ref=e54] [cursor=pointer]
+        - row "Ibrahima Sarr dining@daust.edu dining Sign in" [ref=e55]:
+          - cell "Ibrahima Sarr" [ref=e56]
+          - cell "dining@daust.edu" [ref=e57]
+          - cell "dining" [ref=e58]:
+            - generic [ref=e59]: dining
+          - cell "Sign in" [ref=e60]:
+            - button "Sign in" [ref=e61] [cursor=pointer]
+        - row "Ousmane Fall hr@daust.edu hr Sign in" [ref=e62]:
+          - cell "Ousmane Fall" [ref=e63]
+          - cell "hr@daust.edu" [ref=e64]
+          - cell "hr" [ref=e65]:
+            - generic [ref=e66]: hr
+          - cell "Sign in" [ref=e67]:
+            - button "Sign in" [ref=e68] [cursor=pointer]
+        - row "Awa Gueye innovation@daust.edu innovation Sign in" [ref=e69]:
+          - cell "Awa Gueye" [ref=e70]
+          - cell "innovation@daust.edu" [ref=e71]
+          - cell "innovation" [ref=e72]:
+            - generic [ref=e73]: innovation
+          - cell "Sign in" [ref=e74]:
+            - button "Sign in" [ref=e75] [cursor=pointer]
+        - row "Modou Cissé it@daust.edu it_admin Sign in" [ref=e76]:
+          - cell "Modou Cissé" [ref=e77]
+          - cell "it@daust.edu" [ref=e78]
+          - cell "it_admin" [ref=e79]:
+            - generic [ref=e80]: it_admin
+          - cell "Sign in" [ref=e81]:
+            - button "Sign in" [ref=e82] [cursor=pointer]
+        - row "Mamadou Sy DAUST-EE-24-0210 mamadou.sy@daust.edu student Sign in" [ref=e83]:
+          - cell "Mamadou Sy DAUST-EE-24-0210" [ref=e84]:
+            - text: Mamadou Sy
+            - text: DAUST-EE-24-0210
+          - cell "mamadou.sy@daust.edu" [ref=e85]
+          - cell "student" [ref=e86]:
+            - generic [ref=e87]: student
+          - cell "Sign in" [ref=e88]:
+            - button "Sign in" [ref=e89] [cursor=pointer]
+        - row "Fatou Sow registrar@daust.edu registrar Sign in" [ref=e90]:
+          - cell "Fatou Sow" [ref=e91]
+          - cell "registrar@daust.edu" [ref=e92]
+          - cell "registrar" [ref=e93]:
+            - generic [ref=e94]: registrar
+          - cell "Sign in" [ref=e95]:
+            - button "Sign in" [ref=e96] [cursor=pointer]
+        - row "Khady Diop studentaffairs@daust.edu student_affairs Sign in" [ref=e97]:
+          - cell "Khady Diop" [ref=e98]
+          - cell "studentaffairs@daust.edu" [ref=e99]
+          - cell "student_affairs" [ref=e100]:
+            - generic [ref=e101]: student_affairs
+          - cell "Sign in" [ref=e102]:
+            - button "Sign in" [ref=e103] [cursor=pointer]
+  - alert [ref=e104]

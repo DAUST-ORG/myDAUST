@@ -1,0 +1,91 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Student Portal
+      - link "Dashboard" [ref=e13] [cursor=pointer]:
+        - /url: /student
+      - generic [ref=e14]:
+        - generic [ref=e15]: Academics
+        - link "Courses" [ref=e16] [cursor=pointer]:
+          - /url: /student/courses
+        - link "Schedule" [ref=e17] [cursor=pointer]:
+          - /url: /student/schedule
+        - link "Grades" [ref=e18] [cursor=pointer]:
+          - /url: /student/grades
+      - generic [ref=e19]:
+        - generic [ref=e20]: Campus
+        - link "Announcements" [ref=e21] [cursor=pointer]:
+          - /url: /student/announcements
+      - generic [ref=e22]:
+        - generic [ref=e23]: Account
+        - link "Billing" [ref=e24] [cursor=pointer]:
+          - /url: /student/billing
+      - generic [ref=e25]:
+        - generic [ref=e26]: AD
+        - generic [ref=e27]:
+          - generic [ref=e28]: Aïssatou Diallo
+          - generic [ref=e29]: student
+        - button "⏻" [ref=e30] [cursor=pointer]
+    - generic [ref=e31]:
+      - banner [ref=e32]:
+        - generic [ref=e33]: Billing
+        - generic [ref=e34]: Search courses, people, invoices…
+        - generic [ref=e35]: aissatou.diallo@daust.edu
+      - main [ref=e37]:
+        - paragraph [ref=e38]: Billing & payments
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - paragraph [ref=e41]: Tuition — Fall 2026
+            - generic [ref=e42]: open
+          - generic [ref=e43]:
+            - generic [ref=e44]:
+              - generic [ref=e45]: Total
+              - generic [ref=e46]: 3 500 000 F CFA
+            - generic [ref=e47]:
+              - generic [ref=e48]: Paid
+              - generic [ref=e49]: 0 F CFA
+            - generic [ref=e50]:
+              - generic [ref=e51]: Balance
+              - generic [ref=e52]: 3 500 000 F CFA
+          - paragraph [ref=e54]: 0% paid
+          - paragraph [ref=e55]: Payment schedule
+          - table [ref=e56]:
+            - rowgroup [ref=e57]:
+              - row "# Due Amount Paid Status" [ref=e58]:
+                - columnheader "#" [ref=e59]
+                - columnheader "Due" [ref=e60]
+                - columnheader "Amount" [ref=e61]
+                - columnheader "Paid" [ref=e62]
+                - columnheader "Status" [ref=e63]
+            - rowgroup [ref=e64]:
+              - row "1 15 sept. 2026 1 500 000 F CFA 0 F CFA pending" [ref=e65]:
+                - cell "1" [ref=e66]
+                - cell "15 sept. 2026" [ref=e67]
+                - cell "1 500 000 F CFA" [ref=e68]
+                - cell "0 F CFA" [ref=e69]
+                - cell "pending" [ref=e70]:
+                  - generic [ref=e71]: pending
+              - row "2 15 oct. 2026 1 000 000 F CFA 0 F CFA pending" [ref=e72]:
+                - cell "2" [ref=e73]
+                - cell "15 oct. 2026" [ref=e74]
+                - cell "1 000 000 F CFA" [ref=e75]
+                - cell "0 F CFA" [ref=e76]
+                - cell "pending" [ref=e77]:
+                  - generic [ref=e78]: pending
+              - row "3 15 nov. 2026 1 000 000 F CFA 0 F CFA pending" [ref=e79]:
+                - cell "3" [ref=e80]
+                - cell "15 nov. 2026" [ref=e81]
+                - cell "1 000 000 F CFA" [ref=e82]
+                - cell "0 F CFA" [ref=e83]
+                - cell "pending" [ref=e84]:
+                  - generic [ref=e85]: pending
+          - generic [ref=e86]:
+            - spinbutton [ref=e87]: "1500000"
+            - combobox [ref=e88] [cursor=pointer]:
+              - option "Wave" [selected]
+              - option "Orange Money"
+              - option "Bank card"
+            - button "Pay 1 500 000 F CFA" [ref=e89] [cursor=pointer]

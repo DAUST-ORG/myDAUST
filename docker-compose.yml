@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: mydaust-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mydaust
+      POSTGRES_PASSWORD: mydaust
+      POSTGRES_DB: mydaust
+    ports:
+      - "5432:5432"
+    volumes:
+      - mydaust_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mydaust"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mydaust_pgdata:

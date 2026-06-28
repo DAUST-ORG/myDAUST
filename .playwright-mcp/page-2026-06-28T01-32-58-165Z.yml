@@ -1,0 +1,29 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Faculty Portal
+      - link "Dashboard" [ref=e13] [cursor=pointer]:
+        - /url: /faculty
+      - generic [ref=e14]:
+        - generic [ref=e15]: Teaching
+        - link "My Sections" [ref=e16] [cursor=pointer]:
+          - /url: /faculty/roster
+      - generic [ref=e17]:
+        - generic [ref=e18]: Campus
+        - link "Announcements" [ref=e19] [cursor=pointer]:
+          - /url: /faculty/announcements
+      - generic [ref=e20]:
+        - generic [ref=e21]: AB
+        - generic [ref=e22]:
+          - generic [ref=e23]: Amadou Ba
+          - generic [ref=e24]: faculty
+        - button "⏻" [ref=e25] [cursor=pointer]
+    - generic [ref=e26]:
+      - banner [ref=e27]:
+        - generic [ref=e28]: Dashboard
+        - generic [ref=e29]: Search courses, people, invoices…
+        - generic [ref=e30]: amadou.ba@daust.edu
+      - paragraph [ref=e32]: Loading…

@@ -1,0 +1,55 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]: DAUST
+        - generic [ref=e11]: Teacher Portal
+      - generic [ref=e12]:
+        - generic [ref=e13]: Teaching
+        - link "Dashboard" [ref=e14] [cursor=pointer]:
+          - /url: /faculty
+        - link "My Classes" [ref=e15] [cursor=pointer]:
+          - /url: /faculty/classes
+        - link "Schedule" [ref=e16] [cursor=pointer]:
+          - /url: /faculty/schedule
+        - link "Insights" [ref=e17] [cursor=pointer]:
+          - /url: /faculty/insights
+      - generic [ref=e18]:
+        - generic [ref=e19]: Campus
+        - link "Announcements" [ref=e20] [cursor=pointer]:
+          - /url: /faculty/announcements
+      - generic [ref=e21]:
+        - generic [ref=e22]: AB
+        - generic [ref=e23]:
+          - generic [ref=e24]: Amadou Ba
+          - generic [ref=e25]: faculty
+        - button "⏻" [ref=e26] [cursor=pointer]
+    - generic [ref=e27]:
+      - banner [ref=e28]:
+        - generic [ref=e29]: Schedule
+        - generic [ref=e30]: Search courses, people, invoices…
+        - generic [ref=e31]: amadou.ba@daust.edu
+      - generic [ref=e32]:
+        - paragraph [ref=e33]: Fall 2026
+        - heading "Schedule" [level=1] [ref=e34]
+        - generic [ref=e35]:
+          - generic [ref=e36]:
+            - generic [ref=e38]: Mon
+            - generic [ref=e39]: Tue
+            - generic [ref=e40]: Wed
+            - generic [ref=e41]: Thu
+            - generic [ref=e42]: Fri
+            - generic [ref=e43]:
+              - generic [ref=e44]: 08:00
+              - generic [ref=e45]: 09:00
+              - generic [ref=e46]: 10:00
+              - generic [ref=e47]: 11:00
+              - generic [ref=e48]: 12:00
+              - generic [ref=e49]: 13:00
+              - generic [ref=e50]: 14:00
+              - generic [ref=e51]: 15:00
+              - generic [ref=e52]: 16:00
+              - generic [ref=e53]: 17:00
+              - generic [ref=e54]: 18:00
+          - paragraph [ref=e115]: No sections assigned.

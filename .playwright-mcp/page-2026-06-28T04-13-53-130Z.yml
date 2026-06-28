@@ -1,0 +1,177 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "DAUST" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e5]: DAUST
+      - navigation [ref=e10]:
+        - link "Home" [ref=e11] [cursor=pointer]:
+          - /url: /
+        - link "Admissions" [ref=e12] [cursor=pointer]:
+          - /url: /admissions
+        - link "Academics" [ref=e13] [cursor=pointer]:
+          - /url: /academics
+        - link "About" [ref=e14] [cursor=pointer]:
+          - /url: /about
+      - button "Apply Now" [ref=e15] [cursor=pointer]
+  - main [ref=e16]:
+    - generic [ref=e18]:
+      - generic [ref=e19]: Admissions · September 2026
+      - heading "Join us at DAUST" [level=1] [ref=e20]
+      - paragraph [ref=e21]: Want an elite American engineering education while staying close to home? Admissions for the September 2026 intake are open now.
+    - generic [ref=e23]:
+      - generic [ref=e24]:
+        - generic [ref=e25]: Admission Procedures
+        - heading "How to apply" [level=2] [ref=e26]
+        - paragraph [ref=e27]: Two simple tracks — pick the one that fits you.
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - generic [ref=e30]:
+            - img [ref=e32]
+            - generic [ref=e35]: First-Year Undergraduate
+          - generic [ref=e36]:
+            - generic [ref=e38]: "1"
+            - generic [ref=e39]: Submit the online application
+          - generic [ref=e40]:
+            - generic [ref=e42]: "2"
+            - generic [ref=e44]: Submit official documents to the Office of Admissions (high-school diploma or equivalent)
+          - generic [ref=e45]:
+            - generic [ref=e47]: "3"
+            - generic [ref=e49]: Submit transcripts from 11th & 12th grades (Première and Terminale)
+          - generic [ref=e50]:
+            - generic [ref=e52]: "4"
+            - generic [ref=e53]: Pay the application fee of 30,000 FCFA
+        - generic [ref=e54]:
+          - generic [ref=e55]:
+            - img [ref=e57]
+            - generic [ref=e62]: Transfer Student
+          - generic [ref=e63]:
+            - generic [ref=e65]: "1"
+            - generic [ref=e66]: Submit the online application
+          - generic [ref=e67]:
+            - generic [ref=e69]: "2"
+            - generic [ref=e70]: Submit official degree transcripts from your previous school
+          - generic [ref=e71]:
+            - generic [ref=e73]: "3"
+            - generic [ref=e74]: Pay the application fee of 30,000 FCFA
+      - generic [ref=e75]:
+        - button "Start your application" [ref=e76] [cursor=pointer]:
+          - text: Start your application
+          - img [ref=e77]
+        - generic [ref=e79]:
+          - text: Questions?
+          - link "admissions@daust.org" [ref=e80] [cursor=pointer]:
+            - /url: mailto:admissions@daust.org
+    - generic [ref=e82]:
+      - generic [ref=e83]:
+        - generic [ref=e84]: Cost of Attendance
+        - heading "An elite education, at a fraction of the cost" [level=2] [ref=e85]
+        - paragraph [ref=e86]: A top American-style engineering education in Senegal, at a fraction of the cost of studying in the USA, UK or Canada.
+      - generic [ref=e87]:
+        - generic [ref=e88]:
+          - generic [ref=e89]:
+            - img [ref=e91]
+            - generic [ref=e94]: Tuition
+          - generic [ref=e95]: 2,975,000
+          - generic [ref=e96]: FCFA / year
+          - paragraph [ref=e97]: 1,487,500 per semester · monthly installments available
+        - generic [ref=e98]:
+          - generic [ref=e99]:
+            - img [ref=e101]
+            - generic [ref=e104]: Housing
+          - generic [ref=e105]: 300,000 – 400,000
+          - generic [ref=e106]: FCFA / semester
+          - paragraph [ref=e107]: Optional · paid at the start of each semester
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - img [ref=e111]
+            - generic [ref=e114]: Cafeteria
+          - generic [ref=e115]: 202,500 – 315,000
+          - generic [ref=e116]: FCFA / semester
+          - paragraph [ref=e117]: Optional · half pension or full pension
+        - generic [ref=e118]:
+          - generic [ref=e119]:
+            - img [ref=e121]
+            - generic [ref=e124]: Application Fee
+          - generic [ref=e125]: 30,000
+          - generic [ref=e126]: FCFA
+          - paragraph [ref=e127]: One-time, paid with your application
+        - generic [ref=e128]:
+          - generic [ref=e129]:
+            - img [ref=e131]
+            - generic [ref=e134]: Insurance
+          - generic [ref=e135]: 10,000
+          - generic [ref=e136]: FCFA
+          - paragraph [ref=e137]: Annual student insurance
+    - generic [ref=e140]:
+      - generic [ref=e141]:
+        - generic [ref=e142]: Scholarships & Financial Aid
+        - heading "Merit scholarships, awarded on your BAC" [level=2] [ref=e143]
+        - paragraph [ref=e144]: Your Baccalauréat results automatically unlock a tuition discount — talent should never be limited by means.
+      - generic [ref=e145]:
+        - generic [ref=e146]:
+          - generic [ref=e147]: 20%
+          - generic [ref=e148]: discount
+          - generic [ref=e149]: BAC 15 and above
+          - paragraph [ref=e150]: Top of the class — the highest automatic merit discount.
+        - generic [ref=e151]:
+          - generic [ref=e152]: 15%
+          - generic [ref=e153]: discount
+          - generic [ref=e154]: BAC 13.5 – 14.9
+          - paragraph [ref=e155]: Strong academic performance rewarded on enrollment.
+        - generic [ref=e156]:
+          - generic [ref=e157]: 10%
+          - generic [ref=e158]: discount
+          - generic [ref=e159]: BAC 12 – 13.4
+          - paragraph [ref=e160]: A solid foundation earns a meaningful tuition reduction.
+    - generic [ref=e162]:
+      - generic [ref=e163]:
+        - generic [ref=e164]: Questions
+        - heading "Frequently asked" [level=2] [ref=e165]
+      - generic [ref=e166]:
+        - generic [ref=e167]:
+          - button "Is DAUST recognized by the Government?" [ref=e168] [cursor=pointer]:
+            - generic [ref=e169]: Is DAUST recognized by the Government?
+            - img [ref=e170]
+          - paragraph [ref=e171]: Yes. DAUST is nationally and internationally recognized, with habilitation from ANAQ-Sup.
+        - button "Do I need to speak English to be admitted?" [ref=e173] [cursor=pointer]:
+          - generic [ref=e174]: Do I need to speak English to be admitted?
+          - img [ref=e175]
+        - button "Can I transfer to an American university after two years?" [ref=e177] [cursor=pointer]:
+          - generic [ref=e178]: Can I transfer to an American university after two years?
+          - img [ref=e179]
+        - button "Will I get a job after my degree?" [ref=e181] [cursor=pointer]:
+          - generic [ref=e182]: Will I get a job after my degree?
+          - img [ref=e183]
+  - contentinfo [ref=e184]:
+    - generic [ref=e185]:
+      - generic [ref=e186]:
+        - generic [ref=e188]: DAUST
+        - paragraph [ref=e193]: Dakar American University of Science & Technology — an elite American-style engineering education in Senegal.
+      - generic [ref=e194]:
+        - generic [ref=e195]: admissions@daust.org
+        - generic [ref=e196]: +221 78 128 44 58
+        - generic [ref=e197]: Sangalkam, Senegal
+    - generic [ref=e198]: © 2026 DAUST. All rights reserved.
+  - button "Open Next.js Dev Tools" [ref=e204] [cursor=pointer]:
+    - img [ref=e205]
+  - alert [ref=e208]
+  - generic [ref=e210]:
+    - generic [ref=e211]:
+      - generic [ref=e212]:
+        - generic [ref=e213]: September 2026 intake
+        - generic [ref=e214]: Apply to DAUST
+      - button [ref=e215] [cursor=pointer]:
+        - img [ref=e216]
+    - generic [ref=e219]:
+      - img [ref=e246]
+      - generic [ref=e227]: Application received!
+      - paragraph [ref=e249]:
+        - text: Thanks, Mariama. We’ve emailed a confirmation to
+        - strong [ref=e250]: mariama.sow@example.sn
+        - text: .
+      - generic [ref=e237]:
+        - generic [ref=e238]: 20%
+        - generic [ref=e241]: merit scholarship
+        - generic [ref=e251]: BAC 15 and above — applied automatically on enrollment.
+      - button "Done" [ref=e252] [cursor=pointer]
