@@ -332,9 +332,10 @@ async function seedAssignments(ce201Id: string, mth210Id: string, eng250Id: stri
 
 async function seedAnnouncements() {
   const items = [
+    { title: "Le Sénégal décroche la Lune: Pourquoi 2026 marque un tournant historique pour l'innovation africaine", body: "Le \"Sputnik\" de l'Afrique de l'Ouest Le 2 avril 2026 restera dans l'histoire comme le jour où le Sénégal est devenu la première nation africaine à poser un instrument scientifique sur la Lune.", category: "Projects", audience: "all", author: "DAUST Press" },
+    { title: "DAUST Career Fair 2026: Shaping Futures, Creating Opportunities", body: "On March 28, the DAUST campus in Somone came alive as the Career Fair 2026 brought together over 60 employers and hundreds of students.", category: "Campus Activities", audience: "all", author: "Student Affairs" },
     { title: "Fall 2026 registration is open", body: "Add/drop closes two weeks after term start. Register early — popular sections fill fast.", category: "Registrar", audience: "all", author: "Registrar" },
     { title: "Tuition installment 1 due Sept 15", body: "Pay via Wave, Orange Money, or card from the Billing page.", category: "Bursar", audience: "student", author: "Bursar Office" },
-    { title: "Career Fair — Atlantic Atrium", body: "60+ employers on campus June 12. Bring your CV.", category: "Life @ DAUST", audience: "all", author: "Student Affairs" },
     { title: "Library extended hours", body: "The library is open until midnight during finals week.", category: "Library", audience: "all", author: "Library" },
     { title: "Grade submission deadline", body: "Submit Fall midterm grades by the end of week 8.", category: "Academics", audience: "faculty", author: "Registrar" },
   ];

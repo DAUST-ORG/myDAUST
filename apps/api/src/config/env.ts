@@ -9,8 +9,8 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().url(),
-  PORTAL_ORIGIN: z.string().url().default("http://localhost:3000"),
-  VITRINE_ORIGIN: z.string().url().default("http://localhost:3001"),
+  PORTAL_ORIGIN: z.string().url().default("http://localhost:3001"),
+  VITRINE_ORIGIN: z.string().url().default("http://localhost:3000"),
   SESSION_SECRET: z.string().min(16).default("dev-only-session-secret-change-me"),
 
   PAYTECH_ENV: z.enum(["test", "prod"]).default("test"),

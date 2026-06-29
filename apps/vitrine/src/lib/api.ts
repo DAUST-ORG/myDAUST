@@ -7,6 +7,16 @@ export interface ApplyResult {
   scholarship: { pct: number; band: string };
 }
 
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  category: string;
+  audience: string;
+  author: string | null;
+  createdAt: string;
+}
+
 export async function submitApplication(input: ApplicationInput): Promise<ApplyResult> {
   const res = await fetch(`${API_URL}/api/applications`, {
     method: "POST",
@@ -15,4 +25,10 @@ export async function submitApplication(input: ApplicationInput): Promise<ApplyR
   });
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
   return res.json() as Promise<ApplyResult>;
+}
+
+export async function getAnnouncements(): Promise<Announcement[]> {
+  const res = await fetch(`${API_URL}/api/campus/announcements`);
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json() as Promise<Announcement[]>;
 }

@@ -57,7 +57,7 @@ export function AppShell({
     <div className="shell">
       <aside className={`sidebar ${variant}`}>
         <div className="brand">
-          <div className="wordmark">DAUST</div>
+          <img src="/logo-daust.png" alt="DAUST" className="wordmark" style={{ height: 28, width: "auto" }} />
           <div className="tri-dash">
             <span />
             <span />

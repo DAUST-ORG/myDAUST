@@ -49,3 +49,6 @@ pnpm-debug.log*
 # Coverage / test
 coverage/
 .nyc_output/
+
+# Local tool scratch output
+.playwright-mcp/

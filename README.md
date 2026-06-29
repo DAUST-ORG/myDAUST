@@ -13,7 +13,8 @@ Infra (OpenTofu/AWS) and remaining modules (grades, attendance, transcripts, adm
 ```
 apps/
   api/        NestJS — finance module, PayTech provider, IPN webhook
-  portal/     Next.js — student billing + bursar tracking
+  portal/     Next.js — student billing + bursar tracking (:3001)
+  vitrine/    Next.js — public landing site (:3000)
 packages/
   shared/     Zod contracts (XOF money, cost centers, payment DTOs)
   db/         Prisma schema + client + seed
@@ -32,14 +33,18 @@ pnpm --filter @mydaust/db exec prisma migrate dev   # apply migrations
 pnpm --filter @mydaust/db run seed                  # cost centers + demo student/invoice
 
 # terminal 1 — api (:4000)
-DATABASE_URL=$DATABASE_URL PORT=4000 PORTAL_ORIGIN=http://localhost:3000 \
+DATABASE_URL=$DATABASE_URL PORT=4000 PORTAL_ORIGIN=http://localhost:3001 VITRINE_ORIGIN=http://localhost:3000 \
   pnpm --filter @mydaust/api dev
 
-# terminal 2 — portal (:3000)
+# terminal 2 — vitrine (:3000) ← public landing page
+pnpm --filter @mydaust/vitrine dev
+
+# terminal 3 — portal (:3001) ← authenticated student/faculty/admin
 pnpm --filter @mydaust/portal dev
 ```
 
-Open http://localhost:3000 → Student billing (pay) / Bursar (track).
+Open http://localhost:3000 → Vitrine (public landing page / admissions).
+Open http://localhost:3001 → Portal (login → student billing / bursar tracking).
 
 ### Real payments
 Set `PAYTECH_API_KEY`, `PAYTECH_API_SECRET` (sandbox), and `PAYTECH_IPN_URL` /
