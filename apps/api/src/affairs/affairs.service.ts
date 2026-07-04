@@ -67,13 +67,37 @@ export class AffairsService {
     }));
   }
 
-  async assignRoom(assignmentId: string, hallId: string, room: string) {
+  /**
+   * Assign a room. When a housing fee is given, an Invoice tagged cost-center 3700 is created
+   * so the charge rides the existing billing/payment rail and the director sees housing revenue.
+   */
+  async assignRoom(assignmentId: string, hallId: string, room: string, feeXof?: number) {
     const hall = await this.prisma.hall.findUnique({ where: { id: hallId } });
     if (!hall) throw new NotFoundException("Hall not found");
-    return this.prisma.housingAssignment.update({
+    const assignment = await this.prisma.housingAssignment.update({
       where: { id: assignmentId },
       data: { hallId, room, status: "assigned" },
     });
+
+    if (feeXof && feeXof > 0) {
+      const term = await this.prisma.term.findFirst({
+        where: { endDate: { gte: new Date() } },
+        orderBy: { startDate: "asc" },
+      });
+      if (!term) throw new BadRequestException("No active term to bill housing against");
+      const invoice = await this.prisma.invoice.create({
+        data: {
+          studentId: assignment.studentId,
+          termId: term.id,
+          totalAmount: feeXof,
+          costCenterCode: "3700",
+        },
+      });
+      await this.prisma.auditLog.create({
+        data: { entity: "Invoice", entityId: invoice.id, action: "housing-fee-billed", data: { assignmentId, hall: hall.name, room, feeXof } },
+      });
+    }
+    return assignment;
   }
 
   /** Heuristic roommate matches for a student, ranked by weighted preference overlap. */
@@ -174,5 +198,111 @@ export class AffairsService {
       pct: l.allocatedXof === 0 ? 0 : Math.round((l.spentXof / l.allocatedXof) * 100),
       color: l.color,
     }));
+  }
+
+  async internationalCases() {
+    const cases = await this.prisma.onboardingCase.findMany({ orderBy: { arrivalDate: "asc" } });
+    return cases.map((c) => ({
+      id: c.id,
+      name: c.name,
+      origin: c.origin,
+      kind: c.kind,
+      visaStatus: c.visaStatus,
+      arrivalDate: c.arrivalDate,
+      tasks: Array.isArray(c.tasks) ? (c.tasks as { label: string; done: boolean }[]) : [],
+    }));
+  }
+
+  async toggleOnboardingTask(id: string, index: number, done: boolean) {
+    const c = await this.prisma.onboardingCase.findUnique({ where: { id } });
+    if (!c) throw new NotFoundException("Onboarding case not found");
+    const tasks = Array.isArray(c.tasks) ? (c.tasks as { label: string; done: boolean }[]) : [];
+    const current = Number.isInteger(index) ? tasks[index] : undefined;
+    if (!current) throw new BadRequestException("Invalid task index");
+    tasks[index] = { label: current.label, done: Boolean(done) };
+    return this.prisma.onboardingCase.update({ where: { id }, data: { tasks } });
+  }
+
+  async eventsBoard() {
+    return this.prisma.event.findMany({ orderBy: { startsAt: "asc" } });
+  }
+
+  async createBoardEvent(input: {
+    title: string;
+    category: string;
+    location: string;
+    organizer: string;
+    attendees?: number;
+    budgetXof?: number;
+    startsAt: string;
+    status: string;
+  }) {
+    if (!input.title || !input.startsAt) throw new BadRequestException("title and startsAt are required");
+    const startsAt = new Date(input.startsAt);
+    if (Number.isNaN(startsAt.getTime())) throw new BadRequestException("Invalid startsAt date");
+    return this.prisma.event.create({
+      data: {
+        title: input.title,
+        category: input.category || "Campus",
+        location: input.location || null,
+        organizer: input.organizer || null,
+        attendees: input.attendees ?? null,
+        budgetXof: input.budgetXof ?? null,
+        status: ["planning", "upcoming", "past"].includes(input.status) ? input.status : "upcoming",
+        startsAt,
+      },
+    });
+  }
+
+  async abroadPrograms() {
+    return this.prisma.abroadProgram.findMany({ orderBy: { name: "asc" } });
+  }
+
+  async adjustAbroadSeat(id: string, delta: number) {
+    if (delta !== 1 && delta !== -1) throw new BadRequestException("delta must be 1 or -1");
+    const program = await this.prisma.abroadProgram.findUnique({ where: { id } });
+    if (!program) throw new NotFoundException("Program not found");
+    const seatsTaken = Math.min(program.seatsTotal, Math.max(0, program.seatsTaken + delta));
+    const status = program.status === "closed" ? "closed" : seatsTaken >= program.seatsTotal ? "full" : "open";
+    return this.prisma.abroadProgram.update({ where: { id }, data: { seatsTaken, status } });
+  }
+
+  async maintenanceTickets() {
+    const rows = await this.prisma.maintenanceTicket.findMany({
+      include: { hall: true },
+      orderBy: [{ status: "asc" }, { openedAt: "desc" }],
+    });
+    return rows.map((t) => ({
+      id: t.id,
+      hallId: t.hallId,
+      hall: t.hall.name,
+      room: t.room,
+      kind: t.kind,
+      note: t.note,
+      severity: t.severity,
+      status: t.status,
+      openedAt: t.openedAt,
+    }));
+  }
+
+  async createMaintenanceTicket(input: { hallId: string; room?: string; kind: string; note?: string; severity: string }) {
+    if (!input.hallId || !input.kind) throw new BadRequestException("hallId and kind are required");
+    const hall = await this.prisma.hall.findUnique({ where: { id: input.hallId } });
+    if (!hall) throw new NotFoundException("Hall not found");
+    return this.prisma.maintenanceTicket.create({
+      data: {
+        hallId: input.hallId,
+        room: input.room || null,
+        kind: input.kind,
+        note: input.note || null,
+        severity: ["low", "med", "high"].includes(input.severity) ? input.severity : "low",
+      },
+    });
+  }
+
+  async resolveMaintenanceTicket(id: string) {
+    const ticket = await this.prisma.maintenanceTicket.findUnique({ where: { id } });
+    if (!ticket) throw new NotFoundException("Ticket not found");
+    return this.prisma.maintenanceTicket.update({ where: { id }, data: { status: "resolved" } });
   }
 }

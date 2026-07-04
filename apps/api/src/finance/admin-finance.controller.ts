@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { CreateExpenseInput, CreatePaymentPlanInput, SetBudgetInput } from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
@@ -57,7 +57,17 @@ export class AdminFinanceController {
 
   @Post("reconcile")
   reconcile() {
-    return this.finance.reconcileStalePayments(60).then((count) => ({ reconciled: count }));
+    return this.finance.listStalePendingPayments(60).then((stale) => ({ stale }));
+  }
+
+  @Post("payments/:id/confirm")
+  confirmPayment(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.finance.confirmPaymentManually(id, user.personId);
+  }
+
+  @Post("payments/:id/cancel")
+  cancelPayment(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.finance.cancelPaymentManually(id, user.personId);
   }
 
   @Get("director-overview")
@@ -78,6 +88,16 @@ export class AdminFinanceController {
   @Post("expenses")
   createExpense(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     return this.finance.createExpense(CreateExpenseInput.parse(body), user.personId);
+  }
+
+  @Patch("expenses/:id")
+  updateExpense(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+    return this.finance.updateExpense(id, CreateExpenseInput.partial().parse(body), user.personId);
+  }
+
+  @Delete("expenses/:id")
+  deleteExpense(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.finance.deleteExpense(id, user.personId);
   }
 
   @Post("budgets")

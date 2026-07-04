@@ -19,7 +19,11 @@ export class AuthController {
     return {
       httpOnly: true,
       sameSite: "lax" as const,
-      secure: this.env.NODE_ENV === "production", // Secure flag automatic behind HTTPS
+      // COOKIE_SECURE override exists for pre-TLS staging (plain HTTP); it must never be "false" in real production.
+      secure:
+        this.env.COOKIE_SECURE !== undefined
+          ? this.env.COOKIE_SECURE === "true"
+          : this.env.NODE_ENV === "production",
       path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     };

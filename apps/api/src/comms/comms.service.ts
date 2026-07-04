@@ -20,6 +20,15 @@ export class CommsService {
     });
   }
 
+  createAnnouncement(
+    input: { title: string; body: string; category: string; audience: string },
+    author: string,
+  ) {
+    return this.prisma.announcement.create({
+      data: { title: input.title, body: input.body, category: input.category, audience: input.audience, author },
+    });
+  }
+
   // --- Messaging ---
 
   /** Threads the person participates in, with the other party, last message, and unread count. */

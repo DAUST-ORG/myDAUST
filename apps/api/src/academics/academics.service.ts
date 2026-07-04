@@ -7,12 +7,12 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 
-const GRADE_POINTS: Record<string, number> = {
+export const GRADE_POINTS: Record<string, number> = {
   A: 4.0, "A-": 3.7, "B+": 3.3, B: 3.0, "B-": 2.7,
   "C+": 2.3, C: 2.0, "C-": 1.7, D: 1.0, F: 0.0,
 };
 
-function computeGpa(rows: { grade: string; credits: number }[]) {
+export function computeGpa(rows: { grade: string; credits: number }[]) {
   let points = 0;
   let completedCredits = 0;
   for (const r of rows) {
@@ -85,6 +85,12 @@ export class AcademicsService {
       if (term.endDate.getTime() < Date.now()) {
         throw new BadRequestException("Registration is closed for this term");
       }
+      // Add window: explicit deadline when set, else open until term end.
+      if (term.addDeadline && term.addDeadline.getTime() < Date.now()) {
+        throw new BadRequestException(
+          `The add period for ${term.name} closed on ${term.addDeadline.toISOString().slice(0, 10)}`,
+        );
+      }
 
       const existing = await tx.enrollment.findUnique({
         where: { studentId_sectionId: { studentId, sectionId } },
@@ -127,10 +133,19 @@ export class AcademicsService {
   }
 
   async drop(studentId: string, enrollmentId: string) {
-    const enr = await this.prisma.enrollment.findUnique({ where: { id: enrollmentId } });
+    const enr = await this.prisma.enrollment.findUnique({
+      where: { id: enrollmentId },
+      include: { section: { include: { term: true } } },
+    });
     if (!enr) throw new NotFoundException("Enrollment not found");
     if (enr.studentId !== studentId) throw new ForbiddenException("Not your enrollment");
     if (enr.status !== "enrolled") throw new BadRequestException("Not an active enrollment");
+    const { dropDeadline, name } = enr.section.term;
+    if (dropDeadline && dropDeadline.getTime() < Date.now()) {
+      throw new BadRequestException(
+        `The drop period for ${name} closed on ${dropDeadline.toISOString().slice(0, 10)} — contact the registrar`,
+      );
+    }
 
     const updated = await this.prisma.enrollment.update({
       where: { id: enrollmentId },
@@ -651,6 +666,7 @@ export class AcademicsService {
         stage: a.stage,
         score: a.score,
         country: a.country,
+        feePaid: a.feePaid,
       })),
     };
   }
@@ -674,7 +690,63 @@ export class AcademicsService {
     const people = await this.prisma.person.findMany({ orderBy: { email: "asc" } });
     return people
       .filter((p) => p.roles.length > 0)
-      .map((p) => ({ name: `${p.firstName} ${p.lastName}`, email: p.email, roles: p.roles }));
+      .map((p) => ({ id: p.id, name: `${p.firstName} ${p.lastName}`, email: p.email, roles: p.roles }));
+  }
+
+  /** Registrar/admin: one student's academic file (profile, enrollments, transcript, GPA, balance). */
+  async adminStudentDetail(studentId: string) {
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        person: true,
+        program: { include: { department: true } },
+        invoices: true,
+        enrollments: {
+          include: { section: { include: { course: true, term: true } } },
+          orderBy: { enrolledAt: "desc" },
+        },
+      },
+    });
+    if (!student) throw new NotFoundException("Student not found");
+    const completed = student.enrollments.filter((e) => e.status === "completed" && e.grade);
+    const { gpa, completedCredits } = computeGpa(
+      completed.map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
+    );
+    return {
+      studentNo: student.studentNo,
+      name: `${student.person.firstName} ${student.person.lastName}`,
+      email: student.person.email,
+      program: student.program ? `${student.program.code} — ${student.program.name}` : null,
+      department: student.program?.department.name ?? null,
+      gpa,
+      completedCredits,
+      balance: student.invoices.reduce((b, i) => b + (i.totalAmount - i.amountPaid), 0),
+      enrollments: student.enrollments.map((e) => ({
+        enrollmentId: e.id,
+        courseCode: e.section.course.code,
+        title: e.section.course.title,
+        credits: e.section.course.credits,
+        term: e.section.term.name,
+        sectionCode: e.section.sectionCode,
+        status: e.status,
+        grade: e.grade,
+      })),
+    };
+  }
+
+  /** Registrar/admin administrative drop — bypasses the student drop deadline, audited. */
+  async adminDropEnrollment(enrollmentId: string, actorId: string) {
+    const enr = await this.prisma.enrollment.findUnique({ where: { id: enrollmentId } });
+    if (!enr) throw new NotFoundException("Enrollment not found");
+    if (enr.status !== "enrolled") throw new BadRequestException("Not an active enrollment");
+    const updated = await this.prisma.enrollment.update({
+      where: { id: enrollmentId },
+      data: { status: "dropped" },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "Enrollment", entityId: enrollmentId, action: "admin-dropped", actorId },
+    });
+    return updated;
   }
 
   // --- Faculty dashboard + insights (design: teacher portal) ---
@@ -925,6 +997,73 @@ export class AcademicsService {
       endTime: s.endTime,
       room: s.room,
     }));
+  }
+
+  // --- Course materials + class posts (faculty, design: teacher MaterialsTab/PostsTab) ---
+
+  async listSectionMaterials(sectionId: string, personId: string, isAdmin: boolean) {
+    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    return this.prisma.sectionMaterial.findMany({
+      where: { sectionId },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async createSectionMaterial(
+    sectionId: string,
+    input: { title: string; kind: string; fileUrl?: string; fileName?: string },
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    const material = await this.prisma.sectionMaterial.create({
+      data: {
+        sectionId,
+        title: input.title,
+        kind: input.kind,
+        fileUrl: input.fileUrl ?? null,
+        fileName: input.fileName ?? null,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "SectionMaterial", entityId: material.id, action: "created", actorId: personId },
+    });
+    return material;
+  }
+
+  async toggleSectionMaterial(materialId: string, personId: string, isAdmin: boolean) {
+    const material = await this.prisma.sectionMaterial.findUnique({ where: { id: materialId } });
+    if (!material) throw new NotFoundException("Material not found");
+    await this.assertSectionOwner(material.sectionId, personId, isAdmin);
+    return this.prisma.sectionMaterial.update({
+      where: { id: materialId },
+      data: { published: !material.published },
+    });
+  }
+
+  async listSectionPosts(sectionId: string, personId: string, isAdmin: boolean) {
+    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    return this.prisma.sectionPost.findMany({
+      where: { sectionId },
+      orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
+    });
+  }
+
+  async createSectionPost(
+    sectionId: string,
+    input: { title: string; body: string },
+    personId: string,
+    authorName: string,
+    isAdmin: boolean,
+  ) {
+    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    const post = await this.prisma.sectionPost.create({
+      data: { sectionId, title: input.title, body: input.body, author: authorName },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "SectionPost", entityId: post.id, action: "created", actorId: personId },
+    });
+    return post;
   }
 
   /** Sections taught by a faculty member. */

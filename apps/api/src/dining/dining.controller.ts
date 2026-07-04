@@ -7,6 +7,15 @@ import {
   type MealPeriod,
   ScanInput,
 } from "@mydaust/shared";
+import { z } from "zod";
+
+// Local schemas (shared package is frozen for this change; api has its own zod).
+const OverrideInput = z.object({
+  studentNo: z.string().min(1).max(40),
+  period: z.enum(["breakfast", "lunch", "dinner"]),
+});
+const MenuImageInput = z.object({ imageUrl: z.string().max(500) });
+const OptionalImageInput = z.object({ imageUrl: z.string().max(500).optional() });
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { DiningService } from "./dining.service.js";
@@ -29,9 +38,15 @@ export class DiningController {
   }
 
   @Get("menu")
-  @Roles("student", "dining", "admin")
+  @Roles("student", "faculty", "dining", "admin")
   menu() {
     return this.dining.menu();
+  }
+
+  @Get("my/today")
+  @Roles("student")
+  myToday(@CurrentUser() user: AuthUser) {
+    return this.dining.myToday(user.studentId!);
   }
 
   @Get("my/orders")
@@ -58,6 +73,13 @@ export class DiningController {
   scan(@Body() body: unknown) {
     const input = ScanInput.parse(body);
     return this.dining.scan(input.token, input.period);
+  }
+
+  @Post("scan/override")
+  @Roles("dining", "admin")
+  scanOverride(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const input = OverrideInput.parse(body);
+    return this.dining.scanOverride(input.studentNo, input.period, user.personId);
   }
 
   @Get("scans")
@@ -91,6 +113,18 @@ export class DiningController {
     return this.dining.settlement();
   }
 
+  @Get("admin/students")
+  @Roles("dining", "admin")
+  adminStudents() {
+    return this.dining.adminStudents();
+  }
+
+  @Get("admin/reports")
+  @Roles("dining", "admin")
+  adminReports() {
+    return this.dining.adminReports();
+  }
+
   @Get("admin/menu")
   @Roles("dining", "admin")
   adminMenu() {
@@ -100,7 +134,15 @@ export class DiningController {
   @Post("admin/menu")
   @Roles("dining", "admin")
   createMenuItem(@Body() body: unknown) {
-    return this.dining.createMenuItem(CreateMenuItemInput.parse(body));
+    const input = CreateMenuItemInput.parse(body);
+    const { imageUrl } = OptionalImageInput.parse(body);
+    return this.dining.createMenuItem({ ...input, imageUrl });
+  }
+
+  @Post("admin/menu/:id/image")
+  @Roles("dining", "admin")
+  setMenuItemImage(@Param("id") id: string, @Body() body: unknown) {
+    return this.dining.setMenuItemImage(id, MenuImageInput.parse(body).imageUrl);
   }
 
   @Post("admin/menu/:id/toggle")

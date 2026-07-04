@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 @Injectable()
@@ -30,6 +30,33 @@ export class CampusService {
         : undefined,
       orderBy: { title: "asc" },
       take: 100,
+    });
+  }
+
+  async createLibraryItem(input: {
+    title: string;
+    author?: string;
+    kind: string;
+    subject?: string;
+    callNumber?: string;
+  }) {
+    return this.prisma.libraryResource.create({
+      data: {
+        title: input.title,
+        author: input.author ?? null,
+        kind: input.kind,
+        subject: input.subject ?? null,
+        callNumber: input.callNumber ?? null,
+      },
+    });
+  }
+
+  async toggleLibraryItem(id: string) {
+    const item = await this.prisma.libraryResource.findUnique({ where: { id } });
+    if (!item) throw new NotFoundException("Library resource not found");
+    return this.prisma.libraryResource.update({
+      where: { id },
+      data: { available: !item.available },
     });
   }
 }

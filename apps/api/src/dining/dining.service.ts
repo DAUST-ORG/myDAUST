@@ -1,33 +1,22 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { PAYMENT_PROVIDER, type PaymentProvider } from "../finance/payment-provider.js";
+import { signPass, verifyPass } from "./pass-token.js";
 
 const PERIODS = ["breakfast", "lunch", "dinner"] as const;
 type Period = (typeof PERIODS)[number];
 
 @Injectable()
 export class DiningService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
+  ) {}
 
   private secret() {
     return process.env.SESSION_SECRET ?? "dev-only-session-secret-change-me";
   }
 
-  /** Signed dining-pass token for a student: `studentId.hmac`. Verified at the scanner. */
-  private signPass(studentId: string) {
-    const sig = createHmac("sha256", this.secret()).update(studentId).digest("hex");
-    return `${studentId}.${sig}`;
-  }
-
-  private verifyPass(token: string): string | null {
-    const [studentId, sig] = token.split(".");
-    if (!studentId || !sig) return null;
-    const expected = createHmac("sha256", this.secret()).update(studentId).digest("hex");
-    const a = Buffer.from(sig);
-    const b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-    return studentId;
-  }
 
   private dayOnly(d = new Date()) {
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -41,7 +30,7 @@ export class DiningService {
       include: { person: true, mealPlan: true },
     });
     return {
-      token: this.signPass(studentId),
+      token: signPass(studentId, this.secret()),
       studentNo: student.studentNo,
       name: `${student.person.firstName} ${student.person.lastName}`,
       plan: student.mealPlan?.type ?? "none",
@@ -59,6 +48,15 @@ export class DiningService {
 
   async menu() {
     return this.prisma.menuItem.findMany({ where: { available: true }, orderBy: { name: "asc" } });
+  }
+
+  /** Which meal periods the student has already been served today (for the home hub). */
+  async myToday(studentId: string) {
+    const scans = await this.prisma.diningScan.findMany({
+      where: { studentId, date: this.dayOnly(), result: "served" },
+      select: { period: true },
+    });
+    return { scannedPeriods: scans.map((s) => s.period) };
   }
 
   async myOrders(studentId: string) {
@@ -94,21 +92,34 @@ export class DiningService {
   }
 
   /**
-   * Pay for a weekend order via the shared PayTech rail. In local/sandbox we mark it paid
-   * directly; production routes through PaymentProvider + IPN like tuition.
+   * Pay for a weekend order via the shared PayTech rail: checkout redirect now, the verified
+   * IPN (ref DINE-<orderId>) marks it paid. Falls back to direct settle only when no gateway
+   * is configured (local dev without keys).
    */
-  async payOrder(studentId: string, orderId: string) {
+  async payOrder(studentId: string, orderId: string): Promise<{ paid: boolean; redirectUrl?: string }> {
     const order = await this.prisma.diningOrder.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException("Order not found");
     if (order.studentId !== studentId) throw new ForbiddenException("Not your order");
     if (order.status !== "cart") throw new BadRequestException("Order is not payable");
-    return this.prisma.diningOrder.update({ where: { id: orderId }, data: { status: "paid" } });
+
+    if (!process.env.PAYTECH_API_KEY) {
+      await this.prisma.diningOrder.update({ where: { id: orderId }, data: { status: "paid" } });
+      return { paid: true };
+    }
+
+    const { redirectUrl } = await this.provider.requestPayment({
+      ref: `DINE-${order.id}`,
+      amount: order.totalXof,
+      itemName: "DAUST weekend dining order",
+      customField: { orderId: order.id, studentId },
+    });
+    return { paid: false, redirectUrl };
   }
 
   // --- Scanner station ---
 
   async scan(token: string, period: Period) {
-    const studentId = this.verifyPass(token);
+    const studentId = verifyPass(token, this.secret());
     if (!studentId) return { result: "turned_away" as const, reason: "Invalid pass", name: null, studentNo: null };
 
     const student = await this.prisma.student.findUnique({
@@ -139,6 +150,34 @@ export class DiningService {
 
     await this.recordScan(studentId, period, date, "served", null);
     return { result: "served" as const, reason: null, ...base };
+  }
+
+  /** Staff-approved manual serve when the pass can't be scanned (or a turn-away is overridden). */
+  async scanOverride(studentNo: string, period: Period, actorPersonId: string) {
+    const student = await this.prisma.student.findUnique({
+      where: { studentNo },
+      include: { person: true },
+    });
+    if (!student) {
+      return { result: "turned_away" as const, reason: "Unknown student number", name: null, studentNo: null };
+    }
+    const date = this.dayOnly();
+    await this.recordScan(student.id, period, date, "served", "Manual override");
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "DiningScan",
+        entityId: student.id,
+        action: "override",
+        actorId: actorPersonId,
+        data: { studentNo, period, date: date.toISOString() },
+      },
+    });
+    return {
+      result: "served" as const,
+      reason: "Manual override",
+      name: `${student.person.firstName} ${student.person.lastName}`,
+      studentNo: student.studentNo,
+    };
   }
 
   private async recordScan(studentId: string, period: Period, date: Date, result: "served" | "turned_away", reason: string | null) {
@@ -230,14 +269,103 @@ export class DiningService {
     return { orders: paid.length, revenue, settledTo: "Cost center 3600 — Dining / Auxiliary Services" };
   }
 
+  /** Meal-plan roster: every student holding a plan record + how many meals they scanned today. */
+  async adminStudents() {
+    const date = this.dayOnly();
+    const [plans, scans] = await Promise.all([
+      this.prisma.mealPlan.findMany({
+        include: { student: { include: { person: true } } },
+        orderBy: { createdAt: "asc" },
+      }),
+      this.prisma.diningScan.groupBy({
+        by: ["studentId"],
+        where: { date, result: "served" },
+        _count: true,
+      }),
+    ]);
+    const scansByStudent = new Map(scans.map((s) => [s.studentId, s._count]));
+    return plans.map((p) => ({
+      studentId: p.studentId,
+      name: `${p.student.person.firstName} ${p.student.person.lastName}`,
+      studentNo: p.student.studentNo,
+      plan: p.type,
+      active: p.active,
+      term: p.term,
+      scansToday: scansByStudent.get(p.studentId) ?? 0,
+    }));
+  }
+
+  /** Derived reporting: 7-day service trend, plan mix, weekend revenue, top-selling items. */
+  async adminReports() {
+    const today = this.dayOnly();
+    const start = new Date(today);
+    start.setUTCDate(start.getUTCDate() - 6);
+
+    const [scanGroups, plans, paidOrders, itemGroups] = await Promise.all([
+      this.prisma.diningScan.groupBy({
+        by: ["date", "result"],
+        where: { date: { gte: start } },
+        _count: true,
+      }),
+      this.prisma.mealPlan.groupBy({ by: ["type"], where: { active: true }, _count: true }),
+      this.prisma.diningOrder.findMany({
+        where: { status: { in: ["paid", "preparing", "ready", "collected"] } },
+        select: { totalXof: true },
+      }),
+      this.prisma.diningOrderItem.groupBy({
+        by: ["menuItemId"],
+        where: { order: { status: { not: "cart" } } },
+        _sum: { qty: true },
+        orderBy: { _sum: { qty: "desc" } },
+        take: 8,
+      }),
+    ]);
+
+    const last7days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start);
+      d.setUTCDate(d.getUTCDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      const count = (result: string) =>
+        scanGroups.find((g) => g.date.toISOString().slice(0, 10) === key && g.result === result)?._count ?? 0;
+      return { date: key, served: count("served"), turnedAway: count("turned_away") };
+    });
+
+    const menuItems = await this.prisma.menuItem.findMany({
+      where: { id: { in: itemGroups.map((g) => g.menuItemId) } },
+      select: { id: true, name: true },
+    });
+    const nameById = new Map(menuItems.map((m) => [m.id, m.name]));
+
+    return {
+      last7days,
+      planMix: plans.map((p) => ({ type: p.type, count: p._count })),
+      weekendRevenue: paidOrders.reduce((s, o) => s + o.totalXof, 0),
+      topItems: itemGroups.map((g) => ({
+        name: nameById.get(g.menuItemId) ?? "Unknown item",
+        qty: g._sum.qty ?? 0,
+      })),
+    };
+  }
+
   async adminMenu() {
     return this.prisma.menuItem.findMany({ orderBy: [{ category: "asc" }, { name: "asc" }] });
   }
 
-  async createMenuItem(input: { name: string; description?: string; category: string; priceXof: number }) {
+  async createMenuItem(input: { name: string; description?: string; category: string; priceXof: number; imageUrl?: string }) {
     return this.prisma.menuItem.create({
-      data: { name: input.name, description: input.description ?? null, category: input.category, priceXof: input.priceXof },
+      data: {
+        name: input.name,
+        description: input.description ?? null,
+        category: input.category,
+        priceXof: input.priceXof,
+        imageUrl: input.imageUrl || null,
+      },
     });
+  }
+
+  async setMenuItemImage(id: string, imageUrl: string) {
+    await this.prisma.menuItem.findUniqueOrThrow({ where: { id } });
+    return this.prisma.menuItem.update({ where: { id }, data: { imageUrl: imageUrl || null } });
   }
 
   async toggleMenuItem(id: string) {

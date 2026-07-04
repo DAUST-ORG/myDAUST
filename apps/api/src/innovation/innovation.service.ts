@@ -133,7 +133,7 @@ export class InnovationService {
       status: p.status,
       grade: p.grade,
       roadmap: this.roadmap(p.phase),
-      members: p.members.map((m) => ({ name: `${m.person.firstName} ${m.person.lastName}`, role: m.role })),
+      members: p.members.map((m) => ({ personId: m.personId, name: `${m.person.firstName} ${m.person.lastName}`, role: m.role })),
       submissions: p.submissions.map((s) => ({ id: s.id, title: s.title, kind: s.kind, status: s.status, grade: s.grade, feedback: s.feedback, fileName: s.fileName, fileUrl: s.fileUrl })),
     };
   }
@@ -151,5 +151,108 @@ export class InnovationService {
       where: { id: submissionId },
       data: { grade, feedback: feedback ?? null, status: "reviewed" },
     });
+  }
+
+  /** Add a member by email (any person; students expected). Idempotent on duplicates. */
+  async addMember(projectId: string, email: string, role = "member") {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) throw new NotFoundException("Project not found");
+    const person = await this.prisma.person.findUnique({ where: { email: email.toLowerCase().trim() } });
+    if (!person) throw new NotFoundException("No user with that email");
+    await this.prisma.projectMember.upsert({
+      where: { projectId_personId: { projectId, personId: person.id } },
+      update: { role },
+      create: { projectId, personId: person.id, role },
+    });
+    return { ok: true, name: `${person.firstName} ${person.lastName}` };
+  }
+
+  async removeMember(projectId: string, personId: string) {
+    await this.prisma.projectMember.deleteMany({ where: { projectId, personId } });
+    return { ok: true };
+  }
+
+  // --- Global tasks ("passes" every project must complete) ---
+
+  async globalTasksOverview() {
+    const [tasks, projects] = await Promise.all([
+      this.prisma.globalTask.findMany({ orderBy: [{ dueDate: "asc" }, { title: "asc" }], include: { statuses: true } }),
+      this.prisma.project.findMany({ select: { id: true, name: true }, orderBy: { createdAt: "asc" } }),
+    ]);
+    return tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      kind: t.kind,
+      dueDate: t.dueDate,
+      done: t.statuses.filter((s) => s.done).length,
+      total: projects.length,
+      statuses: projects.map((p) => ({
+        projectId: p.id,
+        projectName: p.name,
+        done: t.statuses.find((s) => s.projectId === p.id)?.done ?? false,
+      })),
+    }));
+  }
+
+  async createGlobalTask(input: { title: string; kind?: string; dueDate?: string }) {
+    if (!input.title?.trim()) throw new BadRequestException("Title is required");
+    const task = await this.prisma.globalTask.create({
+      data: {
+        title: input.title.trim(),
+        kind: input.kind?.trim() || "Document",
+        dueDate: input.dueDate ? new Date(input.dueDate) : null,
+      },
+    });
+    const projects = await this.prisma.project.findMany({ select: { id: true } });
+    if (projects.length > 0) {
+      await this.prisma.projectGlobalTask.createMany({
+        data: projects.map((p) => ({ globalTaskId: task.id, projectId: p.id })),
+        skipDuplicates: true,
+      });
+    }
+    return task;
+  }
+
+  async projectGlobalTasks(projectId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) throw new NotFoundException("Project not found");
+    const tasks = await this.prisma.globalTask.findMany({
+      orderBy: [{ dueDate: "asc" }, { title: "asc" }],
+      include: { statuses: { where: { projectId } } },
+    });
+    return tasks.map((t) => ({
+      taskId: t.id,
+      title: t.title,
+      kind: t.kind,
+      dueDate: t.dueDate,
+      done: t.statuses[0]?.done ?? false,
+    }));
+  }
+
+  /** Flip a project's completion of a global task. Upserts the row for projects created after the task. */
+  async toggleGlobalTaskStatus(taskId: string, projectId: string) {
+    const task = await this.prisma.globalTask.findUnique({ where: { id: taskId } });
+    if (!task) throw new NotFoundException("Global task not found");
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) throw new NotFoundException("Project not found");
+    const existing = await this.prisma.projectGlobalTask.findUnique({
+      where: { globalTaskId_projectId: { globalTaskId: taskId, projectId } },
+    });
+    if (!existing) {
+      return this.prisma.projectGlobalTask.create({ data: { globalTaskId: taskId, projectId, done: true } });
+    }
+    return this.prisma.projectGlobalTask.update({ where: { id: existing.id }, data: { done: !existing.done } });
+  }
+
+  async myProjectGlobalTasks(personId: string) {
+    const membership = await this.prisma.projectMember.findFirst({ where: { personId } });
+    if (!membership) return [];
+    return this.projectGlobalTasks(membership.projectId);
+  }
+
+  async setAdvisor(projectId: string, advisor: string) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) throw new NotFoundException("Project not found");
+    return this.prisma.project.update({ where: { id: projectId }, data: { advisor: advisor.trim() || null } });
   }
 }

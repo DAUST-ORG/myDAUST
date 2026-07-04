@@ -13,5 +13,7 @@ import { PaytechProvider } from "./paytech.provider.js";
     FinanceTasks,
     { provide: PAYMENT_PROVIDER, useClass: PaytechProvider },
   ],
+  // Dining orders and application fees ride the same PayTech rail.
+  exports: [PAYMENT_PROVIDER],
 })
 export class FinanceModule {}

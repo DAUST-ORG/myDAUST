@@ -1,7 +1,9 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { type ApplicationInput, scholarshipForBac } from "@mydaust/shared";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import type { ApplicationInput } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
+import { AppConfigService } from "../app-config/app-config.service.js";
+import { PAYMENT_PROVIDER, type PaymentProvider } from "../finance/payment-provider.js";
 
 @Injectable()
 export class AdmissionsService {
@@ -10,7 +12,30 @@ export class AdmissionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
+    private readonly appConfig: AppConfigService,
+    @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
   ) {}
+
+  /**
+   * PayTech checkout for the 30k FCFA application fee. Anonymous (the applicant id is the
+   * capability); the verified IPN (ref APPFEE-<id>) flips feePaid — never this endpoint.
+   */
+  async feeCheckout(applicantId: string) {
+    const applicant = await this.prisma.applicant.findUnique({ where: { id: applicantId } });
+    if (!applicant) throw new NotFoundException("Application not found");
+    if (applicant.feePaid) throw new BadRequestException("Application fee already paid");
+    if (!process.env.PAYTECH_API_KEY) {
+      throw new BadRequestException("Online fee payment is not available right now — pay at the Office of Admissions");
+    }
+    const fee = await this.appConfig.applicationFee();
+    const { redirectUrl } = await this.provider.requestPayment({
+      ref: `APPFEE-${applicant.id}`,
+      amount: fee,
+      itemName: "DAUST application fee",
+      customField: { applicantId: applicant.id },
+    });
+    return { redirectUrl };
+  }
 
   /** Anonymous public application: persist applicant + send confirmation email. */
   async apply(input: ApplicationInput) {
@@ -26,7 +51,8 @@ export class AdmissionsService {
       },
     });
 
-    const award = scholarshipForBac(input.bacScore);
+    const award = await this.appConfig.awardFor(input.bacScore);
+    const appFee = await this.appConfig.applicationFee();
     const scholarshipLine =
       award.pct > 0
         ? `<p>Based on your reported BAC, you may qualify for a <strong>${award.pct}% merit scholarship</strong> (${award.band}).</p>`
@@ -39,7 +65,7 @@ export class AdmissionsService {
         <h2>Thank you, ${input.firstName}!</h2>
         <p>We've received your application to DAUST for the September 2026 intake.</p>
         ${scholarshipLine}
-        <p>Next step: submit your documents and the 30,000 FCFA application fee. Our admissions team will be in touch.</p>
+        <p>Next step: submit your documents and the ${appFee.toLocaleString("en-US")} FCFA application fee. Our admissions team will be in touch.</p>
         <p>— Office of Admissions, DAUST</p>`,
     });
 

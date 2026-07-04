@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post } from "@nestjs/common";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { InnovationService } from "./innovation.service.js";
@@ -61,5 +61,53 @@ export class InnovationController {
   @Roles("innovation", "admin")
   grade(@Param("id") id: string, @Body() body: { grade: string; feedback?: string }) {
     return this.innovation.gradeSubmission(id, body.grade, body.feedback);
+  }
+
+  @Post("admin/projects/:id/members")
+  @Roles("innovation", "admin")
+  addMember(@Param("id") id: string, @Body() body: { email: string; role?: string }) {
+    return this.innovation.addMember(id, body.email, body.role ?? "member");
+  }
+
+  @Delete("admin/projects/:id/members/:personId")
+  @Roles("innovation", "admin")
+  removeMember(@Param("id") id: string, @Param("personId") personId: string) {
+    return this.innovation.removeMember(id, personId);
+  }
+
+  @Get("my/project/global-tasks")
+  @Roles("student")
+  myGlobalTasks(@CurrentUser() user: AuthUser) {
+    return this.innovation.myProjectGlobalTasks(user.personId);
+  }
+
+  @Get("admin/global-tasks")
+  @Roles("innovation", "admin")
+  globalTasks() {
+    return this.innovation.globalTasksOverview();
+  }
+
+  @Post("admin/global-tasks")
+  @Roles("innovation", "admin")
+  createGlobalTask(@Body() body: { title: string; kind?: string; dueDate?: string }) {
+    return this.innovation.createGlobalTask(body);
+  }
+
+  @Get("admin/projects/:id/global-tasks")
+  @Roles("innovation", "admin")
+  projectGlobalTasks(@Param("id") id: string) {
+    return this.innovation.projectGlobalTasks(id);
+  }
+
+  @Post("admin/global-tasks/:taskId/projects/:projectId/toggle")
+  @Roles("innovation", "admin")
+  toggleGlobalTask(@Param("taskId") taskId: string, @Param("projectId") projectId: string) {
+    return this.innovation.toggleGlobalTaskStatus(taskId, projectId);
+  }
+
+  @Post("admin/projects/:id/advisor")
+  @Roles("innovation", "admin")
+  setAdvisor(@Param("id") id: string, @Body() body: { advisor: string }) {
+    return this.innovation.setAdvisor(id, body.advisor ?? "");
   }
 }

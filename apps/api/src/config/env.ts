@@ -12,6 +12,7 @@ const schema = z.object({
   PORTAL_ORIGIN: z.string().url().default("http://localhost:3000"),
   VITRINE_ORIGIN: z.string().url().default("http://localhost:3001"),
   SESSION_SECRET: z.string().min(16).default("dev-only-session-secret-change-me"),
+  COOKIE_SECURE: z.enum(["true", "false"]).optional(),
 
   PAYTECH_ENV: z.enum(["test", "prod"]).default("test"),
   PAYTECH_API_KEY: z.string().optional(),

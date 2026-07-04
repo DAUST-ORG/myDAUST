@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import type { CreatePaymentPlanInput, InitiatePaymentInput } from "@mydaust/shared";
+import { FEE_STRUCTURE, type CreatePaymentPlanInput, type InitiatePaymentInput } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { PAYMENT_PROVIDER, type PaymentProvider } from "./payment-provider.js";
@@ -155,10 +155,17 @@ export class FinanceService {
       return { valid: true }; // already processed
     }
 
-    const payment = await this.prisma.payment.findUnique({
-      where: { providerRef: v.ref },
-      include: { invoice: { include: { plan: { include: { installments: true } } } } },
-    });
+    // Non-tuition charges ride the same verified rail, routed by ref prefix.
+    if (v.ref.startsWith("DINE-")) {
+      await this.settleDiningOrder(v.ref.slice(5), v.success);
+      return { valid: true };
+    }
+    if (v.ref.startsWith("APPFEE-")) {
+      await this.settleApplicationFee(v.ref.slice(7), v.success);
+      return { valid: true };
+    }
+
+    const payment = await this.prisma.payment.findUnique({ where: { providerRef: v.ref } });
     if (!payment) return { valid: true };
 
     if (!v.success) {
@@ -172,12 +179,33 @@ export class FinanceService {
       return { valid: true };
     }
 
-    if (payment.status === "success") return { valid: true }; // already applied
+    await this.settlePayment(payment.id, { via: "ipn", payload: payload as object, method: v.method });
+    return { valid: true };
+  }
+
+  /**
+   * Apply a successful payment: allocate to installments oldest-due-first, roll up the invoice,
+   * audit, and email the receipt. Idempotent (no-op when already success). Shared by the IPN
+   * path and the bursar's manual confirm (for verified-but-IPN-lost payments).
+   */
+  private async settlePayment(
+    paymentId: string,
+    opts: { via: "ipn" | "manual"; payload?: object; method?: string | null; actorId?: string },
+  ) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { invoice: { include: { plan: { include: { installments: true } } } } },
+    });
+    if (!payment) throw new NotFoundException("Payment not found");
+    if (payment.status === "success") return; // already applied
 
     await this.prisma.$transaction(async (tx) => {
       await tx.payment.update({
         where: { id: payment.id },
-        data: { status: "success", ipnPayload: payload as object, method: payment.method },
+        data: {
+          status: "success",
+          ...(opts.payload ? { ipnPayload: opts.payload } : {}),
+        },
       });
 
       // Allocate to installments oldest-due-first (when a plan exists).
@@ -217,14 +245,57 @@ export class FinanceService {
         data: {
           entity: "Payment",
           entityId: payment.id,
-          action: "succeeded",
-          data: { amount: payment.amount, method: v.method },
+          action: opts.via === "ipn" ? "succeeded" : "manually-confirmed",
+          actorId: opts.actorId,
+          data: { amount: payment.amount, method: opts.method ?? payment.method },
         },
       });
     });
 
     await this.emailReceipt(payment.id);
-    return { valid: true };
+  }
+
+  /** Bursar verified the money in the PayTech dashboard but the IPN never arrived. */
+  async confirmPaymentManually(paymentId: string, actorId: string) {
+    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!payment) throw new NotFoundException("Payment not found");
+    if (payment.status !== "pending") throw new BadRequestException("Only pending payments can be confirmed");
+    await this.settlePayment(paymentId, { via: "manual", actorId });
+    return { ok: true };
+  }
+
+  /** Bursar confirmed the checkout was abandoned; explicitly cancel the stale pending payment. */
+  async cancelPaymentManually(paymentId: string, actorId: string) {
+    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!payment) throw new NotFoundException("Payment not found");
+    if (payment.status !== "pending") throw new BadRequestException("Only pending payments can be cancelled");
+    await this.prisma.payment.update({ where: { id: paymentId }, data: { status: "cancelled" } });
+    await this.audit(paymentId, "manually-cancelled", { actorId });
+    return { ok: true };
+  }
+
+  /** IPN said a weekend dining order was paid. Idempotent: only a cart order transitions. */
+  private async settleDiningOrder(orderId: string, success: boolean) {
+    if (!success) return;
+    await this.prisma.diningOrder.updateMany({
+      where: { id: orderId, status: "cart" },
+      data: { status: "paid" },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "DiningOrder", entityId: orderId, action: "paid-via-ipn" },
+    });
+  }
+
+  /** IPN said an application fee was paid. Idempotent boolean flip. */
+  private async settleApplicationFee(applicantId: string, success: boolean) {
+    if (!success) return;
+    await this.prisma.applicant.updateMany({
+      where: { id: applicantId, feePaid: false },
+      data: { feePaid: true },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "Applicant", entityId: applicantId, action: "application-fee-paid" },
+    });
   }
 
   /** Email a payment receipt to the student (best-effort; dev-logs without a provider). */
@@ -387,20 +458,28 @@ export class FinanceService {
   }
 
   /**
-   * Scheduled/manual reconciliation: a pending payment with no IPN after the grace window is
-   * treated as abandoned and cancelled, so it stops polluting the tracking view. (If PayTech
-   * exposes a status endpoint later, query it here before cancelling.)
+   * Reconciliation surfaces stale pendings for HUMAN review — it never auto-cancels, because a
+   * payment whose IPN was lost may be genuinely paid; the bursar checks the PayTech dashboard
+   * and uses confirm/cancel. (If PayTech exposes a status API later, poll it here instead.)
    */
-  async reconcileStalePayments(graceMinutes = 60): Promise<number> {
+  async listStalePendingPayments(graceMinutes = 60) {
     const cutoff = new Date(Date.now() - graceMinutes * 60_000);
     const stale = await this.prisma.payment.findMany({
       where: { status: "pending", createdAt: { lt: cutoff } },
+      orderBy: { createdAt: "asc" },
+      include: { student: { include: { person: true } }, invoice: { include: { term: true } } },
     });
-    for (const p of stale) {
-      await this.prisma.payment.update({ where: { id: p.id }, data: { status: "cancelled" } });
-      await this.audit(p.id, "reconciled-cancelled", { reason: "no IPN within grace window" });
-    }
-    return stale.length;
+    return stale.map((p) => ({
+      id: p.id,
+      student: `${p.student.person.firstName} ${p.student.person.lastName}`,
+      studentNo: p.student.studentNo,
+      term: p.invoice.term.name,
+      amount: p.amount,
+      method: p.method,
+      providerRef: p.providerRef,
+      createdAt: p.createdAt,
+      ageMinutes: Math.round((Date.now() - p.createdAt.getTime()) / 60_000),
+    }));
   }
 
   // --- Management accounting: cost centers, expenses, budgets, director money-in/out ---
@@ -437,6 +516,49 @@ export class FinanceService {
       data: { entity: "Expense", entityId: expense.id, action: "created", actorId, data: input },
     });
     return expense;
+  }
+
+  async updateExpense(
+    id: string,
+    patch: Partial<{
+      costCenterCode: string;
+      category: string;
+      description: string;
+      payee: string;
+      amount: number;
+      isEstimate: boolean;
+      incurredOn: string;
+    }>,
+    actorId?: string,
+  ) {
+    const existing = await this.prisma.expense.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("Expense not found");
+    const expense = await this.prisma.expense.update({
+      where: { id },
+      data: {
+        ...(patch.costCenterCode !== undefined ? { costCenterCode: patch.costCenterCode } : {}),
+        ...(patch.category !== undefined ? { category: patch.category } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.payee !== undefined ? { payee: patch.payee } : {}),
+        ...(patch.amount !== undefined ? { amount: patch.amount } : {}),
+        ...(patch.isEstimate !== undefined ? { isEstimate: patch.isEstimate } : {}),
+        ...(patch.incurredOn !== undefined ? { incurredOn: new Date(patch.incurredOn) } : {}),
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "Expense", entityId: id, action: "updated", actorId, data: patch },
+    });
+    return expense;
+  }
+
+  async deleteExpense(id: string, actorId?: string) {
+    const existing = await this.prisma.expense.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("Expense not found");
+    await this.prisma.expense.delete({ where: { id } });
+    await this.prisma.auditLog.create({
+      data: { entity: "Expense", entityId: id, action: "deleted", actorId, data: { amount: existing.amount, category: existing.category } },
+    });
+    return { ok: true };
   }
 
   async listExpenses() {
@@ -487,6 +609,22 @@ export class FinanceService {
       const cc = p.invoice.costCenterCode;
       revenueByCc.set(cc, (revenueByCc.get(cc) ?? 0) + p.amount);
     }
+
+    // Auxiliary revenue that doesn't ride invoices: dining orders → 3600, application fees → 4200.
+    const [diningAgg, paidApplicants] = await Promise.all([
+      this.prisma.diningOrder.aggregate({
+        where: { status: { in: ["paid", "preparing", "ready", "collected"] } },
+        _sum: { totalXof: true },
+      }),
+      this.prisma.applicant.count({ where: { feePaid: true } }),
+    ]);
+    const diningRevenue = diningAgg._sum.totalXof ?? 0;
+    if (diningRevenue > 0) revenueByCc.set("3600", (revenueByCc.get("3600") ?? 0) + diningRevenue);
+    // Uses the CURRENT configured fee; historical fee changes will skew this management view
+    // slightly until per-payment amounts are recorded for app fees.
+    const feeRow = await this.prisma.feeItem.findUnique({ where: { key: "application_fee" } });
+    const appFeeRevenue = paidApplicants * (feeRow?.minXof ?? FEE_STRUCTURE.applicationFee);
+    if (appFeeRevenue > 0) revenueByCc.set("4200", (revenueByCc.get("4200") ?? 0) + appFeeRevenue);
     const expenseByCc = new Map<string, number>();
     for (const e of expenseAgg) expenseByCc.set(e.costCenterCode, e._sum.amount ?? 0);
 

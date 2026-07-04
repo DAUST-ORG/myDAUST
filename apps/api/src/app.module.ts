@@ -3,6 +3,7 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { AcademicsModule } from "./academics/academics.module.js";
 import { AdmissionsModule } from "./admissions/admissions.module.js";
 import { AffairsModule } from "./affairs/affairs.module.js";
+import { AppConfigModule } from "./app-config/app-config.module.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { CampusModule } from "./campus/campus.module.js";
 import { DiningModule } from "./dining/dining.module.js";
@@ -12,6 +13,7 @@ import { MailModule } from "./mail/mail.module.js";
 import { CommsModule } from "./comms/comms.module.js";
 import { ConfigModule } from "./config/config.module.js";
 import { FinanceModule } from "./finance/finance.module.js";
+import { HealthController } from "./health.controller.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { UploadsModule } from "./uploads/uploads.module.js";
 
@@ -21,6 +23,7 @@ import { UploadsModule } from "./uploads/uploads.module.js";
     ConfigModule,
     PrismaModule,
     MailModule,
+    AppConfigModule,
     AuthModule,
     FinanceModule,
     AcademicsModule,
@@ -33,5 +36,6 @@ import { UploadsModule } from "./uploads/uploads.module.js";
     HrModule,
     UploadsModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

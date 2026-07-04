@@ -5,6 +5,7 @@ import { PassportModule } from "@nestjs/passport";
 import { ENV } from "../config/config.module.js";
 import type { Env } from "../config/env.js";
 import { AuthController } from "./auth.controller.js";
+import { UsersController } from "./users.controller.js";
 import { AuthService } from "./auth.service.js";
 import { JwtAuthGuard } from "./guards.js";
 import { JwtStrategy } from "./jwt.strategy.js";
@@ -22,7 +23,7 @@ import { RolesGuard } from "./roles.guard.js";
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, UsersController],
   providers: [
     AuthService,
     LocalStrategy,

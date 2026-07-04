@@ -28,8 +28,8 @@ export class AffairsController {
   }
 
   @Post("housing/:id/assign")
-  assign(@Param("id") id: string, @Body() body: { hallId: string; room: string }) {
-    return this.affairs.assignRoom(id, body.hallId, body.room);
+  assign(@Param("id") id: string, @Body() body: { hallId: string; room: string; feeXof?: number }) {
+    return this.affairs.assignRoom(id, body.hallId, body.room, body.feeXof);
   }
 
   @Get("roommate/subjects")
@@ -70,5 +70,62 @@ export class AffairsController {
   @Get("budget")
   budget() {
     return this.affairs.budget();
+  }
+
+  @Get("international")
+  international() {
+    return this.affairs.internationalCases();
+  }
+
+  @Post("international/:id/task")
+  toggleTask(@Param("id") id: string, @Body() body: { index: number; done: boolean }) {
+    return this.affairs.toggleOnboardingTask(id, body.index, body.done);
+  }
+
+  @Get("events-board")
+  eventsBoard() {
+    return this.affairs.eventsBoard();
+  }
+
+  @Post("events-board")
+  createBoardEvent(
+    @Body()
+    body: {
+      title: string;
+      category: string;
+      location: string;
+      organizer: string;
+      attendees?: number;
+      budgetXof?: number;
+      startsAt: string;
+      status: string;
+    },
+  ) {
+    return this.affairs.createBoardEvent(body);
+  }
+
+  @Get("abroad")
+  abroad() {
+    return this.affairs.abroadPrograms();
+  }
+
+  @Post("abroad/:id/seat")
+  adjustSeat(@Param("id") id: string, @Body() body: { delta: 1 | -1 }) {
+    return this.affairs.adjustAbroadSeat(id, body.delta);
+  }
+
+  @Get("maintenance")
+  maintenance() {
+    return this.affairs.maintenanceTickets();
+  }
+
+  @Post("maintenance")
+  createMaintenance(@Body() body: { hallId: string; room?: string; kind: string; note?: string; severity: string }) {
+    return this.affairs.createMaintenanceTicket(body);
+  }
+
+  @Post("maintenance/:id/resolve")
+  resolveMaintenance(@Param("id") id: string) {
+    return this.affairs.resolveMaintenanceTicket(id);
   }
 }

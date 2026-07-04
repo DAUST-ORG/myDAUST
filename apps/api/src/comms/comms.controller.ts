@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
-import { SendMessageInput, StartThreadInput } from "@mydaust/shared";
+import { CreateAnnouncementInput, SendMessageInput, StartThreadInput } from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
+import { Roles } from "../auth/decorators.js";
 import { CommsService } from "./comms.service.js";
 
 @Controller("comms")
@@ -10,6 +11,13 @@ export class CommsController {
   @Get("announcements")
   announcements(@CurrentUser() user: AuthUser) {
     return this.comms.announcements(user);
+  }
+
+  @Post("announcements")
+  @Roles("admin", "registrar", "bursar", "student_affairs", "hr", "faculty")
+  createAnnouncement(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const input = CreateAnnouncementInput.parse(body);
+    return this.comms.createAnnouncement(input, user.name);
   }
 
   @Get("threads")

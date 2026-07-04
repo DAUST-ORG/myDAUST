@@ -15,9 +15,11 @@ export class FinanceTasks {
     if (n > 0) this.log.log(`Marked ${n} installment(s) overdue`);
   }
 
+  // Surfaces stale pendings for bursar review — never auto-cancels (a lost IPN does not mean
+  // the customer didn't pay; the bursar verifies in the PayTech dashboard then confirms/cancels).
   @Cron(CronExpression.EVERY_30_MINUTES)
   async reconcile(): Promise<void> {
-    const n = await this.finance.reconcileStalePayments(60);
-    if (n > 0) this.log.log(`Reconciled ${n} stale pending payment(s)`);
+    const stale = await this.finance.listStalePendingPayments(60);
+    if (stale.length > 0) this.log.warn(`${stale.length} stale pending payment(s) need bursar review`);
   }
 }
