@@ -1,0 +1,18 @@
+.git
+node_modules
+**/node_modules
+**/.next
+**/dist
+design
+*.png
+apps/api/uploads
+.env
+.playwright-mcp
+packages/db/prisma/migrations/**/README*
+# never let deploy/infra artifacts or env files into image contexts
+infra
+**/.env*
+*.tfvars
+*.tfstate*
+.terraform
+TODO.md
