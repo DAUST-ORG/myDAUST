@@ -1,8 +1,23 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { z } from "zod";
 import { CreateExpenseInput, CreatePaymentPlanInput, SetBudgetInput } from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { FinanceService } from "./finance.service.js";
+
+// Local zod (api's own instance): keeps the ESM/CJS dual-package hazard away from shared.
+const CreatePaymentLinkInput = z.object({
+  payeeName: z.string().min(1).max(120),
+  payeeMeta: z.string().max(160).optional(),
+  // Seed ids are human-readable strings, not uuids; existence is checked in the service.
+  studentId: z.string().min(1).max(64).optional(),
+  invoiceId: z.string().min(1).max(64).optional(),
+  amountXof: z.number().int().positive().max(100_000_000),
+  purpose: z.string().min(1).max(160),
+  costCenterCode: z.string().max(8).optional(),
+  dueDate: z.string().datetime().optional(),
+  expiresAt: z.string().datetime().optional(),
+});
 
 @Controller("finance/admin")
 @Roles("bursar", "admin")
@@ -12,6 +27,27 @@ export class AdminFinanceController {
   @Get("summary")
   summary() {
     return this.finance.getCollectionSummary();
+  }
+
+  @Get("links")
+  links() {
+    return this.finance.listPaymentLinks();
+  }
+
+  @Post("links")
+  createLink(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const input = CreatePaymentLinkInput.parse(body);
+    return this.finance.createPaymentLink(user.personId, input);
+  }
+
+  @Post("links/:id/cancel")
+  cancelLink(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.finance.cancelPaymentLink(id, user.personId);
+  }
+
+  @Post("links/:id/mark-paid")
+  markLinkPaid(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.finance.markPaymentLinkPaid(id, user.personId);
   }
 
   @Get("payments")

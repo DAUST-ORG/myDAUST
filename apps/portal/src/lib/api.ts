@@ -814,3 +814,53 @@ export interface AppUser { id: string; name: string; email: string; roles: strin
 export const updateUserRoles = (personId: string, roles: string[]) =>
   request(`/users/${personId}/roles`, { method: "PATCH", body: JSON.stringify({ roles }) });
 export const getUsers = () => request<AppUser[]>("/academics/admin/users");
+
+// --- Payment links (bursar-generated; public pay page at /pay/[token]) ---
+export interface PaymentLinkRow {
+  id: string;
+  token: string;
+  url: string;
+  amountXof: number;
+  purpose: string;
+  payeeName: string;
+  payeeMeta: string | null;
+  studentId: string | null;
+  invoiceId: string | null;
+  costCenterCode: string;
+  dueDate: string | null;
+  expiresAt: string | null;
+  status: string;
+  method: string | null;
+  paidAt: string | null;
+  createdAt: string;
+  expired: boolean;
+}
+export interface PublicPaymentLink {
+  ref: string;
+  amountXof: number;
+  purpose: string;
+  payeeName: string;
+  payeeMeta: string | null;
+  dueDate: string | null;
+  expiresAt: string | null;
+  status: string; // active | paid | expired
+}
+export const getPaymentLinks = () => request<PaymentLinkRow[]>("/finance/admin/links");
+export const createPaymentLink = (input: {
+  payeeName: string;
+  payeeMeta?: string;
+  studentId?: string;
+  invoiceId?: string;
+  amountXof: number;
+  purpose: string;
+  costCenterCode?: string;
+  dueDate?: string;
+  expiresAt?: string;
+}) => request<PaymentLinkRow>("/finance/admin/links", { method: "POST", body: JSON.stringify(input) });
+export const cancelPaymentLink = (id: string) =>
+  request<PaymentLinkRow>(`/finance/admin/links/${id}/cancel`, { method: "POST" });
+export const markPaymentLinkPaid = (id: string) =>
+  request<PaymentLinkRow>(`/finance/admin/links/${id}/mark-paid`, { method: "POST" });
+export const getPublicPaymentLink = (token: string) => request<PublicPaymentLink>(`/finance/links/${token}`);
+export const checkoutPaymentLink = (token: string, method: string) =>
+  request<{ redirectUrl: string }>(`/finance/links/${token}/checkout`, { method: "POST", body: JSON.stringify({ method }) });

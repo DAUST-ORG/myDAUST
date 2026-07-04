@@ -17,6 +17,7 @@ const nav: NavGroup[] = [
       { href: "/admin/finance/director", label: "Director overview" },
       { href: "/admin/finance", label: "Collections" },
       { href: "/admin/finance/aging", label: "A/R Aging" },
+      { href: "/admin/finance/links", label: "Payment Links" },
       { href: "/admin/finance/expenses", label: "Expenses" },
       { href: "/admin/finance/budgets", label: "Budgets" },
     ],

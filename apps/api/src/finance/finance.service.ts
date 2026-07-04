@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ForbiddenException,
@@ -10,6 +10,7 @@ import { FEE_STRUCTURE, type CreatePaymentPlanInput, type InitiatePaymentInput }
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { PAYMENT_PROVIDER, type PaymentProvider } from "./payment-provider.js";
+import { loadEnv } from "../config/env.js";
 
 @Injectable()
 export class FinanceService {
@@ -162,6 +163,10 @@ export class FinanceService {
     }
     if (v.ref.startsWith("APPFEE-")) {
       await this.settleApplicationFee(v.ref.slice(7), v.success);
+      return { valid: true };
+    }
+    if (v.ref.startsWith("PLINK-")) {
+      await this.settlePaymentLinkIpn(v.ref.slice(6), v.success, payload as object, v.method);
       return { valid: true };
     }
 
@@ -625,6 +630,16 @@ export class FinanceService {
     const feeRow = await this.prisma.feeItem.findUnique({ where: { key: "application_fee" } });
     const appFeeRevenue = paidApplicants * (feeRow?.minXof ?? FEE_STRUCTURE.applicationFee);
     if (appFeeRevenue > 0) revenueByCc.set("4200", (revenueByCc.get("4200") ?? 0) + appFeeRevenue);
+    // Standalone payment links (no invoice) carry their own cost center; invoice-linked ones
+    // are already counted through their Payment above.
+    const linkAgg = await this.prisma.paymentLink.groupBy({
+      by: ["costCenterCode"],
+      where: { status: "paid", invoiceId: null },
+      _sum: { amountXof: true },
+    });
+    for (const l of linkAgg) {
+      revenueByCc.set(l.costCenterCode, (revenueByCc.get(l.costCenterCode) ?? 0) + (l._sum.amountXof ?? 0));
+    }
     const expenseByCc = new Map<string, number>();
     for (const e of expenseAgg) expenseByCc.set(e.costCenterCode, e._sum.amount ?? 0);
 
@@ -818,6 +833,195 @@ export class FinanceService {
       recentPayments: succeeded.slice(0, 10),
       totals: director.totals,
     };
+  }
+
+
+  // --- Payment links (bursar-generated, any amount/purpose; PLINK- refs on the IPN rail) ---
+
+  async createPaymentLink(
+    actorId: string,
+    input: {
+      payeeName: string;
+      payeeMeta?: string;
+      studentId?: string;
+      invoiceId?: string;
+      amountXof: number;
+      purpose: string;
+      costCenterCode?: string;
+      dueDate?: string;
+      expiresAt?: string;
+    },
+  ) {
+    if (input.invoiceId) {
+      const invoice = await this.prisma.invoice.findUnique({ where: { id: input.invoiceId } });
+      if (!invoice) throw new NotFoundException("Invoice not found");
+      if (input.studentId && invoice.studentId !== input.studentId) {
+        throw new BadRequestException("Invoice does not belong to that student");
+      }
+      const balance = invoice.totalAmount - invoice.amountPaid;
+      if (input.amountXof > balance) {
+        throw new BadRequestException(`Amount exceeds the invoice balance (${balance} XOF)`);
+      }
+    }
+    if (input.costCenterCode) {
+      const cc = await this.prisma.costCenter.findUnique({ where: { code: input.costCenterCode } });
+      if (!cc) throw new BadRequestException("Unknown cost center");
+    }
+
+    const link = await this.prisma.paymentLink.create({
+      data: {
+        token: randomBytes(18).toString("hex"),
+        amountXof: input.amountXof,
+        purpose: input.purpose,
+        payeeName: input.payeeName,
+        payeeMeta: input.payeeMeta ?? null,
+        studentId: input.studentId ?? null,
+        invoiceId: input.invoiceId ?? null,
+        costCenterCode: input.costCenterCode ?? "9100",
+        dueDate: input.dueDate ? new Date(input.dueDate) : null,
+        expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+        createdById: actorId,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "PaymentLink", entityId: link.id, action: "link-created", actorId, data: { amountXof: input.amountXof, purpose: input.purpose, invoiceId: input.invoiceId ?? null } },
+    });
+    return { ...link, url: `${loadEnv().PORTAL_ORIGIN}/pay/${link.token}` };
+  }
+
+  async listPaymentLinks() {
+    const links = await this.prisma.paymentLink.findMany({ orderBy: { createdAt: "desc" } });
+    const now = Date.now();
+    return links.map((l) => ({
+      ...l,
+      url: `${loadEnv().PORTAL_ORIGIN}/pay/${l.token}`,
+      expired: l.status === "active" && l.expiresAt !== null && l.expiresAt.getTime() < now,
+    }));
+  }
+
+  async cancelPaymentLink(id: string, actorId: string) {
+    const link = await this.prisma.paymentLink.findUnique({ where: { id } });
+    if (!link) throw new NotFoundException("Link not found");
+    if (link.status === "paid") throw new BadRequestException("Already paid");
+    const updated = await this.prisma.paymentLink.update({ where: { id }, data: { status: "cancelled" } });
+    await this.prisma.auditLog.create({
+      data: { entity: "PaymentLink", entityId: id, action: "link-cancelled", actorId },
+    });
+    return updated;
+  }
+
+  /** Bank-transfer / offline settlement: bursar verified the money arrived out of band. */
+  async markPaymentLinkPaid(id: string, actorId: string) {
+    const link = await this.prisma.paymentLink.findUnique({ where: { id } });
+    if (!link) throw new NotFoundException("Link not found");
+    if (link.status !== "active") throw new BadRequestException(`Link is ${link.status}`);
+
+    if (link.invoiceId) {
+      const payment = await this.prisma.payment.upsert({
+        where: { providerRef: `PLINK-${link.id}` },
+        update: {},
+        create: {
+          invoiceId: link.invoiceId,
+          studentId: link.studentId ?? (await this.prisma.invoice.findUniqueOrThrow({ where: { id: link.invoiceId } })).studentId,
+          amount: link.amountXof,
+          method: "card", // schema enum has no bank type; the link record carries method="manual"
+          status: "pending",
+          providerRef: `PLINK-${link.id}`,
+        },
+      });
+      await this.settlePayment(payment.id, { via: "manual", actorId });
+    }
+
+    const updated = await this.prisma.paymentLink.update({
+      where: { id },
+      data: { status: "paid", method: "manual", paidAt: new Date() },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "PaymentLink", entityId: id, action: "link-paid-manual", actorId },
+    });
+    return updated;
+  }
+
+  /** Public: what the standalone pay page shows. Cancelled links 404; expiry is computed. */
+  async getPublicLink(token: string) {
+    const link = await this.prisma.paymentLink.findUnique({ where: { token } });
+    if (!link || link.status === "cancelled") throw new NotFoundException("Link not found");
+    const expired = link.status === "active" && link.expiresAt !== null && link.expiresAt.getTime() < Date.now();
+    return {
+      ref: `PLINK-${link.id.slice(0, 8).toUpperCase()}`,
+      amountXof: link.amountXof,
+      purpose: link.purpose,
+      payeeName: link.payeeName,
+      payeeMeta: link.payeeMeta,
+      dueDate: link.dueDate,
+      expiresAt: link.expiresAt,
+      status: expired ? "expired" : link.status,
+    };
+  }
+
+  /** Public: start a gateway checkout for an active link. */
+  async checkoutLink(token: string, method: string) {
+    const link = await this.prisma.paymentLink.findUnique({ where: { token } });
+    if (!link || link.status === "cancelled") throw new NotFoundException("Link not found");
+    if (link.status === "paid") throw new BadRequestException("Already paid");
+    if (link.expiresAt && link.expiresAt.getTime() < Date.now()) {
+      throw new BadRequestException("This payment link has expired");
+    }
+
+    const ref = `PLINK-${link.id}`;
+    if (link.invoiceId) {
+      const invoice = await this.prisma.invoice.findUniqueOrThrow({ where: { id: link.invoiceId } });
+      await this.prisma.payment.upsert({
+        where: { providerRef: ref },
+        update: {},
+        create: {
+          invoiceId: invoice.id,
+          studentId: link.studentId ?? invoice.studentId,
+          amount: link.amountXof,
+          method: (["wave", "orange_money", "card"].includes(method) ? method : "card") as never,
+          status: "pending",
+          providerRef: ref,
+        },
+      });
+    }
+
+    const { redirectUrl } = await this.provider.requestPayment({
+      ref,
+      amount: link.amountXof,
+      itemName: link.purpose,
+      customField: { paymentLinkId: link.id },
+    });
+    return { redirectUrl };
+  }
+
+  private async settlePaymentLinkIpn(linkId: string, success: boolean, payload: object, method: string | null) {
+    const link = await this.prisma.paymentLink.findUnique({ where: { id: linkId } });
+    if (!link) return;
+
+    const payment = await this.prisma.payment.findUnique({ where: { providerRef: `PLINK-${linkId}` } });
+    if (!success) {
+      if (payment?.status === "pending") {
+        await this.prisma.payment.update({
+          where: { id: payment.id },
+          data: { status: "cancelled", ipnPayload: payload },
+        });
+      }
+      await this.prisma.auditLog.create({
+        data: { entity: "PaymentLink", entityId: linkId, action: "link-payment-failed", data: payload },
+      });
+      return;
+    }
+
+    if (payment) await this.settlePayment(payment.id, { via: "ipn", payload, method });
+    if (link.status !== "paid") {
+      await this.prisma.paymentLink.update({
+        where: { id: linkId },
+        data: { status: "paid", method: method ?? "unknown", paidAt: new Date() },
+      });
+      await this.prisma.auditLog.create({
+        data: { entity: "PaymentLink", entityId: linkId, action: "link-paid", data: payload },
+      });
+    }
   }
 
   private async audit(entityId: string, action: string, data: unknown): Promise<void> {

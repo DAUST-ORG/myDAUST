@@ -42,8 +42,8 @@ const FEE_ICONS: Record<string, typeof GraduationCap> = {
 // Offline fallbacks (shared seed constants); replaced by the director's live values on load.
 const FALLBACK_FEES: PublicFee[] = [
   { key: "tuition", label: "Tuition", minXof: FEE_STRUCTURE.tuitionPerYear, maxXof: null, period: "year", note: "Half per semester · monthly installments available" },
-  { key: "housing", label: "Housing", minXof: FEE_STRUCTURE.housingPerSemester.min, maxXof: FEE_STRUCTURE.housingPerSemester.max, period: "semester", note: "Optional · paid at the start of each semester" },
-  { key: "cafeteria", label: "Cafeteria", minXof: FEE_STRUCTURE.cafeteriaPerSemester.min, maxXof: FEE_STRUCTURE.cafeteriaPerSemester.max, period: "semester", note: "Optional · half pension or full pension" },
+  { key: "housing", label: "Housing", minXof: FEE_STRUCTURE.housingPerYear, maxXof: null, period: "year", note: "Optional · on-campus residence" },
+  { key: "cafeteria", label: "Cafeteria", minXof: FEE_STRUCTURE.cafeteriaPerYear, maxXof: null, period: "year", note: "Optional · full pension meal plan" },
   { key: "application_fee", label: "Application Fee", minXof: FEE_STRUCTURE.applicationFee, maxXof: null, period: "one-time", note: "One-time, paid with your application" },
   { key: "insurance", label: "Insurance", minXof: FEE_STRUCTURE.insurancePerYear, maxXof: null, period: "year", note: "Annual student insurance" },
 ];

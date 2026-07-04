@@ -62,11 +62,15 @@ export const ScholarshipTierInput = z.object({
 export type ScholarshipTierInput = z.infer<typeof ScholarshipTierInput>;
 
 /** Published cost of attendance (integer XOF; ranges keep min/max). Source: vitrine design. */
+// Official DAUST payment plan (finance office sheet, 2026): flat yearly housing/cafeteria,
+// annual total paid in 4 installments (Inscription, Nov 5, Jan 5, Mar 5).
 export const FEE_STRUCTURE = {
   tuitionPerYear: 2_975_000,
   tuitionPerSemester: 1_487_500,
-  housingPerSemester: { min: 300_000, max: 400_000 },
-  cafeteriaPerSemester: { min: 202_500, max: 315_000 },
+  housingPerYear: 680_000,
+  cafeteriaPerYear: 630_000,
+  housingPerSemester: { min: 340_000, max: 340_000 },
+  cafeteriaPerSemester: { min: 315_000, max: 315_000 },
   applicationFee: 30_000,
   insurancePerYear: 10_000,
 } as const;

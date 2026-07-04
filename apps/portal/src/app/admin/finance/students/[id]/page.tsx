@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   type AccountInvoice,
   type StudentAccount,
+  createPaymentLink,
   createPaymentPlan,
   getStudentAccount,
 } from "@/lib/api";
@@ -40,10 +41,70 @@ export default function StudentAccountPage() {
 
       {msg && <p className="card" style={{ color: msg.kind === "ok" ? "var(--success)" : "var(--danger)" }}>{msg.text}</p>}
 
+      <LinkQuickCreate studentId={id} acct={acct} onDone={(m) => setMsg(m)} />
+
       {acct.invoices.map((inv) => (
         <InvoiceBlock key={inv.id} inv={inv} onChange={(m) => { setMsg(m); load(); }} />
       ))}
     </>
+  );
+}
+
+
+/** One-click payment link for this student: prefilled, tied to their open invoice so the
+ * money allocates to installments like any tuition payment. URL is copied on create. */
+function LinkQuickCreate({
+  studentId,
+  acct,
+  onDone,
+}: {
+  studentId: string;
+  acct: StudentAccount;
+  onDone: (m: { kind: "ok" | "err"; text: string }) => void;
+}) {
+  const openInvoice = acct.invoices.find((i) => i.balance > 0);
+  const [amount, setAmount] = useState(String(openInvoice?.balance ?? ""));
+  const [purpose, setPurpose] = useState(openInvoice ? `Tuition payment — ${openInvoice.term}` : "Payment");
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function create() {
+    setBusy(true);
+    try {
+      const link = await createPaymentLink({
+        payeeName: acct.student.name,
+        payeeMeta: `${acct.student.studentNo} · ${acct.student.program}`,
+        studentId,
+        invoiceId: openInvoice && Number(amount) <= openInvoice.balance ? openInvoice.id : undefined,
+        amountXof: Number(amount),
+        purpose,
+      });
+      await navigator.clipboard.writeText(link.url).catch(() => {});
+      setUrl(link.url);
+      onDone({ kind: "ok", text: "Payment link created and copied — share it with the student or a parent." });
+    } catch (e) {
+      onDone({ kind: "err", text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <p className="h1" style={{ fontSize: 16, margin: 0 }}>Send a payment link</p>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {openInvoice ? `allocates to ${openInvoice.term} installments` : "no open invoice — records as standalone revenue"}
+        </span>
+        <span style={{ flex: 1 }} />
+        <input type="number" min={1} value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 140 }} placeholder="Amount XOF" />
+        <input value={purpose} onChange={(e) => setPurpose(e.target.value)} style={{ width: 260 }} />
+        <button className="primary" disabled={busy || !amount || Number(amount) <= 0} onClick={create}>
+          {busy ? "Creating…" : "Create + copy link"}
+        </button>
+      </div>
+      {url && <p className="muted" style={{ fontSize: 12.5, marginTop: 8, wordBreak: "break-all" }}>{url} — <a href={url} target="_blank" rel="noreferrer">open</a> · manage under Finance → Payment Links</p>}
+    </div>
   );
 }
 
@@ -118,15 +179,23 @@ function PlanForm({
   const [count, setCount] = useState(3);
   const [busy, setBusy] = useState(false);
 
-  function generate(parts = count) {
+  function generate(parts = count, dueMonthDays?: readonly string[] | null) {
     const amounts = splitEvenXof(total, parts);
-    const next = new Date();
-    setRows(
-      amounts.map((amount, i) => ({
-        dueDate: new Date(next.getFullYear(), next.getMonth() + i + 1, 15).toISOString().slice(0, 10),
-        amount,
-      })),
-    );
+    const now = new Date();
+    // Official anchors ("enrolment" = today; "MM-DD" lands on the next occurrence of that date).
+    const anchored = (i: number): string => {
+      const spec = dueMonthDays?.[i];
+      if (!spec || spec === "enrolment") {
+        return spec === "enrolment"
+          ? now.toISOString().slice(0, 10)
+          : new Date(now.getFullYear(), now.getMonth() + i + 1, 15).toISOString().slice(0, 10);
+      }
+      const [mm, dd] = spec.split("-").map(Number);
+      const d = new Date(now.getFullYear(), mm! - 1, dd);
+      if (d.getTime() < now.getTime()) d.setFullYear(d.getFullYear() + 1);
+      return d.toISOString().slice(0, 10);
+    };
+    setRows(amounts.map((amount, i) => ({ dueDate: anchored(i), amount })));
     setCount(parts);
   }
 
@@ -155,7 +224,7 @@ function PlanForm({
       </p>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
         <label className="muted" style={{ fontSize: 13 }}>Template</label>
-        <select defaultValue="" onChange={(e) => { const t = PLAN_TEMPLATES.find((x) => x.key === e.target.value); if (t) generate(t.installments); }}>
+        <select defaultValue="" onChange={(e) => { const t = PLAN_TEMPLATES.find((x) => x.key === e.target.value); if (t) generate(t.installments, t.dueMonthDays); }}>
           <option value="" disabled>Pick a template…</option>
           {PLAN_TEMPLATES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
         </select>

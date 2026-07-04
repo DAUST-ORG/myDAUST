@@ -78,11 +78,17 @@ export const SetBudgetInput = z.object({
 export type SetBudgetInput = z.infer<typeof SetBudgetInput>;
 
 /** Payment-plan templates: even splits over N installments, one month apart. Prefill, editable per student. */
+// dueMonthDays: official calendar anchors ("MM-DD"; first entry = at enrolment/today).
 export const PLAN_TEMPLATES = [
-  { key: "full", label: "Single payment", installments: 1 },
-  { key: "semester", label: "2 installments (per semester)", installments: 2 },
-  { key: "quarterly", label: "4 installments", installments: 4 },
-  { key: "monthly", label: "Monthly (8 installments)", installments: 8 },
+  { key: "full", label: "Single payment", installments: 1, dueMonthDays: null },
+  { key: "semester", label: "2 installments (per semester)", installments: 2, dueMonthDays: null },
+  {
+    key: "quarterly",
+    label: "4 installments — official (Inscription, Nov 5, Jan 5, Mar 5)",
+    installments: 4,
+    dueMonthDays: ["enrolment", "11-05", "01-05", "03-05"],
+  },
+  { key: "monthly", label: "Monthly (8 installments)", installments: 8, dueMonthDays: null },
 ] as const;
 
 /** Even split of an integer XOF total: earlier installments absorb the remainder. */

@@ -883,3 +883,26 @@ model ProjectGlobalTask {
 
   @@unique([globalTaskId, projectId])
 }
+
+// Bursar-generated payment link: any amount/purpose, PayTech or manual settlement.
+// Optional invoiceId puts the money on the normal tuition rail (Payment + allocations).
+model PaymentLink {
+  id             String    @id @default(uuid())
+  token          String    @unique // unguessable public slug
+  amountXof      Int
+  purpose        String
+  payeeName      String
+  payeeMeta      String? // e.g. "DA24003 · Computer Science"
+  studentId      String?
+  invoiceId      String?
+  costCenterCode String    @default("9100")
+  dueDate        DateTime?
+  expiresAt      DateTime?
+  status         String    @default("active") // active | paid | cancelled
+  method         String? // how it was settled (wave | orange_money | card | manual)
+  paidAt         DateTime?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+
+  @@index([status])
+}
