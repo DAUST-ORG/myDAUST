@@ -844,6 +844,8 @@ export interface PublicPaymentLink {
   dueDate: string | null;
   expiresAt: string | null;
   status: string; // active | paid | expired
+  method: string | null;
+  paidAt: string | null;
 }
 export const getPaymentLinks = () => request<PaymentLinkRow[]>("/finance/admin/links");
 export const createPaymentLink = (input: {

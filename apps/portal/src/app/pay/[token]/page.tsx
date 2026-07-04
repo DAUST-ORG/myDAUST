@@ -125,11 +125,36 @@ export default function PayLinkPage() {
             {/* Right: action panel */}
             <section style={{ flex: 1, background: "#fff", padding: "36px 40px" }}>
               {link.status === "paid" ? (
-                <div style={{ textAlign: "center", paddingTop: 60 }}>
-                  <CheckCircle2 size={62} color="#2e7d52" style={{ margin: "0 auto" }} />
-                  <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 24, marginTop: 16 }}>Payment received</div>
-                  <p style={{ color: "#5b6675", fontSize: 14.5, marginTop: 8 }}>
-                    {fcfa(link.amountXof)} FCFA for “{link.purpose}” has been recorded.<br />The DAUST Finance Office has been notified.
+                <div style={{ paddingTop: 12 }}>
+                  <div style={{ textAlign: "center" }}>
+                    <CheckCircle2 size={56} color="#2e7d52" style={{ margin: "0 auto" }} />
+                    <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 24, marginTop: 12 }}>Payment received</div>
+                    <p style={{ color: "#5b6675", fontSize: 13.5, marginTop: 6 }}>
+                      This page is the payment confirmation — anyone with this link can view it at any time.
+                    </p>
+                  </div>
+                  <div style={{ border: "1px solid #d9e0e8", borderRadius: 14, marginTop: 20, overflow: "hidden" }}>
+                    {[
+                      ["Amount", `${fcfa(link.amountXof)} FCFA`],
+                      ["For", link.purpose],
+                      ["Paid by", link.payeeMeta ? `${link.payeeName} — ${link.payeeMeta}` : link.payeeName],
+                      ["Reference", link.ref],
+                      ["Date", link.paidAt ? new Date(link.paidAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"],
+                      ["Method", link.method === "manual" ? "Bank transfer (confirmed by DAUST Finance)" : (link.method ?? "—").replace("_", " ")],
+                    ].map(([k, v], i) => (
+                      <div key={k} style={{ display: "flex", padding: "11px 18px", fontSize: 13.5, borderTop: i > 0 ? "1px solid #eef1f5" : "none", background: i % 2 ? "#fafbfc" : "#fff" }}>
+                        <span style={{ width: 110, color: "#7b8794", flexShrink: 0 }}>{k}</span>
+                        <span style={{ fontWeight: 600, color: "#16202e", textTransform: k === "Method" ? "capitalize" : undefined }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 18 }}>
+                    <button onClick={() => window.print()} style={{ border: "1px solid #d9e0e8", background: "#fff", borderRadius: 999, padding: "10px 22px", fontWeight: 700, fontSize: 13.5, cursor: "pointer", color: "#16202e" }}>
+                      Print / save PDF
+                    </button>
+                  </div>
+                  <p style={{ textAlign: "center", color: "#7b8794", fontSize: 12, marginTop: 14 }}>
+                    Questions? finance@daust.edu.sn — quote reference {link.ref}.
                   </p>
                 </div>
               ) : link.status === "expired" ? (

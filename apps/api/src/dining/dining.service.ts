@@ -107,11 +107,14 @@ export class DiningService {
       return { paid: true };
     }
 
+    const portal = process.env.PORTAL_ORIGIN ?? "http://localhost:3000";
     const { redirectUrl } = await this.provider.requestPayment({
       ref: `DINE-${order.id}`,
       amount: order.totalXof,
       itemName: "DAUST weekend dining order",
       customField: { orderId: order.id, studentId },
+      successUrl: `${portal}/student/dining`,
+      cancelUrl: `${portal}/student/dining`,
     });
     return { paid: false, redirectUrl };
   }

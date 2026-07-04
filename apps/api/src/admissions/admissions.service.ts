@@ -28,11 +28,15 @@ export class AdmissionsService {
       throw new BadRequestException("Online fee payment is not available right now — pay at the Office of Admissions");
     }
     const fee = await this.appConfig.applicationFee();
+    const vitrine = process.env.VITRINE_ORIGIN ?? "http://localhost:3001";
     const { redirectUrl } = await this.provider.requestPayment({
       ref: `APPFEE-${applicant.id}`,
       amount: fee,
       itemName: "DAUST application fee",
       customField: { applicantId: applicant.id },
+      // Applicants are anonymous — return them to the public site, not the portal.
+      successUrl: `${vitrine}/admissions?fee=paid`,
+      cancelUrl: `${vitrine}/admissions`,
     });
     return { redirectUrl };
   }

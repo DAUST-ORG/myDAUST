@@ -60,8 +60,8 @@ export class PaytechProvider implements PaymentProvider {
       command_name: params.itemName,
       env: this.env.PAYTECH_ENV,
       ipn_url: this.env.PAYTECH_IPN_URL,
-      success_url: this.env.PAYTECH_SUCCESS_URL,
-      cancel_url: this.env.PAYTECH_CANCEL_URL,
+      success_url: params.successUrl ?? this.env.PAYTECH_SUCCESS_URL,
+      cancel_url: params.cancelUrl ?? this.env.PAYTECH_CANCEL_URL,
       custom_field: JSON.stringify(params.customField ?? {}),
     };
 

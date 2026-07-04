@@ -7,6 +7,9 @@ export interface RequestPaymentParams {
   amount: number;
   itemName: string;
   customField?: Record<string, unknown>;
+  /** Per-checkout return pages; fall back to the global PAYTECH_*_URL envs. */
+  successUrl?: string;
+  cancelUrl?: string;
 }
 
 export interface RequestPaymentResult {

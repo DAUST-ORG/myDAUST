@@ -956,6 +956,8 @@ export class FinanceService {
       dueDate: link.dueDate,
       expiresAt: link.expiresAt,
       status: expired ? "expired" : link.status,
+      method: link.method,
+      paidAt: link.paidAt,
     };
   }
 
@@ -985,11 +987,15 @@ export class FinanceService {
       });
     }
 
+    const payUrl = `${loadEnv().PORTAL_ORIGIN}/pay/${link.token}`;
     const { redirectUrl } = await this.provider.requestPayment({
       ref,
       amount: link.amountXof,
       itemName: link.purpose,
       customField: { paymentLinkId: link.id },
+      // Anonymous payers must land back on the pay page, never inside the portal.
+      successUrl: `${payUrl}?back=1`,
+      cancelUrl: payUrl,
     });
     return { redirectUrl };
   }
