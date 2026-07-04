@@ -166,6 +166,9 @@ model Term {
   name      String    @unique
   startDate DateTime
   endDate   DateTime
+  // Registration windows. Null = falls back to endDate (add) / unbounded (drop).
+  addDeadline  DateTime?
+  dropDeadline DateTime?
   invoices  Invoice[]
   sections  Section[]
 }
@@ -284,6 +287,8 @@ model Applicant {
   stage       String   @default("submitted") // submitted|review|interview|offer|accepted|rejected
   score       Int? // BAC score (0–20)
   country     String?
+  // 30k FCFA application fee, settled via the PayTech rail (IPN ref APPFEE-<id>).
+  feePaid     Boolean  @default(false)
   createdAt   DateTime @default(now())
 
   @@index([stage])
@@ -349,6 +354,8 @@ model Section {
   room         String?
   enrollments  Enrollment[]
   assignments  Assignment[]
+  materials    SectionMaterial[]
+  posts        SectionPost[]
 
   @@unique([courseId, termId, sectionCode])
   @@index([termId])
@@ -469,6 +476,10 @@ model Event {
   description String?
   location    String?
   category    String    @default("Campus") // Campus | Academics | Career | Sports | Arts
+  organizer   String?
+  attendees   Int?
+  budgetXof   Int?
+  status      String    @default("upcoming") // planning | upcoming | past
   startsAt    DateTime
   endsAt      DateTime?
   createdAt   DateTime  @default(now())
@@ -607,6 +618,7 @@ model Hall {
   beds        Int
   color       String              @default("#153b6a")
   assignments HousingAssignment[]
+  tickets     MaintenanceTicket[]
 }
 
 model HousingAssignment {
@@ -687,6 +699,7 @@ model Project {
   members     ProjectMember[]
   tasks       ProjectTask[]
   submissions ProjectSubmission[]
+  globalTaskStatuses ProjectGlobalTask[]
 }
 
 model ProjectMember {
@@ -763,4 +776,110 @@ model RoomBooking {
 
   @@index([personId])
   @@index([room, date])
+}
+
+// --- Director-configurable money settings (admin UI, audit-logged, seeded from shared constants). ---
+
+model FeeItem {
+  key       String  @id // tuition | housing | cafeteria | application_fee | insurance
+  label     String
+  minXof    Int
+  maxXof    Int? // null = fixed amount, otherwise a min–max range
+  period    String // year | semester | one-time
+  note      String?
+  sortOrder Int     @default(0)
+}
+
+model ScholarshipTier {
+  id       String  @id @default(uuid())
+  minScore Float // BAC threshold (inclusive)
+  pct      Int // tuition discount percent
+  band     String
+  note     String?
+}
+
+// --- Track D additions: course materials/posts, SA boards, innovation global tasks. ---
+
+model SectionMaterial {
+  id        String   @id @default(uuid())
+  sectionId String
+  section   Section  @relation(fields: [sectionId], references: [id])
+  title     String
+  kind      String   @default("Document") // Document | Slides | Video | Link
+  fileUrl   String?
+  fileName  String?
+  published Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([sectionId])
+}
+
+model SectionPost {
+  id        String   @id @default(uuid())
+  sectionId String
+  section   Section  @relation(fields: [sectionId], references: [id])
+  title     String
+  body      String
+  author    String?
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([sectionId])
+}
+
+// International student onboarding checklist (SA design).
+model OnboardingCase {
+  id          String    @id @default(uuid())
+  name        String
+  origin      String
+  kind        String // Exchange | Graduate | Degree-seeking
+  visaStatus  String    @default("Pending") // Valid | Pending | Action needed
+  arrivalDate DateTime?
+  tasks       Json // [{ label: string, done: boolean }]
+  createdAt   DateTime  @default(now())
+}
+
+model AbroadProgram {
+  id         String    @id @default(uuid())
+  name       String
+  kind       String // Study abroad | Internship
+  partner    String
+  seatsTotal Int
+  seatsTaken Int       @default(0)
+  deadline   DateTime?
+  status     String    @default("open") // open | full | closed
+}
+
+model MaintenanceTicket {
+  id       String   @id @default(uuid())
+  hallId   String
+  hall     Hall     @relation(fields: [hallId], references: [id])
+  room     String?
+  kind     String
+  note     String?
+  severity String   @default("low") // low | med | high
+  status   String   @default("open") // open | resolved
+  openedAt DateTime @default(now())
+
+  @@index([hallId])
+}
+
+// Innovation "passes" every project must complete (design: AdminGlobalTasks).
+model GlobalTask {
+  id       String              @id @default(uuid())
+  title    String
+  kind     String              @default("Document")
+  dueDate  DateTime?
+  statuses ProjectGlobalTask[]
+}
+
+model ProjectGlobalTask {
+  id           String     @id @default(uuid())
+  globalTaskId String
+  globalTask   GlobalTask @relation(fields: [globalTaskId], references: [id])
+  projectId    String
+  project      Project    @relation(fields: [projectId], references: [id])
+  done         Boolean    @default(false)
+
+  @@unique([globalTaskId, projectId])
 }

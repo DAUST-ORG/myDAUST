@@ -76,3 +76,18 @@ export const SetBudgetInput = z.object({
   allocated: Xof.positive(),
 });
 export type SetBudgetInput = z.infer<typeof SetBudgetInput>;
+
+/** Payment-plan templates: even splits over N installments, one month apart. Prefill, editable per student. */
+export const PLAN_TEMPLATES = [
+  { key: "full", label: "Single payment", installments: 1 },
+  { key: "semester", label: "2 installments (per semester)", installments: 2 },
+  { key: "quarterly", label: "4 installments", installments: 4 },
+  { key: "monthly", label: "Monthly (8 installments)", installments: 8 },
+] as const;
+
+/** Even split of an integer XOF total: earlier installments absorb the remainder. */
+export function splitEvenXof(total: number, parts: number): number[] {
+  const base = Math.floor(total / parts);
+  const remainder = total - base * parts;
+  return Array.from({ length: parts }, (_, i) => base + (i < remainder ? 1 : 0));
+}

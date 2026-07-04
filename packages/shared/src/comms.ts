@@ -11,3 +11,11 @@ export const StartThreadInput = z.object({
   body: z.string().min(1).max(5000),
 });
 export type StartThreadInput = z.infer<typeof StartThreadInput>;
+
+export const CreateAnnouncementInput = z.object({
+  title: z.string().min(1).max(200),
+  body: z.string().min(1).max(5000),
+  category: z.string().min(1).max(50),
+  audience: z.enum(["all", "student", "faculty", "staff"]).default("all"),
+});
+export type CreateAnnouncementInput = z.infer<typeof CreateAnnouncementInput>;

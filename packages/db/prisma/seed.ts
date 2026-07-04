@@ -110,8 +110,14 @@ async function seedStaff(passwordHash: string) {
 async function seedStudents(passwordHash: string) {
   const term = await prisma.term.upsert({
     where: { name: "Fall 2026" },
-    update: {},
-    create: { name: "Fall 2026", startDate: new Date("2026-09-01"), endDate: new Date("2026-12-20") },
+    update: { addDeadline: new Date("2026-09-15"), dropDeadline: new Date("2026-10-15") },
+    create: {
+      name: "Fall 2026",
+      startDate: new Date("2026-09-01"),
+      endDate: new Date("2026-12-20"),
+      addDeadline: new Date("2026-09-15"),
+      dropDeadline: new Date("2026-10-15"),
+    },
   });
 
   for (const s of STUDENTS) {
@@ -639,6 +645,87 @@ async function seedInnovation() {
   console.log(`Innovation: seeded project "${project.name}" + review-queue project.`);
 }
 
+
+async function seedTrackD() {
+  // Course materials + class posts for CE 201 (faculty course-detail tabs).
+  const ce201 = await prisma.section.findFirst({ where: { course: { code: "CE 201" }, term: { name: "Fall 2026" } } });
+  if (ce201 && (await prisma.sectionMaterial.count({ where: { sectionId: ce201.id } })) === 0) {
+    await prisma.sectionMaterial.createMany({
+      data: [
+        { sectionId: ce201.id, title: "Week 1 — Boolean Algebra Slides", kind: "Slides", fileName: "week1-boolean.pdf", published: true },
+        { sectionId: ce201.id, title: "Lab Manual — Digital Systems", kind: "Document", fileName: "lab-manual.pdf", published: true },
+        { sectionId: ce201.id, title: "K-map Tutorial Video", kind: "Video", published: false },
+      ],
+    });
+    await prisma.sectionPost.createMany({
+      data: [
+        { sectionId: ce201.id, title: "Welcome to CE 201", body: "Syllabus is under Materials. First lab meets Thursday in R105.", author: "Amadou Ba", pinned: true },
+        { sectionId: ce201.id, title: "Midterm moved to Oct 20", body: "Same room, same duration — plan accordingly.", author: "Amadou Ba" },
+      ],
+    });
+  }
+
+  if ((await prisma.onboardingCase.count()) === 0) {
+    await prisma.onboardingCase.createMany({
+      data: [
+        { name: "Emily Carter", origin: "Boston, US", kind: "Exchange", visaStatus: "Valid", arrivalDate: new Date("2026-09-02"), tasks: [{ label: "Airport pickup", done: true }, { label: "SIM + bank", done: false }] },
+        { name: "Sofia Hassan", origin: "Cairo, EG", kind: "Graduate", visaStatus: "Pending", arrivalDate: new Date("2026-09-05"), tasks: [{ label: "Residency permit", done: false }, { label: "Housing letter", done: false }, { label: "Orientation", done: false }] },
+        { name: "Lucas Moreau", origin: "Lyon, FR", kind: "Exchange", visaStatus: "Action needed", arrivalDate: new Date("2026-08-30"), tasks: [{ label: "Housing letter", done: false }, { label: "Permit appointment", done: false }] },
+        { name: "Kwame Mensah", origin: "Accra, GH", kind: "Degree-seeking", visaStatus: "Valid", arrivalDate: new Date("2026-08-28"), tasks: [{ label: "Orientation", done: true }, { label: "Buddy match", done: true }] },
+      ],
+    });
+  }
+
+  if ((await prisma.abroadProgram.count()) === 0) {
+    await prisma.abroadProgram.createMany({
+      data: [
+        { name: "MIT Summer Exchange", kind: "Study abroad", partner: "Cambridge, US", seatsTotal: 8, seatsTaken: 6, deadline: new Date("2026-09-15"), status: "open" },
+        { name: "Siemens Engineering Internship", kind: "Internship", partner: "Munich, DE", seatsTotal: 4, seatsTaken: 3, deadline: new Date("2026-09-20"), status: "open" },
+        { name: "Sonatel Data Science Co-op", kind: "Internship", partner: "Dakar, SN", seatsTotal: 12, seatsTaken: 12, status: "full" },
+        { name: "Sorbonne Research Semester", kind: "Study abroad", partner: "Paris, FR", seatsTotal: 5, seatsTaken: 2, deadline: new Date("2026-10-01"), status: "open" },
+      ],
+    });
+  }
+
+  const baobab = await prisma.hall.findUnique({ where: { name: "Baobab Hall" } });
+  const sahel = await prisma.hall.findUnique({ where: { name: "Sahel Hall" } });
+  if (baobab && (await prisma.maintenanceTicket.count()) === 0) {
+    await prisma.maintenanceTicket.createMany({
+      data: [
+        { hallId: baobab.id, room: "B-106", kind: "AC unit unresolved", note: "Open 11 days — follow up with facilities.", severity: "low" },
+        ...(sahel ? [{ hallId: sahel.id, room: "S-303", kind: "Noise complaints ×2", note: "Two roommate-reported incidents this month.", severity: "med" }] : []),
+      ],
+    });
+  }
+
+  // Innovation global tasks (passes every project must complete) + per-project status rows.
+  if ((await prisma.globalTask.count()) === 0) {
+    await prisma.globalTask.createMany({
+      data: [
+        { title: "Submit Project Proposal", kind: "Document", dueDate: new Date("2025-10-03") },
+        { title: "Record a 2-min Pitch Video", kind: "Video", dueDate: new Date("2025-11-28") },
+        { title: "Final Report Submission", kind: "Document", dueDate: new Date("2026-06-12") },
+      ],
+    });
+    const [tasks, projects] = await Promise.all([prisma.globalTask.findMany(), prisma.project.findMany()]);
+    for (const t of tasks) {
+      for (const pr of projects) {
+        await prisma.projectGlobalTask.upsert({
+          where: { globalTaskId_projectId: { globalTaskId: t.id, projectId: pr.id } },
+          update: {},
+          create: { globalTaskId: t.id, projectId: pr.id, done: t.title.includes("Proposal") },
+        });
+      }
+    }
+  }
+
+  // Enrich seeded events for the SA events board.
+  await prisma.event.updateMany({ where: { title: { contains: "Career Fair" } }, data: { organizer: "Career Services", attendees: 520, budgetXof: 4_200_000, status: "upcoming" } });
+  await prisma.event.updateMany({ where: { title: { contains: "Open Mic" } }, data: { organizer: "Cultural Collective", attendees: 180, budgetXof: 1_000_000, status: "planning" } });
+
+  console.log("Track D: materials/posts, onboarding, abroad, maintenance, global tasks seeded.");
+}
+
 async function main() {
   const passwordHash = await bcrypt.hash(DEV_PASSWORD, 10);
   await seedCostCenters();
@@ -654,6 +741,7 @@ async function main() {
   await seedDining();
   await seedAffairs();
   await seedInnovation();
+  await seedTrackD();
   console.log(`All seeded users share dev password: "${DEV_PASSWORD}"`);
 }
 
