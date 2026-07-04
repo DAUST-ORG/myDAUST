@@ -113,6 +113,7 @@ module "alb" {
 
 locals {
   alb_url      = "http://${module.alb.alb_dns_name}"
+  public_url   = "https://daust-staging.azt.dev" # Cloudflare tunnel hostname (zone azt.dev)
   database_url = "postgresql://mydaust:${random_password.db.result}@${module.rds.address}:5432/mydaust?schema=public"
 }
 
@@ -126,7 +127,10 @@ module "secrets" {
     SESSION_SECRET     = var.session_secret
     PAYTECH_API_KEY    = var.paytech_api_key
     PAYTECH_API_SECRET = var.paytech_api_secret
-  }, var.resend_api_key != "" ? { RESEND_API_KEY = var.resend_api_key } : {})
+    },
+    var.resend_api_key != "" ? { RESEND_API_KEY = var.resend_api_key } : {},
+    var.tunnel_token != "" ? { TUNNEL_TOKEN = var.tunnel_token } : {},
+  )
 }
 
 module "api_service" {
@@ -146,14 +150,14 @@ module "api_service" {
   environment = [
     { name = "NODE_ENV", value = "production" },
     { name = "PORT", value = "4000" },
-    # COOKIE_SECURE stays false until Cloudflare terminates TLS in front of the ALB.
-    { name = "COOKIE_SECURE", value = "false" },
-    { name = "PORTAL_ORIGIN", value = local.alb_url },
-    { name = "VITRINE_ORIGIN", value = local.alb_url },
+    # Cloudflare tunnel terminates TLS at the edge; browsers are on https.
+    { name = "COOKIE_SECURE", value = "true" },
+    { name = "PORTAL_ORIGIN", value = local.public_url },
+    { name = "VITRINE_ORIGIN", value = local.public_url },
     { name = "PAYTECH_ENV", value = "test" },
-    { name = "PAYTECH_IPN_URL", value = "${local.alb_url}/api/finance/webhook/paytech" },
-    { name = "PAYTECH_SUCCESS_URL", value = "${local.alb_url}/student/billing" },
-    { name = "PAYTECH_CANCEL_URL", value = "${local.alb_url}/student/billing" },
+    { name = "PAYTECH_IPN_URL", value = "${local.public_url}/api/finance/webhook/paytech" },
+    { name = "PAYTECH_SUCCESS_URL", value = "${local.public_url}/student/billing" },
+    { name = "PAYTECH_CANCEL_URL", value = "${local.public_url}/student/billing" },
     { name = "MAIL_FROM", value = "myDAUST <no-reply@daust.org>" },
   ]
 
@@ -188,4 +192,26 @@ module "portal_service" {
     { name = "HOSTNAME", value = "0.0.0.0" },
     { name = "PORT", value = "3000" },
   ]
+}
+
+# Cloudflare tunnel connector: egress-only, forwards edge traffic to the ALB.
+# TLS terminates at Cloudflare; the tunnel dials out (7844/443), so no inbound exposure is added.
+module "tunnel_service" {
+  count  = var.tunnel_token != "" ? 1 : 0
+  source = "../../modules/ecs-service"
+
+  env                = "staging"
+  name               = "tunnel"
+  cluster_id         = aws_ecs_cluster.this.id
+  image              = "cloudflare/cloudflared:2026.6.1"
+  container_port     = 2000 # metrics port only; no LB attachment
+  cpu                = 256
+  memory             = 512
+  subnet_ids         = module.network.public_subnet_ids
+  security_group_ids = [aws_security_group.tasks.id]
+
+  command = ["tunnel", "--no-autoupdate", "run", "--url", local.alb_url]
+
+  secrets     = [{ name = "TUNNEL_TOKEN", valueFrom = module.secrets.arns["TUNNEL_TOKEN"] }]
+  secret_arns = values(module.secrets.arns)
 }

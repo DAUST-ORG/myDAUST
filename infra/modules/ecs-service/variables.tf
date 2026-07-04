@@ -42,7 +42,13 @@ variable "assign_public_ip" {
 }
 
 variable "target_group_arn" {
-  type = string
+  type    = string
+  default = "" # empty = no load balancer attachment (egress-only services like the Cloudflare tunnel)
+}
+
+variable "command" {
+  type    = list(string)
+  default = null
 }
 
 variable "environment" {

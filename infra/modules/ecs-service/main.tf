@@ -79,6 +79,7 @@ resource "aws_ecs_task_definition" "this" {
       name      = var.name
       image     = var.image
       essential = true
+      command   = var.command
       portMappings = [
         {
           containerPort = var.container_port
@@ -112,10 +113,13 @@ resource "aws_ecs_service" "this" {
     assign_public_ip = var.assign_public_ip
   }
 
-  load_balancer {
-    target_group_arn = var.target_group_arn
-    container_name   = var.name
-    container_port   = var.container_port
+  dynamic "load_balancer" {
+    for_each = var.target_group_arn == "" ? [] : [var.target_group_arn]
+    content {
+      target_group_arn = load_balancer.value
+      container_name   = var.name
+      container_port   = var.container_port
+    }
   }
 
   wait_for_steady_state = false

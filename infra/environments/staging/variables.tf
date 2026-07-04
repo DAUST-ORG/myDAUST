@@ -35,3 +35,9 @@ variable "api_image" {
 variable "portal_image" {
   type = string
 }
+
+variable "tunnel_token" {
+  type      = string
+  sensitive = true
+  default   = "" # cloudflared tunnel token; empty skips the tunnel service
+}

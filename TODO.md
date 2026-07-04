@@ -76,8 +76,8 @@ Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 desig
 ## 6 · Track B — infrastructure (STAGING LIVE 2026-07-03 → http://daust-staging-alb-1764546181.us-east-1.elb.amazonaws.com)
 
 - [x] OpenTofu bootstrap + modules (network/ecr/alb/ecs-service/rds/secrets) + **staging applied** — ARM64 Fargate, path-routed ALB (same-origin), RDS migrated+seeded, secrets in SM, adversarially reviewed pre-apply (~$71/mo now billing)
-- [ ] 🔴 *User git action:* add `*.tfvars` + `!*.tfvars.example` to .gitignore (secrets currently passed via TF_VAR_* env only — keep it that way until then); optionally un-ignore `.terraform.lock.hcl` for reproducible init
-- [ ] 🟠 Cloudflare scoped token (⚪ create) → dns module: staging.daust.azertica.com + Origin CA TLS + lock ALB SG to Cloudflare IPs; then flip COOKIE_SECURE off
+- [x] .gitignore hardened (tfvars ignored, examples + tofu lockfiles committed); repo committed 2026-07-04 in 7 thematic commits (unsigned — ssh key not available non-interactively)
+- [x] HTTPS via Cloudflare Tunnel (2026-07-04): https://daust-staging.azt.dev — cloudflared connector as ECS service (egress-only, token in SM), COOKIE_SECURE=true, origins + PayTech IPN/success/cancel on the https URL. Note: cloudflared cert is scoped to azt.dev (not azertica.com); Universal SSL also limits depth, so staging lives at daust-staging.azt.dev. Later: lock/remove direct ALB :80 (still open), delete stray daust-staging.azertica.com.azt.dev CNAME (⚪ dashboard)
 - [ ] 🟠 Vitrine: static export → S3 + Cloudflare (module static-site)
 - [ ] 🟠 Slim the api image (2.6GB full-workspace copy → pnpm deploy prune)
 - [ ] 🟠 Flip Secrets Manager recovery_window 0 → 7 once staging stabilizes
