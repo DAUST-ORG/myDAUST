@@ -1,0 +1,7 @@
+# DO NOT copy this to a real .tfvars file — *.tfvars is not gitignored in this repo.
+# Preferred: pass secrets as environment variables at plan/apply time:
+#   export TF_VAR_session_secret=... TF_VAR_paytech_api_key=... TF_VAR_paytech_api_secret=...
+#   export TF_VAR_admin_cidr=<your-ip>/32
+#   export TF_VAR_api_image=961828155948.dkr.ecr.us-east-1.amazonaws.com/daust-api:<git-sha>
+#   export TF_VAR_portal_image=961828155948.dkr.ecr.us-east-1.amazonaws.com/daust-portal:<git-sha>
+# (If you insist on a tfvars file, FIRST add `*.tfvars` + `!*.tfvars.example` to .gitignore.)
