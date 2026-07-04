@@ -26,6 +26,11 @@ Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 desig
 - [x] **Application fee in Apply flow** — public `POST /applications/:id/fee-checkout` → PayTech; IPN ref `APPFEE-<id>` flips `feePaid` (verified end-to-end); "Pay application fee" button on the vitrine success screen; fee status column in the admissions funnel.
 - [x] **Payment-plan templates** — `PLAN_TEMPLATES` + exact-sum `splitEvenXof` in shared; template picker prefills the plan form (unit-tested).
 
+## 2b · Payments (2026-07-04)
+
+- [x] Official payment plan wired: fees (tuition 2 975 000 / housing 680 000 / cafeteria 630 000 per year) in shared + DB (local AND staging, audited PATCHes); quarterly template prefills official due dates (Inscription, Nov 5, Jan 5, Mar 5). Reference designs: design/references/.
+- [x] **Payment links**: PaymentLink model; bursar/admin CRUD (audited) at /admin/finance/links + quick-create on the student account page (prefills open invoice); public branded pay page /pay/[token] (navy split card, OM/Wave/Card via PayTech, bank-transfer instructions + admin mark-paid); PLINK- refs on the verified IPN rail; invoice-linked links allocate to installments (verified: balance 2.0M→1.5M, inst 1 partial); standalone links land on their cost center in the director overview. Deployed to staging (images db1b1f1-07042148).
+
 ## 3 · Track P platform services (remaining)
 
 - [ ] 🟠 **Real-time layer** — no polling/WebSocket anywhere; dining live feed and inbox only update on manual interaction. Cheapest: `setInterval` polling on scanner feed + inbox; proper: WS gateway (needs sticky sessions at deploy).
