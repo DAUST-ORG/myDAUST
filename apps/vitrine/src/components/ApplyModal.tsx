@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, CheckCircle2 } from "lucide-react";
-import { type ApplyResult, submitApplication } from "@/lib/api";
+import { type ApplyResult, feeCheckout, getFees, submitApplication } from "@/lib/api";
 
 const field: React.CSSProperties = {
   width: "100%",
@@ -21,6 +21,13 @@ export function ApplyModal({ open, onClose }: { open: boolean; onClose: () => vo
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<ApplyResult | null>(null);
+  const [feeXof, setFeeXof] = useState(30_000);
+  useEffect(() => {
+    getFees().then((f) => {
+      const fee = f.find((x) => x.key === "application_fee");
+      if (fee) setFeeXof(fee.minXof);
+    }).catch(() => {});
+  }, []);
 
   if (!open) return null;
 
@@ -81,7 +88,23 @@ export function ApplyModal({ open, onClose }: { open: boolean; onClose: () => vo
                 <div className="lead" style={{ fontSize: 13.5, marginTop: 6 }}>{done.scholarship.band} — applied automatically on enrollment.</div>
               </div>
             )}
-            <button className="btn btn-primary btn-lg" style={{ marginTop: 24 }} onClick={close}>Done</button>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 24, flexWrap: "wrap" }}>
+              <button
+                className="btn btn-primary btn-lg"
+                onClick={async () => {
+                  try {
+                    const { redirectUrl } = await feeCheckout(done.id);
+                    window.location.href = redirectUrl;
+                  } catch {
+                    setErr("Online fee payment is unavailable right now — you can pay at the Office of Admissions.");
+                  }
+                }}
+              >
+                Pay application fee ({feeXof.toLocaleString("en-US")} FCFA)
+              </button>
+              <button className="btn btn-outline-light btn-lg" style={{ color: "var(--navy)", boxShadow: "inset 0 0 0 1.5px var(--navy)" }} onClick={close}>Later</button>
+            </div>
+            {err && <div style={{ color: "#c0392b", fontSize: 13, marginTop: 10 }}>{err}</div>}
           </div>
         ) : (
           <div style={{ padding: 28, display: "flex", flexDirection: "column", gap: 16 }}>

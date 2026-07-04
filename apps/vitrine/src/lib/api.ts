@@ -16,3 +16,38 @@ export async function submitApplication(input: ApplicationInput): Promise<ApplyR
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
   return res.json() as Promise<ApplyResult>;
 }
+
+/** PayTech checkout for the 30k FCFA application fee. */
+export async function feeCheckout(applicantId: string): Promise<{ redirectUrl: string }> {
+  const res = await fetch(`${API_URL}/api/applications/${applicantId}/fee-checkout`, { method: "POST" });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json() as Promise<{ redirectUrl: string }>;
+}
+
+// --- Public director-configured money settings (fallbacks live in @mydaust/shared) ---
+export interface PublicFee {
+  key: string;
+  label: string;
+  minXof: number;
+  maxXof: number | null;
+  period: string;
+  note: string | null;
+}
+export async function getFees(): Promise<PublicFee[]> {
+  const res = await fetch(`${API_URL}/api/config/fees`);
+  if (!res.ok) throw new Error(String(res.status));
+  return res.json() as Promise<PublicFee[]>;
+}
+
+export interface PublicTier {
+  id: string;
+  minScore: number;
+  pct: number;
+  band: string;
+  note: string | null;
+}
+export async function getScholarships(): Promise<PublicTier[]> {
+  const res = await fetch(`${API_URL}/api/config/scholarships`);
+  if (!res.ok) throw new Error(String(res.status));
+  return res.json() as Promise<PublicTier[]>;
+}

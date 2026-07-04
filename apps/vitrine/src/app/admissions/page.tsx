@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, FileText, GraduationCap, Home, Repeat, ShieldCheck, UserPlus, Utensils, Plus, Minus } from "lucide-react";
-import { FEE_STRUCTURE } from "@mydaust/shared";
+import { FEE_STRUCTURE, SCHOLARSHIP_TIERS } from "@mydaust/shared";
+import { type PublicFee, type PublicTier, getFees, getScholarships } from "@/lib/api";
 import { PageFrame, useApply } from "@/components/PageFrame";
 import { Heading, Section } from "@/components/site";
 
@@ -30,19 +31,34 @@ const TRACKS = [
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 
-const COST = [
-  { label: "Tuition", amount: fmt(FEE_STRUCTURE.tuitionPerYear), unit: "FCFA / year", note: `${fmt(FEE_STRUCTURE.tuitionPerSemester)} per semester · monthly installments available`, primary: true, icon: GraduationCap },
-  { label: "Housing", amount: `${fmt(FEE_STRUCTURE.housingPerSemester.min)} – ${fmt(FEE_STRUCTURE.housingPerSemester.max)}`, unit: "FCFA / semester", note: "Optional · paid at the start of each semester", icon: Home },
-  { label: "Cafeteria", amount: `${fmt(FEE_STRUCTURE.cafeteriaPerSemester.min)} – ${fmt(FEE_STRUCTURE.cafeteriaPerSemester.max)}`, unit: "FCFA / semester", note: "Optional · half pension or full pension", icon: Utensils },
-  { label: "Application Fee", amount: fmt(FEE_STRUCTURE.applicationFee), unit: "FCFA", note: "One-time, paid with your application", icon: FileText },
-  { label: "Insurance", amount: fmt(FEE_STRUCTURE.insurancePerYear), unit: "FCFA", note: "Annual student insurance", icon: ShieldCheck },
-];
+const FEE_ICONS: Record<string, typeof GraduationCap> = {
+  tuition: GraduationCap,
+  housing: Home,
+  cafeteria: Utensils,
+  application_fee: FileText,
+  insurance: ShieldCheck,
+};
 
-const TIERS = [
-  { pct: "20%", band: "BAC 15 and above", note: "Top of the class — the highest automatic merit discount." },
-  { pct: "15%", band: "BAC 13.5 – 14.9", note: "Strong academic performance rewarded on enrollment." },
-  { pct: "10%", band: "BAC 12 – 13.4", note: "A solid foundation earns a meaningful tuition reduction." },
+// Offline fallbacks (shared seed constants); replaced by the director's live values on load.
+const FALLBACK_FEES: PublicFee[] = [
+  { key: "tuition", label: "Tuition", minXof: FEE_STRUCTURE.tuitionPerYear, maxXof: null, period: "year", note: "Half per semester · monthly installments available" },
+  { key: "housing", label: "Housing", minXof: FEE_STRUCTURE.housingPerSemester.min, maxXof: FEE_STRUCTURE.housingPerSemester.max, period: "semester", note: "Optional · paid at the start of each semester" },
+  { key: "cafeteria", label: "Cafeteria", minXof: FEE_STRUCTURE.cafeteriaPerSemester.min, maxXof: FEE_STRUCTURE.cafeteriaPerSemester.max, period: "semester", note: "Optional · half pension or full pension" },
+  { key: "application_fee", label: "Application Fee", minXof: FEE_STRUCTURE.applicationFee, maxXof: null, period: "one-time", note: "One-time, paid with your application" },
+  { key: "insurance", label: "Insurance", minXof: FEE_STRUCTURE.insurancePerYear, maxXof: null, period: "year", note: "Annual student insurance" },
 ];
+const FALLBACK_TIERS = SCHOLARSHIP_TIERS.map((t, i) => ({ id: String(i), minScore: t.minScore, pct: t.pct, band: t.band, note: t.note ?? null }));
+
+function feeCard(f: PublicFee) {
+  return {
+    label: f.label,
+    amount: f.maxXof != null ? `${fmt(f.minXof)} – ${fmt(f.maxXof)}` : fmt(f.minXof),
+    unit: f.period === "one-time" ? "FCFA" : `FCFA / ${f.period}`,
+    note: f.note ?? "",
+    primary: f.key === "tuition",
+    icon: FEE_ICONS[f.key] ?? FileText,
+  };
+}
 
 const FAQS = [
   ["Is DAUST recognized by the Government?", "Yes. DAUST is nationally and internationally recognized, with habilitation from ANAQ-Sup."],
@@ -52,6 +68,14 @@ const FAQS = [
 ];
 
 export default function AdmissionsPage() {
+  const [fees, setFees] = useState<PublicFee[]>(FALLBACK_FEES);
+  const [tiers, setTiers] = useState<PublicTier[]>(FALLBACK_TIERS);
+  useEffect(() => {
+    getFees().then(setFees).catch(() => {});
+    getScholarships().then(setTiers).catch(() => {});
+  }, []);
+  const COST = fees.map(feeCard);
+  const TIERS = tiers.map((t) => ({ pct: `${t.pct}%`, band: t.band, note: t.note ?? "" }));
   return (
     <PageFrame active="Admissions">
       <section style={{ background: "linear-gradient(160deg, var(--navy) 0%, var(--navy-deep) 100%)", color: "#fff" }}>

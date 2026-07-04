@@ -56,6 +56,10 @@ const NAV = [
   { href: "/", label: "Home" },
   { href: "/admissions", label: "Admissions" },
   { href: "/academics", label: "Academics" },
+  { href: "/research", label: "Research" },
+  { href: "/startups", label: "Startups" },
+  { href: "/campus", label: "Campus" },
+  { href: "/alumni", label: "Alumni" },
   { href: "/about", label: "About" },
 ];
 
