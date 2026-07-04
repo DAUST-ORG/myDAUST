@@ -19,7 +19,7 @@ export default function StudentIdPage() {
       <h1 className="page-title">Student ID</h1>
 
       <div style={{ maxWidth: 460, margin: "0 auto" }}>
-        <div style={{ borderRadius: 18, overflow: "hidden", boxShadow: "var(--shadow-lg)", background: "#fff" }}>
+        <div style={{ borderRadius: 18, overflow: "hidden", boxShadow: "var(--shadow-lg)", background: "var(--surface)" }}>
           <div style={{ background: "linear-gradient(135deg, var(--daust-navy) 0%, var(--daust-navy-deep) 100%)", color: "#fff", padding: "20px 24px", display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, letterSpacing: ".04em" }}>DAUST</span>
             <div className="tri-dash" style={{ display: "flex", gap: 6 }}>

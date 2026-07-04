@@ -7,6 +7,14 @@ const nav: NavGroup[] = [
     items: [
       { href: "/affairs/housing", label: "Housing & Residence" },
       { href: "/affairs/roommate", label: "Roommate Matching" },
+      { href: "/affairs/maintenance", label: "Maintenance" },
+    ],
+  },
+  {
+    label: "Global",
+    items: [
+      { href: "/affairs/international", label: "International" },
+      { href: "/affairs/abroad", label: "Study Abroad" },
     ],
   },
   {
@@ -14,6 +22,7 @@ const nav: NavGroup[] = [
     items: [
       { href: "/affairs/conduct", label: "Conduct & Disputes" },
       { href: "/affairs/clubs", label: "Clubs & Orgs" },
+      { href: "/affairs/events", label: "Events" },
       { href: "/affairs/budget", label: "Co-curricular Budget" },
     ],
   },

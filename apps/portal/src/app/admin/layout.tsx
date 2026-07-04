@@ -8,6 +8,7 @@ const nav: NavGroup[] = [
       { href: "/admin/admissions", label: "Admissions" },
       { href: "/admin/students", label: "Students" },
       { href: "/admin/programs", label: "Programs & Courses" },
+      { href: "/admin/schedule", label: "Master Schedule" },
     ],
   },
   {

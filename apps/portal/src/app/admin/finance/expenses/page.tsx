@@ -5,8 +5,10 @@ import {
   type CostCenter,
   type Expense,
   createExpense,
+  deleteExpense,
   getCostCenters,
   getExpenses,
+  updateExpense,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
 
@@ -26,6 +28,31 @@ export default function ExpensesPage() {
     incurredOn: new Date().toISOString().slice(0, 10),
   });
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState(0);
+
+  async function remove(id: string) {
+    setMsg(null);
+    try {
+      await deleteExpense(id);
+      setMsg("Expense deleted (audit-logged).");
+      load();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
+
+  async function saveEdit(id: string) {
+    setMsg(null);
+    try {
+      await updateExpense(id, { amount: editAmount });
+      setEditingId(null);
+      setMsg("Expense updated (audit-logged).");
+      load();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
 
   const load = useCallback(() => {
     getExpenses().then(setRows).catch(() => {});
@@ -90,7 +117,7 @@ export default function ExpensesPage() {
       <div className="card">
         <p className="h1" style={{ fontSize: 16 }}>Recent expenses</p>
         <table>
-          <thead><tr><th>Date</th><th>Cost center</th><th>Category</th><th>Payee / description</th><th>Amount</th></tr></thead>
+          <thead><tr><th>Date</th><th>Cost center</th><th>Category</th><th>Payee / description</th><th>Amount</th><th /></tr></thead>
           <tbody>
             {rows.map((e) => (
               <tr key={e.id}>
@@ -98,7 +125,26 @@ export default function ExpensesPage() {
                 <td>{e.costCenter}</td>
                 <td>{e.category}</td>
                 <td>{e.payee || e.description}{e.isEstimate && <span className="badge pending" style={{ marginLeft: 6 }}>est.</span>}</td>
-                <td>{formatXof(e.amount)}</td>
+                <td>
+                  {editingId === e.id ? (
+                    <input type="number" value={editAmount} onChange={(ev) => setEditAmount(Number(ev.target.value))} style={{ width: 120 }} />
+                  ) : (
+                    formatXof(e.amount)
+                  )}
+                </td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  {editingId === e.id ? (
+                    <>
+                      <button className="primary" onClick={() => saveEdit(e.id)} style={{ fontSize: 12, marginRight: 6 }}>Save</button>
+                      <button onClick={() => setEditingId(null)} style={{ fontSize: 12 }}>Cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => { setEditingId(e.id); setEditAmount(e.amount); }} style={{ fontSize: 12, marginRight: 6 }}>Edit</button>
+                      <button onClick={() => remove(e.id)} style={{ fontSize: 12 }}>Delete</button>
+                    </>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

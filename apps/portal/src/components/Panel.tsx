@@ -18,7 +18,7 @@ export function Panel({
   return (
     <section
       style={{
-        background: "#fff",
+        background: "var(--surface)",
         border: "1px solid var(--gray-100)",
         borderRadius: 16,
         boxShadow: "var(--shadow-sm)",

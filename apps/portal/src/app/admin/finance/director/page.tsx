@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { type DirectorOverview, getDirectorOverview } from "@/lib/api";
-import { formatXof } from "@/lib/format";
+import { formatXof, formatXofCompact } from "@/lib/format";
 
 export default function DirectorPage() {
   const [d, setD] = useState<DirectorOverview | null>(null);
@@ -19,10 +19,10 @@ export default function DirectorPage() {
       <h1 className="page-title">Director — money in & out</h1>
 
       <div className="kpi-grid">
-        <div className="kpi"><div className="label">Money in (collected)</div><div className="value">{formatXof(d.totals.moneyIn)}</div></div>
-        <div className="kpi"><div className="label">Money out (expenses)</div><div className="value">{formatXof(d.totals.moneyOut)}</div></div>
-        <div className="kpi"><div className="label">Net</div><div className="value" style={{ color: d.totals.net >= 0 ? "var(--success)" : "var(--danger)" }}>{formatXof(d.totals.net)}</div></div>
-        <div className="kpi"><div className="label">Cash position</div><div className="value">{formatXof(d.totals.cashPosition)}</div></div>
+        <div className="kpi"><div className="label">Money in (collected)</div><div className="value">{formatXofCompact(d.totals.moneyIn)}</div></div>
+        <div className="kpi"><div className="label">Money out (expenses)</div><div className="value">{formatXofCompact(d.totals.moneyOut)}</div></div>
+        <div className="kpi"><div className="label">Net</div><div className="value" style={{ color: d.totals.net >= 0 ? "var(--success)" : "var(--danger)" }}>{formatXofCompact(d.totals.net)}</div></div>
+        <div className="kpi"><div className="label">Cash position</div><div className="value">{formatXofCompact(d.totals.cashPosition)}</div></div>
       </div>
 
       <div className="card">

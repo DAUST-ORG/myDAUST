@@ -2,7 +2,7 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}/api${path}`, {
     ...init,
     credentials: "include", // send/receive the session cookie
@@ -406,6 +406,21 @@ export interface AdminPrograms {
 }
 export const getAdminStats = () => request<AdminStats>("/academics/admin/stats");
 export const getAdminStudents = () => request<AdminStudent[]>("/academics/admin/students");
+export interface AdminStudentDetail {
+  studentNo: string;
+  name: string;
+  email: string;
+  program: string | null;
+  department: string | null;
+  gpa: number;
+  completedCredits: number;
+  balance: number;
+  enrollments: { enrollmentId: string; courseCode: string; title: string; credits: number; term: string; sectionCode: string; status: string; grade: string | null }[];
+}
+export const getAdminStudentDetail = (id: string) =>
+  request<AdminStudentDetail>(`/academics/admin/students/${id}`);
+export const adminDropEnrollment = (enrollmentId: string) =>
+  request(`/academics/admin/enrollments/${enrollmentId}/drop`, { method: "POST" });
 export const getAdminPrograms = () => request<AdminPrograms>("/academics/admin/programs");
 
 export interface Announcement {
@@ -418,6 +433,8 @@ export interface Announcement {
   createdAt: string;
 }
 export const getAnnouncements = () => request<Announcement[]>("/comms/announcements");
+export const createAnnouncement = (body: { title: string; body: string; category: string; audience: string }) =>
+  request("/comms/announcements", { method: "POST", body: JSON.stringify(body) });
 
 // --- Messaging ---
 export interface ThreadSummary {
@@ -495,7 +512,8 @@ export interface DiningOrder { id: string; status: string; totalXof: number; cre
 export const getMyDiningOrders = () => request<DiningOrder[]>("/dining/my/orders");
 export const createDiningOrder = (items: { menuItemId: string; qty: number }[]) =>
   request<{ id: string }>("/dining/my/orders", { method: "POST", body: JSON.stringify({ items }) });
-export const payDiningOrder = (id: string) => request(`/dining/my/orders/${id}/pay`, { method: "POST" });
+export const payDiningOrder = (id: string) =>
+  request<{ paid: boolean; redirectUrl?: string }>(`/dining/my/orders/${id}/pay`, { method: "POST" });
 
 export interface ScanResult { result: string; reason: string | null; name: string | null; studentNo: string | null }
 export const diningScan = (token: string, period: string) =>
@@ -537,8 +555,8 @@ export interface HousingRow { assignmentId: string; studentId: string; studentNo
 export const getHousingRoster = () => request<HousingRow[]>("/affairs/housing/roster");
 export interface HousingRequest { assignmentId: string; studentId: string; name: string; studentNo: string; need: string }
 export const getHousingRequests = () => request<HousingRequest[]>("/affairs/housing/requests");
-export const assignRoom = (assignmentId: string, hallId: string, room: string) =>
-  request(`/affairs/housing/${assignmentId}/assign`, { method: "POST", body: JSON.stringify({ hallId, room }) });
+export const assignRoom = (assignmentId: string, hallId: string, room: string, feeXof?: number) =>
+  request(`/affairs/housing/${assignmentId}/assign`, { method: "POST", body: JSON.stringify({ hallId, room, feeXof }) });
 
 export interface RoommateMatches {
   subject: { name: string; prefs: Record<string, string> };
@@ -591,13 +609,19 @@ export const getReviewQueue = () => request<ReviewItem[]>("/innovation/admin/rev
 export interface ProjectDetail {
   id: string; name: string; description: string | null; phase: string; advisor: string | null; status: string; grade: string | null;
   roadmap: RoadmapPhase[];
-  members: { name: string; role: string }[];
+  members: { personId: string; name: string; role: string }[];
   submissions: { id: string; title: string; kind: string; status: string; grade: string | null; feedback: string | null; fileName: string | null; fileUrl: string | null }[];
 }
 export const getProjectDetail = (id: string) => request<ProjectDetail>(`/innovation/admin/projects/${id}`);
 export const advanceProjectPhase = (id: string) => request(`/innovation/admin/projects/${id}/advance`, { method: "POST" });
 export const gradeProjectSubmission = (id: string, grade: string, feedback?: string) =>
   request(`/innovation/admin/submissions/${id}/grade`, { method: "POST", body: JSON.stringify({ grade, feedback }) });
+export const addProjectMember = (projectId: string, email: string, role?: string) =>
+  request<{ ok: boolean; name: string }>(`/innovation/admin/projects/${projectId}/members`, { method: "POST", body: JSON.stringify({ email, role }) });
+export const removeProjectMember = (projectId: string, personId: string) =>
+  request(`/innovation/admin/projects/${projectId}/members/${personId}`, { method: "DELETE" });
+export const setProjectAdvisor = (projectId: string, advisor: string) =>
+  request(`/innovation/admin/projects/${projectId}/advisor`, { method: "POST", body: JSON.stringify({ advisor }) });
 
 // --- HR-lite ---
 export interface Payslip { id: string; period: string; gross: number; deductions: number; net: number; isEstimate: boolean }
@@ -690,8 +714,23 @@ export const refundPayment = (paymentId: string, reason?: string) =>
     method: "POST",
     body: JSON.stringify({ reason }),
   });
+export interface StalePayment {
+  id: string;
+  student: string;
+  studentNo: string;
+  term: string;
+  amount: number;
+  method: string;
+  providerRef: string;
+  createdAt: string;
+  ageMinutes: number;
+}
 export const reconcilePayments = () =>
-  request<{ reconciled: number }>("/finance/admin/reconcile", { method: "POST" });
+  request<{ stale: StalePayment[] }>("/finance/admin/reconcile", { method: "POST" });
+export const confirmPayment = (id: string) =>
+  request(`/finance/admin/payments/${id}/confirm`, { method: "POST" });
+export const cancelPayment = (id: string) =>
+  request(`/finance/admin/payments/${id}/cancel`, { method: "POST" });
 
 export interface PlanInstallmentInput {
   sequence: number;
@@ -739,18 +778,39 @@ export const createExpense = (body: {
   isEstimate: boolean;
   incurredOn: string;
 }) => request("/finance/admin/expenses", { method: "POST", body: JSON.stringify(body) });
+export const updateExpense = (id: string, patch: Partial<{ costCenterCode: string; category: string; description: string; payee: string; amount: number; isEstimate: boolean; incurredOn: string }>) =>
+  request(`/finance/admin/expenses/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+export const deleteExpense = (id: string) =>
+  request(`/finance/admin/expenses/${id}`, { method: "DELETE" });
 export const setBudget = (costCenterCode: string, fiscalYear: string, allocated: number) =>
   request("/finance/admin/budgets", { method: "POST", body: JSON.stringify({ costCenterCode, fiscalYear, allocated }) });
 
 // --- Admissions, staff, users ---
 export interface Admissions {
   funnel: { stage: string; count: number }[];
-  applicants: { name: string; email: string; program: string; stage: string; score: number | null; country: string | null }[];
+  applicants: { name: string; email: string; program: string; stage: string; score: number | null; country: string | null; feePaid: boolean }[];
 }
 export const getAdmissions = () => request<Admissions>("/academics/admin/applicants");
 
 export interface StaffMember { name: string; email: string; kind: string; roles: string[] }
 export const getStaff = () => request<StaffMember[]>("/academics/admin/staff");
 
-export interface AppUser { name: string; email: string; roles: string[] }
+// --- Director-configurable money settings ---
+export interface FeeItem { key: string; label: string; minXof: number; maxXof: number | null; period: string; note: string | null; sortOrder: number }
+export const getFeeConfig = () => request<FeeItem[]>("/config/fees");
+export const updateFeeItem = (key: string, patch: Partial<Pick<FeeItem, "label" | "minXof" | "maxXof" | "period" | "note">>) =>
+  request(`/config/fees/${key}`, { method: "PATCH", body: JSON.stringify(patch) });
+
+export interface ScholarshipTierRow { id: string; minScore: number; pct: number; band: string; note: string | null }
+export const getScholarshipConfig = () => request<ScholarshipTierRow[]>("/config/scholarships");
+export const createScholarshipTier = (body: { minScore: number; pct: number; band: string; note?: string }) =>
+  request("/config/scholarships", { method: "POST", body: JSON.stringify(body) });
+export const updateScholarshipTier = (id: string, body: { minScore: number; pct: number; band: string; note?: string }) =>
+  request(`/config/scholarships/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+export const deleteScholarshipTier = (id: string) =>
+  request(`/config/scholarships/${id}`, { method: "DELETE" });
+
+export interface AppUser { id: string; name: string; email: string; roles: string[] }
+export const updateUserRoles = (personId: string, roles: string[]) =>
+  request(`/users/${personId}/roles`, { method: "PATCH", body: JSON.stringify({ roles }) });
 export const getUsers = () => request<AppUser[]>("/academics/admin/users");

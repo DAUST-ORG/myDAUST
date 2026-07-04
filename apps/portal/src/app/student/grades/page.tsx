@@ -4,9 +4,12 @@ import { useEffect, useState } from "react";
 import { type GradeRow, type MySummary, getMyGrades, getMySummary } from "@/lib/api";
 import { GpaRing } from "@/components/GpaRing";
 
+const ALL_TERMS = "__all__";
+
 export default function GradesPage() {
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [summary, setSummary] = useState<MySummary | null>(null);
+  const [term, setTerm] = useState(ALL_TERMS);
   useEffect(() => {
     Promise.all([getMyGrades(), getMySummary()])
       .then(([g, s]) => {
@@ -15,6 +18,9 @@ export default function GradesPage() {
       })
       .catch(() => {});
   }, []);
+
+  const terms = [...new Set(grades.map((g) => g.term))];
+  const filtered = term === ALL_TERMS ? grades : grades.filter((g) => g.term === term);
 
   return (
     <>
@@ -34,14 +40,25 @@ export default function GradesPage() {
       </div>
 
       <div className="card">
-        <p className="h1" style={{ fontSize: 16 }}>Transcript</p>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <p className="h1" style={{ fontSize: 16 }}>Transcript</p>
+          <span style={{ flex: 1 }} />
+          <select value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Filter by term">
+            <option value={ALL_TERMS}>All terms</option>
+            {terms.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </div>
         {grades.length === 0 ? (
           <p className="muted">No completed courses yet.</p>
+        ) : filtered.length === 0 ? (
+          <p className="muted">No courses for this term.</p>
         ) : (
           <table>
             <thead><tr><th>Course</th><th>Term</th><th>Credits</th><th>Grade</th><th>Points</th></tr></thead>
             <tbody>
-              {grades.map((g, i) => (
+              {filtered.map((g, i) => (
                 <tr key={i}>
                   <td><strong>{g.courseCode}</strong> — {g.title}</td>
                   <td>{g.term}</td>

@@ -96,7 +96,7 @@ export function Inbox() {
           height: "calc(100vh - 230px)",
           minHeight: 460,
           overflow: "hidden",
-          background: "#fff",
+          background: "var(--surface)",
           border: "1px solid var(--gray-100)",
           borderRadius: 16,
           boxShadow: "var(--shadow-sm)",

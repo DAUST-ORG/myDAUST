@@ -12,7 +12,9 @@ const nav: NavGroup[] = [
   {
     label: "Manage",
     items: [
+      { href: "/dining/students", label: "Students" },
       { href: "/dining/menus", label: "Menus" },
+      { href: "/dining/reports", label: "Reports" },
       { href: "/dining/settlement", label: "Finance / Settlement" },
     ],
   },

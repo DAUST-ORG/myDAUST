@@ -80,7 +80,7 @@ export default function SchedulePage() {
                       href={`/student/courses/${e.sectionId}`}
                       style={{
                         position: "absolute", top, left: 4, right: 4, height: height - 4,
-                        background: "#fff", border: "1px solid var(--border)", borderLeft: "3px solid var(--daust-navy)",
+                        background: "var(--surface)", border: "1px solid var(--border)", borderLeft: "3px solid var(--daust-navy)",
                         borderRadius: 8, padding: "6px 8px", boxShadow: "var(--shadow-sm)", overflow: "hidden",
                         textDecoration: "none", color: "inherit", display: "block",
                       }}

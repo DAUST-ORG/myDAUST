@@ -24,6 +24,24 @@ export default function GradebookPage() {
 
   if (!gb) return <p className="muted">Loading…</p>;
 
+  function exportCsv() {
+    if (!gb) return;
+    const header = "studentNo,name,grade,status";
+    const lines = gb.students.map((s) =>
+      [s.studentNo, s.name, draft[s.enrollmentId] ?? s.grade ?? "", s.status]
+        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+        .join(","),
+    );
+    const blob = new Blob([[header, ...lines].join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const section = `${gb.course.split(" — ")[0] ?? gb.course}-${gb.sectionCode}`.replace(/\s+/g, "");
+    a.download = `${section}-grades.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function save(finalize: boolean) {
     setBusy(true);
     setMsg(null);
@@ -70,6 +88,7 @@ export default function GradebookPage() {
         <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
           <button disabled={busy} onClick={() => save(false)}>Save draft</button>
           <button className="primary" disabled={busy} onClick={() => save(true)}>Submit final grades</button>
+          <button onClick={exportCsv} style={{ marginLeft: "auto" }}>Export CSV</button>
         </div>
         <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
           Submitting marks graded students <strong>completed</strong> — it flows to their transcript &amp; GPA.

@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, ScanLine, XCircle } from "lucide-react";
 import { type LiveScans, type ScanResult, diningScan, getLiveScans } from "@/lib/api";
+import { diningScanOverride } from "@/lib/api-dining";
 
 const PERIODS = ["breakfast", "lunch", "dinner"] as const;
 
 export default function ScannerPage() {
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>("lunch");
   const [token, setToken] = useState("");
+  const [overrideNo, setOverrideNo] = useState("");
   const [last, setLast] = useState<ScanResult | null>(null);
   const [feed, setFeed] = useState<LiveScans | null>(null);
 
@@ -23,6 +25,15 @@ export default function ScannerPage() {
     const res = await diningScan(token.trim(), period);
     setLast(res);
     setToken("");
+    refresh();
+  }
+
+  async function override(e: React.FormEvent) {
+    e.preventDefault();
+    if (!overrideNo.trim()) return;
+    const res = await diningScanOverride(overrideNo.trim(), period);
+    setLast(res);
+    setOverrideNo("");
     refresh();
   }
 
@@ -61,6 +72,11 @@ export default function ScannerPage() {
           <form onSubmit={scan} style={{ display: "flex", gap: 8, marginTop: 24, width: "100%", maxWidth: 460 }}>
             <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="Paste / scan pass token…" autoFocus style={{ flex: 1, padding: "12px 14px", borderRadius: 10, border: "1px solid var(--border)" }} />
             <button className="primary" type="submit">Scan</button>
+          </form>
+          <form onSubmit={override} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14, width: "100%", maxWidth: 460 }}>
+            <span className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>Manual override</span>
+            <input value={overrideNo} onChange={(e) => setOverrideNo(e.target.value)} placeholder={`Student no · serve ${period}`} style={{ flex: 1, padding: "9px 12px", borderRadius: 10, border: "1px solid var(--border)", fontSize: 13 }} />
+            <button type="submit" style={{ fontSize: 13 }}>Serve</button>
           </form>
         </div>
 

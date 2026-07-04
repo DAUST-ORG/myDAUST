@@ -16,9 +16,12 @@ const nav: NavGroup[] = [
     label: "Campus",
     items: [
       { href: "/faculty/announcements", label: "Announcements" },
+      { href: "/faculty/documents", label: "Documents" },
+      { href: "/faculty/dining", label: "Dining" },
       { href: "/faculty/pay", label: "Pay & Payslips" },
       { href: "/faculty/leave", label: "Leave & Absence" },
       { href: "/faculty/booking", label: "Room Booking" },
+      { href: "/faculty/profile", label: "My Profile" },
     ],
   },
 ];

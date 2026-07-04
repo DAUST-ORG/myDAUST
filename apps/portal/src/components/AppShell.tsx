@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getMe, logout, type Me } from "@/lib/api";
+import { Topbar } from "./Topbar";
 
 export interface NavItem {
   href: string;
@@ -30,6 +31,7 @@ export function AppShell({
   const pathname = usePathname();
   const [me, setMe] = useState<Me | null>(null);
   const [ready, setReady] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
     getMe()
@@ -55,7 +57,8 @@ export function AppShell({
 
   return (
     <div className="shell">
-      <aside className={`sidebar ${variant}`}>
+      {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} />}
+      <aside className={`sidebar ${variant} ${navOpen ? "open" : ""}`}>
         <div className="brand">
           <div className="wordmark">DAUST</div>
           <div className="tri-dash">
@@ -73,6 +76,7 @@ export function AppShell({
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => setNavOpen(false)}
                 className={`nav-item ${active?.href === item.href ? "active" : ""}`}
               >
                 {item.label}
@@ -95,12 +99,7 @@ export function AppShell({
       </aside>
 
       <div className="main">
-        <header className="topbar">
-          <span className="page">{pageTitle}</span>
-          <div className="search">Search courses, people, invoices…</div>
-          <span className="spacer" />
-          <span className="muted" style={{ fontSize: 13 }}>{me.email}</span>
-        </header>
+        <Topbar me={me} nav={nav} pageTitle={pageTitle} onToggleNav={() => setNavOpen((v) => !v)} />
         <div className="content">{children}</div>
       </div>
     </div>

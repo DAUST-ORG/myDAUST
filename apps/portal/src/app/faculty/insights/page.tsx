@@ -59,7 +59,7 @@ function InsightsInner() {
         <select
           value={sectionId}
           onChange={(e) => setSectionId(e.target.value)}
-          style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "#fff", minWidth: 280 }}
+          style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", minWidth: 280 }}
         >
           {classes.map((c) => (
             <option key={c.sectionId} value={c.sectionId}>{c.code} — {c.title}</option>

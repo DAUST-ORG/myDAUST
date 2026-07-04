@@ -20,7 +20,7 @@ export function StatCard({
       onClick={onClick}
       style={{
         flex: 1,
-        background: "#fff",
+        background: "var(--surface)",
         border: "1px solid var(--gray-100)",
         borderRadius: 16,
         padding: 20,

@@ -27,7 +27,7 @@ export default function AdmissionsPage() {
       <div className="card">
         <p className="h1" style={{ fontSize: 16 }}>Applicants</p>
         <table>
-          <thead><tr><th>Name</th><th>Program</th><th>Country</th><th>BAC</th><th>Stage</th></tr></thead>
+          <thead><tr><th>Name</th><th>Program</th><th>Country</th><th>BAC</th><th>Fee</th><th>Stage</th></tr></thead>
           <tbody>
             {d.applicants.map((a) => (
               <tr key={a.email}>
@@ -35,6 +35,7 @@ export default function AdmissionsPage() {
                 <td>{a.program}</td>
                 <td>{a.country}</td>
                 <td>{a.score ?? "—"}</td>
+                <td>{a.feePaid ? <span className="badge completed">paid</span> : <span className="badge pending">due</span>}</td>
                 <td><span className={`badge ${a.stage === "accepted" ? "paid" : a.stage === "rejected" ? "overdue" : "pending"}`}>{a.stage}</span></td>
               </tr>
             ))}

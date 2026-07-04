@@ -11,6 +11,7 @@ import {
   toggleProjectTask,
   uploadFile,
 } from "@/lib/api";
+import { type ProjectPass, getMyGlobalTasks } from "@/lib/api-innovation";
 
 const KINDS = ["Document", "Video", "Demo", "Poster"];
 
@@ -80,10 +81,36 @@ export default function StudentInnovationPage() {
               </div>
             ))}
           </Panel>
+          <ProgramPasses />
           <SubmitWork projectId={project.id} onDone={load} />
         </div>
       </div>
     </>
+  );
+}
+
+function ProgramPasses() {
+  const [passes, setPasses] = useState<ProjectPass[] | null>(null);
+  useEffect(() => {
+    getMyGlobalTasks().then(setPasses).catch(() => setPasses([]));
+  }, []);
+
+  if (!passes || passes.length === 0) return null;
+
+  return (
+    <Panel title="Program passes" pad="4px 20px 12px">
+      {passes.map((t, i) => (
+        <div key={t.taskId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: i < passes.length - 1 ? "1px solid var(--divider)" : "none" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: t.done ? "var(--fg3)" : "var(--fg1)", textDecoration: t.done ? "line-through" : "none" }}>{t.title}</div>
+            <div className="muted" style={{ fontSize: 11 }}>
+              {t.kind}{t.dueDate ? ` · due ${new Date(t.dueDate).toLocaleDateString()}` : ""}
+            </div>
+          </div>
+          {t.done ? <span className="badge completed">Done</span> : <span className="badge partial">Pending</span>}
+        </div>
+      ))}
+    </Panel>
   );
 }
 

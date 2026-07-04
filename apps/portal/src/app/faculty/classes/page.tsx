@@ -22,7 +22,7 @@ export default function MyClassesPage() {
           <div
             key={c.sectionId}
             onClick={() => router.push(`/faculty/classes/${c.sectionId}`)}
-            style={{ background: "#fff", border: "1px solid var(--gray-100)", borderRadius: 16, overflow: "hidden", cursor: "pointer", boxShadow: "var(--shadow-sm)" }}
+            style={{ background: "var(--surface)", border: "1px solid var(--gray-100)", borderRadius: 16, overflow: "hidden", cursor: "pointer", boxShadow: "var(--shadow-sm)" }}
           >
             <div style={{ background: `linear-gradient(135deg, ${c.color} 0%, ${c.color}cc 100%)`, padding: "18px 20px", color: "#fff" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>

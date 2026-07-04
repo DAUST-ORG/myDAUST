@@ -1,5 +1,6 @@
 "use client";
 
+import { PLAN_TEMPLATES, splitEvenXof } from "@mydaust/shared";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -117,16 +118,16 @@ function PlanForm({
   const [count, setCount] = useState(3);
   const [busy, setBusy] = useState(false);
 
-  function generate() {
-    const base = Math.floor(total / count);
+  function generate(parts = count) {
+    const amounts = splitEvenXof(total, parts);
     const next = new Date();
-    const out: Row[] = [];
-    for (let i = 0; i < count; i++) {
-      const d = new Date(next.getFullYear(), next.getMonth() + i + 1, 15);
-      const amount = i === count - 1 ? total - base * (count - 1) : base;
-      out.push({ dueDate: d.toISOString().slice(0, 10), amount });
-    }
-    setRows(out);
+    setRows(
+      amounts.map((amount, i) => ({
+        dueDate: new Date(next.getFullYear(), next.getMonth() + i + 1, 15).toISOString().slice(0, 10),
+        amount,
+      })),
+    );
+    setCount(parts);
   }
 
   const sum = rows.reduce((s, r) => s + Number(r.amount || 0), 0);
@@ -152,10 +153,16 @@ function PlanForm({
       <p className="muted" style={{ fontSize: 13 }}>
         No payment plan. Configure an installment schedule (must total {formatXof(total)}).
       </p>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+        <label className="muted" style={{ fontSize: 13 }}>Template</label>
+        <select defaultValue="" onChange={(e) => { const t = PLAN_TEMPLATES.find((x) => x.key === e.target.value); if (t) generate(t.installments); }}>
+          <option value="" disabled>Pick a template…</option>
+          {PLAN_TEMPLATES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+        <span className="muted" style={{ fontSize: 12 }}>or</span>
         <label className="muted" style={{ fontSize: 13 }}>Installments</label>
         <input type="number" min={1} max={12} value={count} onChange={(e) => setCount(Number(e.target.value))} style={{ width: 70 }} />
-        <button onClick={generate}>Generate schedule</button>
+        <button onClick={() => generate()}>Generate schedule</button>
       </div>
       {rows.length > 0 && (
         <>

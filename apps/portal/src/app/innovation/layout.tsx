@@ -7,6 +7,7 @@ const nav: NavGroup[] = [
       { href: "/innovation", label: "Overview" },
       { href: "/innovation/projects", label: "Projects" },
       { href: "/innovation/review", label: "Review Queue" },
+      { href: "/innovation/global-tasks", label: "Global Tasks" },
     ],
   },
 ];

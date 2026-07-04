@@ -18,6 +18,7 @@ export default function HousingPage() {
   const [assigning, setAssigning] = useState<string | null>(null);
   const [hallId, setHallId] = useState("");
   const [room, setRoom] = useState("");
+  const [fee, setFee] = useState("");
 
   const load = useCallback(() => {
     getHousingRoster().then(setRoster).catch(() => {});
@@ -28,9 +29,10 @@ export default function HousingPage() {
 
   async function doAssign(id: string) {
     if (!hallId || !room) return;
-    await assignRoom(id, hallId, room);
+    await assignRoom(id, hallId, room, fee ? Number(fee) : undefined);
     setAssigning(null);
     setRoom("");
+    setFee("");
     load();
   }
 
@@ -54,6 +56,7 @@ export default function HousingPage() {
                       <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                         <select value={hallId} onChange={(e) => setHallId(e.target.value)}>{halls.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
                         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room #" style={{ width: 80 }} />
+                        <input value={fee} onChange={(e) => setFee(e.target.value)} type="number" placeholder="Fee XOF (opt.)" style={{ width: 110 }} title="Bills a housing invoice (cost center 3700) on the student's account" />
                         <button className="primary" onClick={() => doAssign(r.assignmentId)} style={{ fontSize: 12 }}>Save</button>
                       </span>
                     ) : (

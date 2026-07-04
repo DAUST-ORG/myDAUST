@@ -22,10 +22,10 @@ export default function AdminStudentsPage() {
             {rows.map((s) => (
               <tr key={s.id}>
                 <td>{s.studentNo}</td>
-                <td>{s.name}</td>
+                <td><Link href={`/admin/students/${s.id}`}><strong>{s.name}</strong></Link></td>
                 <td>{s.program}</td>
                 <td>{s.balance > 0 ? <span className="badge overdue">{formatXof(s.balance)}</span> : <span className="badge paid">Paid</span>}</td>
-                <td><Link href={`/admin/finance/students/${s.id}`}>Account →</Link></td>
+                <td><Link href={`/admin/students/${s.id}`}>Record →</Link> · <Link href={`/admin/finance/students/${s.id}`}>Account →</Link></td>
               </tr>
             ))}
           </tbody>

@@ -74,7 +74,7 @@ export default function FacultyDashboard() {
                 <div
                   key={c.sectionId}
                   onClick={() => router.push(`/faculty/classes/${c.sectionId}`)}
-                  style={{ border: "1px solid var(--gray-100)", borderRadius: 13, overflow: "hidden", cursor: "pointer", background: "#fff" }}
+                  style={{ border: "1px solid var(--gray-100)", borderRadius: 13, overflow: "hidden", cursor: "pointer", background: "var(--surface)" }}
                 >
                   <div style={{ height: 4, background: c.color }} />
                   <div style={{ padding: 15 }}>
