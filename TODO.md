@@ -78,7 +78,7 @@ Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 desig
 - [x] OpenTofu bootstrap + modules (network/ecr/alb/ecs-service/rds/secrets) + **staging applied** — ARM64 Fargate, path-routed ALB (same-origin), RDS migrated+seeded, secrets in SM, adversarially reviewed pre-apply (~$71/mo now billing)
 - [x] .gitignore hardened (tfvars ignored, examples + tofu lockfiles committed); repo committed 2026-07-04 in 7 thematic commits (unsigned — ssh key not available non-interactively)
 - [x] HTTPS via Cloudflare Tunnel (2026-07-04): https://daust-staging.azt.dev — cloudflared connector as ECS service (egress-only, token in SM), COOKIE_SECURE=true, origins + PayTech IPN/success/cancel on the https URL. Note: cloudflared cert is scoped to azt.dev (not azertica.com); Universal SSL also limits depth, so staging lives at daust-staging.azt.dev. Later: lock/remove direct ALB :80 (still open), delete stray daust-staging.azertica.com.azt.dev CNAME (⚪ dashboard)
-- [ ] 🟠 Vitrine: static export → S3 + Cloudflare (module static-site)
+- [x] Vitrine live (2026-07-04): https://daust.azt.dev — next output:export + trailingSlash → S3 website bucket (modules/static-site) → same daust-staging tunnel, host-routed via baked config (infra/tunnel: daust-staging.azt.dev→ALB, daust.azt.dev→S3 with httpHostHeader). Connector now runs creds-file mode (TUNNEL_CREDS in SM, daust-tunnel:v1 in ECR). CORS verified from the vitrine origin. Redeploy = rebuild export + aws s3 sync.
 - [ ] 🟠 Slim the api image (2.6GB full-workspace copy → pnpm deploy prune)
 - [ ] 🟠 Flip Secrets Manager recovery_window 0 → 7 once staging stabilizes
 - [ ] 🟠 **prod** environment (same modules; t4g.small, deletion protection, private RDS, NAT decision)

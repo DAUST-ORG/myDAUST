@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "export", // static site: S3 + Cloudflare, no server
+  trailingSlash: true, // S3 website serves folder indexes, not extensionless keys
   reactStrictMode: true,
   transpilePackages: ["@mydaust/shared"],
   env: {

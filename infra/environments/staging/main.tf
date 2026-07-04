@@ -8,7 +8,7 @@ module "network" {
 module "ecr" {
   source = "../../modules/ecr"
 
-  repos = ["api", "portal"]
+  repos = ["api", "portal", "tunnel"]
 }
 
 resource "aws_ecs_cluster" "this" {
@@ -114,6 +114,7 @@ module "alb" {
 locals {
   alb_url      = "http://${module.alb.alb_dns_name}"
   public_url   = "https://daust-staging.azt.dev" # Cloudflare tunnel hostname (zone azt.dev)
+  vitrine_url  = "https://daust.azt.dev"          # vitrine static site, same tunnel
   database_url = "postgresql://mydaust:${random_password.db.result}@${module.rds.address}:5432/mydaust?schema=public"
 }
 
@@ -129,7 +130,7 @@ module "secrets" {
     PAYTECH_API_SECRET = var.paytech_api_secret
     },
     var.resend_api_key != "" ? { RESEND_API_KEY = var.resend_api_key } : {},
-    var.tunnel_token != "" ? { TUNNEL_TOKEN = var.tunnel_token } : {},
+    var.tunnel_creds != "" ? { TUNNEL_CREDS = var.tunnel_creds } : {},
   )
 }
 
@@ -153,7 +154,7 @@ module "api_service" {
     # Cloudflare tunnel terminates TLS at the edge; browsers are on https.
     { name = "COOKIE_SECURE", value = "true" },
     { name = "PORTAL_ORIGIN", value = local.public_url },
-    { name = "VITRINE_ORIGIN", value = local.public_url },
+    { name = "VITRINE_ORIGIN", value = local.vitrine_url },
     { name = "PAYTECH_ENV", value = "test" },
     { name = "PAYTECH_IPN_URL", value = "${local.public_url}/api/finance/webhook/paytech" },
     { name = "PAYTECH_SUCCESS_URL", value = "${local.public_url}/student/billing" },
@@ -194,24 +195,29 @@ module "portal_service" {
   ]
 }
 
-# Cloudflare tunnel connector: egress-only, forwards edge traffic to the ALB.
-# TLS terminates at Cloudflare; the tunnel dials out (7844/443), so no inbound exposure is added.
+# Vitrine: static export in S3, served through the tunnel (host-routed in infra/tunnel/config.yml).
+module "vitrine_site" {
+  source      = "../../modules/static-site"
+  bucket_name = "daust-staging-vitrine-961828155948"
+}
+
+# Cloudflare tunnel connector: egress-only, forwards edge traffic by hostname
+# (daust-staging.azt.dev -> ALB, daust.azt.dev -> vitrine S3). Ingress lives in the
+# baked image config (infra/tunnel/config.yml); credentials arrive via Secrets Manager.
 module "tunnel_service" {
-  count  = var.tunnel_token != "" ? 1 : 0
+  count  = var.tunnel_creds != "" && var.tunnel_image != "" ? 1 : 0
   source = "../../modules/ecs-service"
 
   env                = "staging"
   name               = "tunnel"
   cluster_id         = aws_ecs_cluster.this.id
-  image              = "cloudflare/cloudflared:2026.6.1"
+  image              = var.tunnel_image
   container_port     = 2000 # metrics port only; no LB attachment
   cpu                = 256
   memory             = 512
   subnet_ids         = module.network.public_subnet_ids
   security_group_ids = [aws_security_group.tasks.id]
 
-  command = ["tunnel", "--no-autoupdate", "run", "--url", local.alb_url]
-
-  secrets     = [{ name = "TUNNEL_TOKEN", valueFrom = module.secrets.arns["TUNNEL_TOKEN"] }]
+  secrets     = [{ name = "TUNNEL_CREDS", valueFrom = module.secrets.arns["TUNNEL_CREDS"] }]
   secret_arns = values(module.secrets.arns)
 }

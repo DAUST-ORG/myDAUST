@@ -1,0 +1,11 @@
+tunnel: 38e2e4ee-2ca3-4918-8589-bc6876497e72
+credentials-file: /etc/cloudflared/creds.json
+ingress:
+  - hostname: daust-staging.azt.dev
+    service: http://daust-staging-alb-1764546181.us-east-1.elb.amazonaws.com
+  - hostname: daust.azt.dev
+    service: http://daust-staging-vitrine-961828155948.s3-website-us-east-1.amazonaws.com
+    originRequest:
+      # S3 website endpoints route by Host header; forward the bucket host, not the edge host.
+      httpHostHeader: daust-staging-vitrine-961828155948.s3-website-us-east-1.amazonaws.com
+  - service: http_status:404

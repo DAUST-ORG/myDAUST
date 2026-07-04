@@ -36,8 +36,13 @@ variable "portal_image" {
   type = string
 }
 
-variable "tunnel_token" {
+variable "tunnel_creds" {
   type      = string
   sensitive = true
-  default   = "" # cloudflared tunnel token; empty skips the tunnel service
+  default   = "" # cloudflared tunnel credentials JSON; empty skips the tunnel service
+}
+
+variable "tunnel_image" {
+  type    = string
+  default = "" # ECR image with baked ingress config (infra/tunnel)
 }
