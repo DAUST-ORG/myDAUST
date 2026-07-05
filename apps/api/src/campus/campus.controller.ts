@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { z } from "zod";
-import { Roles } from "../auth/decorators.js";
+import { Public, Roles } from "../auth/decorators.js";
 import { CampusService } from "./campus.service.js";
 
 const CreateLibraryItemSchema = z.object({
@@ -14,6 +14,12 @@ const CreateLibraryItemSchema = z.object({
 @Controller("campus")
 export class CampusController {
   constructor(private readonly campus: CampusService) {}
+
+  @Public()
+  @Get("announcements")
+  announcements(@Query("audience") audience?: string) {
+    return this.campus.announcements(audience);
+  }
 
   @Get("events")
   events() {

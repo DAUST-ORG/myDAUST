@@ -7,6 +7,16 @@ export interface ApplyResult {
   scholarship: { pct: number; band: string };
 }
 
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  category: string;
+  audience: string;
+  author: string | null;
+  createdAt: string;
+}
+
 export async function submitApplication(input: ApplicationInput): Promise<ApplyResult> {
   const res = await fetch(`${API_URL}/api/applications`, {
     method: "POST",
@@ -17,7 +27,7 @@ export async function submitApplication(input: ApplicationInput): Promise<ApplyR
   return res.json() as Promise<ApplyResult>;
 }
 
-/** PayTech checkout for the 30k FCFA application fee. */
+/** PayTech checkout for the application fee (amount from director config). */
 export async function feeCheckout(applicantId: string): Promise<{ redirectUrl: string }> {
   const res = await fetch(`${API_URL}/api/applications/${applicantId}/fee-checkout`, { method: "POST" });
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
@@ -50,4 +60,10 @@ export async function getScholarships(): Promise<PublicTier[]> {
   const res = await fetch(`${API_URL}/api/config/scholarships`);
   if (!res.ok) throw new Error(String(res.status));
   return res.json() as Promise<PublicTier[]>;
+}
+
+export async function getAnnouncements(): Promise<Announcement[]> {
+  const res = await fetch(`${API_URL}/api/campus/announcements`);
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json() as Promise<Announcement[]>;
 }

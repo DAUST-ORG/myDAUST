@@ -2,12 +2,22 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
 import { login } from "@/lib/api";
+
+const DEMO_ACCOUNTS = [
+  { email: "aissatou.diallo@daust.edu", role: "Student" },
+  { email: "bursar@daust.edu", role: "Bursar" },
+  { email: "registrar@daust.edu", role: "Registrar" },
+  { email: "admin@daust.edu", role: "Admin" },
+];
+const DEMO_PASSWORD = "daust-dev-2026";
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -36,93 +46,133 @@ export default function LoginPage() {
     }
   }
 
+  function fillDemo(demoEmail: string) {
+    setEmail(demoEmail);
+    setPassword(DEMO_PASSWORD);
+    setError(null);
+  }
+
   return (
-    <main className="login-split" style={{ display: "flex", minHeight: "100vh" }}>
-      {/* Brand hero */}
-      <section
-        className="login-hero"
-        style={{
-          flex: "1 1 52%",
-          background: "linear-gradient(160deg, var(--daust-navy) 0%, var(--daust-navy-deep) 100%)",
-          color: "#fff",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          padding: "64px 72px",
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
-        <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px)", backgroundSize: "16px 16px" }} />
-        <div style={{ position: "relative" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 34, letterSpacing: ".04em" }}>DAUST</span>
-            <span style={{ display: "flex", gap: 7 }}>
-              <span style={{ width: 30, height: 5, borderRadius: 999, background: "#fff" }} />
-              <span style={{ width: 30, height: 5, borderRadius: 999, background: "var(--daust-orange)" }} />
-              <span style={{ width: 30, height: 5, borderRadius: 999, background: "var(--daust-steel)" }} />
-            </span>
+    <div className="login-screen">
+      <div className="login-brand">
+        <div className="login-brand-bg" />
+        <div className="login-brand-fade" />
+        <div className="login-brand-content">
+          <div className="login-brand-top">
+            <img src="/logo-daust.png" alt="DAUST" style={{ height: 30, width: "auto" }} />
+            <div className="tri-dash" style={{ margin: "14px 0 0" }}>
+              <span />
+              <span />
+              <span />
+            </div>
           </div>
-          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "clamp(28px, 3.4vw, 44px)", lineHeight: 1.12, margin: "26px 0 0", maxWidth: 460 }}>
-            One campus.<br />Every portal.
-          </h1>
-          <p style={{ color: "rgba(255,255,255,.72)", fontSize: 15.5, lineHeight: 1.65, maxWidth: 420, marginTop: 16 }}>
-            myDAUST brings academics, payments, dining, housing and innovation together —
-            sign in with your DAUST account to reach your portal.
-          </p>
-          <div style={{ display: "flex", gap: 34, marginTop: 44 }}>
-            {[["6", "role portals"], ["1", "student record"], ["0", "paper forms"]].map(([v, l]) => (
-              <div key={l}>
-                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 30, color: "var(--daust-orange)", lineHeight: 1 }}>{v}</div>
-                <div style={{ color: "rgba(255,255,255,.6)", fontSize: 12.5, marginTop: 5 }}>{l}</div>
-              </div>
-            ))}
+          <div>
+            <p className="login-quote">
+              &ldquo;DAUST strives to provide a high-quality education that prepares its students
+              for successful careers and to contribute to the development of their communities
+              and the African continent.&rdquo;
+            </p>
+            <p className="login-quote-attr">Dr. Sidy Ndao &mdash; Founder &amp; President</p>
+          </div>
+          <div className="login-brand-foot">
+            <span>ANAQ-Sup Accredited</span>
+            <span className="login-dot" />
+            <span>Est. 2017</span>
+            <span className="login-dot" />
+            <span>Somone, Senegal</span>
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* Form */}
-      <section style={{ flex: "1 1 48%", display: "flex", alignItems: "center", justifyContent: "center", padding: 32, background: "var(--gray-50)" }}>
-        <div style={{ width: "100%", maxWidth: 400 }}>
-          <p className="eyebrow">Welcome back</p>
-          <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 26, margin: "4px 0 20px" }}>Sign in to myDAUST</h2>
-          <form className="card" onSubmit={submit} style={{ padding: 24 }}>
-            <label className="muted" style={{ fontSize: 13 }}>Email</label>
-            <input
-              type="email"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              placeholder="you@daust.edu"
-              style={{ width: "100%", margin: "6px 0 14px" }}
-            />
-            <label className="muted" style={{ fontSize: 13 }}>Password</label>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              style={{ width: "100%", margin: "6px 0 16px" }}
-            />
-            {error && <p style={{ color: "var(--bad)", marginTop: 0 }}>{error}</p>}
-            <button className="primary" type="submit" disabled={busy} style={{ width: "100%" }}>
-              {busy ? "Signing in…" : "Sign in"}
-            </button>
-            <p className="muted" style={{ fontSize: 12, marginTop: 14, marginBottom: 0 }}>
-              Google Workspace sign-in is coming; use your DAUST email + password for now.
+      <div className="login-panel">
+        <div className="login-card">
+          <div className="login-card-head">
+            <img src="/logo-daust.png" alt="DAUST" className="login-mobile-logo" />
+            <p className="eyebrow" style={{ marginBottom: 6 }}>Campus Portal</p>
+            <h1 className="page-title" style={{ fontSize: 28 }}>Welcome back</h1>
+            <p className="muted" style={{ marginTop: 4, fontSize: 14 }}>
+              Sign in with your DAUST account to continue.
             </p>
+          </div>
+
+          <form onSubmit={submit} className="login-form">
+            <label className="login-label" htmlFor="email">Email</label>
+            <div className="login-input-wrap">
+              <Mail size={16} className="login-input-icon" />
+              <input
+                id="email"
+                type="email"
+                autoComplete="username"
+                placeholder="you@daust.edu"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="login-input"
+              />
+            </div>
+
+            <label className="login-label" htmlFor="password">Password</label>
+            <div className="login-input-wrap">
+              <Lock size={16} className="login-input-icon" />
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="login-input"
+                style={{ paddingRight: 40 }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="login-input-toggle"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+
+            {error && (
+              <div className="login-error">
+                <AlertCircle size={15} />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button className="primary login-submit" type="submit" disabled={busy}>
+              {busy ? (
+                <>
+                  <Loader2 size={16} className="login-spin" /> Signing in…
+                </>
+              ) : (
+                "Sign in"
+              )}
+            </button>
           </form>
-          <details style={{ marginTop: 14 }}>
-            <summary className="muted" style={{ fontSize: 12, cursor: "pointer" }}>Dev seed accounts</summary>
-            <p className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
-              Password <code>daust-dev-2026</code> — <code>aissatou.diallo@daust.edu</code> (student), <code>amadou.ba@daust.edu</code> (faculty),
-              <code> admin@daust.edu</code>, <code>dining@daust.edu</code>, <code>studentaffairs@daust.edu</code>, <code>innovation@daust.edu</code>.
+
+          <p className="muted" style={{ fontSize: 12.5, textAlign: "center", marginTop: 18 }}>
+            Need help? <a href="mailto:info@daust.org">Contact IT support</a>
+          </p>
+
+          <details className="login-demo">
+            <summary>Demo accounts (dev only)</summary>
+            <div className="login-demo-chips">
+              {DEMO_ACCOUNTS.map((a) => (
+                <button key={a.email} type="button" className="login-demo-chip" onClick={() => fillDemo(a.email)}>
+                  <span className="login-demo-role">{a.role}</span>
+                  <span className="login-demo-email">{a.email}</span>
+                </button>
+              ))}
+            </div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
+              Click a role to autofill. Password: <code>{DEMO_PASSWORD}</code>. Google Workspace SSO replaces this later.
             </p>
           </details>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
   );
 }

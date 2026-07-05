@@ -5,6 +5,15 @@ import { PrismaService } from "../prisma/prisma.service.js";
 export class CampusService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Public announcements for the vitrine, optionally filtered by audience. */
+  async announcements(audience?: string) {
+    return this.prisma.announcement.findMany({
+      where: audience ? { audience: { in: [audience, "all"] } } : undefined,
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+  }
+
   /** Upcoming campus events (today onward). */
   async events() {
     const since = new Date(Date.now() - 86_400_000);
