@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ArrowRight, Cpu, FlaskConical, GraduationCap, Building2 } from "lucide-react";
 import { PageFrame, useApply } from "@/components/PageFrame";
-import { Heading, Section, TriDash } from "@/components/site";
+import { Heading, Section } from "@/components/site";
 
 function Hero() {
   const apply = useApply();
@@ -11,8 +11,6 @@ function Hero() {
     <section style={{ background: "linear-gradient(160deg, var(--navy) 0%, var(--navy-deep) 100%)", position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px)", backgroundSize: "16px 16px" }} />
       <div style={{ position: "relative", maxWidth: 1180, margin: "0 auto", padding: "110px 32px 96px", textAlign: "center", color: "#fff" }}>
-        <TriDash light />
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 22, marginTop: -8 }} />
         <div className="eyebrow">Dakar American University of Science & Technology</div>
         <h1 style={{ fontFamily: "var(--display)", fontWeight: 800, fontSize: "clamp(36px,5vw,64px)", lineHeight: 1.05, margin: "16px auto 0", maxWidth: 860 }}>
           An elite engineering education, <span style={{ color: "var(--orange)" }}>close to home</span>

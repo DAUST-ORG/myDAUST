@@ -99,3 +99,30 @@ a {
   height: 5px;
   border-radius: 999px;
 }
+
+/* ---------- Responsive (mobile-first fixes) ---------- */
+.vit-burger {
+  display: none;
+  background: transparent;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  padding: 8px;
+  margin-left: 4px;
+}
+.vit-mobile-menu {
+  display: none;
+}
+@media (max-width: 940px) {
+  .vit-nav { display: none !important; }
+  .vit-burger { display: flex; align-items: center; margin-left: auto; }
+  .vit-apply { display: none !important; }
+  .vit-mobile-menu { display: block; background: var(--navy); }
+}
+@media (max-width: 720px) {
+  /* Overrides inline section padding: stylesheet !important beats style attributes. */
+  .v-section { padding: 56px 20px !important; }
+  .h2 { font-size: 26px !important; }
+  .lead { font-size: 15px !important; }
+  .eyebrow { font-size: 11px !important; letter-spacing: .1em !important; }
+}
