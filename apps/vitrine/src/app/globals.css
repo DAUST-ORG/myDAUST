@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700;9..144,800;9..144,900&family=Saira:wght@500;600;700;800&family=Montserrat:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Saira:wght@500;600;700;800&family=Montserrat:wght@400;500;600;700&display=swap");
 
 :root {
   --navy: #153b6a;
@@ -13,51 +13,49 @@
   --fg2: #4d5965;
   --fg3: #6c7884;
   --on-navy-muted: #b9c4d4;
-  /* Display headings use a soft editorial serif (Fraunces) paired with the
-     Montserrat body copy — the sans+serif contrast used by Stanford/CMU's
-     sites to read as "academic gravitas" rather than generic startup-sans. */
-  --display: "Fraunces", Georgia, serif;
-  --display-sans: "Saira", system-ui, sans-serif;
+  --display: "Saira", system-ui, sans-serif;
   --body: "Montserrat", system-ui, sans-serif;
 }
 
-* { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
-html, body { margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
 body {
   font-family: var(--body);
   color: var(--fg1);
   background: #fff;
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
 }
-a { color: inherit; }
-img { max-width: 100%; display: block; }
+a {
+  color: inherit;
+}
 
-/* Typography */
 .eyebrow {
   font-family: var(--body);
   font-weight: 700;
-  font-size: 12px;
-  letter-spacing: 0.14em;
+  font-size: 13px;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--orange);
 }
 .h2 {
   font-family: var(--display);
   font-weight: 700;
-  font-size: clamp(26px, 3vw, 38px);
-  line-height: 1.15;
-  margin: 10px 0 0;
+  font-size: clamp(28px, 3.2vw, 42px);
+  line-height: 1.1;
+  margin: 14px 0 0;
 }
 .lead {
   font-family: var(--body);
-  font-size: 15.5px;
+  font-size: 16px;
   line-height: 1.7;
   color: var(--fg2);
 }
-
-/* Buttons */
 .btn {
   font-family: var(--body);
   font-weight: 600;
@@ -68,265 +66,36 @@ img { max-width: 100%; display: block; }
   align-items: center;
   gap: 8px;
   text-decoration: none;
-  transition: all 0.2s cubic-bezier(0.2, 0.7, 0.3, 1);
+  transition: transform 0.12s, background 0.15s;
 }
-.btn-primary { background: var(--orange); color: #fff; }
-.btn-primary:hover { background: var(--orange-600); transform: translateY(-2px) rotate(-1deg); box-shadow: 0 10px 24px rgba(237, 132, 37, 0.35); }
-.btn-primary:active { transform: translateY(0) rotate(0); }
-.btn-outline { background: transparent; color: var(--navy); box-shadow: inset 0 0 0 1.5px var(--navy); }
-.btn-outline:hover { background: var(--navy); color: #fff; transform: translateY(-2px) rotate(1deg); }
-.btn-outline-light { background: transparent; color: #fff; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.5); }
-.btn-outline-light:hover { background: rgba(255,255,255,0.1); transform: translateY(-2px) rotate(1deg); }
-.btn-sm { padding: 9px 18px; font-size: 13px; }
-.btn-lg { padding: 13px 26px; font-size: 14.5px; }
-
-/* Cards */
-.card {
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.3, 1.2), box-shadow 0.3s cubic-bezier(0.2, 0.7, 0.3, 1);
-}
-.card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 12px 32px rgba(15, 44, 80, 0.1);
-}
-.card-flat {
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-}
-
-/* Tilt cards: a deliberate, slightly-imperfect hover (alternating rotation
-   per card via nth-child) instead of the uniform "every card lifts the same
-   way" pattern that reads as templated. Used on the Features/pillars grid. */
-.card-tilt {
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.3), box-shadow 0.3s ease;
-}
-.card-tilt:nth-child(odd):hover { transform: translateY(-6px) rotate(-1.3deg) scale(1.015); }
-.card-tilt:nth-child(even):hover { transform: translateY(-6px) rotate(1.3deg) scale(1.015); }
-.card-tilt:hover { box-shadow: 0 16px 36px rgba(15, 44, 80, 0.14); border-color: transparent; }
-
-/* Tilt-only utility: same alternating-rotation hover as .card-tilt but with
-   no opinion on background/border, so it can be layered onto elements that
-   already define their own surface (e.g. the navy scholarship tiers). */
-.tilt-hover { transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.3); }
-.tilt-hover:nth-child(odd):hover { transform: translateY(-6px) rotate(-1.3deg) scale(1.02); }
-.tilt-hover:nth-child(even):hover { transform: translateY(-6px) rotate(1.3deg) scale(1.02); }
-
-/* Fade-slide-in for content that mounts on demand (FAQ answers, expanding
-   panels) instead of popping into place instantly. */
-@keyframes fade-slide-in {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.fade-in-down { animation: fade-slide-in 0.25s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
-
-/* Links with underline on hover */
-.link-underline {
-  text-decoration: none;
-  transition: color 0.15s;
-}
-.link-underline:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-/* Site header */
-.site-header {
-  background: var(--navy);
-  position: sticky;
-  top: 0;
-  z-index: 60;
-  transition: box-shadow 0.25s;
-  overflow: visible;
-}
-.site-header.scrolled {
-  box-shadow: 0 4px 20px rgba(15,44,80,0.25);
-}
-.site-header nav a {
-  font-family: var(--body);
-  font-weight: 500;
-  font-size: 14px;
-  color: rgba(255,255,255,0.65);
-  text-decoration: none;
-  padding: 6px 0;
-  transition: color 0.15s;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-underline-offset: 4px;
-  transition: color 0.15s, text-decoration-color 0.15s;
-}
-.site-header nav a:hover {
-  color: #fff;
-  text-decoration-color: rgba(255,255,255,0.5);
-}
-.site-header nav a.active {
-  color: #fff;
-  font-weight: 600;
-  text-decoration-color: var(--orange);
-}
-
-/* Header buttons */
-.btn-header {
-  font-family: var(--body);
-  font-weight: 600;
-  font-size: 13px;
-  padding: 8px 18px;
-  border-radius: 999px;
-  border: none;
-  cursor: pointer;
-  text-decoration: none;
-  transition: all 0.2s;
-}
-.btn-header-primary { background: var(--orange); color: #fff; }
-.btn-header-primary:hover { background: var(--orange-600); transform: translateY(-1px); }
-.btn-header-ghost {
-  background: transparent;
-  color: rgba(255,255,255,0.7);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);
-}
-.btn-header-ghost:hover {
-  color: #fff;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4);
-}
-
-/* Mobile */
-.hdr-burger {
-  display: none;
-  background: transparent;
-  border: none;
-  color: #fff;
-  cursor: pointer;
-  padding: 4px;
-}
-.mobile-nav {
-  display: none;
-  background: var(--navy-deep);
-  border-top: 1px solid rgba(255,255,255,0.08);
-}
-.mobile-nav a {
-  display: block;
-  font-family: var(--body);
-  font-weight: 500;
-  font-size: 15px;
-  color: rgba(255,255,255,0.65);
-  text-decoration: none;
-  padding: 14px 32px;
-  transition: color 0.15s;
-}
-.mobile-nav a:hover, .mobile-nav a.active { color: #fff; }
-
-/* Scroll reveal */
-.reveal {
-  opacity: 0;
-  transform: translateY(24px);
-  transition: opacity 0.5s cubic-bezier(0.2, 0.7, 0.3, 1), transform 0.5s cubic-bezier(0.2, 0.7, 0.3, 1);
-}
-.reveal.visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* Hero motion: slow Ken Burns pan/zoom on the background image, the
-   "moving hero" treatment used in place of a literal video embed (no
-   carousel — see UI/UX review: this tier of university site never uses
-   hero carousels, just a single still or video with subtle motion). */
-@keyframes hero-kenburns {
-  0% { transform: scale(1) translate3d(0, 0, 0); }
-  100% { transform: scale(1.12) translate3d(-1.5%, -1.5%, 0); }
-}
-.hero-bg {
-  animation: hero-kenburns 22s ease-in-out infinite alternate;
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero-bg { animation: none; }
-}
-
-/* Marquee ticker: an infinite horizontally-scrolling strip — the "alive"
-   replacement for a static info band (used by Minerva for deadlines). Two
-   identical copies of the track sit side by side and the whole thing slides
-   left forever, so the loop is seamless. */
-.marquee {
+.btn-primary {
   background: var(--orange);
-  overflow: hidden;
-  white-space: nowrap;
-  display: flex;
-}
-.marquee-track {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  animation: marquee-scroll 28s linear infinite;
-}
-@keyframes marquee-scroll {
-  from { transform: translateX(0); }
-  to { transform: translateX(-100%); }
-}
-.marquee-item {
-  font-family: var(--display);
-  font-weight: 700;
-  font-style: italic;
-  font-size: 16px;
   color: #fff;
-  padding: 10px 28px;
-  white-space: nowrap;
 }
-.marquee-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.55);
-  flex-shrink: 0;
+.btn-primary:hover {
+  background: var(--orange-600);
+  transform: translateY(-1px);
 }
-@media (prefers-reduced-motion: reduce) {
-  .marquee-track { animation: none; }
+.btn-outline-light {
+  background: transparent;
+  color: #fff;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.5);
 }
-
-/* Wavy section divider (Hack Club-style soft edge instead of a hard
-   rectangle cut between sections). Sits at the bottom of a section,
-   colored to match the section it's leaving. */
-.wave-divider {
+.btn-sm {
+  padding: 9px 18px;
+  font-size: 13.5px;
+}
+.btn-lg {
+  padding: 14px 26px;
+  font-size: 15px;
+}
+.tri-dash {
+  display: flex;
+  gap: 9px;
+}
+.tri-dash span {
   display: block;
-  width: 100%;
-  height: 48px;
-  margin-bottom: -1px;
-}
-
-/* Oversized statement: one huge, confident line of serif type on a dark
-   full-bleed band — the "Learn. Belong. Lead." move — used once per page to
-   break up the card-grid rhythm instead of stacking identical sections. */
-.statement-band {
-  background: var(--navy-deep);
-  overflow: hidden;
-}
-.statement-text {
-  font-family: var(--display);
-  font-weight: 600;
-  font-style: italic;
-  color: #fff;
-  font-size: clamp(34px, 7vw, 84px);
-  line-height: 1.05;
-  letter-spacing: -0.01em;
-  margin: 0;
-  text-align: center;
-}
-.statement-text .accent { color: var(--orange); font-style: normal; }
-
-/* Responsive */
-@media (max-width: 1080px) {
-  .hdr-nav { display: none !important; }
-  .hdr-burger { display: inline-flex !important; }
-  .mobile-nav { display: block; }
-}
-@media (max-width: 900px) {
-  .grid-2 { grid-template-columns: 1fr !important; }
-  .grid-3 { grid-template-columns: 1fr !important; }
-  .grid-4 { grid-template-columns: repeat(2, 1fr) !important; }
-}
-@media (max-width: 600px) {
-  .grid-4 { grid-template-columns: 1fr !important; }
+  width: 36px;
+  height: 5px;
+  border-radius: 999px;
 }

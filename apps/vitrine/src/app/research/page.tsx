@@ -1,83 +1,126 @@
 "use client";
 
-import { ArrowRight, Stethoscope, Zap, Wheat, Leaf, Building2, Bot } from "lucide-react";
-import { PageFrame } from "@/components/PageFrame";
-import { Heading, Section } from "@/components/site";
-import { useLang } from "@/i18n/context";
+import Link from "next/link";
+import { ArrowRight, Bot, CheckCircle2, Cpu, HeartPulse, Leaf, Radio, Sun } from "lucide-react";
+import { PageFrame, useApply } from "@/components/PageFrame";
+import { Heading, Section, TriDash } from "@/components/site";
 
-const AREA_ICONS = [Stethoscope, Zap, Wheat, Leaf, Building2, Bot];
+const AREAS = [
+  { icon: Cpu, title: "Artificial Intelligence", desc: "Machine learning for African languages, agriculture, and health — building models that serve local needs." },
+  { icon: Sun, title: "Renewable Energy", desc: "Solar, storage and smart grids engineered for reliable power across the continent." },
+  { icon: Bot, title: "Robotics & Automation", desc: "Autonomous systems and embedded robotics, from competition platforms to industrial applications." },
+  { icon: Radio, title: "Connectivity & Networks", desc: "Communications, IoT and infrastructure that ensure inclusive participation in emerging technology." },
+  { icon: Leaf, title: "Sustainable Systems", desc: "Engineering for climate resilience, clean water and the environment." },
+  { icon: HeartPulse, title: "Engineering for Health", desc: "Affordable medical devices and data systems for health challenges that matter here." },
+];
+
+const STATS: [string, string][] = [
+  ["100+", "Student Projects"],
+  ["1000+", "Guests & Attendees"],
+  ["6", "Research Areas"],
+  ["25+", "Industry Partners"],
+];
 
 export default function ResearchPage() {
-  const { t } = useLang();
   return (
-    <PageFrame active="/research">
-      <section style={{ background: "var(--navy)", color: "#fff" }}>
-        <div style={{ padding: "88px clamp(24px, 5vw, 64px)" }}>
-          <div className="reveal">
-            <div className="eyebrow" style={{ color: "var(--orange)" }}>{t.research.eyebrow}</div>
-            <h1 style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: "clamp(32px, 4.8vw, 56px)", lineHeight: 1.05, margin: "14px 0 0", maxWidth: 740 }}>{t.research.title}</h1>
-            <p style={{ fontSize: 16, lineHeight: 1.75, color: "var(--on-navy-muted)", margin: "18px 0 0", maxWidth: 540 }}>{t.research.sub}</p>
-          </div>
-        </div>
-      </section>
-      <Section bg="#fff" pad="96px 32px">
-        <Heading eyebrow={t.research.areasEyebrow} title={t.research.areasTitle} sub={t.research.areasSub} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 18, marginTop: 44 }}>
-          {t.research.areas.map((a, i) => {
-            const Icon = AREA_ICONS[i] || Bot;
-            return (
-              <div key={a.title} className="reveal card-tilt" style={{ padding: "28px 24px" }}>
-                <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--navy)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <Icon size={20} color="#fff" />
-                </div>
-                <div style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 17, marginTop: 18 }}>{a.title}</div>
-                <p className="lead" style={{ fontSize: 13.5, marginTop: 8 }}>{a.desc}</p>
+    <PageFrame active="Research">
+      <Hero />
+      <Section bg="#fff">
+        <Heading
+          eyebrow="Research Areas"
+          title="Driven by purpose, rooted in local impact"
+          sub="DAUST research ensures inclusive participation of Africa in the technologies shaping tomorrow."
+        />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 26, marginTop: 50 }}>
+          {AREAS.map((a) => (
+            <div key={a.title} style={{ background: "var(--subtle)", borderRadius: 16, padding: "32px 30px", border: "1px solid var(--border)" }}>
+              <div style={{ width: 54, height: 54, borderRadius: 14, background: "var(--navy)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 18 }}>
+                <a.icon size={25} color="#fff" />
               </div>
-            );
-          })}
-        </div>
-      </Section>
-      <Section bg="var(--subtle)" pad="96px 32px">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 64, alignItems: "start" }}>
-          <div className="reveal">
-            <div className="eyebrow">{t.research.centerEyebrow}</div>
-            <h2 className="h2" style={{ marginTop: 10 }}>{t.research.centerTitle}</h2>
-            <p className="lead" style={{ marginTop: 18 }}>{t.research.centerSub}</p>
-          </div>
-          <div className="reveal" style={{ display: "grid", gap: 12 }}>
-            {t.research.centerFocus.map((f) => (
-              <div key={f} className="card-flat" style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--orange)", flexShrink: 0 }} />
-                <span style={{ fontSize: 14.5, fontWeight: 500 }}>{f}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </Section>
-      <Section bg="#fff" pad="96px 32px">
-        <Heading eyebrow={t.research.leadershipEyebrow} title={t.research.leadershipTitle} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 18, marginTop: 44 }}>
-          {t.research.directors.map((d) => (
-            <div key={d.name} className="reveal card-tilt" style={{ padding: "22px 22px" }}>
-              <div style={{ width: 38, height: 38, borderRadius: "50%", background: "var(--navy)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--display)", fontWeight: 700, fontSize: 13, marginBottom: 12 }}>
-                {d.name.split(" ").map((w) => w[0]).slice(-2).join("")}
-              </div>
-              <div style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 14.5 }}>{d.name}</div>
-              <div style={{ fontSize: 12.5, color: "var(--orange)", fontWeight: 600, marginTop: 3 }}>{d.role}</div>
+              <div style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 19, color: "var(--fg1)", marginBottom: 9 }}>{a.title}</div>
+              <p style={{ fontSize: 14.5, lineHeight: 1.65, color: "var(--fg2)", margin: 0 }}>{a.desc}</p>
             </div>
           ))}
         </div>
-        <p style={{ fontSize: 13, color: "var(--fg3)", marginTop: 28 }}>{t.research.associatesNote}</p>
       </Section>
-      <section style={{ background: "var(--navy)", color: "#fff" }}>
-        <div style={{ padding: "64px clamp(24px, 5vw, 64px)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
-          <div className="reveal">
-            <div className="eyebrow" style={{ color: "var(--orange)" }}>{t.research.cta.eyebrow}</div>
-            <h2 style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: "clamp(24px, 2.5vw, 34px)", margin: "8px 0 0", lineHeight: 1.1 }}>{t.research.cta.title}</h2>
-          </div>
-          <a href="mailto:info@daust.org" className="reveal btn btn-primary btn-lg">{t.research.cta.action} <ArrowRight size={15} /></a>
-        </div>
-      </section>
+      <ImpactStats />
+      <Ventures />
     </PageFrame>
+  );
+}
+
+function Hero() {
+  return (
+    <section style={{ background: "linear-gradient(160deg, var(--navy) 0%, var(--navy-deep) 100%)", color: "#fff", position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px)", backgroundSize: "16px 16px" }} />
+      <div style={{ position: "relative", maxWidth: 1180, margin: "0 auto", padding: "84px 32px", textAlign: "center" }}>
+        <div className="eyebrow">Research & Innovation</div>
+        <h1 style={{ fontFamily: "var(--display)", fontWeight: 800, fontSize: "clamp(32px,4vw,52px)", margin: "14px auto 0", maxWidth: 780 }}>
+          Ensuring Africa has a seat at the table
+        </h1>
+        <p className="lead" style={{ color: "var(--on-navy-muted)", margin: "16px auto 0", maxWidth: 640 }}>
+          Research at DAUST is driven by purpose and rooted in local impact — advancing the emerging technologies that will shape the continent&rsquo;s future.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function ImpactStats() {
+  return (
+    <section style={{ background: "var(--navy)", position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px)", backgroundSize: "16px 16px" }} />
+      <div style={{ position: "relative", maxWidth: 1180, margin: "0 auto", padding: "74px 32px" }}>
+        <div className="eyebrow">DAUST Impact 2025</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 28, marginTop: 28 }}>
+          {STATS.map(([v, l]) => (
+            <div key={l}>
+              <div style={{ fontFamily: "var(--display)", fontWeight: 800, fontSize: 42, color: "var(--orange)", lineHeight: 1 }}>{v}</div>
+              <div style={{ color: "var(--on-navy-muted)", fontSize: 13.5, marginTop: 8 }}>{l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Ventures() {
+  const apply = useApply();
+  return (
+    <Section bg="var(--subtle)">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 60, alignItems: "center" }}>
+        <div>
+          <div className="eyebrow">Technology Ventures</div>
+          <h2 className="h2" style={{ color: "var(--fg1)", margin: "14px 0 0" }}>From the lab to the market.</h2>
+          <div style={{ margin: "20px 0 22px" }}><TriDash /></div>
+          <p style={{ fontSize: 16, lineHeight: 1.7, color: "var(--fg2)", margin: "0 0 22px" }}>
+            Our Technology Ventures program empowers students to build entrepreneurial skills and bring new
+            technologies to market — turning research and class projects into companies with real impact.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 28 }}>
+            {["Venture design & prototyping studios", "Mentorship from founders and industry", "Pitch events, demo days and seed support"].map((it) => (
+              <div key={it} style={{ display: "flex", gap: 11, alignItems: "center" }}>
+                <CheckCircle2 size={19} color="var(--orange)" style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: 15, color: "var(--fg2)" }}>{it}</span>
+              </div>
+            ))}
+          </div>
+          <Link href="/startups" className="btn btn-lg" style={{ background: "var(--navy)", color: "#fff" }}>
+            Explore the program <ArrowRight size={16} />
+          </Link>
+        </div>
+        <div style={{ background: "var(--navy)", borderRadius: 18, padding: "48px 40px", color: "#fff" }}>
+          <div className="eyebrow">Featured</div>
+          <h3 style={{ fontFamily: "var(--display)", fontWeight: 800, fontSize: "clamp(24px,2.6vw,34px)", margin: "16px 0 0", lineHeight: 1.1 }}>
+            Le Sénégal décroche la Lune
+          </h3>
+          <p style={{ fontSize: 15.5, lineHeight: 1.7, color: "var(--on-navy-muted)", margin: "18px 0 26px" }}>
+            Why 2026 marks a historic turning point for African innovation — and the role DAUST students and researchers are playing in it.
+          </p>
+          <button className="btn btn-outline-light" onClick={apply}>Join the mission <ArrowRight size={16} /></button>
+        </div>
+      </div>
+    </Section>
   );
 }
