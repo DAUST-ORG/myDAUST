@@ -21,7 +21,7 @@ export default function StudentIdPage() {
       <div style={{ maxWidth: 460, margin: "0 auto" }}>
         <div style={{ borderRadius: 18, overflow: "hidden", boxShadow: "var(--shadow-lg)", background: "var(--surface)" }}>
           <div style={{ background: "linear-gradient(135deg, var(--daust-navy) 0%, var(--daust-navy-deep) 100%)", color: "#fff", padding: "20px 24px", display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, letterSpacing: ".04em" }}>DAUST</span>
+            <img src="/logo-daust.png" alt="DAUST" style={{ height: 24, width: "auto", filter: "brightness(0) invert(1)" }} />
             <div className="tri-dash" style={{ display: "flex", gap: 6 }}>
               <span style={{ width: 22, height: 4, background: "#fff", borderRadius: 999 }} />
               <span style={{ width: 22, height: 4, background: "var(--daust-orange)", borderRadius: 999 }} />

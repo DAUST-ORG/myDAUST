@@ -62,7 +62,7 @@ export default function PayLinkPage() {
       {/* Header */}
       <header style={{ background: "var(--daust-navy-deep)", color: "#fff", padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, letterSpacing: ".05em" }}>DAUST</span>
+          <img src="/logo-daust.png" alt="DAUST" style={{ height: 22, width: "auto", filter: "brightness(0) invert(1)", verticalAlign: "middle" }} />
           <span style={{ display: "inline-flex", gap: 4, marginLeft: 10, verticalAlign: "middle" }}>
             <span style={{ width: 18, height: 3.5, borderRadius: 99, background: "#fff" }} />
             <span style={{ width: 18, height: 3.5, borderRadius: 99, background: "var(--daust-orange)" }} />

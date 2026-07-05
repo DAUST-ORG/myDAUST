@@ -68,7 +68,7 @@ export function Header({ active, onApply }: { active?: string; onApply: () => vo
     <header style={{ background: "var(--navy)", position: "sticky", top: 0, zIndex: 60 }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 32px", height: 68, display: "flex", alignItems: "center", gap: 24 }}>
         <Link href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none" }}>
-          <span style={{ fontFamily: "var(--display)", fontWeight: 800, fontSize: 22, color: "#fff", letterSpacing: ".04em" }}>DAUST</span>
+          <img src="/logo-daust.png" alt="DAUST" style={{ height: 24, width: "auto", filter: "brightness(0) invert(1)" }} />
           <TriDash light />
         </Link>
         <nav style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
@@ -103,7 +103,7 @@ export function Footer() {
       <div style={{ maxWidth: 1180, margin: "0 auto", display: "flex", flexWrap: "wrap", gap: 24, alignItems: "center" }}>
         <div style={{ flex: 1, minWidth: 240 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontFamily: "var(--display)", fontWeight: 800, fontSize: 20, letterSpacing: ".04em" }}>DAUST</span>
+            <img src="/logo-daust.png" alt="DAUST" style={{ height: 22, width: "auto", filter: "brightness(0) invert(1)" }} />
             <TriDash light />
           </div>
           <p style={{ color: "var(--on-navy-muted)", fontSize: 13.5, marginTop: 12, maxWidth: 360, lineHeight: 1.6 }}>
