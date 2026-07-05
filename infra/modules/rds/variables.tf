@@ -44,3 +44,13 @@ variable "allocated_storage" {
   type    = number
   default = 20
 }
+
+variable "deletion_protection" {
+  type    = bool
+  default = false
+}
+
+variable "skip_final_snapshot" {
+  type    = bool
+  default = true
+}

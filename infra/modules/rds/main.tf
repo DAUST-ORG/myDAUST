@@ -29,7 +29,7 @@ resource "aws_db_instance" "this" {
   publicly_accessible    = var.publicly_accessible
 
   backup_retention_period = 7
-  skip_final_snapshot     = true
-  deletion_protection     = false
+  skip_final_snapshot     = var.skip_final_snapshot
+  deletion_protection     = var.deletion_protection
   apply_immediately       = true
 }
