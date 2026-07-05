@@ -14,6 +14,8 @@ FROM node:24-slim AS runtime
 WORKDIR /app
 COPY --from=build /app/apps/portal/.next/standalone ./
 COPY --from=build /app/apps/portal/.next/static ./apps/portal/.next/static
+# next standalone omits public/ by design; the server serves it from ./public next to server.js
+COPY --from=build /app/apps/portal/public ./apps/portal/public
 ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
 EXPOSE 3000
 CMD ["node", "apps/portal/server.js"]

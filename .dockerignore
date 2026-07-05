@@ -5,6 +5,7 @@ node_modules
 **/dist
 design
 *.png
+!apps/portal/public/*.png
 apps/api/uploads
 .env
 .playwright-mcp
