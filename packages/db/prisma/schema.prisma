@@ -150,6 +150,10 @@ model Student {
   studentNo   String       @unique
   programId   String?
   program     Program?     @relation(fields: [programId], references: [id])
+  // Date of birth (date only). Second factor for the public bill-payment lookup.
+  dateOfBirth DateTime?
+  // Roster photo, resolved to an absolute URL (served from the vitrine bucket).
+  photoUrl    String?
   invoices    Invoice[]
   payments    Payment[]
   enrollments Enrollment[]

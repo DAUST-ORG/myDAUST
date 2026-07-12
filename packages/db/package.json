@@ -21,7 +21,9 @@
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'no lint yet'",
-    "bootstrap:prod": "tsx prisma/bootstrap-prod.ts"
+    "bootstrap:prod": "tsx prisma/bootstrap-prod.ts",
+    "import:students": "tsx prisma/import-students.ts",
+    "attach-photos": "tsx prisma/attach-photos.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

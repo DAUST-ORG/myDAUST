@@ -111,8 +111,9 @@ module "alb" {
 
 locals {
   alb_url      = "http://${module.alb.alb_dns_name}"
-  public_url   = "https://my.daust.net"  # prod domain (zone on Cloudflare; my-daust.azt.dev kept as tunnel alias)
-  vitrine_url  = "https://daust.net"     # prod vitrine (prod bucket via the prod tunnel)
+  public_url   = "https://my.daust.net"      # prod domain (zone on Cloudflare; my-daust.azt.dev kept as tunnel alias)
+  vitrine_url  = "https://daust.net"         # prod vitrine (prod bucket via the prod tunnel)
+  payment_url  = "https://payment.daust.net" # public bill portal (same portal image, tunnel-routed to the ALB)
   database_url = "postgresql://mydaust:${random_password.db.result}@${module.rds.address}:5432/mydaust?schema=public"
 }
 
@@ -153,6 +154,7 @@ module "api_service" {
     { name = "COOKIE_SECURE", value = "true" },
     { name = "PORTAL_ORIGIN", value = local.public_url },
     { name = "VITRINE_ORIGIN", value = local.vitrine_url },
+    { name = "PAYMENT_ORIGIN", value = local.payment_url },
     { name = "PAYTECH_ENV", value = "test" },
     { name = "PAYTECH_IPN_URL", value = "${local.public_url}/api/finance/webhook/paytech" },
     { name = "PAYTECH_SUCCESS_URL", value = "${local.public_url}/student/billing" },

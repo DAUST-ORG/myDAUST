@@ -866,3 +866,25 @@ export const markPaymentLinkPaid = (id: string) =>
 export const getPublicPaymentLink = (token: string) => request<PublicPaymentLink>(`/finance/links/${token}`);
 export const checkoutPaymentLink = (token: string, method: string) =>
   request<{ redirectUrl: string }>(`/finance/links/${token}/checkout`, { method: "POST", body: JSON.stringify({ method }) });
+
+// --- Public bill portal (payment.daust.net): pay a real student account by ID + DOB ---
+export interface BillCharge {
+  label: string;
+  dueDate: string | null;
+  amountXof: number;
+  paidXof: number;
+  status: string; // pending | partial | paid | overdue
+}
+export interface BillLookup {
+  studentName: string;
+  studentNo: string;
+  program: string | null;
+  term: string | null;
+  balanceXof: number;
+  dueDate: string | null;
+  charges: BillCharge[];
+}
+export const lookupBill = (studentNo: string, dob: string) =>
+  request<BillLookup>("/finance/public/bill/lookup", { method: "POST", body: JSON.stringify({ studentNo, dob }) });
+export const checkoutBill = (input: { studentNo: string; dob: string; amountXof: number; method: string }) =>
+  request<{ redirectUrl: string }>("/finance/public/bill/checkout", { method: "POST", body: JSON.stringify(input) });

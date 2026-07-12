@@ -169,6 +169,11 @@ export class FinanceService {
       await this.settlePaymentLinkIpn(v.ref.slice(6), v.success, payload as object, v.method);
       return { valid: true };
     }
+    // Public bill portal (payment.daust.net): the ref IS the Payment.providerRef.
+    if (v.ref.startsWith("BILL-")) {
+      await this.settleBillIpn(v.ref, v.success, payload as object, v.method);
+      return { valid: true };
+    }
 
     const payment = await this.prisma.payment.findUnique({ where: { providerRef: v.ref } });
     if (!payment) return { valid: true };
@@ -1028,6 +1033,107 @@ export class FinanceService {
         data: { entity: "PaymentLink", entityId: linkId, action: "link-paid", data: payload },
       });
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public bill portal (payment.daust.net): pay a real student account by ID + DOB.
+  // No login; the DOB is a weak second factor, so responses never confirm whether
+  // the ID exists (no enumeration oracle) and the controller rate-limits by IP.
+  // Money still rides the exact same rail as the platform: a pending Payment now,
+  // settled by the verified IPN via settlePayment (allocation + audit + receipt).
+  // ---------------------------------------------------------------------------
+
+  /** Public: outstanding balance + charges for a student matched by ID + date of birth. */
+  async lookupBill(studentNo: string, dob: string) {
+    const student = await this.findStudentForBill(studentNo, dob);
+    const invoices = await this.prisma.invoice.findMany({
+      where: { studentId: student.id },
+      orderBy: { createdAt: "asc" },
+      include: { term: true, plan: { include: { installments: { orderBy: { sequence: "asc" } } } } },
+    });
+    const balanceXof = invoices.reduce((s, i) => s + (i.totalAmount - i.amountPaid), 0);
+    const charges = invoices.flatMap((inv) =>
+      (inv.plan?.installments ?? []).map((i) => ({
+        label: `${inv.term.name} · installment ${i.sequence}`,
+        dueDate: i.dueDate,
+        amountXof: i.amountDue,
+        paidXof: i.amountPaid,
+        status: i.status,
+      })),
+    );
+    return {
+      studentName: `${student.person.firstName} ${student.person.lastName}`.replace(/\s+/g, " ").trim(),
+      studentNo: student.studentNo,
+      program: student.program?.name ?? null,
+      term: invoices[0]?.term.name ?? null,
+      balanceXof,
+      dueDate: charges.find((c) => c.status !== "paid")?.dueDate ?? null,
+      charges,
+    };
+  }
+
+  /** Public: start a PayTech checkout of `amountXof` toward the student's oldest open invoice. */
+  async checkoutBill(studentNo: string, dob: string, amountXof: number, method: string) {
+    const student = await this.findStudentForBill(studentNo, dob);
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { studentId: student.id, status: { in: ["open", "partial"] } },
+      orderBy: { createdAt: "asc" },
+    });
+    if (!invoice) throw new BadRequestException("This account has no outstanding balance");
+    const balance = invoice.totalAmount - invoice.amountPaid;
+    const amount = Math.min(Math.max(1, Math.floor(amountXof)), balance);
+
+    const ref = `BILL-${randomUUID()}`;
+    await this.prisma.payment.create({
+      data: {
+        invoiceId: invoice.id,
+        studentId: student.id,
+        amount,
+        method: (["wave", "orange_money", "card"].includes(method) ? method : "card") as never,
+        status: "pending",
+        providerRef: ref,
+      },
+    });
+
+    const payUrl = `${loadEnv().PAYMENT_ORIGIN}/pay-bill`;
+    const { redirectUrl } = await this.provider.requestPayment({
+      ref,
+      amount,
+      itemName: `DAUST tuition · ${student.studentNo}`,
+      customField: { studentNo: student.studentNo },
+      successUrl: `${payUrl}?paid=1`,
+      cancelUrl: payUrl,
+    });
+    return { redirectUrl };
+  }
+
+  /** IPN settler for a BILL- payment: the ref is the Payment.providerRef verbatim. */
+  private async settleBillIpn(ref: string, success: boolean, payload: object, method: string | null) {
+    const payment = await this.prisma.payment.findUnique({ where: { providerRef: ref } });
+    if (!payment) return;
+    if (!success) {
+      if (payment.status === "pending") {
+        await this.prisma.payment.update({
+          where: { id: payment.id },
+          data: { status: "cancelled", ipnPayload: payload },
+        });
+        await this.audit(payment.id, "cancelled", payload);
+      }
+      return;
+    }
+    await this.settlePayment(payment.id, { via: "ipn", payload, method });
+  }
+
+  /** Match a student by studentNo + DOB (date-only, UTC). Generic 404 on any mismatch. */
+  private async findStudentForBill(studentNo: string, dob: string) {
+    const notFound = new NotFoundException("No account matches that ID and date of birth");
+    const student = await this.prisma.student.findUnique({
+      where: { studentNo: studentNo.trim() },
+      include: { person: true, program: true },
+    });
+    if (!student?.dateOfBirth) throw notFound;
+    if (student.dateOfBirth.toISOString().slice(0, 10) !== dob.slice(0, 10)) throw notFound;
+    return student;
   }
 
   private async audit(entityId: string, action: string, data: unknown): Promise<void> {

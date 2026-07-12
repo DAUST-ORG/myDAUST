@@ -11,6 +11,8 @@ const schema = z.object({
   DATABASE_URL: z.string().url(),
   PORTAL_ORIGIN: z.string().url().default("http://localhost:3001"),
   VITRINE_ORIGIN: z.string().url().default("http://localhost:3000"),
+  // Public bill-payment portal (payment.daust.net); drives its PayTech return URLs.
+  PAYMENT_ORIGIN: z.string().url().default("http://localhost:3000"),
   SESSION_SECRET: z.string().min(16).default("dev-only-session-secret-change-me"),
   COOKIE_SECURE: z.enum(["true", "false"]).optional(),
 
