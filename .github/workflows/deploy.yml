@@ -1,0 +1,144 @@
+name: Deploy
+
+# develop -> staging, main -> prod. CI only bumps images and rolls services;
+# infrastructure changes stay operator-run via OpenTofu (see infra/).
+on:
+  push:
+    branches: [develop, main]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC -> daust-github-deploy role
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR: 961828155948.dkr.ecr.us-east-1.amazonaws.com
+  ROLE_ARN: arn:aws:iam::961828155948:role/daust-github-deploy
+  # Branch -> environment mapping
+  ENV_NAME: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+  API_ORIGIN: ${{ github.ref_name == 'main' && 'https://my.daust.net' || 'https://daust-staging.azt.dev' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      vitrine: ${{ steps.filter.outputs.vitrine }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'apps/api/**'
+              - 'apps/portal/**'
+              - 'packages/**'
+              - 'pnpm-lock.yaml'
+            vitrine:
+              - 'apps/vitrine/**'
+              - 'packages/shared/**'
+
+  app:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    # ARM64 images; if the org plan lacks arm runners, switch to ubuntu-latest
+    # + docker/setup-qemu-action (slow until the api image is slimmed).
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECR login
+        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR"
+
+      - name: Build and push images
+        run: |
+          TAG="${GITHUB_SHA::7}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          docker build -f apps/api/Dockerfile -t "$ECR/daust-api:$TAG" .
+          docker build -f apps/portal/Dockerfile --build-arg NEXT_PUBLIC_API_URL="" -t "$ECR/daust-portal:$TAG" .
+          docker push "$ECR/daust-api:$TAG"
+          docker push "$ECR/daust-portal:$TAG"
+
+      - name: Run migrations (one-off ECS task inside the VPC)
+        run: |
+          CLUSTER="daust-$ENV_NAME"
+          # Current api task def carries the DATABASE_URL secret + network config.
+          TD=$(aws ecs describe-services --cluster "$CLUSTER" --services "daust-$ENV_NAME-api" \
+                --query 'services[0].taskDefinition' --output text)
+          NET=$(aws ecs describe-services --cluster "$CLUSTER" --services "daust-$ENV_NAME-api" \
+                --query 'services[0].networkConfiguration' --output json)
+          TASK=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TD" \
+                --launch-type FARGATE --network-configuration "$NET" \
+                --overrides '{"containerOverrides":[{"name":"api","command":["npx","prisma","migrate","deploy","--schema","packages/db/prisma/schema.prisma"]}]}' \
+                --query 'tasks[0].taskArn' --output text)
+          echo "migration task: $TASK"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
+          EXIT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" \
+                --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migration exit code: $EXIT"
+          [ "$EXIT" = "0" ]
+
+      - name: Roll services to the new images
+        run: |
+          CLUSTER="daust-$ENV_NAME"
+          for SVC in api portal; do
+            TD=$(aws ecs describe-services --cluster "$CLUSTER" --services "daust-$ENV_NAME-$SVC" \
+                  --query 'services[0].taskDefinition' --output text)
+            # Re-register the current definition with only the image swapped.
+            aws ecs describe-task-definition --task-definition "$TD" --query 'taskDefinition' --output json \
+              | jq --arg img "$ECR/daust-$SVC:$TAG" \
+                   'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+                    | .containerDefinitions[0].image = $img' > td.json
+            NEW=$(aws ecs register-task-definition --cli-input-json file://td.json \
+                  --query 'taskDefinition.taskDefinitionArn' --output text)
+            aws ecs update-service --cluster "$CLUSTER" --service "daust-$ENV_NAME-$SVC" \
+              --task-definition "$NEW" >/dev/null
+            echo "$SVC -> $NEW"
+          done
+
+      - name: Wait for rollout + health check
+        run: |
+          CLUSTER="daust-$ENV_NAME"
+          aws ecs wait services-stable --cluster "$CLUSTER" \
+            --services "daust-$ENV_NAME-api" "daust-$ENV_NAME-portal"
+          curl -sf "$API_ORIGIN/api/health" | grep -q '"ok":true'
+
+  vitrine:
+    needs: changes
+    if: needs.changes.outputs.vitrine == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build shared + static export
+        run: |
+          pnpm --filter @mydaust/shared run build
+          NEXT_PUBLIC_API_URL="$API_ORIGIN" NEXT_PUBLIC_PORTAL_URL="$API_ORIGIN" \
+            pnpm --filter @mydaust/vitrine exec next build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync to the environment bucket
+        run: aws s3 sync apps/vitrine/out/ "s3://daust-$ENV_NAME-vitrine-961828155948/" --delete

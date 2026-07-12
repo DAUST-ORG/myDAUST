@@ -73,3 +73,10 @@ Sign in at `/login` — each role lands on its own portal area.
 
 Production guards: passwordless paths removed; cookies get `Secure` when `NODE_ENV=production`;
 boot fails if `SESSION_SECRET` is left at its dev default in production.
+
+## Branches & deploys
+
+- `develop` → auto-deploys **staging** (`daust-staging.azt.dev` app · `daust.azt.dev` vitrine · demo seed).
+- `main` → auto-deploys **prod** (`my.daust.net` app · `daust.net` vitrine · real data, bootstrap via `pnpm --filter @mydaust/db run bootstrap:prod`).
+- Flow: feature branch → PR into `develop` (CI: typecheck + tests) → verify on staging → merge `develop` into `main`.
+- CI auth is GitHub OIDC (`infra/global/`); workflows only bump images / sync the vitrine — infrastructure changes are operator-run OpenTofu (pass the currently-running image tags when applying manually).

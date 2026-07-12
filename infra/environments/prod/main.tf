@@ -111,8 +111,8 @@ module "alb" {
 
 locals {
   alb_url      = "http://${module.alb.alb_dns_name}"
-  public_url   = "https://my-daust.azt.dev" # Cloudflare tunnel hostname (zone azt.dev)
-  vitrine_url  = "https://daust.azt.dev"          # vitrine static site, same tunnel
+  public_url   = "https://my.daust.net"  # prod domain (zone on Cloudflare; my-daust.azt.dev kept as tunnel alias)
+  vitrine_url  = "https://daust.net"     # prod vitrine (prod bucket via the prod tunnel)
   database_url = "postgresql://mydaust:${random_password.db.result}@${module.rds.address}:5432/mydaust?schema=public"
 }
 

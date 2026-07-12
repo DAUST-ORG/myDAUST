@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
 import { login } from "@/lib/api";
 
@@ -12,6 +12,8 @@ const DEMO_ACCOUNTS = [
   { email: "admin@daust.edu", role: "Admin" },
 ];
 const DEMO_PASSWORD = "daust-dev-2026";
+// One image serves every environment, so demo helpers are gated by hostname at runtime.
+const PROD_HOSTS = ["my.daust.net", "my-daust.azt.dev"];
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,6 +22,10 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
+  useEffect(() => {
+    setShowDemo(!PROD_HOSTS.includes(window.location.hostname));
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -157,7 +163,7 @@ export default function LoginPage() {
             Need help? <a href="mailto:info@daust.org">Contact IT support</a>
           </p>
 
-          <details className="login-demo">
+          {showDemo && <details className="login-demo">
             <summary>Demo accounts (dev only)</summary>
             <div className="login-demo-chips">
               {DEMO_ACCOUNTS.map((a) => (
@@ -170,7 +176,7 @@ export default function LoginPage() {
             <p className="muted" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
               Click a role to autofill. Password: <code>{DEMO_PASSWORD}</code>. Google Workspace SSO replaces this later.
             </p>
-          </details>
+          </details>}
         </div>
       </div>
     </div>

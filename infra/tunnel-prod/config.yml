@@ -1,10 +1,14 @@
 tunnel: 1510130a-e77f-486c-96af-52d4618350fb
 credentials-file: /etc/cloudflared/creds.json
 ingress:
+  - hostname: my.daust.net
+    service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
+  # Transition alias until daust.net DNS is live everywhere.
   - hostname: my-daust.azt.dev
     service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
-  - hostname: daust.azt.dev
+  - hostname: daust.net
     service: http://daust-prod-vitrine-961828155948.s3-website-us-east-1.amazonaws.com
     originRequest:
+      # S3 website endpoints route by Host header; forward the bucket host, not the edge host.
       httpHostHeader: daust-prod-vitrine-961828155948.s3-website-us-east-1.amazonaws.com
   - service: http_status:404

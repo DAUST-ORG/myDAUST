@@ -4,6 +4,13 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+// Demo data must never land in production. The prod bootstrap is bootstrap-prod.ts.
+const dbUrl = process.env.DATABASE_URL ?? "";
+if (dbUrl.includes("daust-prod") && process.env.SEED_ALLOW_PROD !== "1") {
+  console.error("Refusing to demo-seed a daust-prod database. Set SEED_ALLOW_PROD=1 to override (don't).");
+  process.exit(1);
+}
+
 // Dev-only shared password for every seeded user. Replaced per-user / by OIDC later.
 const DEV_PASSWORD = "daust-dev-2026";
 
