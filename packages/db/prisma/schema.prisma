@@ -186,6 +186,8 @@ model Invoice {
   totalAmount    Int
   amountPaid     Int           @default(0)
   status         InvoiceStatus @default(open)
+  // Human label for an ad-hoc charge (e.g. "Lab & technology fee"); null for tuition.
+  description    String?
   // Revenue dimension for the director dashboard (tuition -> 9100).
   costCenterCode String        @default("9100")
   costCenter     CostCenter    @relation(fields: [costCenterCode], references: [code])

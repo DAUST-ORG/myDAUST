@@ -647,6 +647,7 @@ export interface AccountInstallment {
 export interface AccountInvoice {
   id: string;
   term: string;
+  description: string | null;
   total: number;
   paid: number;
   balance: number;
@@ -679,6 +680,25 @@ export interface StudentAccountRow {
   invoiceId: string | null;
 }
 export const listStudentAccounts = () => request<StudentAccountRow[]>("/finance/admin/accounts");
+
+// Standalone billing admin: create students + add/remove ad-hoc charges (single or bulk).
+export const createStudent = (input: {
+  fullName: string;
+  dateOfBirth: string;
+  studentNo?: string;
+  email?: string;
+  programCode?: string;
+  billTuition?: boolean;
+}) => request<{ id: string; studentNo: string }>("/finance/admin/students", { method: "POST", body: JSON.stringify(input) });
+export const addCharge = (input: {
+  studentIds: string[];
+  description: string;
+  amountXof: number;
+  costCenterCode?: string;
+  dueDate?: string;
+}) => request<{ ok: boolean; count: number }>("/finance/admin/charges", { method: "POST", body: JSON.stringify(input) });
+export const removeCharge = (invoiceId: string) =>
+  request<{ ok: boolean }>(`/finance/admin/charges/${invoiceId}`, { method: "DELETE" });
 
 export interface OverdueRow {
   installmentId: string;

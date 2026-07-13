@@ -19,6 +19,23 @@ const CreatePaymentLinkInput = z.object({
   expiresAt: z.string().datetime().optional(),
 });
 
+const CreateStudentInput = z.object({
+  fullName: z.string().min(1).max(120),
+  dateOfBirth: z.string().min(8).max(10), // YYYY-MM-DD
+  studentNo: z.string().min(1).max(64).optional(),
+  email: z.string().email().max(160).optional(),
+  programCode: z.string().min(1).max(16).optional(),
+  billTuition: z.boolean().optional(),
+});
+
+const AddChargeInput = z.object({
+  studentIds: z.array(z.string().min(1).max(64)).min(1).max(2000),
+  description: z.string().min(1).max(160),
+  amountXof: z.number().int().positive().max(100_000_000),
+  costCenterCode: z.string().max(8).optional(),
+  dueDate: z.string().optional(),
+});
+
 @Controller("finance/admin")
 @Roles("bursar", "admin")
 export class AdminFinanceController {
@@ -88,6 +105,21 @@ export class AdminFinanceController {
   @Get("students/:id/account")
   account(@Param("id") id: string) {
     return this.finance.getStudentAccount(id);
+  }
+
+  @Post("students")
+  createStudent(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.finance.createStudent(user.personId, CreateStudentInput.parse(body));
+  }
+
+  @Post("charges")
+  addCharge(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.finance.addCharge(user.personId, AddChargeInput.parse(body));
+  }
+
+  @Delete("charges/:invoiceId")
+  removeCharge(@CurrentUser() user: AuthUser, @Param("invoiceId") invoiceId: string) {
+    return this.finance.removeCharge(user.personId, invoiceId);
   }
 
   @Post("plans")

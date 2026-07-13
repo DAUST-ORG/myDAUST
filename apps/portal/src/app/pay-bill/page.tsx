@@ -23,7 +23,8 @@ function PayBillInner() {
   const search = useSearchParams();
   const justPaid = search.get("paid") === "1";
 
-  const [studentNo, setStudentNo] = useState("");
+  // A staff-shared link prefills the ID (e.g. .../pay-bill?sid=DAUST-2026-0007); DOB is still required.
+  const [studentNo, setStudentNo] = useState(() => search.get("sid") ?? "");
   const [dob, setDob] = useState("");
   const [bill, setBill] = useState<BillLookup | null>(null);
   const [creds, setCreds] = useState<Creds | null>(null);

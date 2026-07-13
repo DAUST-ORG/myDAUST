@@ -8,11 +8,24 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { FEE_STRUCTURE, type CreatePaymentPlanInput, type InitiatePaymentInput } from "@mydaust/shared";
+import {
+  COST_CENTER_TUITION,
+  FEE_STRUCTURE,
+  splitEvenXof,
+  type CreatePaymentPlanInput,
+  type InitiatePaymentInput,
+} from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { PAYMENT_PROVIDER, type PaymentProvider } from "./payment-provider.js";
 import { loadEnv } from "../config/env.js";
+
+// Standard annual tuition, billed as the official 4-installment quarterly plan — mirrors
+// packages/db/prisma/import-students.ts so admin-created students match the imported roster.
+// Official DAUST payment sheet (tuition-only): 4 x 743,750 XOF due Aug 5 / Nov 5 / Jan 5 / Mar 5.
+const STANDARD_TUITION_XOF = FEE_STRUCTURE.tuitionPerYear; // 2_975_000
+const TUITION_TERM_NAME = "Fall 2026";
+const TUITION_INSTALLMENT_DUE = ["2026-08-05", "2026-11-05", "2027-01-05", "2027-03-05"] as const;
 
 @Injectable()
 export class FinanceService {
@@ -458,6 +471,7 @@ export class FinanceService {
       invoices: invoices.map((inv) => ({
         id: inv.id,
         term: inv.term.name,
+        description: inv.description,
         total: inv.totalAmount,
         paid: inv.amountPaid,
         balance: inv.totalAmount - inv.amountPaid,
@@ -469,6 +483,210 @@ export class FinanceService {
         })),
       })),
     };
+  }
+
+  // --- Standalone billing admin: student + ad-hoc charge management ---
+  // A "charge" is one small Invoice + a single-installment plan, so it flows through the exact
+  // same balance/settlement rail as tuition with zero changes to settlePayment or balance math.
+
+  private splitName(full: string): { firstName: string; lastName: string } {
+    const parts = full.replace(/\s+/g, " ").trim().split(" ");
+    const firstName = parts.shift() ?? "";
+    return { firstName, lastName: parts.join(" ") || firstName };
+  }
+
+  /** Mint a unique campus ID for a student created without an official registrar number. */
+  private async generateStudentNo(): Promise<string> {
+    const year = new Date().getUTCFullYear();
+    const base = await this.prisma.student.count();
+    for (let i = 0; i < 100; i++) {
+      const candidate = `DAUST-${year}-${String(base + 1 + i).padStart(4, "0")}`;
+      const exists = await this.prisma.student.findUnique({ where: { studentNo: candidate } });
+      if (!exists) return candidate;
+    }
+    return `DAUST-${year}-${randomUUID().slice(0, 8)}`;
+  }
+
+  /** Bill the standard annual tuition (idempotent per student+term). */
+  private async billStandardTuition(studentId: string, actorId: string) {
+    const term = await this.prisma.term.findUnique({ where: { name: TUITION_TERM_NAME } });
+    if (!term) throw new BadRequestException(`Term "${TUITION_TERM_NAME}" is not set up`);
+    const existing = await this.prisma.invoice.findFirst({ where: { studentId, termId: term.id } });
+    if (existing) return;
+    const amounts = splitEvenXof(STANDARD_TUITION_XOF, TUITION_INSTALLMENT_DUE.length);
+    const installments = TUITION_INSTALLMENT_DUE.map((d, idx) => ({
+      sequence: idx + 1,
+      dueDate: new Date(`${d}T00:00:00Z`),
+      amountDue: amounts[idx] ?? 0,
+    }));
+    const invoice = await this.prisma.invoice.create({
+      data: {
+        studentId,
+        termId: term.id,
+        totalAmount: STANDARD_TUITION_XOF,
+        costCenterCode: COST_CENTER_TUITION,
+        plan: { create: { createdById: actorId, installments: { create: installments } } },
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "Invoice", entityId: invoice.id, action: "tuition-billed", actorId, data: { amount: STANDARD_TUITION_XOF } },
+    });
+  }
+
+  /**
+   * Create a real platform student (Person + Student) from the billing admin. They immediately
+   * appear in the registrar roster and can pay on payment.daust.net. Optionally auto-bills tuition.
+   */
+  async createStudent(
+    actorId: string,
+    input: {
+      fullName: string;
+      dateOfBirth: string;
+      studentNo?: string;
+      email?: string;
+      programCode?: string;
+      billTuition?: boolean;
+    },
+  ) {
+    const { firstName, lastName } = this.splitName(input.fullName);
+    if (!firstName) throw new BadRequestException("Full name is required");
+    const dob = new Date(`${input.dateOfBirth.slice(0, 10)}T00:00:00Z`);
+    if (Number.isNaN(dob.getTime())) throw new BadRequestException("Invalid date of birth");
+
+    const studentNo = input.studentNo?.trim() || (await this.generateStudentNo());
+    if (await this.prisma.student.findUnique({ where: { studentNo } })) {
+      throw new BadRequestException(`Student ID ${studentNo} already exists`);
+    }
+    const email = input.email?.trim().toLowerCase() || `${studentNo.toLowerCase()}@students.daust.edu`;
+    if (await this.prisma.person.findUnique({ where: { email } })) {
+      throw new BadRequestException(`Email ${email} is already in use`);
+    }
+
+    let programId: string | null = null;
+    if (input.programCode) {
+      const program = await this.prisma.program.findUnique({ where: { code: input.programCode } });
+      if (!program) throw new BadRequestException("Unknown program");
+      programId = program.id;
+    }
+
+    const student = await this.prisma.$transaction(async (tx) => {
+      const person = await tx.person.create({
+        data: { email, firstName, lastName, kind: "student", roles: ["student"] },
+      });
+      const created = await tx.student.create({
+        data: { personId: person.id, studentNo, dateOfBirth: dob, programId },
+      });
+      await tx.auditLog.create({
+        data: { entity: "Student", entityId: created.id, action: "student-created", actorId, data: { studentNo, email } },
+      });
+      return created;
+    });
+
+    if (input.billTuition !== false) await this.billStandardTuition(student.id, actorId);
+    return { id: student.id, studentNo };
+  }
+
+  /** Add an ad-hoc charge to one, several, or all students. Each charge = one single-installment invoice. */
+  async addCharge(
+    actorId: string,
+    input: { studentIds: string[]; description: string; amountXof: number; costCenterCode?: string; dueDate?: string },
+  ) {
+    const description = input.description.trim();
+    if (!description) throw new BadRequestException("Charge description is required");
+    const amount = Math.floor(input.amountXof);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("Amount must be positive");
+
+    const costCenterCode = input.costCenterCode ?? COST_CENTER_TUITION;
+    if (!(await this.prisma.costCenter.findUnique({ where: { code: costCenterCode } }))) {
+      throw new BadRequestException("Unknown cost center");
+    }
+    const term = await this.prisma.term.findUnique({ where: { name: TUITION_TERM_NAME } });
+    if (!term) throw new BadRequestException(`Term "${TUITION_TERM_NAME}" is not set up`);
+    const dueDate = input.dueDate ? new Date(input.dueDate) : new Date();
+    if (Number.isNaN(dueDate.getTime())) throw new BadRequestException("Invalid due date");
+
+    const ids = [...new Set(input.studentIds)];
+    if (ids.length === 0) throw new BadRequestException("No students selected");
+    const validIds = (
+      await this.prisma.student.findMany({ where: { id: { in: ids } }, select: { id: true } })
+    ).map((s) => s.id);
+    if (validIds.length === 0) throw new NotFoundException("No matching students");
+
+    // Chunk so a big "charge all" stays comfortably under the interactive-transaction timeout.
+    const CHUNK = 25;
+    let count = 0;
+    for (let i = 0; i < validIds.length; i += CHUNK) {
+      const slice = validIds.slice(i, i + CHUNK);
+      await this.prisma.$transaction(
+        slice.map((studentId) =>
+          this.prisma.invoice.create({
+            data: {
+              studentId,
+              termId: term.id,
+              totalAmount: amount,
+              description,
+              costCenterCode,
+              plan: {
+                create: {
+                  createdById: actorId,
+                  installments: { create: [{ sequence: 1, dueDate, amountDue: amount }] },
+                },
+              },
+            },
+          }),
+        ),
+      );
+      count += slice.length;
+    }
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Charge",
+        entityId: "bulk",
+        action: "charges-added",
+        actorId,
+        data: { description, amount, costCenterCode, count, studentIds: validIds },
+      },
+    });
+    return { ok: true, count };
+  }
+
+  /** Remove an unpaid charge (its invoice + plan). Refuses once anything has been paid against it. */
+  async removeCharge(actorId: string, invoiceId: string) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { plan: { include: { installments: true } }, payments: true },
+    });
+    if (!invoice) throw new NotFoundException("Charge not found");
+    if (invoice.amountPaid > 0) throw new BadRequestException("Cannot remove a charge that has been paid");
+    if (invoice.payments.some((p) => p.status === "success" || p.status === "refunded")) {
+      throw new BadRequestException("Cannot remove a charge with settled payments");
+    }
+
+    const installmentIds = invoice.plan?.installments.map((i) => i.id) ?? [];
+    const paymentIds = invoice.payments.map((p) => p.id);
+    await this.prisma.$transaction(async (tx) => {
+      if (installmentIds.length || paymentIds.length) {
+        await tx.paymentAllocation.deleteMany({
+          where: { OR: [{ installmentId: { in: installmentIds } }, { paymentId: { in: paymentIds } }] },
+        });
+      }
+      await tx.payment.deleteMany({ where: { invoiceId } });
+      if (invoice.plan) {
+        await tx.installment.deleteMany({ where: { planId: invoice.plan.id } });
+        await tx.paymentPlan.delete({ where: { id: invoice.plan.id } });
+      }
+      await tx.invoice.delete({ where: { id: invoiceId } });
+      await tx.auditLog.create({
+        data: {
+          entity: "Invoice",
+          entityId: invoiceId,
+          action: "charge-removed",
+          actorId,
+          data: { description: invoice.description, amount: invoice.totalAmount },
+        },
+      });
+    });
+    return { ok: true };
   }
 
   /** Installments past due and not fully paid, across all students (bursar collections view). */
@@ -1091,7 +1309,8 @@ export class FinanceService {
     const balanceXof = invoices.reduce((s, i) => s + (i.totalAmount - i.amountPaid), 0);
     const charges = invoices.flatMap((inv) =>
       (inv.plan?.installments ?? []).map((i) => ({
-        label: `${inv.term.name} · installment ${i.sequence}`,
+        // Ad-hoc charges carry a description; tuition installments fall back to term + sequence.
+        label: inv.description ?? `${inv.term.name} · installment ${i.sequence}`,
         dueDate: i.dueDate,
         amountXof: i.amountDue,
         paidXof: i.amountPaid,

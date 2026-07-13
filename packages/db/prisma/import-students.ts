@@ -15,8 +15,8 @@ const prisma = new PrismaClient();
 
 const TUITION_PER_YEAR = 2_975_000;
 const TERM_NAME = "Fall 2026";
-// Official quarterly plan: installment 1 at enrolment, then Nov 5 / Jan 5 / Mar 5.
-const INSTALLMENT_DUE = ["enrolment", "2026-11-05", "2027-01-05", "2027-03-05"] as const;
+// Official DAUST payment sheet (tuition-only): 4 x 743,750 XOF, fixed dates for everyone.
+const INSTALLMENT_DUE = ["2026-08-05", "2026-11-05", "2027-01-05", "2027-03-05"] as const;
 
 const MONTHS: Record<string, number> = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
@@ -102,8 +102,7 @@ async function main() {
     if (!email || seenEmails.has(email)) email = synthEmail(studentNo);
     seenEmails.add(email);
 
-    const enrolDue = parseDmy(r["Enrollment Date"] ?? "") ?? new Date();
-    const dueDates = INSTALLMENT_DUE.map((d) => (d === "enrolment" ? enrolDue : new Date(`${d}T00:00:00Z`)));
+    const dueDates = INSTALLMENT_DUE.map((d) => new Date(`${d}T00:00:00Z`));
 
     if (!commit) {
       const existing = await prisma.student.findUnique({ where: { studentNo } });
