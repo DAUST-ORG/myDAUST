@@ -2,6 +2,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
@@ -1124,15 +1126,40 @@ export class FinanceService {
     await this.settlePayment(payment.id, { via: "ipn", payload, method });
   }
 
+  // Hard bound on wrong-DOB guesses per ID across ALL sources — the real defense
+  // against enumerating a student's balance by brute-forcing their date of birth
+  // (the IP-based guard is spoofable on a directly-reachable origin). In-memory is
+  // fine for the single prod api task; move to Redis when scaled.
+  private readonly failedBillLookups = new Map<string, number[]>();
+  private static readonly BILL_FAIL_WINDOW_MS = 60 * 60_000;
+  private static readonly BILL_MAX_FAILS = 10;
+
   /** Match a student by studentNo + DOB (date-only, UTC). Generic 404 on any mismatch. */
   private async findStudentForBill(studentNo: string, dob: string) {
-    const notFound = new NotFoundException("No account matches that ID and date of birth");
+    const key = studentNo.trim().toLowerCase();
+    const now = Date.now();
+    const recentFails = (this.failedBillLookups.get(key) ?? []).filter(
+      (t) => now - t < FinanceService.BILL_FAIL_WINDOW_MS,
+    );
+    if (recentFails.length >= FinanceService.BILL_MAX_FAILS) {
+      throw new HttpException(
+        "Too many failed attempts for this ID. Please try again later.",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const student = await this.prisma.student.findUnique({
       where: { studentNo: studentNo.trim() },
       include: { person: true, program: true },
     });
-    if (!student?.dateOfBirth) throw notFound;
-    if (student.dateOfBirth.toISOString().slice(0, 10) !== dob.slice(0, 10)) throw notFound;
+    const ok =
+      !!student?.dateOfBirth && student.dateOfBirth.toISOString().slice(0, 10) === dob.slice(0, 10);
+    if (!ok) {
+      recentFails.push(now);
+      this.failedBillLookups.set(key, recentFails);
+      throw new NotFoundException("No account matches that ID and date of birth");
+    }
+    this.failedBillLookups.delete(key); // reset the counter on a successful match
     return student;
   }
 
