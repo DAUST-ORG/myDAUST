@@ -69,15 +69,24 @@ jobs:
           docker push "$ECR/daust-api:$TAG"
           docker push "$ECR/daust-portal:$TAG"
 
-      - name: Run migrations (one-off ECS task inside the VPC)
+      - name: Run migrations (one-off ECS task on the freshly built image)
         run: |
           CLUSTER="daust-$ENV_NAME"
-          # Current api task def carries the DATABASE_URL secret + network config.
-          TD=$(aws ecs describe-services --cluster "$CLUSTER" --services "daust-$ENV_NAME-api" \
+          # The migration files live in THIS build's image, so migrate MUST run the new image.
+          # run-task can't override the image, so register a task def carrying it while keeping
+          # the current def's DATABASE_URL secret + network config. (Running the current/old
+          # task def here silently skips new migrations — the client then 500s on the new columns.)
+          CUR=$(aws ecs describe-services --cluster "$CLUSTER" --services "daust-$ENV_NAME-api" \
                 --query 'services[0].taskDefinition' --output text)
           NET=$(aws ecs describe-services --cluster "$CLUSTER" --services "daust-$ENV_NAME-api" \
                 --query 'services[0].networkConfiguration' --output json)
-          TASK=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TD" \
+          aws ecs describe-task-definition --task-definition "$CUR" --query 'taskDefinition' --output json \
+            | jq --arg img "$ECR/daust-api:$TAG" \
+                 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+                  | .containerDefinitions[0].image = $img' > migtd.json
+          MIGTD=$(aws ecs register-task-definition --cli-input-json file://migtd.json \
+                --query 'taskDefinition.taskDefinitionArn' --output text)
+          TASK=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$MIGTD" \
                 --launch-type FARGATE --network-configuration "$NET" \
                 --overrides '{"containerOverrides":[{"name":"api","command":["pnpm","--filter","@mydaust/db","exec","prisma","migrate","deploy"]}]}' \
                 --query 'tasks[0].taskArn' --output text)
