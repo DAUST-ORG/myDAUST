@@ -239,6 +239,8 @@ function PayBillInner() {
 
       <footer style={{ textAlign: "center", padding: "16px 0 22px", fontSize: 12.5, color: "#7b8794" }}>
         <strong style={{ color: "#3c4756" }}>DAUST Pay</strong> · Dakar American University of Science &amp; Technology · finance@daust.edu.sn
+        <span style={{ margin: "0 6px", color: "#bcc6d1" }}>·</span>
+        <a href="/admin" style={{ color: "var(--daust-navy)", fontWeight: 600 }}>Staff login</a>
       </footer>
     </main>
   );
