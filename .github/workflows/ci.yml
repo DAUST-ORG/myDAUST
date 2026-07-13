@@ -25,6 +25,14 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Workspace consumers typecheck against built artifacts: shared's .d.ts and
+      # the generated Prisma client. DATABASE_URL is a dummy (generate needs the
+      # schema, not a live DB).
+      - name: Build workspace packages
+        run: |
+          pnpm --filter @mydaust/shared run build
+          DATABASE_URL="postgresql://x:x@localhost:5432/x" pnpm --filter @mydaust/db run build
+
       - name: Typecheck (all packages)
         run: pnpm -r typecheck
 
