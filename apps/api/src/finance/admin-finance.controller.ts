@@ -80,6 +80,11 @@ export class AdminFinanceController {
     return this.finance.refundPayment(id, body?.reason, user.personId);
   }
 
+  @Get("accounts")
+  accounts() {
+    return this.finance.listStudentAccounts();
+  }
+
   @Get("students/:id/account")
   account(@Param("id") id: string) {
     return this.finance.getStudentAccount(id);

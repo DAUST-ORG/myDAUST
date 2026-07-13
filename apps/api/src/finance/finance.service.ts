@@ -392,6 +392,41 @@ export class FinanceService {
     };
   }
 
+  /** All student accounts with derived balances + status. Powers the standalone billing admin. */
+  async listStudentAccounts() {
+    const students = await this.prisma.student.findMany({
+      orderBy: { studentNo: "asc" },
+      include: {
+        person: true,
+        program: true,
+        invoices: { include: { plan: { include: { installments: true } } } },
+      },
+    });
+    const now = Date.now();
+    return students.map((s) => {
+      const billed = s.invoices.reduce((a, i) => a + i.totalAmount, 0);
+      const paid = s.invoices.reduce((a, i) => a + i.amountPaid, 0);
+      const balance = billed - paid;
+      const installments = s.invoices.flatMap((i) => i.plan?.installments ?? []);
+      const openCharges = installments.filter((i) => i.amountPaid < i.amountDue).length;
+      const overdue = installments.some((i) => i.amountPaid < i.amountDue && i.dueDate.getTime() < now);
+      return {
+        id: s.id,
+        studentNo: s.studentNo,
+        name: `${s.person.firstName} ${s.person.lastName}`.replace(/\s+/g, " ").trim(),
+        program: s.program?.name ?? null,
+        photoUrl: s.photoUrl,
+        billed,
+        paid,
+        balance,
+        openCharges,
+        overdue,
+        status: balance <= 0 ? "paid" : overdue ? "overdue" : "due",
+        invoiceId: s.invoices[0]?.id ?? null,
+      };
+    });
+  }
+
   /** Bursar drill-down: one student's full account (invoices, schedule, payments, balances). */
   async getStudentAccount(studentId: string) {
     const student = await this.prisma.student.findUnique({

@@ -663,6 +663,23 @@ export interface StudentAccount {
 export const getStudentAccount = (studentId: string) =>
   request<StudentAccount>(`/finance/admin/students/${studentId}/account`);
 
+// --- Standalone billing admin: all accounts with derived balances ---
+export interface StudentAccountRow {
+  id: string;
+  studentNo: string;
+  name: string;
+  program: string | null;
+  photoUrl: string | null;
+  billed: number;
+  paid: number;
+  balance: number;
+  openCharges: number;
+  overdue: boolean;
+  status: string; // paid | due | overdue
+  invoiceId: string | null;
+}
+export const listStudentAccounts = () => request<StudentAccountRow[]>("/finance/admin/accounts");
+
 export interface OverdueRow {
   installmentId: string;
   student: string;
