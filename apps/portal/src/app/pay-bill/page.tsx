@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CalendarDays, CheckCircle2, CreditCard, Lock, Search, ShieldCheck } from "lucide-react";
 import { type BillLookup, checkoutBill, lookupBill } from "@/lib/api";
@@ -19,7 +19,7 @@ interface Creds {
   dob: string;
 }
 
-export default function PayBillPage() {
+function PayBillInner() {
   const search = useSearchParams();
   const justPaid = search.get("paid") === "1";
 
@@ -241,5 +241,13 @@ export default function PayBillPage() {
         <strong style={{ color: "#3c4756" }}>DAUST Pay</strong> · Dakar American University of Science &amp; Technology · finance@daust.edu.sn
       </footer>
     </main>
+  );
+}
+
+export default function PayBillPage() {
+  return (
+    <Suspense fallback={null}>
+      <PayBillInner />
+    </Suspense>
   );
 }
