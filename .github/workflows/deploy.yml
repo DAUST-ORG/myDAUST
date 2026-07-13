@@ -39,6 +39,7 @@ jobs:
               - 'apps/portal/**'
               - 'packages/**'
               - 'pnpm-lock.yaml'
+              - '.github/workflows/deploy.yml'
             vitrine:
               - 'apps/vitrine/**'
               - 'packages/shared/**'
