@@ -69,7 +69,7 @@ export function AppShell({
       {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} />}
       <aside className={`sidebar ${variant} ${navOpen ? "open" : ""}`}>
         <div className="brand">
-          <img src="/logo-daust.png" alt="DAUST" className="wordmark" style={{ height: 26, width: "auto", filter: "brightness(0) invert(1)" }} />
+          <img src="/logo-daust.png" alt="DAUST" className="wordmark" style={{ height: 22, width: "auto", display: "block", filter: "brightness(0) invert(1)" }} />
           <div className="tri-dash">
             <span />
             <span />
