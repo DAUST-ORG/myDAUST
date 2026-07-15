@@ -10,15 +10,27 @@ import {
 } from "@/lib/api";
 import { Field, Modal, Select } from "@/components/ui";
 
+export type EditSection = "all" | "enrollment" | "personal" | "contact" | "guardian";
+const SECTION_TITLE: Record<EditSection, string> = {
+  all: "Edit record",
+  enrollment: "Edit enrollment",
+  personal: "Edit personal details",
+  contact: "Edit contact",
+  guardian: "Edit guardian / emergency",
+};
+
 export function EditStudentModal({
   student,
+  section = "all",
   onClose,
   onSaved,
 }: {
   student: AdminStudentDetail;
+  section?: EditSection;
   onClose: () => void;
   onSaved: (updated: AdminStudentDetail) => void;
 }) {
+  const show = (k: EditSection) => section === "all" || section === k;
   const [programs, setPrograms] = useState<AdminPrograms["programs"]>([]);
   const [form, setForm] = useState({
     fullName: student.name,
@@ -86,7 +98,7 @@ export function EditStudentModal({
     <Modal
       open
       onClose={onClose}
-      title="Edit record"
+      title={SECTION_TITLE[section]}
       width={640}
       footer={
         <>
@@ -98,36 +110,44 @@ export function EditStudentModal({
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
 
-        <Section title="Identity & enrollment">
-          <Field label="Full name"><input value={form.fullName} onChange={(e) => set("fullName", e.target.value)} /></Field>
-          <Field label="Email"><input value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
-          <Field label="Program">
-            <Select value={form.programCode} onChange={(v) => set("programCode", v)} options={[{ value: "", label: "— None —" }, ...programs.map((p) => ({ value: p.code, label: p.name }))]} />
-          </Field>
-          <Field label="Year of study"><input type="number" min={1} max={8} value={form.yearLevel} onChange={(e) => set("yearLevel", e.target.value)} /></Field>
-          <Field label="Cohort"><input value={form.cohort} onChange={(e) => set("cohort", e.target.value)} placeholder="Class of 2028" /></Field>
-          <Field label="Advisor"><input value={form.advisor} onChange={(e) => set("advisor", e.target.value)} placeholder="Dr. Ibrahima Bâ" /></Field>
-        </Section>
+        {show("enrollment") && (
+          <Section title="Identity & enrollment">
+            <Field label="Full name"><input value={form.fullName} onChange={(e) => set("fullName", e.target.value)} /></Field>
+            <Field label="Email"><input value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
+            <Field label="Program">
+              <Select value={form.programCode} onChange={(v) => set("programCode", v)} options={[{ value: "", label: "— None —" }, ...programs.map((p) => ({ value: p.code, label: p.name }))]} />
+            </Field>
+            <Field label="Year of study"><input type="number" min={1} max={8} value={form.yearLevel} onChange={(e) => set("yearLevel", e.target.value)} /></Field>
+            <Field label="Cohort"><input value={form.cohort} onChange={(e) => set("cohort", e.target.value)} placeholder="Class of 2028" /></Field>
+            <Field label="Advisor"><input value={form.advisor} onChange={(e) => set("advisor", e.target.value)} placeholder="Dr. Ibrahima Bâ" /></Field>
+          </Section>
+        )}
 
-        <Section title="Personal">
-          <Field label="Date of birth"><input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
-          <Field label="Gender">
-            <Select value={form.gender} onChange={(v) => set("gender", v)} options={[{ value: "", label: "—" }, "Female", "Male", "Other"]} />
-          </Field>
-          <Field label="Nationality"><input value={form.nationality} onChange={(e) => set("nationality", e.target.value)} /></Field>
-        </Section>
+        {show("personal") && (
+          <Section title="Personal">
+            <Field label="Date of birth"><input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
+            <Field label="Gender">
+              <Select value={form.gender} onChange={(v) => set("gender", v)} options={[{ value: "", label: "—" }, "Female", "Male", "Other"]} />
+            </Field>
+            <Field label="Nationality"><input value={form.nationality} onChange={(e) => set("nationality", e.target.value)} /></Field>
+          </Section>
+        )}
 
-        <Section title="Contact">
-          <Field label="Phone"><input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+221 …" /></Field>
-          <Field label="City"><input value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
-          <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>
-        </Section>
+        {show("contact") && (
+          <Section title="Contact">
+            <Field label="Phone"><input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+221 …" /></Field>
+            <Field label="City"><input value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
+            <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>
+          </Section>
+        )}
 
-        <Section title="Guardian / emergency">
-          <Field label="Name"><input value={form.guardianName} onChange={(e) => set("guardianName", e.target.value)} /></Field>
-          <Field label="Relationship"><input value={form.guardianRelation} onChange={(e) => set("guardianRelation", e.target.value)} placeholder="Parent" /></Field>
-          <Field label="Phone"><input value={form.guardianPhone} onChange={(e) => set("guardianPhone", e.target.value)} /></Field>
-        </Section>
+        {show("guardian") && (
+          <Section title="Guardian / emergency">
+            <Field label="Name"><input value={form.guardianName} onChange={(e) => set("guardianName", e.target.value)} /></Field>
+            <Field label="Relationship"><input value={form.guardianRelation} onChange={(e) => set("guardianRelation", e.target.value)} placeholder="Parent" /></Field>
+            <Field label="Phone"><input value={form.guardianPhone} onChange={(e) => set("guardianPhone", e.target.value)} /></Field>
+          </Section>
+        )}
       </div>
     </Modal>
   );

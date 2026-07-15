@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { z } from "zod";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
@@ -26,6 +26,11 @@ export class AdminAdmissionsController {
   create(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const input = CreateApplicantInput.parse(body);
     return this.admissions.adminCreateApplicant(user.personId, input);
+  }
+
+  @Get("applicants/:id")
+  detail(@Param("id") id: string) {
+    return this.admissions.applicantDetail(id);
   }
 
   @Patch("applicants/:id/stage")

@@ -342,6 +342,12 @@ model Program {
   departmentId String
   department   Department @relation(fields: [departmentId], references: [id])
   students     Student[]
+  // Display/reference metadata (editable via admin). `tuition` is reference only —
+  // actual billing uses the standard FEE_STRUCTURE amount, not this.
+  degree       String? // e.g. "B.Sc.", "M.Sc.", "MBA"
+  school       String? // e.g. "Engineering"
+  tuition      Int? // reference annual tuition (XOF)
+  color        String? // accent hex for cards
 }
 
 model Course {

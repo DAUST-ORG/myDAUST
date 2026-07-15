@@ -408,15 +408,97 @@ export interface AdminStudent {
   balance: number;
   status: string;
 }
+export interface ProgramRow {
+  code: string;
+  name: string;
+  department: string;
+  students: number;
+  degree: string | null;
+  school: string | null;
+  tuition: number | null;
+  color: string | null;
+}
 export interface AdminPrograms {
-  programs: { code: string; name: string; department: string; students: number }[];
+  programs: ProgramRow[];
   courses: { code: string; title: string; credits: number; department: string }[];
   departments: { id: string; code: string; name: string }[];
 }
-export const createProgram = (input: { code: string; name: string; departmentId: string }) =>
+export const createProgram = (input: { code: string; name: string; departmentId: string; degree?: string | null; school?: string | null; tuition?: number | null; color?: string | null }) =>
   request<{ id: string }>("/academics/admin/programs", { method: "POST", body: JSON.stringify(input) });
 export const createCourse = (input: { code: string; title: string; credits: number; departmentId: string }) =>
   request<{ id: string }>("/academics/admin/courses", { method: "POST", body: JSON.stringify(input) });
+
+export interface ProgramDetail {
+  code: string;
+  name: string;
+  department: string;
+  degree: string | null;
+  school: string | null;
+  tuition: number | null;
+  color: string | null;
+  stats: { studentCount: number; billed: number; paid: number; revenue: number; yearDist: number[] };
+  students: { id: string; studentNo: string; name: string; photoUrl: string | null; yearLevel: number | null; gpa: number; completedCredits: number; balance: number; status: string }[];
+  courses: { code: string; title: string; credits: number }[];
+}
+export const getProgramDetail = (code: string) => request<ProgramDetail>(`/academics/admin/programs/${encodeURIComponent(code)}`);
+export interface UpdateProgramInput {
+  name?: string;
+  departmentId?: string;
+  degree?: string | null;
+  school?: string | null;
+  tuition?: number | null;
+  color?: string | null;
+}
+export const updateProgram = (code: string, input: UpdateProgramInput) =>
+  request(`/academics/admin/programs/${encodeURIComponent(code)}`, { method: "PATCH", body: JSON.stringify(input) });
+
+export interface CourseSection {
+  id: string;
+  sectionCode: string;
+  term: string;
+  termId: string;
+  instructor: string | null;
+  instructorId: string | null;
+  days: string;
+  startTime: string;
+  endTime: string;
+  room: string | null;
+  capacity: number;
+  seatsTaken: number;
+}
+export interface AdminCourseDetail {
+  id: string;
+  code: string;
+  title: string;
+  credits: number;
+  department: string;
+  departmentId: string;
+  prerequisites: { code: string; title: string }[];
+  sections: CourseSection[];
+  allCourses: { code: string; title: string }[];
+  departments: { id: string; code: string; name: string }[];
+  terms: { id: string; name: string }[];
+}
+export const getAdminCourseDetail = (code: string) => request<AdminCourseDetail>(`/academics/admin/courses/${encodeURIComponent(code)}`);
+export const updateCourse = (code: string, input: { title?: string; credits?: number; departmentId?: string; prerequisiteCodes?: string[] }) =>
+  request(`/academics/admin/courses/${encodeURIComponent(code)}`, { method: "PATCH", body: JSON.stringify(input) });
+export interface SectionInput {
+  courseCode: string;
+  termId: string;
+  sectionCode: string;
+  instructorId?: string | null;
+  capacity: number;
+  days: string;
+  startTime: string;
+  endTime: string;
+  room?: string | null;
+}
+export const createSection = (input: SectionInput) =>
+  request<{ id: string }>("/academics/admin/sections", { method: "POST", body: JSON.stringify(input) });
+export const updateSection = (id: string, input: Partial<Omit<SectionInput, "courseCode">>) =>
+  request(`/academics/admin/sections/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+export const deleteSection = (id: string) =>
+  request<{ ok: boolean }>(`/academics/admin/sections/${id}`, { method: "DELETE" });
 export const getAdminStats = () => request<AdminStats>("/academics/admin/stats");
 export const getAdminStudents = () => request<AdminStudent[]>("/academics/admin/students");
 export interface AdminStudentDetail {
@@ -912,8 +994,25 @@ export const createApplicant = (input: {
 }) => request<{ id: string }>("/admissions/applicants", { method: "POST", body: JSON.stringify(input) });
 export const setApplicantStage = (id: string, stage: string) =>
   request(`/admissions/applicants/${id}/stage`, { method: "PATCH", body: JSON.stringify({ stage }) });
+export interface ApplicantDetail {
+  id: string;
+  firstName: string;
+  lastName: string;
+  name: string;
+  email: string;
+  programCode: string | null;
+  program: string | null;
+  stage: string;
+  score: number | null;
+  country: string | null;
+  feePaid: boolean;
+  appFee: number;
+  submittedAt: string;
+  scholarship: { pct: number; band: string | null };
+}
+export const getApplicant = (id: string) => request<ApplicantDetail>(`/admissions/applicants/${id}`);
 
-export interface StaffMember { name: string; email: string; kind: string; roles: string[] }
+export interface StaffMember { id: string; name: string; email: string; kind: string; roles: string[] }
 export const getStaff = () => request<StaffMember[]>("/academics/admin/staff");
 
 // --- Director-configurable money settings ---

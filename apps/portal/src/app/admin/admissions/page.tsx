@@ -1,9 +1,10 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, ChevronRight, Download, Filter, UserPlus, X } from "lucide-react";
-import { type Admissions, type Applicant, createApplicant, getAdmissions, setApplicantStage } from "@/lib/api";
-import { Avatar, Badge, type BadgeTone, Drawer, Field, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
+import { ChevronRight, Download, Filter, UserPlus } from "lucide-react";
+import { type Admissions, createApplicant, getAdmissions } from "@/lib/api";
+import { Avatar, Badge, type BadgeTone, Field, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
 
 const STAGES = ["submitted", "review", "interview", "offer", "accepted", "rejected"];
 const STAGE_TONE: Record<string, BadgeTone> = {
@@ -23,19 +24,13 @@ const STAGE_LABEL: Record<string, string> = {
   rejected: "Rejected",
 };
 
-function nextStage(stage: string): string | null {
-  const flow = ["submitted", "review", "interview", "offer", "accepted"];
-  const i = flow.indexOf(stage);
-  return i >= 0 && i < flow.length - 1 ? flow[i + 1]! : null;
-}
-
 export default function AdmissionsPage() {
+  const router = useRouter();
   const [d, setD] = useState<Admissions | null>(null);
   const [q, setQ] = useState("");
   const [stageF, setStageF] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
   const [progF, setProgF] = useState("all");
-  const [sel, setSel] = useState<Applicant | null>(null);
   const [adding, setAdding] = useState(false);
   const { sort, toggle, apply } = useSort({ key: "score", dir: "desc" });
 
@@ -63,12 +58,6 @@ export default function AdmissionsPage() {
       submitted: (a) => a.submittedAt,
     });
   }, [d, q, stageF, progF, apply]);
-
-  async function move(a: Applicant, stage: string) {
-    await setApplicantStage(a.id, stage);
-    setSel(null);
-    load();
-  }
 
   function exportCsv() {
     const header = ["Name", "Email", "Program", "Country", "BAC", "Fee paid", "Stage", "Submitted"];
@@ -146,7 +135,7 @@ export default function AdmissionsPage() {
             </thead>
             <tbody>
               {rows.map((a) => (
-                <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => setSel(a)}>
+                <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/admin/admissions/${a.id}`)}>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Avatar name={a.name} size={30} />
@@ -173,66 +162,12 @@ export default function AdmissionsPage() {
         </div>
       </div>
 
-      <Drawer
-        open={!!sel}
-        onClose={() => setSel(null)}
-        title="Applicant"
-        footer={
-          sel && sel.stage !== "rejected" && sel.stage !== "accepted" ? (
-            <>
-              <button onClick={() => move(sel, "rejected")} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--danger)" }}><X size={15} /> Reject</button>
-              {nextStage(sel.stage) && nextStage(sel.stage) !== "accepted" && (
-                <button onClick={() => move(sel, nextStage(sel.stage)!)} style={{ display: "flex", alignItems: "center", gap: 6 }}><ArrowRight size={15} /> Advance</button>
-              )}
-              <button className="primary" onClick={() => move(sel, sel.stage === "offer" ? "accepted" : "offer")} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <Check size={15} /> {sel.stage === "offer" ? "Accept" : "Make offer"}
-              </button>
-            </>
-          ) : null
-        }
-      >
-        {sel && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <Avatar name={sel.name} size={56} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 18 }}>{sel.name}</div>
-                <div className="muted" style={{ fontSize: 13 }}>{sel.program} · {sel.country ?? "—"}</div>
-                <div style={{ marginTop: 6 }}><Badge tone={STAGE_TONE[sel.stage] ?? "neutral"}>{STAGE_LABEL[sel.stage] ?? sel.stage}</Badge></div>
-              </div>
-            </div>
-            <div style={{ background: "var(--bg-subtle)", borderRadius: "var(--radius-lg)", padding: 16, display: "flex", justifyContent: "space-around", textAlign: "center" }}>
-              <div><div style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 800, color: "var(--daust-navy)" }}>{sel.score ?? "—"}</div><div className="muted" style={{ fontSize: 11.5 }}>BAC score</div></div>
-              <div style={{ width: 1, background: "var(--border)" }} />
-              <div><div style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 800, color: sel.feePaid ? "var(--success)" : "var(--warning)" }}>{sel.feePaid ? "Paid" : "Due"}</div><div className="muted" style={{ fontSize: 11.5 }}>Application fee</div></div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--fg2)", marginBottom: 10 }}>Pipeline</div>
-              {STAGES.filter((s) => s !== "rejected").map((st, i) => {
-                const reached = STAGES.indexOf(sel.stage) >= STAGES.indexOf(st) && sel.stage !== "rejected";
-                return (
-                  <div key={st} style={{ display: "flex", gap: 12, paddingBottom: 12 }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                      <span style={{ width: 18, height: 18, borderRadius: "50%", background: reached ? "var(--daust-navy)" : "var(--bg-subtle)", border: reached ? "none" : "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        {reached && <Check size={11} color="#fff" />}
-                      </span>
-                      {i < 4 && <span style={{ width: 1, flex: 1, minHeight: 14, background: "var(--border)" }} />}
-                    </div>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: reached ? "var(--fg1)" : "var(--fg3)" }}>{STAGE_LABEL[st]}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </Drawer>
-
-      {adding && <AddApplicantModal programs={programs} onClose={() => setAdding(false)} onCreated={() => { setAdding(false); load(); }} />}
+      {adding && <AddApplicantModal programs={programs} onClose={() => setAdding(false)} onCreated={(id) => router.push(`/admin/admissions/${id}`)} />}
     </>
   );
 }
 
-function AddApplicantModal({ programs, onClose, onCreated }: { programs: string[]; onClose: () => void; onCreated: () => void }) {
+function AddApplicantModal({ programs, onClose, onCreated }: { programs: string[]; onClose: () => void; onCreated: (id: string) => void }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -250,7 +185,7 @@ function AddApplicantModal({ programs, onClose, onCreated }: { programs: string[
     }
     setBusy(true);
     try {
-      await createApplicant({
+      const res = await createApplicant({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
@@ -258,7 +193,7 @@ function AddApplicantModal({ programs, onClose, onCreated }: { programs: string[
         country: country.trim() || null,
         score: score.trim() === "" ? null : Number(score),
       });
-      onCreated();
+      onCreated(res.id);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not add applicant.");
       setBusy(false);

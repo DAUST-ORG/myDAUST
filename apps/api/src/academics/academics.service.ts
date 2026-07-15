@@ -695,20 +695,113 @@ export class AcademicsService {
         name: p.name,
         department: p.department.name,
         students: p._count.students,
+        degree: p.degree,
+        school: p.school,
+        tuition: p.tuition,
+        color: p.color,
       })),
       courses: courses.map((c) => ({ code: c.code, title: c.title, credits: c.credits, department: c.department.name })),
       departments: departments.map((d) => ({ id: d.id, code: d.code, name: d.name })),
     };
   }
 
+  /** Admin: one program's detail — students in it, department courses, and stats. */
+  async programDetail(code: string) {
+    const program = await this.prisma.program.findUnique({
+      where: { code },
+      include: {
+        department: true,
+        students: {
+          include: { person: true, invoices: true, enrollments: { include: { section: { include: { course: true } } } } },
+          orderBy: { studentNo: "asc" },
+        },
+      },
+    });
+    if (!program) throw new NotFoundException("Program not found");
+    const courses = await this.prisma.course.findMany({
+      where: { departmentId: program.departmentId },
+      orderBy: { code: "asc" },
+    });
+    const students = program.students.map((s) => {
+      const completed = s.enrollments.filter((e) => e.status === "completed" && e.grade);
+      const { gpa, completedCredits } = computeGpa(
+        completed.map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
+      );
+      return {
+        id: s.id,
+        studentNo: s.studentNo,
+        name: `${s.person.firstName} ${s.person.lastName}`,
+        photoUrl: s.photoUrl,
+        yearLevel: s.yearLevel,
+        gpa,
+        completedCredits,
+        balance: s.invoices.reduce((b, i) => b + (i.totalAmount - i.amountPaid), 0),
+        status: gpa > 0 && gpa < 2 ? "probation" : "active",
+      };
+    });
+    const billed = program.students.reduce((sum, s) => sum + s.invoices.reduce((b, i) => b + i.totalAmount, 0), 0);
+    const paid = program.students.reduce((sum, s) => sum + s.invoices.reduce((b, i) => b + i.amountPaid, 0), 0);
+    const yearDist = [1, 2, 3, 4].map((y) => program.students.filter((s) => s.yearLevel === y).length);
+    return {
+      code: program.code,
+      name: program.name,
+      department: program.department.name,
+      degree: program.degree,
+      school: program.school,
+      tuition: program.tuition,
+      color: program.color,
+      stats: { studentCount: program.students.length, billed, paid, revenue: billed, yearDist },
+      students,
+      courses: courses.map((c) => ({ code: c.code, title: c.title, credits: c.credits })),
+    };
+  }
+
+  /** Registrar/admin: update a program's editable fields. Audited. */
+  async updateProgram(
+    actorId: string,
+    code: string,
+    input: { name?: string; departmentId?: string; degree?: string | null; school?: string | null; tuition?: number | null; color?: string | null },
+  ) {
+    const program = await this.prisma.program.findUnique({ where: { code } });
+    if (!program) throw new NotFoundException("Program not found");
+    if (input.departmentId !== undefined) {
+      const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId } });
+      if (!dept) throw new BadRequestException("Unknown department");
+    }
+    const updated = await this.prisma.program.update({
+      where: { code },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
+        ...(input.degree !== undefined ? { degree: input.degree } : {}),
+        ...(input.school !== undefined ? { school: input.school } : {}),
+        ...(input.tuition !== undefined ? { tuition: input.tuition } : {}),
+        ...(input.color !== undefined ? { color: input.color } : {}),
+      },
+    });
+    await this.prisma.auditLog.create({ data: { entity: "Program", entityId: program.id, action: "program-updated", actorId } });
+    return updated;
+  }
+
   /** Registrar/admin: create a degree program. Audited. */
-  async adminCreateProgram(actorId: string, input: { code: string; name: string; departmentId: string }) {
+  async adminCreateProgram(
+    actorId: string,
+    input: { code: string; name: string; departmentId: string; degree?: string | null; school?: string | null; tuition?: number | null; color?: string | null },
+  ) {
     const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId } });
     if (!dept) throw new BadRequestException("Unknown department");
     const dup = await this.prisma.program.findUnique({ where: { code: input.code } });
     if (dup) throw new ConflictException(`Program code "${input.code}" already exists`);
     const program = await this.prisma.program.create({
-      data: { code: input.code, name: input.name, departmentId: input.departmentId },
+      data: {
+        code: input.code,
+        name: input.name,
+        departmentId: input.departmentId,
+        degree: input.degree ?? null,
+        school: input.school ?? null,
+        tuition: input.tuition ?? null,
+        color: input.color ?? null,
+      },
     });
     await this.prisma.auditLog.create({ data: { entity: "Program", entityId: program.id, action: "program-created", actorId } });
     return program;
@@ -725,6 +818,166 @@ export class AcademicsService {
     });
     await this.prisma.auditLog.create({ data: { entity: "Course", entityId: course.id, action: "course-created", actorId } });
     return course;
+  }
+
+  /** Admin: one course's detail — catalog fields, prerequisites, and its sections across terms. */
+  async adminCourseDetail(code: string) {
+    const course = await this.prisma.course.findUnique({
+      where: { code },
+      include: {
+        department: true,
+        prerequisites: true,
+        sections: {
+          include: { term: true, instructor: true, _count: { select: { enrollments: true } } },
+          orderBy: [{ term: { startDate: "desc" } }, { sectionCode: "asc" }],
+        },
+      },
+    });
+    if (!course) throw new NotFoundException("Course not found");
+    const [allCourses, departments, terms] = await Promise.all([
+      this.prisma.course.findMany({ where: { code: { not: code } }, orderBy: { code: "asc" }, select: { code: true, title: true } }),
+      this.prisma.department.findMany({ orderBy: { name: "asc" } }),
+      this.prisma.term.findMany({ orderBy: { startDate: "desc" } }),
+    ]);
+    return {
+      id: course.id,
+      code: course.code,
+      title: course.title,
+      credits: course.credits,
+      department: course.department.name,
+      departmentId: course.departmentId,
+      prerequisites: course.prerequisites.map((p) => ({ code: p.code, title: p.title })),
+      sections: course.sections.map((s) => ({
+        id: s.id,
+        sectionCode: s.sectionCode,
+        term: s.term.name,
+        termId: s.termId,
+        instructor: s.instructor ? `${s.instructor.firstName} ${s.instructor.lastName}` : null,
+        instructorId: s.instructorId,
+        days: s.days,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        room: s.room,
+        capacity: s.capacity,
+        seatsTaken: s._count.enrollments,
+      })),
+      allCourses,
+      departments: departments.map((d) => ({ id: d.id, code: d.code, name: d.name })),
+      terms: terms.map((t) => ({ id: t.id, name: t.name })),
+    };
+  }
+
+  /** Registrar/admin: update a course's catalog fields + prerequisites. Audited. (`code` is immutable.) */
+  async updateCourse(
+    actorId: string,
+    code: string,
+    input: { title?: string; credits?: number; departmentId?: string; prerequisiteCodes?: string[] },
+  ) {
+    const course = await this.prisma.course.findUnique({ where: { code } });
+    if (!course) throw new NotFoundException("Course not found");
+    if (input.departmentId !== undefined) {
+      const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId } });
+      if (!dept) throw new BadRequestException("Unknown department");
+    }
+    let prereqSet: { id: string }[] | undefined;
+    if (input.prerequisiteCodes !== undefined) {
+      const prereqs = await this.prisma.course.findMany({
+        where: { code: { in: input.prerequisiteCodes.filter((c) => c !== code) } },
+        select: { id: true },
+      });
+      prereqSet = prereqs.map((p) => ({ id: p.id }));
+    }
+    const updated = await this.prisma.course.update({
+      where: { code },
+      data: {
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.credits !== undefined ? { credits: input.credits } : {}),
+        ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
+        ...(prereqSet ? { prerequisites: { set: prereqSet } } : {}),
+      },
+    });
+    await this.prisma.auditLog.create({ data: { entity: "Course", entityId: course.id, action: "course-updated", actorId } });
+    return updated;
+  }
+
+  /** Registrar/admin: create a section (a scheduled offering of a course in a term). Audited. */
+  async createSection(
+    actorId: string,
+    input: { courseCode: string; termId: string; sectionCode: string; instructorId?: string | null; capacity: number; days: string; startTime: string; endTime: string; room?: string | null },
+  ) {
+    const course = await this.prisma.course.findUnique({ where: { code: input.courseCode } });
+    if (!course) throw new BadRequestException("Unknown course");
+    const term = await this.prisma.term.findUnique({ where: { id: input.termId } });
+    if (!term) throw new BadRequestException("Unknown term");
+    if (input.instructorId) {
+      const inst = await this.prisma.person.findUnique({ where: { id: input.instructorId } });
+      if (!inst) throw new BadRequestException("Unknown instructor");
+    }
+    const dup = await this.prisma.section.findFirst({
+      where: { courseId: course.id, termId: input.termId, sectionCode: input.sectionCode },
+    });
+    if (dup) throw new ConflictException(`Section ${input.sectionCode} already exists for this course and term`);
+    const section = await this.prisma.section.create({
+      data: {
+        courseId: course.id,
+        termId: input.termId,
+        sectionCode: input.sectionCode,
+        instructorId: input.instructorId ?? null,
+        capacity: input.capacity,
+        days: input.days,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        room: input.room ?? null,
+      },
+    });
+    await this.prisma.auditLog.create({ data: { entity: "Section", entityId: section.id, action: "section-created", actorId } });
+    return section;
+  }
+
+  /** Registrar/admin: update a section's schedule/instructor/capacity. Audited. */
+  async updateSection(
+    actorId: string,
+    id: string,
+    input: { sectionCode?: string; termId?: string; instructorId?: string | null; capacity?: number; days?: string; startTime?: string; endTime?: string; room?: string | null },
+  ) {
+    const section = await this.prisma.section.findUnique({ where: { id } });
+    if (!section) throw new NotFoundException("Section not found");
+    if (input.instructorId) {
+      const inst = await this.prisma.person.findUnique({ where: { id: input.instructorId } });
+      if (!inst) throw new BadRequestException("Unknown instructor");
+    }
+    if (input.termId) {
+      const term = await this.prisma.term.findUnique({ where: { id: input.termId } });
+      if (!term) throw new BadRequestException("Unknown term");
+    }
+    const updated = await this.prisma.section.update({
+      where: { id },
+      data: {
+        ...(input.sectionCode !== undefined ? { sectionCode: input.sectionCode } : {}),
+        ...(input.termId !== undefined ? { termId: input.termId } : {}),
+        ...(input.instructorId !== undefined ? { instructorId: input.instructorId } : {}),
+        ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
+        ...(input.days !== undefined ? { days: input.days } : {}),
+        ...(input.startTime !== undefined ? { startTime: input.startTime } : {}),
+        ...(input.endTime !== undefined ? { endTime: input.endTime } : {}),
+        ...(input.room !== undefined ? { room: input.room } : {}),
+      },
+    });
+    await this.prisma.auditLog.create({ data: { entity: "Section", entityId: id, action: "section-updated", actorId } });
+    return updated;
+  }
+
+  /** Registrar/admin: delete a section. Refuses when it has enrollments. Audited. */
+  async deleteSection(actorId: string, id: string) {
+    const section = await this.prisma.section.findUnique({
+      where: { id },
+      include: { _count: { select: { enrollments: true } } },
+    });
+    if (!section) throw new NotFoundException("Section not found");
+    if (section._count.enrollments > 0) throw new BadRequestException("Cannot delete a section that has enrollments");
+    await this.prisma.section.delete({ where: { id } });
+    await this.prisma.auditLog.create({ data: { entity: "Section", entityId: id, action: "section-deleted", actorId } });
+    return { ok: true };
   }
 
   /** Admissions funnel + applicant list. */
@@ -756,6 +1009,7 @@ export class AcademicsService {
       orderBy: { lastName: "asc" },
     });
     return people.map((p) => ({
+      id: p.id,
       name: `${p.firstName} ${p.lastName}`,
       email: p.email,
       kind: p.kind,

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import {
   CreateAssignmentInput,
   DropInput,
@@ -29,6 +29,10 @@ const CreateProgramInput = z.object({
   code: z.string().min(1).max(20),
   name: z.string().min(1).max(120),
   departmentId: z.string().min(1),
+  degree: z.string().max(40).nullable().optional(),
+  school: z.string().max(80).nullable().optional(),
+  tuition: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  color: z.string().max(20).nullable().optional(),
 });
 
 const CreateCourseInput = z.object({
@@ -36,6 +40,45 @@ const CreateCourseInput = z.object({
   title: z.string().min(1).max(160),
   credits: z.number().int().min(1).max(12),
   departmentId: z.string().min(1),
+});
+
+const UpdateProgramInput = z.object({
+  name: z.string().min(1).max(120).optional(),
+  departmentId: z.string().min(1).optional(),
+  degree: z.string().max(40).nullable().optional(),
+  school: z.string().max(80).nullable().optional(),
+  tuition: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  color: z.string().max(20).nullable().optional(),
+});
+
+const UpdateCourseInput = z.object({
+  title: z.string().min(1).max(160).optional(),
+  credits: z.number().int().min(1).max(12).optional(),
+  departmentId: z.string().min(1).optional(),
+  prerequisiteCodes: z.array(z.string().max(20)).optional(),
+});
+
+const TIME_RE = /^\d{2}:\d{2}$/;
+const CreateSectionInput = z.object({
+  courseCode: z.string().min(1).max(20),
+  termId: z.string().min(1),
+  sectionCode: z.string().min(1).max(10),
+  instructorId: z.string().max(64).nullable().optional(),
+  capacity: z.number().int().min(1).max(1000),
+  days: z.string().min(1).max(10),
+  startTime: z.string().regex(TIME_RE),
+  endTime: z.string().regex(TIME_RE),
+  room: z.string().max(40).nullable().optional(),
+});
+const UpdateSectionInput = z.object({
+  sectionCode: z.string().min(1).max(10).optional(),
+  termId: z.string().min(1).optional(),
+  instructorId: z.string().max(64).nullable().optional(),
+  capacity: z.number().int().min(1).max(1000).optional(),
+  days: z.string().min(1).max(10).optional(),
+  startTime: z.string().regex(TIME_RE).optional(),
+  endTime: z.string().regex(TIME_RE).optional(),
+  room: z.string().max(40).nullable().optional(),
 });
 
 const UpdateStudentInput = z.object({
@@ -138,11 +181,57 @@ export class AcademicsController {
     return this.academics.adminCreateProgram(user.personId, input);
   }
 
+  @Get("admin/programs/:code")
+  @Roles("admin", "registrar", "bursar")
+  programDetail(@Param("code") code: string) {
+    return this.academics.programDetail(code);
+  }
+
+  @Patch("admin/programs/:code")
+  @Roles("admin", "registrar")
+  updateProgram(@CurrentUser() user: AuthUser, @Param("code") code: string, @Body() body: unknown) {
+    const input = UpdateProgramInput.parse(body);
+    return this.academics.updateProgram(user.personId, code, input);
+  }
+
   @Post("admin/courses")
   @Roles("admin", "registrar")
   createCourse(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const input = CreateCourseInput.parse(body);
     return this.academics.adminCreateCourse(user.personId, input);
+  }
+
+  @Get("admin/courses/:code")
+  @Roles("admin", "registrar", "bursar")
+  adminCourseDetail(@Param("code") code: string) {
+    return this.academics.adminCourseDetail(code);
+  }
+
+  @Patch("admin/courses/:code")
+  @Roles("admin", "registrar")
+  updateCourse(@CurrentUser() user: AuthUser, @Param("code") code: string, @Body() body: unknown) {
+    const input = UpdateCourseInput.parse(body);
+    return this.academics.updateCourse(user.personId, code, input);
+  }
+
+  @Post("admin/sections")
+  @Roles("admin", "registrar")
+  createSection(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const input = CreateSectionInput.parse(body);
+    return this.academics.createSection(user.personId, input);
+  }
+
+  @Patch("admin/sections/:id")
+  @Roles("admin", "registrar")
+  updateSection(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+    const input = UpdateSectionInput.parse(body);
+    return this.academics.updateSection(user.personId, id, input);
+  }
+
+  @Delete("admin/sections/:id")
+  @Roles("admin", "registrar")
+  deleteSection(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.academics.deleteSection(user.personId, id);
   }
 
   @Get("admin/applicants")

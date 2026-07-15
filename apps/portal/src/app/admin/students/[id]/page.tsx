@@ -14,6 +14,7 @@ import {
   Clock,
   GraduationCap,
   Layers,
+  Link2,
   type LucideIcon,
   Pencil,
   Phone,
@@ -28,13 +29,14 @@ import {
   type StudentAccount,
   type StudentActivity,
   adminDropEnrollment,
+  createPaymentLink,
   getAdminStudentActivity,
   getAdminStudentDetail,
   getStudentAccount,
 } from "@/lib/api";
 import { formatXof } from "@/lib/format";
-import { Avatar, Badge, Tabs } from "@/components/ui";
-import { EditStudentModal } from "./EditStudentModal";
+import { Avatar, Badge, Field, Modal, Tabs } from "@/components/ui";
+import { EditStudentModal, type EditSection } from "./EditStudentModal";
 
 const ENROLL_BADGE: Record<string, string> = { enrolled: "enrolled", completed: "completed", dropped: "dropped" };
 
@@ -51,8 +53,14 @@ export default function AdminStudentDetailPage() {
   const [account, setAccount] = useState<StudentAccount | null>(null);
   const [activity, setActivity] = useState<StudentActivity[]>([]);
   const [tab, setTab] = useState("overview");
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState<EditSection | null>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const pencil = (section: EditSection) => (
+    <button onClick={() => setEditing(section)} title="Edit" style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: "var(--fg3)", border: "none", background: "none" }}>
+      <Pencil size={14} />
+    </button>
+  );
 
   const load = useCallback(() => {
     getAdminStudentDetail(id).then(setS).catch(() => {});
@@ -95,7 +103,10 @@ export default function AdminStudentDetailPage() {
               <Send size={15} /> Payment reminder
             </Link>
           )}
-          <button className="primary" onClick={() => setEditing(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}><Pencil size={15} /> Edit record</button>
+          {s.balance > 0 && (
+            <button onClick={() => setLinkOpen(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}><Link2 size={15} /> Payment link</button>
+          )}
+          <button className="primary" onClick={() => setEditing("all")} style={{ display: "flex", alignItems: "center", gap: 7 }}><Pencil size={15} /> Edit record</button>
         </div>
       </div>
 
@@ -137,7 +148,7 @@ export default function AdminStudentDetailPage() {
 
       {tab === "overview" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>
-          <ProfileCard title="Enrollment" icon={BookOpen}>
+          <ProfileCard title="Enrollment" icon={BookOpen} action={pencil("enrollment")}>
             <KV k="Program" v={s.program ?? "—"} />
             <KV k="Year of study" v={s.yearLevel ? `Year ${s.yearLevel}` : "—"} />
             <KV k="Cohort" v={s.cohort ?? "—"} />
@@ -151,7 +162,7 @@ export default function AdminStudentDetailPage() {
             <KV k="Total paid" v={account ? formatXof(account.totals.paid) : "—"} />
             <KV k="Credits this term" v={String(s.currentTermCredits)} />
           </ProfileCard>
-          <ProfileCard title="Contact" icon={Phone}>
+          <ProfileCard title="Contact" icon={Phone} action={pencil("contact")}>
             <KV k="Email" v={s.email} />
             <KV k="Phone" v={s.phone ?? "—"} />
             <KV k="City" v={s.city ?? "—"} />
@@ -206,7 +217,12 @@ export default function AdminStudentDetailPage() {
             <KV k="Total billed" v={account ? formatXof(account.totals.billed) : "—"} />
             <KV k="Total paid" v={account ? formatXof(account.totals.paid) : "—"} />
             <KV k="Last payment" v={lastPayment ? new Date(lastPayment.createdAt).toLocaleDateString("fr-SN", { day: "numeric", month: "short", year: "numeric" }) : "—"} />
-            <Link href={`/admin/finance/students/${id}`} className="primary" style={{ display: "block", textAlign: "center", marginTop: 14, padding: "10px 14px", borderRadius: 10, background: "var(--daust-orange)", color: "#fff", fontWeight: 600 }}>
+            {s.balance > 0 && (
+              <button onClick={() => setLinkOpen(true)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", marginTop: 14 }}>
+                <Link2 size={15} /> Generate payment link
+              </button>
+            )}
+            <Link href={`/admin/finance/students/${id}`} className="primary" style={{ display: "block", textAlign: "center", marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "var(--daust-orange)", color: "#fff", fontWeight: 600 }}>
               Manage finance account →
             </Link>
           </ProfileCard>
@@ -234,20 +250,20 @@ export default function AdminStudentDetailPage() {
 
       {tab === "personal" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>
-          <ProfileCard title="Personal details" icon={UserPlus}>
+          <ProfileCard title="Personal details" icon={UserPlus} action={pencil("personal")}>
             <KV k="Full name" v={s.name} />
             <KV k="Student ID" v={s.studentNo} />
             <KV k="Date of birth" v={s.dateOfBirth ?? "—"} />
             <KV k="Gender" v={s.gender ?? "—"} />
             <KV k="Nationality" v={s.nationality ?? "—"} />
           </ProfileCard>
-          <ProfileCard title="Contact" icon={Phone}>
+          <ProfileCard title="Contact" icon={Phone} action={pencil("contact")}>
             <KV k="Email" v={s.email} />
             <KV k="Phone" v={s.phone ?? "—"} />
             <KV k="Address" v={s.address ?? "—"} />
             <KV k="City" v={s.city ?? "—"} />
           </ProfileCard>
-          <ProfileCard title="Guardian / emergency" icon={Users}>
+          <ProfileCard title="Guardian / emergency" icon={Users} action={pencil("guardian")}>
             <KV k="Name" v={s.guardianName ?? "—"} />
             <KV k="Relationship" v={s.guardianRelation ?? "—"} />
             <KV k="Phone" v={s.guardianPhone ?? "—"} />
@@ -283,15 +299,79 @@ export default function AdminStudentDetailPage() {
       {editing && (
         <EditStudentModal
           student={s}
-          onClose={() => setEditing(false)}
+          section={editing}
+          onClose={() => setEditing(null)}
           onSaved={(updated) => {
             setS(updated);
-            setEditing(false);
+            setEditing(null);
             load();
           }}
         />
       )}
+      {linkOpen && account && <PaymentLinkModal student={s} account={account} onClose={() => setLinkOpen(false)} />}
     </>
+  );
+}
+
+function PaymentLinkModal({ student, account, onClose }: { student: AdminStudentDetail; account: StudentAccount; onClose: () => void }) {
+  const openInvoice = account.invoices.find((i) => i.balance > 0);
+  const [amount, setAmount] = useState(String(Math.max(0, account.totals.balance)));
+  const [purpose, setPurpose] = useState("Tuition payment");
+  const [link, setLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function create() {
+    setErr(null);
+    const amt = Number(String(amount).replace(/[^\d]/g, "")) || 0;
+    if (amt <= 0) {
+      setErr("Enter an amount.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await createPaymentLink({
+        payeeName: student.name,
+        payeeMeta: `${student.studentNo}${student.program ? ` · ${student.program}` : ""}`,
+        studentId: student.id,
+        invoiceId: openInvoice && amt <= openInvoice.balance ? openInvoice.id : undefined,
+        amountXof: amt,
+        purpose: purpose.trim() || "Tuition payment",
+      });
+      setLink(res.url);
+      navigator.clipboard?.writeText(res.url).then(() => { setCopied(true); }).catch(() => {});
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not create link.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Generate payment link"
+      width={480}
+      footer={link ? <button className="primary" onClick={onClose}>Done</button> : <><button onClick={onClose}>Cancel</button><button className="primary" onClick={create} disabled={busy}>{busy ? "Creating…" : "Create link"}</button></>}
+    >
+      {link ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <p style={{ margin: 0, fontSize: 13.5 }}>Share this link with <strong>{student.name}</strong> to pay <strong>{formatXof(Number(String(amount).replace(/[^\d]/g, "")) || 0)}</strong>.</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "4px 4px 4px 12px" }}>
+            <input readOnly value={link} style={{ flex: 1, border: "none", background: "none", outline: "none", fontSize: 12.5, color: "var(--fg2)" }} />
+            <button className="primary" onClick={() => { navigator.clipboard?.writeText(link); setCopied(true); }}>{copied ? "Copied" : "Copy"}</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
+          <Field label="Amount (FCFA)"><input value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+          <Field label="Purpose"><input value={purpose} onChange={(e) => setPurpose(e.target.value)} /></Field>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -320,12 +400,13 @@ function ProfileStat({ label, value, unit, icon: Icon, color = "var(--fg1)" }: {
   );
 }
 
-function ProfileCard({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
+function ProfileCard({ title, icon: Icon, children, action }: { title: string; icon: LucideIcon; children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="card" style={{ margin: 0, padding: 0, overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "13px 18px", borderBottom: "1px solid var(--divider)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 12px 10px 18px", borderBottom: "1px solid var(--divider)" }}>
         <Icon size={16} color="var(--daust-navy)" />
-        <h4 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 14.5, fontWeight: 700 }}>{title}</h4>
+        <h4 style={{ margin: 0, flex: 1, fontFamily: "var(--font-display)", fontSize: 14.5, fontWeight: 700 }}>{title}</h4>
+        {action}
       </div>
       <div style={{ padding: 18 }}>{children}</div>
     </div>

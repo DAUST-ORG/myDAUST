@@ -76,6 +76,31 @@ export class AdmissionsService {
     return { id: applicant.id, scholarship: award };
   }
 
+  /** Registrar/admin: one applicant's detail + the merit scholarship their BAC would earn. */
+  async applicantDetail(id: string) {
+    const a = await this.prisma.applicant.findUnique({ where: { id } });
+    if (!a) throw new NotFoundException("Applicant not found");
+    const program = a.programCode ? await this.prisma.program.findUnique({ where: { code: a.programCode } }) : null;
+    const scholarship = await this.appConfig.awardFor(a.score);
+    const appFee = await this.appConfig.applicationFee();
+    return {
+      id: a.id,
+      firstName: a.firstName,
+      lastName: a.lastName,
+      name: `${a.firstName} ${a.lastName}`,
+      email: a.email,
+      programCode: a.programCode,
+      program: program?.name ?? null,
+      stage: a.stage,
+      score: a.score,
+      country: a.country,
+      feePaid: a.feePaid,
+      appFee,
+      submittedAt: a.createdAt.toISOString(),
+      scholarship,
+    };
+  }
+
   private static readonly STAGES = ["submitted", "review", "interview", "offer", "accepted", "rejected"];
 
   /** Registrar/admin: manually add an applicant to the pipeline. Audited. */
