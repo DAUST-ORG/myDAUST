@@ -5,6 +5,9 @@ name: Deploy
 on:
   push:
     branches: [develop, main]
+  # Manual trigger: deploy the selected ref's env on demand (develop -> staging, main -> prod).
+  # Forces the app + vitrine jobs regardless of the path filter.
+  workflow_dispatch:
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -26,10 +29,14 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      app: ${{ steps.filter.outputs.app }}
-      vitrine: ${{ steps.filter.outputs.vitrine }}
+      # workflow_dispatch forces both jobs; otherwise the path filter decides.
+      app: ${{ steps.filter.outputs.app == 'true' || github.event_name == 'workflow_dispatch' }}
+      vitrine: ${{ steps.filter.outputs.vitrine == 'true' || github.event_name == 'workflow_dispatch' }}
     steps:
+      # Full history so paths-filter diffs against the real previous commit, not the default branch.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.2
         id: filter
         with:
