@@ -249,10 +249,16 @@ tr.sel{background:#eef2f8!important}
         <h1>Manage bills &amp; payment links</h1>
         <p>Add charges to one, several, or all students — then generate payment links.</p>
       </div>
-      <button class="btn-nav" id="charge-all-btn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-        Add charge to all students
-      </button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-o" id="add-student-btn" style="padding:11px 16px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M19 8v6M22 11h-6"/></svg>
+          Add student
+        </button>
+        <button class="btn-nav" id="charge-all-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          Add charge to all students
+        </button>
+      </div>
     </div>
 
     <div class="kpis" id="kpis"></div>
@@ -584,7 +590,64 @@ tr.sel{background:#eef2f8!important}
   var toastT;
   function toast(msg){var el=document.getElementById('toast');document.getElementById('toast-msg').textContent=msg;el.classList.add('show');clearTimeout(toastT);toastT=setTimeout(function(){el.classList.remove('show');},2200);}
 
+  function nextId(){
+    var max=students.reduce(function(m,s){var n=parseInt(s.id.replace(/^DA/,''),10);return n>m?n:m;},24000);
+    return 'DA'+(max+1);
+  }
+  function emailFor(name){
+    var parts=name.trim().split(/\s+/);
+    var base=(parts[0]?parts[0][0]:'')+(parts.slice(1).join('')||parts[0]||'');
+    return base.toLowerCase().normalize('NFD').replace(/[^\w]/g,'')+'@daust.edu.sn';
+  }
+
+  // Add-student modal
+  function openAddStudent(){
+    var id=nextId();
+    root.innerHTML=
+    '<div class="overlay center"><div class="modal" onclick="event.stopPropagation()">'+
+      '<div class="dhead"><h3>Add student</h3><button class="x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>'+
+      '<div class="dbody">'+
+        '<div class="scope-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M19 8v6M22 11h-6"/></svg><span>Student ID <b id="ns-id">'+id+'</b> will be assigned automatically.</span></div>'+
+        '<div class="field"><label>Full name</label><input type="text" id="ns-name" placeholder="e.g. Awa Diop" autocomplete="off"></div>'+
+        '<div class="field"><label>Program</label><select id="ns-prog">'+PROGS.map(function(p){return '<option>'+p+'</option>';}).join('')+'</select></div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
+          '<div class="field"><label>Year</label><select id="ns-year"><option value="1">Year 1</option><option value="2">Year 2</option><option value="3">Year 3</option><option value="4">Year 4</option><option value="5">Year 5</option></select></div>'+
+          '<div class="field"><label>Date of birth</label><input type="date" id="ns-dob" max="2012-12-31" min="1975-01-01"></div>'+
+        '</div>'+
+        '<div class="field"><label>Email</label><input type="email" id="ns-email" placeholder="auto-generated from name"></div>'+
+      '</div>'+
+      '<div class="dfoot">'+
+        '<button class="btn-ghost" data-close>Cancel</button>'+
+        '<button class="btn-primary" id="ns-save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg> Create student</button>'+
+      '</div>'+
+    '</div></div>';
+    wireClose();
+    var nameEl=root.querySelector('#ns-name'), emailEl=root.querySelector('#ns-email');
+    var emailTouched=false;
+    emailEl.addEventListener('input',function(){emailTouched=true;});
+    nameEl.addEventListener('input',function(){ if(!emailTouched) emailEl.value=nameEl.value.trim()?emailFor(nameEl.value):''; });
+    root.querySelector('#ns-save').addEventListener('click',function(){
+      var name=nameEl.value.trim();
+      if(!name){nameEl.focus();return;}
+      var s={
+        id:nextId(), name:name,
+        program:root.querySelector('#ns-prog').value,
+        year:parseInt(root.querySelector('#ns-year').value,10),
+        email:emailEl.value.trim()||emailFor(name),
+        dob:root.querySelector('#ns-dob').value||'',
+        due:'15 Jul 2026', term:'Fall 2026', overdue:false,
+        charges:[]
+      };
+      students.push(s);
+      closeOverlay(); render();
+      toast(s.name+' created — ID '+s.id);
+      openManage(s.id);
+    });
+    nameEl.focus();
+  }
+
   // ---------- Top-level buttons ----------
+  document.getElementById('add-student-btn').addEventListener('click',openAddStudent);
   document.getElementById('charge-all-btn').addEventListener('click',function(){ openBulkAdd(students,'all '+students.length+' students'); });
   document.getElementById('bulk-add').addEventListener('click',function(){ var l=selectedStudents(); openBulkAdd(l, l.length+' selected student'+(l.length>1?'s':'')); });
   document.getElementById('bulk-link').addEventListener('click',function(){ openLinks(selectedStudents()); });
