@@ -154,6 +154,19 @@ model Student {
   dateOfBirth DateTime?
   // Roster photo, resolved to an absolute URL (served from the vitrine bucket).
   photoUrl    String?
+  // --- Extended SIS profile (all optional; captured via the admin Edit-record form) ---
+  gender           String?
+  phone            String?
+  address          String?
+  city             String?
+  nationality      String?
+  guardianName     String?
+  guardianRelation String?
+  guardianPhone    String?
+  advisor          String? // free-text advisor name (no faculty FK yet)
+  yearLevel        Int? // year of study 1..N
+  cohort           String? // e.g. "Class of 2028"
+  enrolledAt       DateTime? // first enrolment date
   invoices    Invoice[]
   payments    Payment[]
   enrollments Enrollment[]

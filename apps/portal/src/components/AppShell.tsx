@@ -3,13 +3,16 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import { getMe, logout, type Me } from "@/lib/api";
-import { Topbar } from "./Topbar";
+import { Topbar, type RoleView } from "./Topbar";
 
 export interface NavItem {
   href: string;
   label: string;
   count?: number;
+  icon?: LucideIcon;
+  disabled?: boolean;
 }
 export interface NavGroup {
   label?: string;
@@ -21,11 +24,17 @@ export function AppShell({
   portalName,
   nav,
   children,
+  viewAs,
+  onViewAs,
+  viewAsRoles,
 }: {
   variant: "navy" | "light";
   portalName: string;
   nav: NavGroup[];
   children: React.ReactNode;
+  viewAs?: string;
+  onViewAs?: (key: string) => void;
+  viewAsRoles?: RoleView[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -72,17 +81,25 @@ export function AppShell({
         {nav.map((group, gi) => (
           <div key={gi}>
             {group.label && <div className="side-label">{group.label}</div>}
-            {group.items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setNavOpen(false)}
-                className={`nav-item ${active?.href === item.href ? "active" : ""}`}
-              >
-                {item.label}
-                {item.count !== undefined && <span className="count">{item.count}</span>}
-              </Link>
-            ))}
+            {group.items.map((item) =>
+              item.disabled ? (
+                <div key={item.href} className="nav-item disabled" aria-disabled="true" title="Not available yet">
+                  {item.icon && <item.icon className="nav-ico" size={18} />}
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                </div>
+              ) : (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setNavOpen(false)}
+                  className={`nav-item ${active?.href === item.href ? "active" : ""}`}
+                >
+                  {item.icon && <item.icon className="nav-ico" size={18} />}
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.count !== undefined && <span className="count">{item.count}</span>}
+                </Link>
+              ),
+            )}
           </div>
         ))}
 
@@ -99,7 +116,7 @@ export function AppShell({
       </aside>
 
       <div className="main">
-        <Topbar me={me} nav={nav} pageTitle={pageTitle} onToggleNav={() => setNavOpen((v) => !v)} />
+        <Topbar me={me} nav={nav} pageTitle={pageTitle} onToggleNav={() => setNavOpen((v) => !v)} viewAs={viewAs} onViewAs={onViewAs} viewAsRoles={viewAsRoles} />
         <div className="content">{children}</div>
       </div>
     </div>

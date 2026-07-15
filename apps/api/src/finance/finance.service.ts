@@ -650,27 +650,76 @@ export class FinanceService {
     return { ok: true, count };
   }
 
-  /** Remove an unpaid charge (its invoice + plan). Refuses once anything has been paid against it. */
+  /**
+   * Remove a charge for any student.
+   * - Fully unpaid → hard-delete the invoice + plan (nothing was collected).
+   * - Paid/partially paid → REVERSAL, no refund: delete the charge and post a negative
+   *   "credit-memo" invoice for the collected amount so it offsets the student's remaining/
+   *   future charges (a credit balance if it exceeds what's owed). The real Payment rows are
+   *   preserved (re-pointed onto the credit memo) for audit. Reuses the existing balance math.
+   */
   async removeCharge(actorId: string, invoiceId: string) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: { plan: { include: { installments: true } }, payments: true },
     });
     if (!invoice) throw new NotFoundException("Charge not found");
-    if (invoice.amountPaid > 0) throw new BadRequestException("Cannot remove a charge that has been paid");
-    if (invoice.payments.some((p) => p.status === "success" || p.status === "refunded")) {
-      throw new BadRequestException("Cannot remove a charge with settled payments");
-    }
+    if (invoice.totalAmount < 0) throw new BadRequestException("Account credits cannot be removed");
 
     const installmentIds = invoice.plan?.installments.map((i) => i.id) ?? [];
     const paymentIds = invoice.payments.map((p) => p.id);
+    const settled =
+      invoice.amountPaid > 0 || invoice.payments.some((p) => p.status === "success" || p.status === "refunded");
+
+    if (!settled) {
+      await this.prisma.$transaction(async (tx) => {
+        if (installmentIds.length || paymentIds.length) {
+          await tx.paymentAllocation.deleteMany({
+            where: { OR: [{ installmentId: { in: installmentIds } }, { paymentId: { in: paymentIds } }] },
+          });
+        }
+        await tx.payment.deleteMany({ where: { invoiceId } });
+        if (invoice.plan) {
+          await tx.installment.deleteMany({ where: { planId: invoice.plan.id } });
+          await tx.paymentPlan.delete({ where: { id: invoice.plan.id } });
+        }
+        await tx.invoice.delete({ where: { id: invoiceId } });
+        await tx.auditLog.create({
+          data: {
+            entity: "Invoice",
+            entityId: invoiceId,
+            action: "charge-removed",
+            actorId,
+            data: { description: invoice.description, amount: invoice.totalAmount },
+          },
+        });
+      });
+      return { ok: true, credited: 0 };
+    }
+
+    // Paid/partial: reverse the collected amount into an account credit (no cash refund).
+    const creditAmount = invoice.amountPaid;
     await this.prisma.$transaction(async (tx) => {
+      const credit = await tx.invoice.create({
+        data: {
+          studentId: invoice.studentId,
+          termId: invoice.termId,
+          totalAmount: -creditAmount,
+          amountPaid: 0,
+          status: "paid", // excludes it from checkoutBill's open/partial selection
+          description: `Credit — reversal of ${invoice.description ?? `${TUITION_TERM_NAME} tuition`}`,
+          costCenterCode: invoice.costCenterCode,
+        },
+      });
       if (installmentIds.length || paymentIds.length) {
         await tx.paymentAllocation.deleteMany({
           where: { OR: [{ installmentId: { in: installmentIds } }, { paymentId: { in: paymentIds } }] },
         });
       }
-      await tx.payment.deleteMany({ where: { invoiceId } });
+      // Preserve the real payment records by moving them onto the credit memo (FK requires an invoice).
+      if (paymentIds.length) {
+        await tx.payment.updateMany({ where: { invoiceId }, data: { invoiceId: credit.id } });
+      }
       if (invoice.plan) {
         await tx.installment.deleteMany({ where: { planId: invoice.plan.id } });
         await tx.paymentPlan.delete({ where: { id: invoice.plan.id } });
@@ -680,13 +729,13 @@ export class FinanceService {
         data: {
           entity: "Invoice",
           entityId: invoiceId,
-          action: "charge-removed",
+          action: "charge-removed-credit",
           actorId,
-          data: { description: invoice.description, amount: invoice.totalAmount },
+          data: { description: invoice.description, chargeAmount: invoice.totalAmount, creditAmount, creditInvoiceId: credit.id },
         },
       });
     });
-    return { ok: true };
+    return { ok: true, credited: creditAmount };
   }
 
   /** Installments past due and not fully paid, across all students (bursar collections view). */
@@ -1307,6 +1356,8 @@ export class FinanceService {
       include: { term: true, plan: { include: { installments: { orderBy: { sequence: "asc" } } } } },
     });
     const balanceXof = invoices.reduce((s, i) => s + (i.totalAmount - i.amountPaid), 0);
+    // Account credits are negative-total invoices; surface them as a positive figure for display.
+    const creditXof = invoices.filter((i) => i.totalAmount < 0).reduce((s, i) => s - i.totalAmount, 0);
     const charges = invoices.flatMap((inv) =>
       (inv.plan?.installments ?? []).map((i) => ({
         // Ad-hoc charges carry a description; tuition installments fall back to term + sequence.
@@ -1323,6 +1374,7 @@ export class FinanceService {
       program: student.program?.name ?? null,
       term: invoices[0]?.term.name ?? null,
       balanceXof,
+      creditXof,
       dueDate: charges.find((c) => c.status !== "paid")?.dueDate ?? null,
       charges,
     };
@@ -1331,13 +1383,20 @@ export class FinanceService {
   /** Public: start a PayTech checkout of `amountXof` toward the student's oldest open invoice. */
   async checkoutBill(studentNo: string, dob: string, amountXof: number, method: string) {
     const student = await this.findStudentForBill(studentNo, dob);
-    const invoice = await this.prisma.invoice.findFirst({
-      where: { studentId: student.id, status: { in: ["open", "partial"] } },
+    const invoices = await this.prisma.invoice.findMany({
+      where: { studentId: student.id },
       orderBy: { createdAt: "asc" },
     });
+    // Net of any account credits (negative-total credit-memo invoices).
+    const netBalance = invoices.reduce((s, i) => s + (i.totalAmount - i.amountPaid), 0);
+    if (netBalance <= 0) throw new BadRequestException("This account has no outstanding balance");
+    const invoice = invoices.find(
+      (i) => (i.status === "open" || i.status === "partial") && i.totalAmount - i.amountPaid > 0,
+    );
     if (!invoice) throw new BadRequestException("This account has no outstanding balance");
-    const balance = invoice.totalAmount - invoice.amountPaid;
-    const amount = Math.min(Math.max(1, Math.floor(amountXof)), balance);
+    const invoiceBalance = invoice.totalAmount - invoice.amountPaid;
+    // Clamp to the invoice's own balance AND the net account balance (so a credit can't be overpaid).
+    const amount = Math.min(Math.max(1, Math.floor(amountXof)), invoiceBalance, netBalance);
 
     const ref = `BILL-${randomUUID()}`;
     await this.prisma.payment.create({

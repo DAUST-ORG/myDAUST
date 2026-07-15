@@ -150,9 +150,9 @@ function PayBillInner() {
                 </div>
               </div>
               <div style={{ marginTop: 22, position: "relative" }}>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,.72)" }}>Outstanding balance</div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,.72)" }}>{bill.balanceXof < 0 ? "Account credit" : "Outstanding balance"}</div>
                 <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,7vw,40px)", lineHeight: 1, marginTop: 5 }}>
-                  {fcfa(bill.balanceXof)} <span style={{ fontSize: 16, fontWeight: 600, color: "rgba(255,255,255,.72)" }}>FCFA</span>
+                  {fcfa(Math.abs(bill.balanceXof))} <span style={{ fontSize: 16, fontWeight: 600, color: "rgba(255,255,255,.72)" }}>FCFA{bill.balanceXof < 0 ? " credit" : ""}</span>
                 </div>
                 {bill.dueDate && (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.10)", borderRadius: 999, padding: "5px 12px", fontSize: 11.5, fontWeight: 600, marginTop: 14 }}>
@@ -229,8 +229,12 @@ function PayBillInner() {
             ) : (
               <div style={{ padding: "24px 30px 30px", textAlign: "center" }}>
                 <CheckCircle2 size={46} color="#2e7d52" style={{ margin: "0 auto 8px" }} />
-                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20 }}>Balance cleared</div>
-                <p style={{ color: "#6c7884", fontSize: 13.5, marginTop: 6 }}>This account is fully paid. Thank you!</p>
+                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20 }}>{bill.balanceXof < 0 ? "Credit on account" : "Balance cleared"}</div>
+                <p style={{ color: "#6c7884", fontSize: 13.5, marginTop: 6 }}>
+                  {bill.balanceXof < 0
+                    ? `You have a credit of ${fcfa(-bill.balanceXof)} FCFA that will apply to future charges. Nothing is due right now.`
+                    : "This account is fully paid. Thank you!"}
+                </p>
                 <button onClick={reset} style={{ marginTop: 16, border: "1px solid #d7dee6", background: "#fff", borderRadius: 999, padding: "10px 22px", fontWeight: 700, fontSize: 13.5, cursor: "pointer", color: "#16202e" }}>Pay another bill</button>
               </div>
             )}

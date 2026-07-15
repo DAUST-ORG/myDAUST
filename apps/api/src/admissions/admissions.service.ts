@@ -75,4 +75,40 @@ export class AdmissionsService {
 
     return { id: applicant.id, scholarship: award };
   }
+
+  private static readonly STAGES = ["submitted", "review", "interview", "offer", "accepted", "rejected"];
+
+  /** Registrar/admin: manually add an applicant to the pipeline. Audited. */
+  async adminCreateApplicant(
+    actorId: string,
+    input: { firstName: string; lastName: string; email: string; programCode?: string | null; country?: string | null; score?: number | null },
+  ) {
+    const applicant = await this.prisma.applicant.create({
+      data: {
+        firstName: input.firstName,
+        lastName: input.lastName,
+        email: input.email,
+        programCode: input.programCode ?? null,
+        country: input.country ?? null,
+        score: input.score ?? null,
+        stage: "submitted",
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "Applicant", entityId: applicant.id, action: "applicant-created", actorId },
+    });
+    return applicant;
+  }
+
+  /** Registrar/admin: advance/reject an applicant's pipeline stage. Audited. */
+  async adminSetStage(actorId: string, id: string, stage: string) {
+    if (!AdmissionsService.STAGES.includes(stage)) throw new BadRequestException(`Invalid stage "${stage}"`);
+    const applicant = await this.prisma.applicant.findUnique({ where: { id } });
+    if (!applicant) throw new NotFoundException("Applicant not found");
+    const updated = await this.prisma.applicant.update({ where: { id }, data: { stage } });
+    await this.prisma.auditLog.create({
+      data: { entity: "Applicant", entityId: id, action: `applicant-stage-${stage}`, actorId },
+    });
+    return updated;
+  }
 }

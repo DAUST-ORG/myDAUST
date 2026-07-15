@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, LogOut, Menu, Moon, Search, Sun } from "lucide-react";
+import { Bell, Check, ChevronDown, HelpCircle, LogOut, Menu, Moon, Repeat, Search, Sun } from "lucide-react";
 import {
   type Announcement,
   type Me,
@@ -38,22 +38,32 @@ const AREA_LINKS: { role: string; href: string; label: string }[] = [
 
 const SEEN_KEY = "daust-announcements-seen";
 
+export interface RoleView {
+  key: string;
+  label: string;
+}
 export function Topbar({
   me,
   nav,
   pageTitle,
   onToggleNav,
+  viewAs,
+  onViewAs,
+  viewAsRoles,
 }: {
   me: Me;
   nav: NavGroup[];
   pageTitle: string;
   onToggleNav: () => void;
+  viewAs?: string;
+  onViewAs?: (key: string) => void;
+  viewAsRoles?: RoleView[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const [term, setTerm] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState<null | "search" | "bell" | "user">(null);
+  const [open, setOpen] = useState<null | "search" | "bell" | "user" | "role" | "help">(null);
   const [data, setData] = useState<SearchHit[]>([]);
   const [news, setNews] = useState<Announcement[]>([]);
   const [seenAt, setSeenAt] = useState<number>(0);
@@ -131,7 +141,7 @@ export function Topbar({
   }, []);
 
   const navHits: SearchHit[] = useMemo(
-    () => nav.flatMap((g) => g.items.map((i) => ({ group: "Go to", label: i.label, href: i.href }))),
+    () => nav.flatMap((g) => g.items.filter((i) => !i.disabled).map((i) => ({ group: "Go to", label: i.label, href: i.href }))),
     [nav],
   );
 
@@ -244,6 +254,40 @@ export function Topbar({
         </span>
       )}
 
+      {/* Viewing-as role preview (admin only; cosmetic — real authz is server-side) */}
+      {viewAsRoles && viewAsRoles.length > 0 && (
+        <div style={{ position: "relative" }} className="viewas">
+          <button
+            onClick={() => setOpen(open === "role" ? null : "role")}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 10, border: "1px solid var(--gray-100)", background: "var(--surface)", cursor: "pointer", fontSize: 13, color: "var(--fg2)", fontWeight: 600, whiteSpace: "nowrap" }}
+          >
+            <Repeat size={15} color="var(--daust-orange)" />
+            <span className="viewas-label">
+              Viewing as: <b style={{ color: "var(--fg1)" }}>{viewAsRoles.find((r) => r.key === viewAs)?.label ?? viewAsRoles[0]?.label}</b>
+            </span>
+            <ChevronDown size={15} color="var(--fg3)" />
+          </button>
+          {open === "role" && (
+            <div style={{ ...dropdownCard, width: 232, top: 46 }}>
+              <div className="muted" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", padding: "10px 14px 4px" }}>Preview role access</div>
+              {viewAsRoles.map((r) => (
+                <button
+                  key={r.key}
+                  onClick={() => {
+                    onViewAs?.(r.key);
+                    setOpen(null);
+                  }}
+                  style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "9px 14px", border: "none", background: r.key === viewAs ? "var(--bg-tint)" : "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: r.key === viewAs ? "var(--daust-navy)" : "var(--fg1)" }}
+                >
+                  <span style={{ flex: 1 }}>{r.label}</span>
+                  {r.key === viewAs && <Check size={15} color="var(--daust-navy)" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Theme toggle */}
       <button onClick={toggleTheme} aria-label="Toggle theme" style={{ width: 38, height: 38, borderRadius: 10, border: "1px solid var(--gray-100)", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
         {theme === "dark" ? <Sun size={17} color="var(--daust-orange)" /> : <Moon size={17} color="var(--daust-navy)" />}
@@ -273,6 +317,31 @@ export function Topbar({
                 View all →
               </Link>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* Help */}
+      <div style={{ position: "relative" }}>
+        <button onClick={() => setOpen(open === "help" ? null : "help")} aria-label="Help" style={{ width: 38, height: 38, borderRadius: 10, border: "1px solid var(--gray-100)", background: "var(--surface, #fff)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+          <HelpCircle size={17} color="var(--daust-navy)" />
+        </button>
+        {open === "help" && (
+          <div style={dropdownCard}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--divider)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 14 }}>Help & shortcuts</div>
+            <div style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <span className="muted">Search anything</span>
+                <kbd style={{ fontSize: 11, border: "1px solid var(--gray-200)", borderRadius: 5, padding: "1px 6px" }}>⌘K</kbd>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <span className="muted">Toggle theme</span>
+                <span style={{ fontWeight: 600 }}>Top-right sun/moon</span>
+              </div>
+            </div>
+            <a href="mailto:support@daust.org" style={{ display: "block", padding: "10px 16px", borderTop: "1px solid var(--divider)", fontSize: 12.5, fontWeight: 600, color: "var(--daust-navy)" }}>
+              Contact IT support →
+            </a>
           </div>
         )}
       </div>

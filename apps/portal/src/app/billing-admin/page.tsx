@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, Copy, Link2, LogOut, Plus, Receipt, Search, Trash2, UserPlus, Users, Wallet, X } from "lucide-react";
 import {
+  type AccountInvoice,
   type Me,
   type StudentAccount,
   type StudentAccountRow,
@@ -499,6 +500,7 @@ function ManageDrawer({ studentId, onClose, onChanged, flash }: { studentId: str
   const [acct, setAcct] = useState<StudentAccount | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<AccountInvoice | null>(null);
 
   const reload = useCallback(() => { getStudentAccount(studentId).then(setAcct).catch(() => setAcct(null)); }, [studentId]);
   useEffect(() => reload(), [reload]);
@@ -516,9 +518,18 @@ function ManageDrawer({ studentId, onClose, onChanged, flash }: { studentId: str
       setBusy(false);
     }
   }
-  async function onRemove(invoiceId: string) {
-    await removeCharge(invoiceId);
-    reload(); onChanged(); flash("Charge removed");
+  async function confirmRemove() {
+    if (!pendingRemove) return;
+    const wasPaid = pendingRemove.paid > 0;
+    setBusy(true);
+    try {
+      await removeCharge(pendingRemove.id);
+      setPendingRemove(null);
+      reload(); onChanged();
+      flash(wasPaid ? "Charge removed — paid amount reversed to account credit" : "Charge removed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -537,30 +548,37 @@ function ManageDrawer({ studentId, onClose, onChanged, flash }: { studentId: str
               </div>
 
               <div style={{ background: "linear-gradient(158deg,var(--daust-navy-deep),var(--daust-navy) 70%)", color: "#fff", borderRadius: 14, padding: "18px 20px", marginBottom: 20 }}>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,.72)" }}>Outstanding balance</div>
-                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 30, marginTop: 4 }}>{balance <= 0 ? "0" : fcfa(balance)}<small style={{ fontSize: ".4em", color: "rgba(255,255,255,.72)", marginLeft: 5 }}>FCFA</small></div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,.72)" }}>{balance < 0 ? "Account credit" : "Outstanding balance"}</div>
+                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 30, marginTop: 4 }}>{fcfa(Math.abs(balance))}<small style={{ fontSize: ".4em", color: "rgba(255,255,255,.72)", marginLeft: 5 }}>FCFA{balance < 0 ? " credit" : ""}</small></div>
                 <div style={{ fontSize: 11.5, color: "rgba(255,255,255,.72)", marginTop: 6 }}>Billed {fcfa(acct.totals.billed)} · Paid {fcfa(acct.totals.paid)} FCFA</div>
               </div>
 
               <SectionKick>Charges on account</SectionKick>
-              {acct.invoices.length === 0 ? <p style={{ color: "#6c7884", fontSize: 13 }}>No charges yet.</p> : acct.invoices.map((inv) => (
-                <div key={inv.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid #edf1f5" }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: "#141a21", fontWeight: 600, fontSize: 13.5 }}>{inv.description ?? `${inv.term} tuition`}</div>
-                    <div style={{ fontSize: 11.5, color: "#6c7884" }}>{inv.paid > 0 && inv.balance > 0 ? `Partly paid · ${fcfa(inv.paid)} of ${fcfa(inv.total)}` : `${inv.installments.length || 1} installment${(inv.installments.length || 1) > 1 ? "s" : ""}`}</div>
+              {acct.invoices.length === 0 ? <p style={{ color: "#6c7884", fontSize: 13 }}>No charges yet.</p> : acct.invoices.map((inv) => {
+                const isCredit = inv.total < 0;
+                return (
+                  <div key={inv.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid #edf1f5" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ color: isCredit ? "#2e7d52" : "#141a21", fontWeight: 600, fontSize: 13.5 }}>{inv.description ?? `${inv.term} tuition`}</div>
+                      <div style={{ fontSize: 11.5, color: "#6c7884" }}>
+                        {isCredit ? "Reversal credit — offsets other charges" : inv.paid > 0 && inv.balance > 0 ? `Partly paid · ${fcfa(inv.paid)} of ${fcfa(inv.total)}` : inv.balance <= 0 ? `Paid · ${fcfa(inv.paid)} FCFA` : `${inv.installments.length || 1} installment${(inv.installments.length || 1) > 1 ? "s" : ""}`}
+                      </div>
+                    </div>
+                    {isCredit ? (
+                      <span style={{ fontWeight: 700, color: "#2e7d52", fontVariantNumeric: "tabular-nums" }}>−{fcfa(-inv.total)} FCFA</span>
+                    ) : (
+                      <>
+                        {inv.balance <= 0 ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "#2e7d52", background: "rgba(46,125,82,.12)", padding: "2px 8px", borderRadius: 999 }}>Paid</span>
+                        ) : (
+                          <span style={{ fontWeight: 700, color: "#141a21", fontVariantNumeric: "tabular-nums" }}>{fcfa(inv.balance)} FCFA</span>
+                        )}
+                        <button onClick={() => setPendingRemove(inv)} title="Remove charge" style={{ width: 28, height: 28, borderRadius: "50%", color: "#9aa4b0", display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", cursor: "pointer" }}><Trash2 size={15} /></button>
+                      </>
+                    )}
                   </div>
-                  {inv.balance <= 0 ? (
-                    <span style={{ fontSize: 10, fontWeight: 700, color: "#2e7d52", background: "rgba(46,125,82,.12)", padding: "2px 8px", borderRadius: 999 }}>Paid</span>
-                  ) : (
-                    <>
-                      <span style={{ fontWeight: 700, color: "#141a21", fontVariantNumeric: "tabular-nums" }}>{fcfa(inv.balance)} FCFA</span>
-                      {inv.paid === 0 && (
-                        <button onClick={() => onRemove(inv.id)} title="Remove charge" style={{ width: 28, height: 28, borderRadius: "50%", color: "#9aa4b0", display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", cursor: "pointer" }}><Trash2 size={15} /></button>
-                      )}
-                    </>
-                  )}
-                </div>
-              ))}
+                );
+              })}
 
               <SectionKick style={{ marginTop: 22 }}>Add a charge</SectionKick>
               <AddChargeForm busy={busy} onSubmit={onAddCharge} />
@@ -589,6 +607,26 @@ function ManageDrawer({ studentId, onClose, onChanged, flash }: { studentId: str
           )}
         </div>
       </div>
+
+      {pendingRemove && (
+        <div onClick={(e) => { e.stopPropagation(); if (!busy) setPendingRemove(null); }} style={{ position: "fixed", inset: 0, zIndex: 120, background: "rgba(15,44,80,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 420, maxWidth: "94vw", background: "#fff", borderRadius: 16, padding: 24, boxShadow: "0 24px 60px rgba(15,44,80,.28)" }}>
+            <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, marginBottom: 8 }}>Remove charge?</h3>
+            <p style={{ fontSize: 13.5, color: "#4d5965", lineHeight: 1.5, margin: 0 }}>
+              <strong>{pendingRemove.description ?? `${pendingRemove.term} tuition`}</strong>
+              {pendingRemove.paid > 0 ? (
+                <> — {fcfa(pendingRemove.paid)} FCFA has been paid. This will <strong>reverse that amount into an account credit</strong> (no cash refund); the credit offsets the student&apos;s other or future charges.</>
+              ) : (
+                <> — this charge is unpaid and will be deleted.</>
+              )}
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+              <button onClick={() => setPendingRemove(null)} disabled={busy}>Cancel</button>
+              <button onClick={confirmRemove} disabled={busy} style={{ background: "var(--danger, #c0392b)", color: "#fff", border: "none" }}>{busy ? "Removing…" : pendingRemove.paid > 0 ? "Reverse to credit" : "Remove"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

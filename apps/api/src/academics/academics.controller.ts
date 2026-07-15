@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import {
   CreateAssignmentInput,
   DropInput,
@@ -23,6 +23,37 @@ const CreateMaterialInput = z.object({
 const CreatePostInput = z.object({
   title: z.string().min(1).max(200),
   body: z.string().min(1).max(5000),
+});
+
+const CreateProgramInput = z.object({
+  code: z.string().min(1).max(20),
+  name: z.string().min(1).max(120),
+  departmentId: z.string().min(1),
+});
+
+const CreateCourseInput = z.object({
+  code: z.string().min(1).max(20),
+  title: z.string().min(1).max(160),
+  credits: z.number().int().min(1).max(12),
+  departmentId: z.string().min(1),
+});
+
+const UpdateStudentInput = z.object({
+  fullName: z.string().min(1).max(120).optional(),
+  email: z.string().email().optional(),
+  programCode: z.string().max(20).nullable().optional(),
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  gender: z.string().max(20).nullable().optional(),
+  phone: z.string().max(40).nullable().optional(),
+  address: z.string().max(200).nullable().optional(),
+  city: z.string().max(80).nullable().optional(),
+  nationality: z.string().max(80).nullable().optional(),
+  guardianName: z.string().max(120).nullable().optional(),
+  guardianRelation: z.string().max(40).nullable().optional(),
+  guardianPhone: z.string().max(40).nullable().optional(),
+  advisor: z.string().max(120).nullable().optional(),
+  yearLevel: z.number().int().min(1).max(8).nullable().optional(),
+  cohort: z.string().max(40).nullable().optional(),
 });
 
 @Controller("academics")
@@ -75,6 +106,19 @@ export class AcademicsController {
     return this.academics.adminStudentDetail(id);
   }
 
+  @Get("admin/students/:id/activity")
+  @Roles("admin", "registrar", "bursar")
+  adminStudentActivity(@Param("id") id: string) {
+    return this.academics.adminStudentActivity(id);
+  }
+
+  @Patch("admin/students/:id")
+  @Roles("admin", "registrar")
+  updateStudent(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+    const input = UpdateStudentInput.parse(body);
+    return this.academics.updateStudent(user.personId, id, input);
+  }
+
   @Post("admin/enrollments/:id/drop")
   @Roles("admin", "registrar")
   adminDrop(@CurrentUser() user: AuthUser, @Param("id") id: string) {
@@ -85,6 +129,20 @@ export class AcademicsController {
   @Roles("admin", "registrar")
   adminPrograms() {
     return this.academics.adminPrograms();
+  }
+
+  @Post("admin/programs")
+  @Roles("admin", "registrar")
+  createProgram(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const input = CreateProgramInput.parse(body);
+    return this.academics.adminCreateProgram(user.personId, input);
+  }
+
+  @Post("admin/courses")
+  @Roles("admin", "registrar")
+  createCourse(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const input = CreateCourseInput.parse(body);
+    return this.academics.adminCreateCourse(user.personId, input);
   }
 
   @Get("admin/applicants")

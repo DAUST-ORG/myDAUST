@@ -397,28 +397,89 @@ export interface AdminStudent {
   id: string;
   studentNo: string;
   name: string;
-  program: string;
-  balance: number;
-}
-export interface AdminPrograms {
-  programs: { code: string; name: string; department: string; students: number }[];
-  courses: { code: string; title: string; credits: number }[];
-}
-export const getAdminStats = () => request<AdminStats>("/academics/admin/stats");
-export const getAdminStudents = () => request<AdminStudent[]>("/academics/admin/students");
-export interface AdminStudentDetail {
-  studentNo: string;
-  name: string;
   email: string;
-  program: string | null;
-  department: string | null;
+  photoUrl: string | null;
+  program: string;
+  programName: string | null;
+  yearLevel: number | null;
+  cohort: string | null;
   gpa: number;
   completedCredits: number;
   balance: number;
-  enrollments: { enrollmentId: string; courseCode: string; title: string; credits: number; term: string; sectionCode: string; status: string; grade: string | null }[];
+  status: string;
+}
+export interface AdminPrograms {
+  programs: { code: string; name: string; department: string; students: number }[];
+  courses: { code: string; title: string; credits: number; department: string }[];
+  departments: { id: string; code: string; name: string }[];
+}
+export const createProgram = (input: { code: string; name: string; departmentId: string }) =>
+  request<{ id: string }>("/academics/admin/programs", { method: "POST", body: JSON.stringify(input) });
+export const createCourse = (input: { code: string; title: string; credits: number; departmentId: string }) =>
+  request<{ id: string }>("/academics/admin/courses", { method: "POST", body: JSON.stringify(input) });
+export const getAdminStats = () => request<AdminStats>("/academics/admin/stats");
+export const getAdminStudents = () => request<AdminStudent[]>("/academics/admin/students");
+export interface AdminStudentDetail {
+  id: string;
+  studentNo: string;
+  name: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  photoUrl: string | null;
+  program: string | null;
+  programCode: string | null;
+  department: string | null;
+  gpa: number;
+  completedCredits: number;
+  currentTermCredits: number;
+  standing: string;
+  status: string;
+  balance: number;
+  dateOfBirth: string | null;
+  gender: string | null;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  nationality: string | null;
+  guardianName: string | null;
+  guardianRelation: string | null;
+  guardianPhone: string | null;
+  advisor: string | null;
+  yearLevel: number | null;
+  cohort: string | null;
+  enrolledAt: string | null;
+  enrollments: { enrollmentId: string; courseCode: string; title: string; credits: number; term: string; sectionCode: string; instructor: string | null; status: string; grade: string | null }[];
 }
 export const getAdminStudentDetail = (id: string) =>
   request<AdminStudentDetail>(`/academics/admin/students/${id}`);
+export interface StudentActivity {
+  type: string;
+  title: string;
+  detail: string;
+  at: string;
+}
+export const getAdminStudentActivity = (id: string) =>
+  request<StudentActivity[]>(`/academics/admin/students/${id}/activity`);
+export interface UpdateStudentInput {
+  fullName?: string;
+  email?: string;
+  programCode?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  nationality?: string | null;
+  guardianName?: string | null;
+  guardianRelation?: string | null;
+  guardianPhone?: string | null;
+  advisor?: string | null;
+  yearLevel?: number | null;
+  cohort?: string | null;
+}
+export const updateStudent = (id: string, input: UpdateStudentInput) =>
+  request<AdminStudentDetail>(`/academics/admin/students/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const adminDropEnrollment = (enrollmentId: string) =>
   request(`/academics/admin/enrollments/${enrollmentId}/drop`, { method: "POST" });
 export const getAdminPrograms = () => request<AdminPrograms>("/academics/admin/programs");
@@ -823,11 +884,34 @@ export const setBudget = (costCenterCode: string, fiscalYear: string, allocated:
   request("/finance/admin/budgets", { method: "POST", body: JSON.stringify({ costCenterCode, fiscalYear, allocated }) });
 
 // --- Admissions, staff, users ---
+export interface Applicant {
+  id: string;
+  name: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  program: string;
+  stage: string;
+  score: number | null;
+  country: string | null;
+  feePaid: boolean;
+  submittedAt: string;
+}
 export interface Admissions {
   funnel: { stage: string; count: number }[];
-  applicants: { name: string; email: string; program: string; stage: string; score: number | null; country: string | null; feePaid: boolean }[];
+  applicants: Applicant[];
 }
 export const getAdmissions = () => request<Admissions>("/academics/admin/applicants");
+export const createApplicant = (input: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  programCode?: string | null;
+  country?: string | null;
+  score?: number | null;
+}) => request<{ id: string }>("/admissions/applicants", { method: "POST", body: JSON.stringify(input) });
+export const setApplicantStage = (id: string, stage: string) =>
+  request(`/admissions/applicants/${id}/stage`, { method: "PATCH", body: JSON.stringify({ stage }) });
 
 export interface StaffMember { name: string; email: string; kind: string; roles: string[] }
 export const getStaff = () => request<StaffMember[]>("/academics/admin/staff");
@@ -918,6 +1002,7 @@ export interface BillLookup {
   program: string | null;
   term: string | null;
   balanceXof: number;
+  creditXof: number;
   dueDate: string | null;
   charges: BillCharge[];
 }

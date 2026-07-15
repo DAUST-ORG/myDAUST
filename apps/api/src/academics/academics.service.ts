@@ -27,6 +27,32 @@ export function computeGpa(rows: { grade: string; credits: number }[]) {
   };
 }
 
+/** Academic standing label derived from GPA (0 = no graded credits yet → treated as Good Standing). */
+export function standingLabel(gpa: number): string {
+  if (gpa >= 3.7) return "Dean's List";
+  if (gpa > 0 && gpa < 2) return "Academic Probation";
+  return "Good Standing";
+}
+
+/** Editable fields for updateStudent (all optional; null clears a nullable field). */
+export interface UpdateStudentFields {
+  fullName?: string;
+  email?: string;
+  programCode?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  nationality?: string | null;
+  guardianName?: string | null;
+  guardianRelation?: string | null;
+  guardianPhone?: string | null;
+  advisor?: string | null;
+  yearLevel?: number | null;
+  cohort?: string | null;
+}
+
 @Injectable()
 export class AcademicsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -619,28 +645,49 @@ export class AcademicsService {
     };
   }
 
-  /** Admin: student roster with program + outstanding balance. */
+  /** Admin: student roster with program, derived GPA/credits/standing + outstanding balance. */
   async adminStudents() {
     const students = await this.prisma.student.findMany({
-      include: { person: true, program: true, invoices: true },
+      include: {
+        person: true,
+        program: true,
+        invoices: true,
+        enrollments: { include: { section: { include: { course: true } } } },
+      },
       orderBy: { studentNo: "asc" },
     });
-    return students.map((s) => ({
-      id: s.id,
-      studentNo: s.studentNo,
-      name: `${s.person.firstName} ${s.person.lastName}`,
-      program: s.program?.code ?? "—",
-      balance: s.invoices.reduce((b, i) => b + (i.totalAmount - i.amountPaid), 0),
-    }));
+    return students.map((s) => {
+      const completed = s.enrollments.filter((e) => e.status === "completed" && e.grade);
+      const { gpa, completedCredits } = computeGpa(
+        completed.map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
+      );
+      return {
+        id: s.id,
+        studentNo: s.studentNo,
+        name: `${s.person.firstName} ${s.person.lastName}`,
+        email: s.person.email,
+        photoUrl: s.photoUrl,
+        program: s.program?.code ?? "—",
+        programName: s.program?.name ?? null,
+        yearLevel: s.yearLevel,
+        cohort: s.cohort,
+        gpa,
+        completedCredits,
+        balance: s.invoices.reduce((b, i) => b + (i.totalAmount - i.amountPaid), 0),
+        status: gpa > 0 && gpa < 2 ? "probation" : "active",
+      };
+    });
   }
 
-  /** Admin: programs with course + student counts. */
+  /** Admin: programs, course catalog + department list (for create forms). */
   async adminPrograms() {
-    const [programs, courses] = await Promise.all([
+    const [programs, courses, departments] = await Promise.all([
       this.prisma.program.findMany({
         include: { department: true, _count: { select: { students: true } } },
+        orderBy: { code: "asc" },
       }),
-      this.prisma.course.findMany({ include: { _count: { select: { sections: true } } } }),
+      this.prisma.course.findMany({ include: { department: true }, orderBy: { code: "asc" } }),
+      this.prisma.department.findMany({ orderBy: { name: "asc" } }),
     ]);
     return {
       programs: programs.map((p) => ({
@@ -649,8 +696,35 @@ export class AcademicsService {
         department: p.department.name,
         students: p._count.students,
       })),
-      courses: courses.map((c) => ({ code: c.code, title: c.title, credits: c.credits })),
+      courses: courses.map((c) => ({ code: c.code, title: c.title, credits: c.credits, department: c.department.name })),
+      departments: departments.map((d) => ({ id: d.id, code: d.code, name: d.name })),
     };
+  }
+
+  /** Registrar/admin: create a degree program. Audited. */
+  async adminCreateProgram(actorId: string, input: { code: string; name: string; departmentId: string }) {
+    const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId } });
+    if (!dept) throw new BadRequestException("Unknown department");
+    const dup = await this.prisma.program.findUnique({ where: { code: input.code } });
+    if (dup) throw new ConflictException(`Program code "${input.code}" already exists`);
+    const program = await this.prisma.program.create({
+      data: { code: input.code, name: input.name, departmentId: input.departmentId },
+    });
+    await this.prisma.auditLog.create({ data: { entity: "Program", entityId: program.id, action: "program-created", actorId } });
+    return program;
+  }
+
+  /** Registrar/admin: create a catalog course. Audited. */
+  async adminCreateCourse(actorId: string, input: { code: string; title: string; credits: number; departmentId: string }) {
+    const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId } });
+    if (!dept) throw new BadRequestException("Unknown department");
+    const dup = await this.prisma.course.findUnique({ where: { code: input.code } });
+    if (dup) throw new ConflictException(`Course code "${input.code}" already exists`);
+    const course = await this.prisma.course.create({
+      data: { code: input.code, title: input.title, credits: input.credits, departmentId: input.departmentId },
+    });
+    await this.prisma.auditLog.create({ data: { entity: "Course", entityId: course.id, action: "course-created", actorId } });
+    return course;
   }
 
   /** Admissions funnel + applicant list. */
@@ -660,13 +734,17 @@ export class AcademicsService {
     return {
       funnel: stages.map((s) => ({ stage: s, count: apps.filter((a) => a.stage === s).length })),
       applicants: apps.map((a) => ({
+        id: a.id,
         name: `${a.firstName} ${a.lastName}`,
+        firstName: a.firstName,
+        lastName: a.lastName,
         email: a.email,
         program: a.programCode ?? "—",
         stage: a.stage,
         score: a.score,
         country: a.country,
         feePaid: a.feePaid,
+        submittedAt: a.createdAt.toISOString(),
       })),
     };
   }
@@ -702,7 +780,7 @@ export class AcademicsService {
         program: { include: { department: true } },
         invoices: true,
         enrollments: {
-          include: { section: { include: { course: true, term: true } } },
+          include: { section: { include: { course: true, term: true, instructor: true } } },
           orderBy: { enrolledAt: "desc" },
         },
       },
@@ -712,15 +790,40 @@ export class AcademicsService {
     const { gpa, completedCredits } = computeGpa(
       completed.map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
     );
+    const currentTermCredits = student.enrollments
+      .filter((e) => e.status === "enrolled")
+      .reduce((c, e) => c + e.section.course.credits, 0);
     return {
+      id: student.id,
       studentNo: student.studentNo,
       name: `${student.person.firstName} ${student.person.lastName}`,
+      firstName: student.person.firstName,
+      lastName: student.person.lastName,
       email: student.person.email,
+      photoUrl: student.photoUrl,
       program: student.program ? `${student.program.code} — ${student.program.name}` : null,
+      programCode: student.program?.code ?? null,
       department: student.program?.department.name ?? null,
       gpa,
       completedCredits,
+      currentTermCredits,
+      standing: standingLabel(gpa),
+      status: gpa > 0 && gpa < 2 ? "probation" : "active",
       balance: student.invoices.reduce((b, i) => b + (i.totalAmount - i.amountPaid), 0),
+      // --- Extended SIS profile (nullable until entered via Edit record) ---
+      dateOfBirth: student.dateOfBirth ? student.dateOfBirth.toISOString().slice(0, 10) : null,
+      gender: student.gender,
+      phone: student.phone,
+      address: student.address,
+      city: student.city,
+      nationality: student.nationality,
+      guardianName: student.guardianName,
+      guardianRelation: student.guardianRelation,
+      guardianPhone: student.guardianPhone,
+      advisor: student.advisor,
+      yearLevel: student.yearLevel,
+      cohort: student.cohort,
+      enrolledAt: student.enrolledAt ? student.enrolledAt.toISOString().slice(0, 10) : null,
       enrollments: student.enrollments.map((e) => ({
         enrollmentId: e.id,
         courseCode: e.section.course.code,
@@ -728,10 +831,97 @@ export class AcademicsService {
         credits: e.section.course.credits,
         term: e.section.term.name,
         sectionCode: e.section.sectionCode,
+        instructor: e.section.instructor ? `${e.section.instructor.firstName} ${e.section.instructor.lastName}` : null,
         status: e.status,
         grade: e.grade,
       })),
     };
+  }
+
+  /** Registrar/admin: per-student activity timeline (account, payments, enrollments). */
+  async adminStudentActivity(studentId: string) {
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        program: true,
+        payments: { where: { status: "success" }, orderBy: { createdAt: "desc" } },
+        enrollments: { include: { section: { include: { course: true, term: true } } }, orderBy: { enrolledAt: "desc" } },
+      },
+    });
+    if (!student) throw new NotFoundException("Student not found");
+    const events: { type: string; title: string; detail: string; at: string }[] = [];
+    events.push({
+      type: "account",
+      title: "Account created",
+      detail: student.program ? `Enrolled in ${student.program.name}` : "Student record created",
+      at: (student.enrolledAt ?? student.createdAt).toISOString(),
+    });
+    for (const p of student.payments) {
+      events.push({
+        type: "payment",
+        title: `Payment received — ${p.amount.toLocaleString("fr-FR")} FCFA`,
+        detail: `${p.method} · ${p.providerRef}`,
+        at: p.createdAt.toISOString(),
+      });
+    }
+    for (const e of student.enrollments) {
+      events.push({
+        type: "enrollment",
+        title: `${e.status === "completed" ? "Completed" : e.status === "dropped" ? "Dropped" : "Enrolled in"} ${e.section.course.code}`,
+        detail: `${e.section.course.title} · ${e.section.term.name}`,
+        at: e.enrolledAt.toISOString(),
+      });
+    }
+    events.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+    return events;
+  }
+
+  /** Registrar/admin: update a student's record (person name/email + extended SIS fields). Audited. */
+  async updateStudent(actorId: string, studentId: string, input: UpdateStudentFields) {
+    const student = await this.prisma.student.findUnique({ where: { id: studentId }, include: { person: true } });
+    if (!student) throw new NotFoundException("Student not found");
+
+    const personData: { firstName?: string; lastName?: string; email?: string } = {};
+    if (input.fullName !== undefined) {
+      const parts = input.fullName.replace(/\s+/g, " ").trim().split(" ");
+      personData.firstName = parts.shift() ?? student.person.firstName;
+      personData.lastName = parts.join(" ") || personData.firstName;
+    }
+    if (input.email !== undefined) personData.email = input.email.toLowerCase();
+
+    let programId: string | null | undefined;
+    if (input.programCode !== undefined) {
+      if (input.programCode === null || input.programCode === "") {
+        programId = null;
+      } else {
+        const program = await this.prisma.program.findUnique({ where: { code: input.programCode } });
+        if (!program) throw new BadRequestException(`Unknown program code "${input.programCode}"`);
+        programId = program.id;
+      }
+    }
+
+    const studentData = {
+      ...(programId !== undefined ? { programId } : {}),
+      ...(input.dateOfBirth !== undefined ? { dateOfBirth: input.dateOfBirth ? new Date(`${input.dateOfBirth}T00:00:00Z`) : null } : {}),
+      ...(input.gender !== undefined ? { gender: input.gender } : {}),
+      ...(input.phone !== undefined ? { phone: input.phone } : {}),
+      ...(input.address !== undefined ? { address: input.address } : {}),
+      ...(input.city !== undefined ? { city: input.city } : {}),
+      ...(input.nationality !== undefined ? { nationality: input.nationality } : {}),
+      ...(input.guardianName !== undefined ? { guardianName: input.guardianName } : {}),
+      ...(input.guardianRelation !== undefined ? { guardianRelation: input.guardianRelation } : {}),
+      ...(input.guardianPhone !== undefined ? { guardianPhone: input.guardianPhone } : {}),
+      ...(input.advisor !== undefined ? { advisor: input.advisor } : {}),
+      ...(input.yearLevel !== undefined ? { yearLevel: input.yearLevel } : {}),
+      ...(input.cohort !== undefined ? { cohort: input.cohort } : {}),
+    };
+
+    await this.prisma.$transaction([
+      ...(Object.keys(personData).length ? [this.prisma.person.update({ where: { id: student.personId }, data: personData })] : []),
+      this.prisma.student.update({ where: { id: studentId }, data: studentData }),
+      this.prisma.auditLog.create({ data: { entity: "Student", entityId: studentId, action: "student-updated", actorId } }),
+    ]);
+    return this.adminStudentDetail(studentId);
   }
 
   /** Registrar/admin administrative drop — bypasses the student drop deadline, audited. */
