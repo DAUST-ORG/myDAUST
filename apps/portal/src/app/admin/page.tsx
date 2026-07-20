@@ -68,11 +68,19 @@ export default function AdminDashboard() {
   const [adm, setAdm] = useState<Admissions | null>(null);
 
   useEffect(() => {
-    getMe().then((m) => setName(m.name)).catch(() => {});
-    getAdminSummary().then(setFin).catch(() => {});
     getAdminStats().then(setStats).catch(() => {});
-    getDirectorOverview().then(setDir).catch(() => {});
     getAdmissions().then(setAdm).catch(() => {});
+    getMe()
+      .then((m) => {
+        setName(m.name);
+        // Finance lives in its own portal under the bursar role. A plain registrar
+        // is refused these endpoints, so don't ask for them at all rather than
+        // firing requests we know will 403.
+        if (!m.roles.some((r) => r === "bursar" || r === "admin")) return;
+        getAdminSummary().then(setFin).catch(() => {});
+        getDirectorOverview().then(setDir).catch(() => {});
+      })
+      .catch(() => {});
   }, []);
 
   const openApps = adm?.funnel

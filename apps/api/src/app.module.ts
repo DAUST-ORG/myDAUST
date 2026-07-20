@@ -16,6 +16,7 @@ import { FinanceModule } from "./finance/finance.module.js";
 import { GuardiansModule } from "./guardians/guardians.module.js";
 import { HealthController } from "./health.controller.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
+import { RegistrarModule } from "./registrar/registrar.module.js";
 import { UploadsModule } from "./uploads/uploads.module.js";
 
 @Module({
@@ -28,6 +29,7 @@ import { UploadsModule } from "./uploads/uploads.module.js";
     AuthModule,
     FinanceModule,
     GuardiansModule,
+    RegistrarModule,
     AcademicsModule,
     CommsModule,
     CampusModule,

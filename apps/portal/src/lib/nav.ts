@@ -110,8 +110,7 @@ export const REGISTRAR_NAV: PortalNav = {
       { href: "/admin/departments", label: "Departments", icon: Building2 },
       { href: "/admin/academic-years", label: "Academic Years", icon: CalendarRange },
       { href: "/admin/programs", label: "Programs & Curriculum", icon: GraduationCap },
-      { href: "/admin/courses", label: "Course Catalog", icon: BookOpen },
-      { href: "/admin/offerings", label: "Course Enrollment", icon: Layers },
+      { href: "/admin/schedule", label: "Course Enrollment", icon: Layers },
       { href: "/admin/calendar", label: "Academic Calendar", icon: CalendarDays },
     ]),
     g("Policy & rules", [
@@ -120,7 +119,7 @@ export const REGISTRAR_NAV: PortalNav = {
       { href: "/admin/grade-approvals", label: "Grade Approvals", icon: ClipboardCheck },
     ]),
     g("Administration", [
-      { href: "/admin/roles", label: "Roles & Permissions", icon: UserCog },
+      { href: "/admin/staff", label: "Roles & Permissions", icon: UserCog },
       { href: "/admin/settings", label: "Security & System", icon: ShieldCheck },
     ]),
     g("Communication", [{ href: "/admin/messages", label: "Messages", icon: Mail }]),

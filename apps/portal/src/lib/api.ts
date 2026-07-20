@@ -1280,3 +1280,102 @@ export type MyHousing =
       roommates: string[];
     };
 export const getMyHousing = () => request<MyHousing>("/academics/my/housing");
+
+// --- Registrar: academic structure, policy and student success ---
+export interface DepartmentRow {
+  id: string;
+  code: string;
+  name: string;
+  head: string | null;
+  programs: number;
+  courses: number;
+}
+export const getDepartments = () => request<DepartmentRow[]>("/registrar/departments");
+export const upsertDepartment = (input: { id?: string; code: string; name: string; head?: string | null }) =>
+  request<DepartmentRow>("/registrar/departments", { method: "POST", body: JSON.stringify(input) });
+
+export interface AcademicYearRow {
+  id: string;
+  label: string;
+  status: "draft" | "active" | "archived";
+  _count: { terms: number };
+}
+export const getAcademicYears = () => request<AcademicYearRow[]>("/registrar/academic-years");
+export const createAcademicYear = (label: string) =>
+  request<AcademicYearRow>("/registrar/academic-years", { method: "POST", body: JSON.stringify({ label }) });
+export const activateAcademicYear = (id: string) =>
+  request<{ ok: boolean }>(`/registrar/academic-years/${id}/activate`, { method: "POST" });
+
+export interface GradingSchemeRow {
+  id: string;
+  key: string;
+  name: string;
+  isDefault: boolean;
+  rows: { id: string; grade: string; points: number | null; minScore: number | null; maxScore: number | null }[];
+}
+export const getGradingSchemes = () => request<GradingSchemeRow[]>("/registrar/grading-schemes");
+
+export interface CourseRuleRow {
+  courseId: string;
+  code: string;
+  title: string;
+  credits: number;
+  prerequisites: { code: string; minGrade: string | null }[];
+  corequisites: string[];
+  standingRequired: string | null;
+  majorRestriction: string | null;
+  capacity: number | null;
+  waitlistEnabled: boolean;
+}
+export const getCourseRules = () => request<CourseRuleRow[]>("/registrar/rules");
+export const setCourseRule = (
+  courseId: string,
+  input: { standingRequired?: string | null; majorRestriction?: string | null; capacity?: number | null; waitlistEnabled?: boolean },
+) => request<unknown>(`/registrar/rules/${courseId}`, { method: "PATCH", body: JSON.stringify(input) });
+
+export interface GradeApprovalRow {
+  id: string;
+  status: string;
+  submittedAt: string | null;
+  approvedAt: string | null;
+  note: string | null;
+  course: string;
+  sectionCode: string;
+  term: string;
+  instructor: string | null;
+  students: number;
+}
+export const getGradeApprovals = () => request<GradeApprovalRow[]>("/registrar/grade-approvals");
+export const decideGradeApproval = (id: string, decision: "approved" | "returned", note?: string) =>
+  request<unknown>(`/registrar/grade-approvals/${id}/decide`, {
+    method: "POST",
+    body: JSON.stringify({ decision, note }),
+  });
+
+export interface StudentSuccess {
+  thresholds: { minGpa: number; minAttendance: number };
+  total: number;
+  flagged: {
+    studentId: string;
+    studentNo: string;
+    name: string;
+    program: string | null;
+    gpa: number;
+    attendance: number | null;
+    flags: string[];
+    lastWarnedAt: string | null;
+  }[];
+}
+export const getStudentSuccess = () => request<StudentSuccess>("/registrar/student-success");
+export const warnStudent = (studentId: string, reason: string) =>
+  request<unknown>("/registrar/student-success/warn", { method: "POST", body: JSON.stringify({ studentId, reason }) });
+
+export interface CalendarEventRow {
+  id: string;
+  title: string;
+  type: string;
+  startsOn: string;
+  endsOn: string | null;
+  note: string | null;
+}
+export const getAcademicCalendar = () => request<CalendarEventRow[]>("/registrar/calendar");
