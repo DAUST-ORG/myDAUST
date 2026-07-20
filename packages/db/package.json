@@ -23,7 +23,8 @@
     "lint": "echo 'no lint yet'",
     "bootstrap:prod": "tsx prisma/bootstrap-prod.ts",
     "import:students": "tsx prisma/import-students.ts",
-    "attach-photos": "tsx prisma/attach-photos.ts"
+    "attach-photos": "tsx prisma/attach-photos.ts",
+    "load:sis-reference": "tsx prisma/load-sis-reference.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

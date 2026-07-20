@@ -23,17 +23,18 @@ interface SearchHit {
   href: string;
 }
 
+// Cross-portal switcher for people holding several roles. Finance is its own
+// portal under the bursar role, so an admin+bursar (the finance office's own
+// account) must be offered both — the registrar sidebar carries no finance entries.
 const AREA_LINKS: { role: string; href: string; label: string }[] = [
   { role: "student", href: "/student", label: "Student Portal" },
-  { role: "faculty", href: "/faculty", label: "Teacher Portal" },
-  { role: "dining", href: "/dining", label: "Dining Console" },
-  { role: "student_affairs", href: "/affairs", label: "Student Affairs" },
-  { role: "innovation", href: "/innovation", label: "Innovation Studio" },
-  { role: "admin", href: "/admin", label: "Admin Portal" },
-  { role: "registrar", href: "/admin", label: "Admin Portal" },
-  { role: "bursar", href: "/admin", label: "Admin Portal" },
-  { role: "hr", href: "/admin", label: "Admin Portal" },
-  { role: "it_admin", href: "/admin", label: "Admin Portal" },
+  { role: "parent", href: "/parent", label: "Parent Access" },
+  { role: "faculty", href: "/faculty", label: "Faculty Portal" },
+  { role: "bursar", href: "/finance", label: "Finance Office" },
+  { role: "admin", href: "/admin", label: "Registrar Portal" },
+  { role: "registrar", href: "/admin", label: "Registrar Portal" },
+  { role: "hr", href: "/admin", label: "Registrar Portal" },
+  { role: "it_admin", href: "/admin", label: "Registrar Portal" },
 ];
 
 const SEEN_KEY = "daust-announcements-seen";
