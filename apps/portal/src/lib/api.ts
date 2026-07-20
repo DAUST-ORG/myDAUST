@@ -1196,3 +1196,87 @@ export const updateFeePlanRow = (
   id: string,
   input: { label?: string; dueOn?: string; amountFullXof?: number; amountTuitionXof?: number },
 ) => request<FeePlanRow>(`/finance/admin/fee-plan/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+
+// --- Student: registration, degree audit, attendance ---
+export interface RegistrationSection {
+  sectionId: string;
+  courseCode: string;
+  title: string;
+  credits: number;
+  sectionCode: string;
+  instructor: string | null;
+  room: string | null;
+  days: string;
+  startTime: string;
+  endTime: string;
+  schedule: string;
+  seatsTaken: number;
+  capacity: number;
+  seatsLeft: number;
+  /** Null when the student may register; otherwise the single clearest reason they cannot. */
+  blockedReason: string | null;
+}
+export interface RegistrationCatalog {
+  maxCredits: number;
+  currentCredits: number;
+  holds: { type: string; reason: string | null }[];
+  catalogYear: string | null;
+  sections: RegistrationSection[];
+}
+export const getRegistrationCatalog = (termId: string) =>
+  request<RegistrationCatalog>(`/academics/my/registration?termId=${encodeURIComponent(termId)}`);
+
+export interface DegreeCategory {
+  category: string;
+  required: number;
+  done: number;
+  inProgress: number;
+  remaining: number;
+  pct: number;
+  status: string;
+}
+export interface DegreeAudit {
+  program: string | null;
+  catalogYear?: string | null;
+  categories: DegreeCategory[];
+  completed: number;
+  inProgress: number;
+  remaining: number;
+  total: number;
+  pctComplete: number;
+}
+export const getDegreeAudit = () => request<DegreeAudit>("/academics/my/degree");
+
+export interface MyAttendance {
+  overall: number | null;
+  rows: { code: string; title: string; present: number; late: number; absent: number; pct: number | null }[];
+}
+export const getMyAttendance = () => request<MyAttendance>("/academics/my/attendance");
+
+export interface MyProfile {
+  name: string;
+  studentNo: string;
+  email: string;
+  program: string | null;
+  gpa: number;
+  completedCredits: number;
+  standing: string;
+  personal: Record<string, string | null>;
+  contact: Record<string, string | null>;
+  academic: Record<string, string | number | null>;
+  emergency: Record<string, string | null>;
+}
+export const getMyProfile = () => request<MyProfile>("/academics/my/profile");
+
+export type MyHousing =
+  | { assigned: false }
+  | {
+      assigned: true;
+      building: string | null;
+      kind: string | null;
+      room: string | null;
+      status: string;
+      note: string | null;
+      roommates: string[];
+    };
+export const getMyHousing = () => request<MyHousing>("/academics/my/housing");

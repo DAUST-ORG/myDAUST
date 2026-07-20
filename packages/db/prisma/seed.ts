@@ -847,6 +847,27 @@ async function seedSisReference() {
     }
   }
 
+  // --- Map each course onto the degree-audit requirement it satisfies. Course
+  // code prefixes are the institution's own convention, and a course's owning
+  // department does not imply its requirement area (one department teaches
+  // maths, computing and engineering courses alike). ---
+  const CATEGORY_BY_PREFIX: [RegExp, string][] = [
+    [/^CSC/, "Computer Science"],
+    [/^MTH/, "Mathematics"],
+    [/^PHY|^CHM|^BIO/, "Sciences"],
+    [/^HUM|^ENG/, "Humanities & English"],
+    [/^CE|^MEC|^EEE/, "Core Engineering"],
+    [/^GEN/, "Free Electives"],
+  ];
+  for (const course of await prisma.course.findMany()) {
+    const hit = CATEGORY_BY_PREFIX.find(([re]) => re.test(course.code));
+    if (!hit) continue;
+    await prisma.course.update({
+      where: { id: course.id },
+      data: { requirementCategory: hit[1] },
+    });
+  }
+
   // --- Institution fee schedule (the DAUST payment plan sheet).
   // Tuition 2,975,000 + housing 680,000 + cafeteria 630,000 = 4,285,000/yr,
   // split into four equal installments. Integer XOF throughout. ---

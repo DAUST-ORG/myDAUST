@@ -415,6 +415,11 @@ model Course {
   departmentId  String
   department    Department @relation(fields: [departmentId], references: [id])
   sections      Section[]
+  /// Which degree-audit requirement bucket this course satisfies (e.g. "Mathematics").
+  /// Distinct from the owning department: one department teaches courses that count
+  /// toward several different requirements. Null falls back to the department name,
+  /// then to the elective bucket.
+  requirementCategory String?
   // Self many-to-many: a course's prerequisite courses.
   // Superseded by CoursePrerequisite (which carries a minimum grade); kept until the
   // enrolment prereq check is migrated over, then dropped.

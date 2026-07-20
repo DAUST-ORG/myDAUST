@@ -131,6 +131,36 @@ export class AcademicsController {
     return this.academics.myGrades(user.studentId!);
   }
 
+  @Get("my/registration")
+  @Roles("student")
+  myRegistration(@CurrentUser() user: AuthUser, @Query("termId") termId: string) {
+    return this.academics.registrationCatalog(user.studentId!, termId);
+  }
+
+  @Get("my/degree")
+  @Roles("student")
+  myDegree(@CurrentUser() user: AuthUser) {
+    return this.academics.degreeAudit(user.studentId!);
+  }
+
+  @Get("my/attendance")
+  @Roles("student")
+  myAttendance(@CurrentUser() user: AuthUser) {
+    return this.academics.myAttendance(user.studentId!);
+  }
+
+  @Get("my/profile")
+  @Roles("student")
+  myProfile(@CurrentUser() user: AuthUser) {
+    return this.academics.myProfile(user.studentId!);
+  }
+
+  @Get("my/housing")
+  @Roles("student")
+  myHousing(@CurrentUser() user: AuthUser) {
+    return this.academics.myHousing(user.studentId!);
+  }
+
   @Get("admin/stats")
   @Roles("admin", "registrar", "bursar")
   adminStats() {

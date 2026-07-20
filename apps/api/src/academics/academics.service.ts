@@ -343,6 +343,301 @@ export class AcademicsService {
   }
 
   /** A student's current (enrolled) schedule. */
+  /**
+   * Sections a student may register into this term, each annotated with why it
+   * is or is not available. The same rules are re-checked in enroll() — this is
+   * the UX-facing preview, never the gate.
+   */
+  async registrationCatalog(studentId: string, termId: string) {
+    const [sections, enrollments, completed, holds, student] = await Promise.all([
+      this.prisma.section.findMany({
+        where: { termId, status: "open" },
+        orderBy: [{ course: { code: "asc" } }, { sectionCode: "asc" }],
+        include: {
+          course: {
+            include: {
+              prereqRules: { include: { prereqCourse: true } },
+              rule: true,
+            },
+          },
+          instructor: true,
+          _count: { select: { enrollments: { where: { status: "enrolled" } } } },
+        },
+      }),
+      this.prisma.enrollment.findMany({
+        where: { studentId, status: "enrolled", section: { termId } },
+        include: { section: { include: { course: true } } },
+      }),
+      this.prisma.enrollment.findMany({
+        where: { studentId, status: "completed" },
+        include: { section: true },
+      }),
+      this.prisma.studentHold.findMany({ where: { studentId, active: true } }),
+      this.prisma.student.findUnique({ where: { id: studentId } }),
+    ]);
+
+    const bestGrade = new Map<string, number>();
+    for (const e of completed) {
+      const pts = e.grade ? GRADE_POINTS[e.grade] : undefined;
+      const id = e.section.courseId;
+      const prev = bestGrade.get(id);
+      if (pts !== undefined && (prev === undefined || pts > prev)) bestGrade.set(id, pts);
+      else if (!bestGrade.has(id)) bestGrade.set(id, pts ?? 0);
+    }
+
+    const enrolledCourseIds = new Set(enrollments.map((e) => e.section.courseId));
+    const currentCredits = enrollments.reduce((s, e) => s + e.section.course.credits, 0);
+
+    const rows = sections.map((s) => {
+      const seatsLeft = s.capacity - s._count.enrollments;
+      const unmetPrereqs = s.course.prereqRules
+        .filter((pr) => {
+          const earned = bestGrade.get(pr.prereqCourseId);
+          if (earned === undefined) return true;
+          const required = pr.minGrade ? GRADE_POINTS[pr.minGrade] : undefined;
+          return required !== undefined && earned < required;
+        })
+        .map((pr) => (pr.minGrade ? `${pr.prereqCourse.code} (min ${pr.minGrade})` : pr.prereqCourse.code));
+
+      const clash = enrollments.find((e) => meetingsOverlap(e.section, s));
+
+      // First blocking reason wins, so the UI shows one clear explanation.
+      const blockedReason = enrolledCourseIds.has(s.courseId)
+        ? "Already enrolled"
+        : seatsLeft <= 0
+          ? "Section is full"
+          : unmetPrereqs.length > 0
+            ? `Needs ${unmetPrereqs.join(", ")}`
+            : clash
+              ? `Clashes with ${clash.section.course.code}`
+              : null;
+
+      return {
+        sectionId: s.id,
+        courseCode: s.course.code,
+        title: s.course.title,
+        credits: s.course.credits,
+        sectionCode: s.sectionCode,
+        instructor: s.instructor ? `${s.instructor.firstName} ${s.instructor.lastName}` : null,
+        room: s.room,
+        days: s.days,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        schedule: `${s.days} ${s.startTime}–${s.endTime}`,
+        seatsTaken: s._count.enrollments,
+        capacity: s.capacity,
+        seatsLeft,
+        blockedReason,
+      };
+    });
+
+    return {
+      maxCredits: MAX_CREDITS_PER_TERM,
+      currentCredits,
+      holds: holds.map((h) => ({ type: h.type, reason: h.reason })),
+      catalogYear: student?.catalogYear ?? null,
+      sections: rows,
+    };
+  }
+
+  /**
+   * Degree audit. Completion is derived from requirement-category fulfilment
+   * rather than tracked separately, so the headline figure and the per-category
+   * breakdown can never disagree.
+   */
+  async degreeAudit(studentId: string) {
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      include: { program: true },
+    });
+    if (!student) throw new NotFoundException("Student not found");
+    if (!student.programId) {
+      return { program: null, categories: [], completed: 0, inProgress: 0, remaining: 0, total: 0, pctComplete: 0 };
+    }
+
+    const [requirements, enrollments] = await Promise.all([
+      this.prisma.programRequirement.findMany({
+        where: {
+          programId: student.programId,
+          ...(student.catalogYear ? { catalogYear: student.catalogYear } : {}),
+        },
+        orderBy: { position: "asc" },
+      }),
+      this.prisma.enrollment.findMany({
+        where: { studentId, status: { in: ["completed", "enrolled"] } },
+        include: { section: { include: { course: { include: { department: true } } } } },
+      }),
+    ]);
+
+    // A course declares which requirement it satisfies; the owning department is
+    // only a fallback, because one department teaches courses counting toward
+    // several requirements. Anything still unmatched lands in the elective bucket
+    // so earned credit is never silently dropped.
+    const fallback = requirements.find((r) => /elective/i.test(r.category))?.category ?? null;
+    const doneBy = new Map<string, number>();
+    const progressBy = new Map<string, number>();
+    for (const e of enrollments) {
+      const course = e.section.course;
+      const declared = course.requirementCategory;
+      const match =
+        (declared && requirements.find((r) => r.category.toLowerCase() === declared.toLowerCase())) ||
+        requirements.find((r) => r.category.toLowerCase() === course.department.name.toLowerCase());
+      const category = match?.category ?? fallback;
+      if (!category) continue;
+      const bucket = e.status === "completed" ? doneBy : progressBy;
+      bucket.set(category, (bucket.get(category) ?? 0) + e.section.course.credits);
+    }
+
+    const categories = requirements.map((r) => {
+      // Credit applied to a category is capped at what the category requires.
+      const done = Math.min(r.requiredCredits, doneBy.get(r.category) ?? 0);
+      const inProgress = progressBy.get(r.category) ?? 0;
+      const pct = r.requiredCredits === 0 ? 100 : Math.round((done / r.requiredCredits) * 100);
+      return {
+        category: r.category,
+        required: r.requiredCredits,
+        done,
+        inProgress,
+        remaining: Math.max(0, r.requiredCredits - done),
+        pct,
+        status: done >= r.requiredCredits ? "Complete" : pct >= 60 ? "On track" : "In progress",
+      };
+    });
+
+    const total = categories.reduce((s, c) => s + c.required, 0);
+    const completedCredits = categories.reduce((s, c) => s + c.done, 0);
+    const inProgress = categories.reduce((s, c) => s + c.inProgress, 0);
+    return {
+      program: student.program?.name ?? null,
+      catalogYear: student.catalogYear,
+      categories,
+      completed: completedCredits,
+      inProgress,
+      remaining: Math.max(0, total - completedCredits - inProgress),
+      total,
+      pctComplete: total === 0 ? 0 : Math.round((completedCredits / total) * 100),
+    };
+  }
+
+  /** The signed-in student's own record, for the My Profile screen. */
+  async myProfile(studentId: string) {
+    const s = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      include: { person: true, program: true },
+    });
+    if (!s) throw new NotFoundException("Student not found");
+
+    const graded = await this.prisma.enrollment.findMany({
+      where: { studentId, status: "completed" },
+      include: { section: { include: { course: true } } },
+    });
+    const { gpa, completedCredits } = computeGpa(
+      graded.filter((e) => e.grade).map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
+    );
+
+    return {
+      name: `${s.person.firstName} ${s.person.lastName}`,
+      studentNo: s.studentNo,
+      email: s.person.email,
+      program: s.program?.name ?? null,
+      gpa,
+      completedCredits,
+      standing: s.standing ?? standingLabel(gpa),
+      personal: {
+        preferredName: s.preferredName,
+        dateOfBirth: s.dateOfBirth,
+        gender: s.gender,
+        nationality: s.nationality,
+        maritalStatus: s.maritalStatus,
+        language: s.language,
+        nationalId: s.nationalId,
+      },
+      contact: {
+        phone: s.phone,
+        personalEmail: s.personalEmail,
+        address: s.address,
+        city: s.city,
+      },
+      academic: {
+        yearLevel: s.yearLevel,
+        catalogYear: s.catalogYear,
+        advisor: s.advisor,
+        major: s.major,
+        minor: s.minor,
+        admitTerm: s.admitTerm,
+        expectedGrad: s.expectedGrad,
+        enrollmentStatus: s.enrollmentStatus,
+        cohort: s.cohort,
+      },
+      emergency: {
+        guardianName: s.guardianName,
+        guardianRelation: s.guardianRelation,
+        guardianPhone: s.guardianPhone,
+        emergencyName2: s.emergencyName2,
+        emergencyPhone2: s.emergencyPhone2,
+        bloodType: s.bloodType,
+        allergies: s.allergies,
+        insurance: s.insurance,
+        physician: s.physician,
+      },
+    };
+  }
+
+  /** The signed-in student's housing assignment, if any. */
+  async myHousing(studentId: string) {
+    const assignment = await this.prisma.housingAssignment.findUnique({
+      where: { studentId },
+      include: { hall: true },
+    });
+    if (!assignment) return { assigned: false as const };
+
+    // Anyone else assigned to the same room is a roommate.
+    const roommates = assignment.room
+      ? await this.prisma.housingAssignment.findMany({
+          where: { hallId: assignment.hallId, room: assignment.room, studentId: { not: studentId } },
+          include: { student: { include: { person: true } } },
+        })
+      : [];
+
+    return {
+      assigned: true as const,
+      building: assignment.hall?.name ?? null,
+      kind: assignment.hall?.kind ?? null,
+      room: assignment.room,
+      status: assignment.status,
+      note: assignment.note,
+      roommates: roommates.map((r) => `${r.student.person.firstName} ${r.student.person.lastName}`),
+    };
+  }
+
+  /** Per-course attendance for the signed-in student. Late counts as half a present. */
+  async myAttendance(studentId: string) {
+    const enrollments = await this.prisma.enrollment.findMany({
+      where: { studentId, status: "enrolled" },
+      include: { section: { include: { course: true } }, attendance: true },
+    });
+    const rows = enrollments.map((e) => {
+      const present = e.attendance.filter((a) => a.status === "present").length;
+      const late = e.attendance.filter((a) => a.status === "late").length;
+      const absent = e.attendance.filter((a) => a.status === "absent").length;
+      const total = present + late + absent;
+      return {
+        code: e.section.course.code,
+        title: e.section.course.title,
+        present,
+        late,
+        absent,
+        pct: total === 0 ? null : Math.round(((present + late * 0.5) / total) * 100),
+      };
+    });
+    const rated = rows.filter((r) => r.pct !== null);
+    return {
+      overall:
+        rated.length === 0 ? null : Math.round(rated.reduce((s, r) => s + (r.pct ?? 0), 0) / rated.length),
+      rows,
+    };
+  }
+
   async myEnrollments(studentId: string) {
     const enr = await this.prisma.enrollment.findMany({
       where: { studentId, status: "enrolled" },

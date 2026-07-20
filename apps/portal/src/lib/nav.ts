@@ -64,7 +64,7 @@ export const STUDENT_NAV: PortalNav = {
     ]),
     g("Communication", [
       { href: "/student/announcements", label: "Announcements", icon: Megaphone },
-      { href: "/student/messages", label: "Messages", icon: Mail },
+      { href: "/student/inbox", label: "Messages", icon: Mail },
     ]),
     g("Account", [{ href: "/student/profile", label: "My Profile", icon: UserRound }]),
   ],
