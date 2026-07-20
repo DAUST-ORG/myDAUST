@@ -734,6 +734,142 @@ async function seedTrackD() {
   console.log("Track D: materials/posts, onboarding, abroad, maintenance, global tasks seeded.");
 }
 
+/**
+ * SIS reference data: grading scales, catalog years, degree-audit requirement
+ * buckets and the institution fee schedule. Idempotent — keyed on natural
+ * unique columns so re-seeding updates rather than duplicates.
+ */
+async function seedSisReference() {
+  // --- Grading schemes. GPA is always derived from these points. ---
+  const schemes: {
+    key: string;
+    name: string;
+    isDefault?: boolean;
+    rows: [string, number | null, number | null, number | null][];
+  }[] = [
+    {
+      key: "letter",
+      name: "Standard Letter Scale · 4.00",
+      isDefault: true,
+      rows: [
+        ["A", 4.0, 93, 100], ["A-", 3.7, 90, 92], ["B+", 3.3, 87, 89],
+        ["B", 3.0, 83, 86], ["B-", 2.7, 80, 82], ["C+", 2.3, 77, 79],
+        ["C", 2.0, 73, 76], ["D", 1.0, 60, 69], ["F", 0.0, 0, 59],
+      ],
+    },
+    {
+      key: "pass",
+      name: "Pass / Fail Scale",
+      // Pass/Fail carries no grade points, so it is excluded from GPA.
+      rows: [["P — Pass", null, 60, 100], ["F — Fail", 0.0, 0, 59]],
+    },
+    {
+      key: "iep",
+      name: "Intensive English Program Levels",
+      rows: [
+        ["Level 5 — Advanced", null, null, null],
+        ["Level 4 — Upper Int.", null, 85, 100],
+        ["Level 3 — Intermediate", null, 70, 84],
+        ["Level 2 — Elementary", null, 55, 69],
+        ["Level 1 — Beginner", null, 0, 54],
+      ],
+    },
+  ];
+
+  for (const s of schemes) {
+    const scheme = await prisma.gradingScheme.upsert({
+      where: { key: s.key },
+      update: { name: s.name, isDefault: s.isDefault ?? false },
+      create: { key: s.key, name: s.name, isDefault: s.isDefault ?? false },
+    });
+    await prisma.gradeScaleRow.deleteMany({ where: { schemeId: scheme.id } });
+    await prisma.gradeScaleRow.createMany({
+      data: s.rows.map(([grade, points, minScore, maxScore], i) => ({
+        schemeId: scheme.id, grade, points, minScore, maxScore, position: i,
+      })),
+    });
+  }
+
+  // --- Catalog years. Exactly one active. ---
+  const years: [string, "archived" | "active" | "draft"][] = [
+    ["2023–2024", "archived"], ["2024–2025", "archived"], ["2025–2026", "archived"],
+    ["2026–2027", "active"], ["2027–2028", "draft"],
+  ];
+  for (const [label, status] of years) {
+    await prisma.academicYear.upsert({
+      where: { label },
+      update: { status },
+      create: { label, status },
+    });
+  }
+  const activeYear = await prisma.academicYear.findUnique({ where: { label: "2026–2027" } });
+
+  // Attach every term to a catalog year so curriculum slots resolve. The year is
+  // derived from the term name: Fall YYYY belongs to YYYY–YYYY+1, Spring YYYY to
+  // YYYY-1–YYYY. Terms whose year has not been seeded are left unlinked.
+  const yearByLabel = new Map(
+    (await prisma.academicYear.findMany()).map((y) => [y.label, y.id]),
+  );
+  for (const term of await prisma.term.findMany()) {
+    const m = /^(Fall|Spring|Summer)\s+(\d{4})$/.exec(term.name);
+    if (!m) continue;
+    const semester = m[1]!;
+    const year = Number(m[2]);
+    const start = semester === "Fall" ? year : year - 1;
+    const yearId = yearByLabel.get(`${start}–${start + 1}`);
+    await prisma.term.update({
+      where: { id: term.id },
+      data: { semester, academicYearId: yearId ?? null },
+    });
+  }
+
+  // --- Degree-audit requirement buckets. The per-category credits sum to the
+  // degree total (132), so `completed` can be derived from category fulfilment
+  // instead of being tracked separately. ---
+  const requirements: [string, number][] = [
+    ["Core Engineering", 40], ["Computer Science", 36], ["Mathematics", 20],
+    ["Sciences", 16], ["Humanities & English", 12], ["Free Electives", 8],
+  ];
+  const programs = await prisma.program.findMany();
+  for (const program of programs) {
+    for (const [i, [category, requiredCredits]] of requirements.entries()) {
+      await prisma.programRequirement.upsert({
+        where: {
+          programId_catalogYear_category: {
+            programId: program.id, catalogYear: "2026–2027", category,
+          },
+        },
+        update: { requiredCredits, position: i },
+        create: {
+          programId: program.id, catalogYear: "2026–2027", category, requiredCredits, position: i,
+        },
+      });
+    }
+  }
+
+  // --- Institution fee schedule (the DAUST payment plan sheet).
+  // Tuition 2,975,000 + housing 680,000 + cafeteria 630,000 = 4,285,000/yr,
+  // split into four equal installments. Integer XOF throughout. ---
+  const feePlan: [string, string, number, string][] = [
+    ["Fall", "Inscription", 1, "2026-08-25"],
+    ["Fall", "2nd installment", 2, "2026-11-05"],
+    ["Spring", "3rd installment", 3, "2027-01-05"],
+    ["Spring", "4th installment", 4, "2027-03-05"],
+  ];
+  for (const [semester, label, sequence, dueOn] of feePlan) {
+    await prisma.feePlanInstallment.upsert({
+      where: { academicYearLabel_sequence: { academicYearLabel: "2026–2027", sequence } },
+      update: { semester, label, dueOn: new Date(dueOn), amountFullXof: 1_071_250, amountTuitionXof: 743_750 },
+      create: {
+        academicYearLabel: "2026–2027", semester, label, sequence,
+        dueOn: new Date(dueOn), amountFullXof: 1_071_250, amountTuitionXof: 743_750,
+      },
+    });
+  }
+
+  console.log("Seeded SIS reference data (grading schemes, catalog years, requirements, fee plan).");
+}
+
 async function main() {
   const passwordHash = await bcrypt.hash(DEV_PASSWORD, 10);
   await seedCostCenters();
@@ -750,6 +886,7 @@ async function main() {
   await seedAffairs();
   await seedInnovation();
   await seedTrackD();
+  await seedSisReference();
   console.log(`All seeded users share dev password: "${DEV_PASSWORD}"`);
 }
 

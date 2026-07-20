@@ -34,6 +34,66 @@ export function standingLabel(gpa: number): string {
   return "Good Standing";
 }
 
+/** Maximum credits a student may carry in one term (enrolled + newly added). */
+export const MAX_CREDITS_PER_TERM = 30;
+
+/** Class-standing ladder, used to evaluate a course rule's `standingRequired`. */
+const STANDING_RANK: Record<string, number> = {
+  freshman: 1, sophomore: 2, junior: 3, senior: 4,
+};
+
+/**
+ * Expand a meeting-day string into day tokens. Two-letter days must be matched
+ * before single letters, otherwise "TTh" reads as T,T,H.
+ */
+export function parseDays(days: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  const src = days.replace(/[\s,]/g, "");
+  while (i < src.length) {
+    const two = src.slice(i, i + 2).toLowerCase();
+    if (two === "th" || two === "su") {
+      out.push(two.charAt(0).toUpperCase() + two.charAt(1));
+      i += 2;
+      continue;
+    }
+    out.push(src.charAt(i).toUpperCase());
+    i += 1;
+  }
+  return out;
+}
+
+/** "09:30" → 570. Returns NaN for unparseable input so callers can skip the check. */
+export function toMinutes(hhmm: string): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return Number.NaN;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+export interface MeetingLike {
+  days: string;
+  startTime: string;
+  endTime: string;
+}
+
+/**
+ * True when two sections meet on a shared day with overlapping times.
+ * Touching blocks (one ends exactly when the other starts) do not conflict.
+ * Unparseable times are treated as non-conflicting rather than blocking
+ * enrolment on bad catalog data.
+ */
+export function meetingsOverlap(a: MeetingLike, b: MeetingLike): boolean {
+  const aDays = parseDays(a.days);
+  const bDays = parseDays(b.days);
+  if (!aDays.some((d) => bDays.includes(d))) return false;
+  const aStart = toMinutes(a.startTime);
+  const aEnd = toMinutes(a.endTime);
+  const bStart = toMinutes(b.startTime);
+  const bEnd = toMinutes(b.endTime);
+  if ([aStart, aEnd, bStart, bEnd].some(Number.isNaN)) return false;
+  return aStart < bEnd && bStart < aEnd;
+}
+
 /** Editable fields for updateStudent (all optional; null clears a nullable field). */
 export interface UpdateStudentFields {
   fullName?: string;
@@ -126,21 +186,120 @@ export class AcademicsService {
       const taken = await tx.enrollment.count({ where: { sectionId, status: "enrolled" } });
       if (taken >= section.capacity) throw new ConflictException("Section is full");
 
+      // A registrar-closed section is not offered, regardless of remaining seats.
+      const full = await tx.section.findUniqueOrThrow({ where: { id: sectionId } });
+      if (full.status === "closed") {
+        throw new ConflictException("This section is closed for registration");
+      }
+
+      // An active financial or advising hold blocks all registration.
+      const holds = await tx.studentHold.findMany({ where: { studentId, active: true } });
+      if (holds.length > 0) {
+        const kinds = [...new Set(holds.map((h) => h.type))].join(", ");
+        throw new ForbiddenException(
+          `Registration is blocked by an active hold (${kinds}). Contact the registrar to clear it.`,
+        );
+      }
+
       const course = await tx.course.findUniqueOrThrow({
         where: { id: section.courseId },
-        include: { prerequisites: true },
+        include: {
+          prereqRules: { include: { prereqCourse: true } },
+          coreqRules: { include: { coreqCourse: true } },
+          rule: true,
+        },
       });
-      if (course.prerequisites.length > 0) {
-        const completed = await tx.enrollment.findMany({
-          where: { studentId, status: "completed" },
-          include: { section: true },
-        });
-        const done = new Set(completed.map((e) => e.section.courseId));
-        const missing = course.prerequisites.filter((p) => !done.has(p.id));
-        if (missing.length > 0) {
+
+      // Everything the student has completed, with the grade earned, so a
+      // prerequisite can require a minimum grade rather than a bare pass.
+      const completed = await tx.enrollment.findMany({
+        where: { studentId, status: "completed" },
+        include: { section: { include: { course: true } } },
+      });
+      const bestGrade = new Map<string, number>();
+      for (const e of completed) {
+        const pts = e.grade ? GRADE_POINTS[e.grade] : undefined;
+        const courseId = e.section.courseId;
+        const prev = bestGrade.get(courseId);
+        // A retake counts at its best grade.
+        if (pts !== undefined && (prev === undefined || pts > prev)) bestGrade.set(courseId, pts);
+        else if (!bestGrade.has(courseId)) bestGrade.set(courseId, pts ?? 0);
+      }
+
+      const unmet: string[] = [];
+      for (const pr of course.prereqRules) {
+        const earned = bestGrade.get(pr.prereqCourseId);
+        if (earned === undefined) {
+          unmet.push(pr.prereqCourse.code);
+          continue;
+        }
+        const required = pr.minGrade ? GRADE_POINTS[pr.minGrade] : undefined;
+        if (required !== undefined && earned < required) {
+          unmet.push(`${pr.prereqCourse.code} (min ${pr.minGrade})`);
+        }
+      }
+      if (unmet.length > 0) {
+        throw new BadRequestException(`Missing prerequisite(s): ${unmet.join(", ")}`);
+      }
+
+      // Sections the student already holds this term — the basis for the
+      // corequisite, timetable-clash and credit-load checks below.
+      const termEnrollments = await tx.enrollment.findMany({
+        where: { studentId, status: "enrolled", section: { termId: section.termId } },
+        include: { section: { include: { course: true } } },
+      });
+
+      if (course.coreqRules.length > 0) {
+        const heldCourseIds = new Set(termEnrollments.map((e) => e.section.courseId));
+        const missingCoreq = course.coreqRules
+          .filter((c) => !heldCourseIds.has(c.coreqCourseId) && !bestGrade.has(c.coreqCourseId))
+          .map((c) => c.coreqCourse.code);
+        if (missingCoreq.length > 0) {
           throw new BadRequestException(
-            `Missing prerequisite(s): ${missing.map((m) => m.code).join(", ")}`,
+            `Must be taken with (or after) ${missingCoreq.join(", ")}`,
           );
+        }
+      }
+
+      const clash = termEnrollments.find((e) => meetingsOverlap(e.section, full));
+      if (clash) {
+        throw new ConflictException(
+          `Time conflict with ${clash.section.course.code} (${clash.section.days} ${clash.section.startTime}-${clash.section.endTime})`,
+        );
+      }
+
+      const currentCredits = termEnrollments.reduce((s, e) => s + e.section.course.credits, 0);
+      if (currentCredits + course.credits > MAX_CREDITS_PER_TERM) {
+        throw new BadRequestException(
+          `Over the ${MAX_CREDITS_PER_TERM}-credit limit for this term (${currentCredits} enrolled + ${course.credits})`,
+        );
+      }
+
+      const student = await tx.student.findUniqueOrThrow({
+        where: { id: studentId },
+        include: { program: true },
+      });
+
+      if (course.rule?.standingRequired) {
+        const firstWord = course.rule.standingRequired.trim().split(/\s+/)[0] ?? "";
+        const needed = STANDING_RANK[firstWord.toLowerCase()];
+        const yr = student.yearLevel ?? 0;
+        if (needed !== undefined && yr > 0 && yr < needed) {
+          throw new ForbiddenException(
+            `${course.code} requires ${course.rule.standingRequired}`,
+          );
+        }
+      }
+
+      if (course.rule?.majorRestriction) {
+        const allowed = course.rule.majorRestriction.toLowerCase();
+        const mine = (student.major ?? student.program?.name ?? "").toLowerCase();
+        // Restriction strings are human-authored lists ("Computer / Electrical Eng."),
+        // so match loosely on any token rather than demanding an exact equality.
+        const tokens = allowed.split(/[/,]/).map((t) => t.trim()).filter(Boolean);
+        const head = (t: string) => t.split(/\s+/)[0] ?? t;
+        if (mine && tokens.length > 0 && !tokens.some((t) => mine.includes(head(t)))) {
+          throw new ForbiddenException(`${course.code} is restricted to ${course.rule.majorRestriction}`);
         }
       }
 
