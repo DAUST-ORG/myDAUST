@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { COST_CENTERS, FEE_STRUCTURE, SCHOLARSHIP_TIERS } from "@mydaust/shared";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { seedSisReference } from "./sis-reference.js";
 
 // Minimal PRODUCTION bootstrap: reference data + one admin. No demo students,
 // no fake money. Run once against an empty schema (after `migrate deploy`).
@@ -99,6 +100,10 @@ async function main() {
   await costCenters();
   await moneyConfig();
   await academicCatalog();
+  // Grading scales, catalogue years, degree requirements and the fee schedule are
+  // official configuration rather than demo data — without them the grading,
+  // degree-audit and fee screens have nothing to show.
+  await seedSisReference(prisma);
   const password = await adminAccount();
   console.log("\n=== PROD ADMIN BOOTSTRAP ===");
   console.log("email:    admin@daust.edu");
