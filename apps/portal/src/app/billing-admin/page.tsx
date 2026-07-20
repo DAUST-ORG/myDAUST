@@ -573,7 +573,7 @@ function ManageDrawer({ studentId, onClose, onChanged, flash }: { studentId: str
                         ) : (
                           <span style={{ fontWeight: 700, color: "#141a21", fontVariantNumeric: "tabular-nums" }}>{fcfa(inv.balance)} FCFA</span>
                         )}
-                        <button onClick={() => setPendingRemove(inv)} title="Remove charge" style={{ width: 28, height: 28, borderRadius: "50%", color: "#9aa4b0", display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", cursor: "pointer" }}><Trash2 size={15} /></button>
+                        <button onClick={() => setPendingRemove(inv)} title="Remove charge" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 8, color: "#c0392b", background: "#fdeeeb", border: "1px solid #f1c9c1", fontSize: 12, fontWeight: 700, cursor: "pointer" }}><Trash2 size={13} /> Remove</button>
                       </>
                     )}
                   </div>
