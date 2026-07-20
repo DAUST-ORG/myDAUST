@@ -13,6 +13,7 @@ import { MailModule } from "./mail/mail.module.js";
 import { CommsModule } from "./comms/comms.module.js";
 import { ConfigModule } from "./config/config.module.js";
 import { FinanceModule } from "./finance/finance.module.js";
+import { GuardiansModule } from "./guardians/guardians.module.js";
 import { HealthController } from "./health.controller.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { UploadsModule } from "./uploads/uploads.module.js";
@@ -26,6 +27,7 @@ import { UploadsModule } from "./uploads/uploads.module.js";
     AppConfigModule,
     AuthModule,
     FinanceModule,
+    GuardiansModule,
     AcademicsModule,
     CommsModule,
     CampusModule,

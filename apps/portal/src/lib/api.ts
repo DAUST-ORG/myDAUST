@@ -1115,3 +1115,84 @@ export const lookupBill = (studentNo: string, dob: string) =>
   request<BillLookup>("/finance/public/bill/lookup", { method: "POST", body: JSON.stringify({ studentNo, dob }) });
 export const checkoutBill = (input: { studentNo: string; dob: string; amountXof: number; method: string }) =>
   request<{ redirectUrl: string }>("/finance/public/bill/checkout", { method: "POST", body: JSON.stringify(input) });
+
+// --- Parent portal (guardian access) ---
+export interface ChildSummary {
+  studentId: string;
+  studentNo: string;
+  name: string;
+  program: string;
+  yearLevel: number | null;
+  photoUrl: string | null;
+  relation: string | null;
+  gpa: number;
+  completedCredits: number;
+  standing: string;
+  balance: number;
+}
+export const getMyChildren = () => request<ChildSummary[]>("/parent/children");
+
+export interface ChildTranscript {
+  cumulativeGpa: number;
+  terms: {
+    term: string;
+    gpa: number;
+    credits: number;
+    courses: { code: string; title: string; credits: number; grade: string | null }[];
+  }[];
+}
+export const getChildGrades = (studentId: string) =>
+  request<ChildTranscript>(`/parent/children/${studentId}/grades`);
+
+export interface ChildAttendance {
+  overall: number | null;
+  rows: { code: string; title: string; present: number; late: number; absent: number; pct: number | null }[];
+}
+export const getChildAttendance = (studentId: string) =>
+  request<ChildAttendance>(`/parent/children/${studentId}/attendance`);
+
+export const getChildAccount = (studentId: string) =>
+  request<StudentAccount>(`/parent/children/${studentId}/account`);
+
+// --- Registrar: guardian administration ---
+export interface GuardianRow {
+  id: string;
+  name: string;
+  email: string;
+  status: string; // active | invited | invite-expired
+  children: { studentId: string; studentNo: string; name: string; relation: string | null }[];
+}
+export const getGuardians = () => request<GuardianRow[]>("/guardians");
+export const createGuardian = (input: {
+  fullName: string;
+  email: string;
+  studentIds: string[];
+  relation?: string;
+}) => request<{ id: string; email: string }>("/guardians", { method: "POST", body: JSON.stringify(input) });
+export const resendGuardianInvite = (id: string) =>
+  request<{ ok: boolean }>(`/guardians/${id}/resend-invite`, { method: "POST" });
+export const setGuardianChildren = (id: string, studentIds: string[]) =>
+  request<{ ok: boolean }>(`/guardians/${id}/children`, { method: "PATCH", body: JSON.stringify({ studentIds }) });
+
+// --- Institution fee schedule (the DAUST payment-plan sheet) ---
+export interface FeePlanRow {
+  id: string;
+  academicYearLabel: string;
+  semester: string;
+  label: string;
+  sequence: number;
+  dueOn: string | null;
+  amountFullXof: number;
+  amountTuitionXof: number;
+}
+export interface FeePlan {
+  academicYearLabel: string | null;
+  rows: FeePlanRow[];
+  totals: { full: number; tuition: number };
+}
+export const getFeePlan = (year?: string) =>
+  request<FeePlan>(`/finance/admin/fee-plan${year ? `?year=${encodeURIComponent(year)}` : ""}`);
+export const updateFeePlanRow = (
+  id: string,
+  input: { label?: string; dueOn?: string; amountFullXof?: number; amountTuitionXof?: number },
+) => request<FeePlanRow>(`/finance/admin/fee-plan/${id}`, { method: "PATCH", body: JSON.stringify(input) });

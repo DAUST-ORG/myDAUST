@@ -17,6 +17,8 @@ import { PaytechProvider } from "./paytech.provider.js";
     { provide: PAYMENT_PROVIDER, useClass: PaytechProvider },
   ],
   // Dining orders and application fees ride the same PayTech rail.
-  exports: [PAYMENT_PROVIDER],
+  // FinanceService is exported so the parent portal reads a child's account
+  // through the same code the bursar uses — one source of truth for money.
+  exports: [PAYMENT_PROVIDER, FinanceService],
 })
 export class FinanceModule {}

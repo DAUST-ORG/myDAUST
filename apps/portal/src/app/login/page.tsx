@@ -4,11 +4,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
 import { login } from "@/lib/api";
+import { portalForRoles } from "@/lib/nav";
 
 const DEMO_ACCOUNTS = [
   { email: "aissatou.diallo@daust.edu", role: "Student" },
-  { email: "bursar@daust.edu", role: "Bursar" },
+  { email: "parent@daust.edu", role: "Parent" },
+  { email: "amadou.ba@daust.edu", role: "Faculty" },
   { email: "registrar@daust.edu", role: "Registrar" },
+  { email: "bursar@daust.edu", role: "Bursar" },
   { email: "admin@daust.edu", role: "Admin" },
 ];
 const DEMO_PASSWORD = "daust-dev-2026";
@@ -33,19 +36,9 @@ export default function LoginPage() {
     setError(null);
     try {
       const me = await login(email.trim(), password);
-      const r = me.roles;
-      const home = r.includes("student")
-        ? "/student"
-        : r.includes("faculty")
-          ? "/faculty"
-          : r.includes("dining")
-            ? "/dining"
-            : r.includes("student_affairs")
-              ? "/affairs"
-              : r.includes("innovation")
-                ? "/innovation"
-                : "/admin";
-      router.push(home);
+      // Single source of truth for role -> portal (src/lib/nav.ts), so the landing
+      // page and the sidebar can never disagree about which portal a role owns.
+      router.push(portalForRoles(me.roles).home);
     } catch {
       setError("Invalid email or password");
       setBusy(false);

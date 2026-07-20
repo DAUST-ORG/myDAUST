@@ -138,6 +138,16 @@ export const FINANCE_NAV: PortalNav = {
   ],
 };
 
+/** Portal registry, keyed so a server layout can name one without importing icons. */
+export const PORTALS = {
+  student: STUDENT_NAV,
+  parent: PARENT_NAV,
+  faculty: FACULTY_NAV,
+  registrar: REGISTRAR_NAV,
+  finance: FINANCE_NAV,
+} as const;
+export type PortalKey = keyof typeof PORTALS;
+
 /**
  * Which portal a person lands in, most privileged first. A person can hold
  * several roles (e.g. admin + bursar), so order decides the default home.

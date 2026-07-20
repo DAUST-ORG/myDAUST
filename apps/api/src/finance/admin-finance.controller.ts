@@ -44,6 +44,13 @@ const ApplyDiscountInput = z.object({
   costCenterCode: z.string().max(8).optional(),
 });
 
+const UpdateFeePlanRowInput = z.object({
+  label: z.string().min(1).max(80).optional(),
+  dueOn: z.string().optional(),
+  amountFullXof: z.number().int().min(0).max(100_000_000).optional(),
+  amountTuitionXof: z.number().int().min(0).max(100_000_000).optional(),
+});
+
 const UpdatePlanInput = z.object({
   installments: z
     .array(
@@ -141,6 +148,16 @@ export class AdminFinanceController {
   @Delete("charges/:invoiceId")
   removeCharge(@CurrentUser() user: AuthUser, @Param("invoiceId") invoiceId: string) {
     return this.finance.removeCharge(user.personId, invoiceId);
+  }
+
+  @Get("fee-plan")
+  feePlan(@Query("year") year?: string) {
+    return this.finance.getFeePlan(year);
+  }
+
+  @Patch("fee-plan/:id")
+  updateFeePlanRow(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+    return this.finance.updateFeePlanRow(user.personId, id, UpdateFeePlanRowInput.parse(body));
   }
 
   @Post("discounts")

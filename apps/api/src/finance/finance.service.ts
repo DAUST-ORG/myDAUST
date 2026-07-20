@@ -108,6 +108,63 @@ export class FinanceService {
   }
 
   /**
+   * The institution-wide fee schedule (the DAUST payment-plan sheet). This is the
+   * template staff edit; it does not retroactively change invoices already raised —
+   * those carry their own installments and are edited per student.
+   */
+  async getFeePlan(academicYearLabel?: string) {
+    const year =
+      academicYearLabel ??
+      (await this.prisma.academicYear.findFirst({ where: { status: "active" } }))?.label;
+    if (!year) return { academicYearLabel: null, rows: [], totals: { full: 0, tuition: 0 } };
+
+    const rows = await this.prisma.feePlanInstallment.findMany({
+      where: { academicYearLabel: year },
+      orderBy: { sequence: "asc" },
+    });
+    return {
+      academicYearLabel: year,
+      rows,
+      totals: {
+        full: rows.reduce((s, r) => s + r.amountFullXof, 0),
+        tuition: rows.reduce((s, r) => s + r.amountTuitionXof, 0),
+      },
+    };
+  }
+
+  async updateFeePlanRow(
+    actorId: string,
+    id: string,
+    input: { label?: string; dueOn?: string; amountFullXof?: number; amountTuitionXof?: number },
+  ) {
+    const row = await this.prisma.feePlanInstallment.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException("Fee plan installment not found");
+
+    const updated = await this.prisma.feePlanInstallment.update({
+      where: { id },
+      data: {
+        label: input.label ?? row.label,
+        dueOn: input.dueOn ? new Date(input.dueOn) : row.dueOn,
+        amountFullXof: input.amountFullXof ?? row.amountFullXof,
+        amountTuitionXof: input.amountTuitionXof ?? row.amountTuitionXof,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "FeePlanInstallment",
+        entityId: id,
+        action: "fee-plan-updated",
+        actorId,
+        data: {
+          before: { full: row.amountFullXof, tuition: row.amountTuitionXof },
+          after: { full: updated.amountFullXof, tuition: updated.amountTuitionXof },
+        },
+      },
+    });
+    return updated;
+  }
+
+  /**
    * Per-student override of a plan's installments: edit each installment's amount + due date.
    * The invoice total follows the installment sum, so lowering an installment lowers what the
    * student owes (balance nets automatically). An installment cannot be set below what has

@@ -870,6 +870,42 @@ async function seedSisReference() {
   console.log("Seeded SIS reference data (grading schemes, catalog years, requirements, fee plan).");
 }
 
+/**
+ * Demo guardian account. In production guardians are provisioned by the registrar
+ * and set their own password via an emailed invite; the seed shortcuts that so the
+ * parent portal is reachable with the shared dev password.
+ * Linked to two students so the child switcher has something to switch between.
+ */
+async function seedGuardians(passwordHash: string) {
+  const children = await prisma.student.findMany({
+    where: { person: { email: { in: ["aissatou.diallo@daust.edu", "mamadou.sy@daust.edu"] } } },
+  });
+  if (children.length === 0) {
+    console.log("Guardians: no demo students found, skipped.");
+    return;
+  }
+
+  const guardian = await prisma.person.upsert({
+    where: { email: "parent@daust.edu" },
+    update: { roles: ["parent"], kind: "parent", passwordHash },
+    create: {
+      email: "parent@daust.edu",
+      firstName: "Ousmane",
+      lastName: "Diallo",
+      kind: "parent",
+      roles: ["parent"],
+      passwordHash,
+    },
+  });
+
+  await prisma.guardianStudent.createMany({
+    data: children.map((c) => ({ guardianId: guardian.id, studentId: c.id, relation: "Father" })),
+    skipDuplicates: true,
+  });
+
+  console.log(`Guardians: parent@daust.edu linked to ${children.length} student(s).`);
+}
+
 async function main() {
   const passwordHash = await bcrypt.hash(DEV_PASSWORD, 10);
   await seedCostCenters();
@@ -887,6 +923,7 @@ async function main() {
   await seedInnovation();
   await seedTrackD();
   await seedSisReference();
+  await seedGuardians(passwordHash);
   console.log(`All seeded users share dev password: "${DEV_PASSWORD}"`);
 }
 
