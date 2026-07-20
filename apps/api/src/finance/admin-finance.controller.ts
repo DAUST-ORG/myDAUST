@@ -36,6 +36,27 @@ const AddChargeInput = z.object({
   dueDate: z.string().optional(),
 });
 
+const ApplyDiscountInput = z.object({
+  studentId: z.string().min(1).max(64),
+  label: z.string().min(1).max(160),
+  amountXof: z.number().int().positive().max(100_000_000),
+  kind: z.enum(["discount", "scholarship"]).optional(),
+  costCenterCode: z.string().max(8).optional(),
+});
+
+const UpdatePlanInput = z.object({
+  installments: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        dueDate: z.string().min(8).max(40),
+        amountDue: z.number().int().min(0).max(100_000_000),
+      }),
+    )
+    .min(1)
+    .max(24),
+});
+
 @Controller("finance/admin")
 @Roles("bursar", "admin")
 export class AdminFinanceController {
@@ -122,10 +143,25 @@ export class AdminFinanceController {
     return this.finance.removeCharge(user.personId, invoiceId);
   }
 
+  @Post("discounts")
+  applyDiscount(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.finance.applyDiscount(user.personId, ApplyDiscountInput.parse(body));
+  }
+
   @Post("plans")
   createPlan(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const input = CreatePaymentPlanInput.parse(body);
     return this.finance.createPaymentPlan(input, user.personId);
+  }
+
+  @Patch("plans/:invoiceId")
+  updatePlan(
+    @CurrentUser() user: AuthUser,
+    @Param("invoiceId") invoiceId: string,
+    @Body() body: unknown,
+  ) {
+    const input = UpdatePlanInput.parse(body);
+    return this.finance.updatePaymentPlan(user.personId, invoiceId, input.installments);
   }
 
   @Post("reconcile")

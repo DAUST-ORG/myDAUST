@@ -20,11 +20,13 @@ import {
   Phone,
   Receipt,
   Send,
+  Trash2,
   UserPlus,
   Users,
   Wallet,
 } from "lucide-react";
 import {
+  type AccountInvoice,
   type AdminStudentDetail,
   type StudentAccount,
   type StudentActivity,
@@ -34,9 +36,11 @@ import {
   getAdminStudentDetail,
   getStudentAccount,
 } from "@/lib/api";
-import { formatXof } from "@/lib/format";
+import { formatDate, formatXof } from "@/lib/format";
 import { Avatar, Badge, Field, Modal, Tabs } from "@/components/ui";
 import { EditStudentModal, type EditSection } from "./EditStudentModal";
+import { RemoveChargeConfirm } from "@/components/RemoveChargeConfirm";
+import { EditPlanModal } from "@/components/EditPlanModal";
 
 const ENROLL_BADGE: Record<string, string> = { enrolled: "enrolled", completed: "completed", dropped: "dropped" };
 
@@ -55,6 +59,8 @@ export default function AdminStudentDetailPage() {
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState<EditSection | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<AccountInvoice | null>(null);
+  const [pendingEdit, setPendingEdit] = useState<AccountInvoice | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const pencil = (section: EditSection) => (
     <button onClick={() => setEditing(section)} title="Edit" style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: "var(--fg3)", border: "none", background: "none" }}>
@@ -208,6 +214,7 @@ export default function AdminStudentDetailPage() {
       )}
 
       {tab === "finance" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.5fr)", gap: 16, alignItems: "start" }}>
           <ProfileCard title="Balance" icon={Wallet}>
             <div style={{ textAlign: "center", padding: "8px 0 14px" }}>
@@ -245,6 +252,57 @@ export default function AdminStudentDetailPage() {
               <p className="muted" style={{ margin: 0 }}>No payments recorded.</p>
             )}
           </ProfileCard>
+        </div>
+
+        <ProfileCard title="Charges on account" icon={Receipt}>
+          {account && account.invoices.length > 0 ? (
+            account.invoices.map((inv) => {
+              const isCredit = inv.total < 0;
+              return (
+                <div key={inv.id} style={{ padding: "14px 0", borderBottom: "1px solid var(--divider)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 600, color: isCredit ? "var(--success)" : "var(--fg1)" }}>{inv.description ?? (isCredit ? "Account credit" : `Tuition — ${inv.term}`)}</span>
+                    {!isCredit && <span className={`badge ${inv.status}`}>{inv.status}</span>}
+                    <span style={{ flex: 1 }} />
+                    {isCredit ? (
+                      <span style={{ fontWeight: 700, color: "var(--success)", fontVariantNumeric: "tabular-nums" }}>−{formatXof(-inv.total)}</span>
+                    ) : (
+                      <span className="muted">{formatXof(inv.paid)} / {formatXof(inv.total)}</span>
+                    )}
+                    {!isCredit && inv.installments.length > 0 && (
+                      <button onClick={() => setPendingEdit(inv)} title="Edit payment plan" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 8, color: "var(--navy, #153b6a)", background: "var(--surface-2, #eef2f7)", border: "1px solid var(--border)", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                        <Pencil size={13} /> Edit plan
+                      </button>
+                    )}
+                    {!isCredit && (
+                      <button onClick={() => setPendingRemove(inv)} title="Remove charge" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 8, color: "#c0392b", background: "#fdeeeb", border: "1px solid #f1c9c1", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                        <Trash2 size={13} /> Remove
+                      </button>
+                    )}
+                  </div>
+                  {!isCredit && inv.installments.length > 0 && (
+                    <table style={{ marginTop: 8 }}>
+                      <thead><tr><th>#</th><th>Due</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead>
+                      <tbody>
+                        {inv.installments.map((i) => (
+                          <tr key={i.id}>
+                            <td>{i.sequence}</td>
+                            <td style={{ whiteSpace: "nowrap" }}>{formatDate(i.dueDate)}</td>
+                            <td>{formatXof(i.amountDue)}</td>
+                            <td>{formatXof(i.amountPaid)}</td>
+                            <td><span className={`badge ${i.status}`}>{i.status}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            <p className="muted" style={{ margin: 0 }}>No charges on account.</p>
+          )}
+        </ProfileCard>
         </div>
       )}
 
@@ -309,6 +367,12 @@ export default function AdminStudentDetailPage() {
         />
       )}
       {linkOpen && account && <PaymentLinkModal student={s} account={account} onClose={() => setLinkOpen(false)} />}
+      {pendingRemove && (
+        <RemoveChargeConfirm charge={pendingRemove} onClose={() => setPendingRemove(null)} onRemoved={() => { setPendingRemove(null); load(); }} />
+      )}
+      {pendingEdit && (
+        <EditPlanModal invoice={pendingEdit} onClose={() => setPendingEdit(null)} onSaved={() => { setPendingEdit(null); load(); }} />
+      )}
     </>
   );
 }

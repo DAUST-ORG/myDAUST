@@ -842,6 +842,12 @@ export const addCharge = (input: {
 }) => request<{ ok: boolean; count: number }>("/finance/admin/charges", { method: "POST", body: JSON.stringify(input) });
 export const removeCharge = (invoiceId: string) =>
   request<{ ok: boolean }>(`/finance/admin/charges/${invoiceId}`, { method: "DELETE" });
+export const applyDiscount = (input: { studentId: string; label: string; amountXof: number; kind?: "discount" | "scholarship"; costCenterCode?: string }) =>
+  request<{ ok: boolean; creditId: string }>("/finance/admin/discounts", { method: "POST", body: JSON.stringify(input) });
+export const updatePaymentPlan = (
+  invoiceId: string,
+  installments: { id: string; dueDate: string; amountDue: number }[],
+) => request<{ ok: boolean }>(`/finance/admin/plans/${invoiceId}`, { method: "PATCH", body: JSON.stringify({ installments }) });
 
 export interface OverdueRow {
   installmentId: string;

@@ -107,6 +107,85 @@ export class FinanceService {
     });
   }
 
+  /**
+   * Per-student override of a plan's installments: edit each installment's amount + due date.
+   * The invoice total follows the installment sum, so lowering an installment lowers what the
+   * student owes (balance nets automatically). An installment cannot be set below what has
+   * already been paid into it. Recomputes installment + invoice status. Audited.
+   */
+  async updatePaymentPlan(
+    actorId: string,
+    invoiceId: string,
+    rows: { id: string; dueDate: string; amountDue: number }[],
+  ) {
+    if (rows.length === 0) throw new BadRequestException("At least one installment is required");
+
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { plan: { include: { installments: true } } },
+    });
+    if (!invoice) throw new NotFoundException("Invoice not found");
+    if (invoice.totalAmount < 0) throw new BadRequestException("Cannot edit a credit memo");
+    if (!invoice.plan) throw new BadRequestException("Invoice has no payment plan to edit");
+
+    const byId = new Map(invoice.plan.installments.map((i) => [i.id, i]));
+    for (const r of rows) {
+      const inst = byId.get(r.id);
+      if (!inst) throw new BadRequestException(`Installment ${r.id} does not belong to this plan`);
+      if (!Number.isInteger(r.amountDue) || r.amountDue < 0) {
+        throw new BadRequestException("Installment amount must be a non-negative integer");
+      }
+      if (r.amountDue < inst.amountPaid) {
+        throw new BadRequestException(
+          `Installment ${inst.sequence} already has ${inst.amountPaid} paid; cannot set below that`,
+        );
+      }
+      if (Number.isNaN(new Date(r.dueDate).getTime())) {
+        throw new BadRequestException("Invalid due date");
+      }
+    }
+
+    const now = Date.now();
+    await this.prisma.$transaction(async (tx) => {
+      for (const r of rows) {
+        const inst = byId.get(r.id)!;
+        const due = new Date(r.dueDate);
+        const status: "paid" | "partial" | "overdue" | "pending" =
+          inst.amountPaid >= r.amountDue ? "paid"
+          : inst.amountPaid > 0 ? "partial"
+          : due.getTime() < now ? "overdue"
+          : "pending";
+        await tx.installment.update({
+          where: { id: r.id },
+          data: { amountDue: r.amountDue, dueDate: due, status },
+        });
+      }
+
+      const fresh = await tx.installment.findMany({ where: { planId: invoice.plan!.id } });
+      const newTotal = fresh.reduce((s, i) => s + i.amountDue, 0);
+      const invStatus: "paid" | "partial" | "open" =
+        newTotal > 0 && invoice.amountPaid >= newTotal ? "paid"
+        : invoice.amountPaid > 0 ? "partial"
+        : "open";
+      await tx.invoice.update({
+        where: { id: invoice.id },
+        data: { totalAmount: newTotal, status: invStatus },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          entity: "PaymentPlan",
+          entityId: invoice.plan!.id,
+          action: "plan-updated",
+          actorId,
+          data: { invoiceId: invoice.id, oldTotal: invoice.totalAmount, newTotal },
+        },
+      });
+    });
+
+    return { ok: true };
+  }
+
   /** Student initiates a payment toward an invoice they own. Returns the gateway redirect. */
   async initiatePayment(studentId: string, input: InitiatePaymentInput) {
     const invoice = await this.prisma.invoice.findUnique({
@@ -648,6 +727,45 @@ export class FinanceService {
       },
     });
     return { ok: true, count };
+  }
+
+  /**
+   * Attach an individual discount / scholarship to a student — a named account credit
+   * (negative-total invoice) that reduces their balance and rides the same balance math.
+   * Separate from the automatic BAC scholarship; this is staff-applied per student.
+   */
+  async applyDiscount(
+    actorId: string,
+    input: { studentId: string; label: string; amountXof: number; kind?: string; costCenterCode?: string },
+  ) {
+    const label = input.label.trim();
+    if (!label) throw new BadRequestException("A label is required");
+    const amount = Math.floor(input.amountXof);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("Amount must be positive");
+    const student = await this.prisma.student.findUnique({ where: { id: input.studentId } });
+    if (!student) throw new NotFoundException("Student not found");
+    const costCenterCode = input.costCenterCode ?? COST_CENTER_TUITION;
+    if (!(await this.prisma.costCenter.findUnique({ where: { code: costCenterCode } }))) {
+      throw new BadRequestException("Unknown cost center");
+    }
+    const term = await this.prisma.term.findUnique({ where: { name: TUITION_TERM_NAME } });
+    if (!term) throw new BadRequestException(`Term "${TUITION_TERM_NAME}" is not set up`);
+    const kind = input.kind === "scholarship" ? "Scholarship" : "Discount";
+    const credit = await this.prisma.invoice.create({
+      data: {
+        studentId: student.id,
+        termId: term.id,
+        totalAmount: -amount,
+        amountPaid: 0,
+        status: "paid", // excludes it from payable selection; balance math still nets it
+        description: `${kind} — ${label}`,
+        costCenterCode,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "Invoice", entityId: credit.id, action: "discount-applied", actorId, data: { label, amount, kind } },
+    });
+    return { ok: true, creditId: credit.id };
   }
 
   /**

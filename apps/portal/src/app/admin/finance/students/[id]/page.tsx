@@ -3,20 +3,28 @@
 import { PLAN_TEMPLATES, splitEvenXof } from "@mydaust/shared";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 import {
   type AccountInvoice,
   type StudentAccount,
+  applyDiscount,
   createPaymentLink,
   createPaymentPlan,
   getStudentAccount,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
+import { RemoveChargeConfirm } from "@/components/RemoveChargeConfirm";
+import { EditPlanModal } from "@/components/EditPlanModal";
+import { Field, Modal, Select } from "@/components/ui";
 
 export default function StudentAccountPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [acct, setAcct] = useState<StudentAccount | null>(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<AccountInvoice | null>(null);
+  const [pendingEdit, setPendingEdit] = useState<AccountInvoice | null>(null);
+  const [discountOpen, setDiscountOpen] = useState(false);
 
   const load = useCallback(() => {
     getStudentAccount(id).then(setAcct).catch((e: Error) => setMsg({ kind: "err", text: e.message }));
@@ -43,10 +51,110 @@ export default function StudentAccountPage() {
 
       <LinkQuickCreate studentId={id} acct={acct} onDone={(m) => setMsg(m)} />
 
+      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "22px 0 12px" }}>
+        <h2 className="h1" style={{ fontSize: 18, margin: 0 }}>Charges on account</h2>
+        <span style={{ flex: 1 }} />
+        <button onClick={() => setDiscountOpen(true)}>+ Discount / scholarship</button>
+      </div>
+      {acct.invoices.length === 0 && <p className="muted">No charges yet.</p>}
       {acct.invoices.map((inv) => (
-        <InvoiceBlock key={inv.id} inv={inv} onChange={(m) => { setMsg(m); load(); }} />
+        <InvoiceBlock
+          key={inv.id}
+          inv={inv}
+          onChange={(m) => { setMsg(m); load(); }}
+          onRemove={() => setPendingRemove(inv)}
+          onEdit={() => setPendingEdit(inv)}
+        />
       ))}
+
+      {pendingRemove && (
+        <RemoveChargeConfirm
+          charge={pendingRemove}
+          onClose={() => setPendingRemove(null)}
+          onRemoved={(m) => { setPendingRemove(null); setMsg({ kind: "ok", text: m }); load(); }}
+        />
+      )}
+      {pendingEdit && (
+        <EditPlanModal
+          invoice={pendingEdit}
+          onClose={() => setPendingEdit(null)}
+          onSaved={(m) => { setPendingEdit(null); setMsg({ kind: "ok", text: m }); load(); }}
+        />
+      )}
+      {discountOpen && (
+        <DiscountModal
+          studentId={id}
+          balance={acct.totals.balance}
+          onClose={() => setDiscountOpen(false)}
+          onDone={(m) => { setDiscountOpen(false); setMsg({ kind: "ok", text: m }); load(); }}
+        />
+      )}
     </>
+  );
+}
+
+/** Attach an individual discount or scholarship (a named account credit) to the student. */
+function DiscountModal({
+  studentId,
+  balance,
+  onClose,
+  onDone,
+}: {
+  studentId: string;
+  balance: number;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [kind, setKind] = useState<"discount" | "scholarship">("scholarship");
+  const [label, setLabel] = useState("");
+  const [mode, setMode] = useState<"amount" | "percent">("amount");
+  const [amount, setAmount] = useState("");
+  const [percent, setPercent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const resolved = mode === "percent"
+    ? Math.round((Math.max(0, balance) * (Number(percent) || 0)) / 100)
+    : Number(String(amount).replace(/[^\d]/g, "")) || 0;
+
+  async function submit() {
+    setErr(null);
+    if (!label.trim()) { setErr("Add a label (e.g. 'Staff family', 'Merit top-up')."); return; }
+    if (resolved <= 0) { setErr("Enter a positive amount."); return; }
+    setBusy(true);
+    try {
+      await applyDiscount({ studentId, label: label.trim(), amountXof: resolved, kind });
+      onDone(`${kind === "scholarship" ? "Scholarship" : "Discount"} applied — ${formatXof(resolved)} credited to the account.`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not apply.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Apply discount / scholarship" width={460}
+      footer={<><button onClick={onClose} disabled={busy}>Cancel</button><button className="primary" onClick={submit} disabled={busy}>{busy ? "Applying…" : `Apply ${formatXof(resolved)}`}</button></>}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
+        <Field label="Type">
+          <Select value={kind} onChange={(v) => setKind(v as "discount" | "scholarship")} options={[{ value: "scholarship", label: "Scholarship" }, { value: "discount", label: "Discount" }]} />
+        </Field>
+        <Field label="Label" hint="Shown on the account, e.g. 'Staff family', 'Need-based 25%'">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Merit top-up" />
+        </Field>
+        <Field label="Amount">
+          <div style={{ display: "flex", gap: 8 }}>
+            <Select value={mode} onChange={(v) => setMode(v as "amount" | "percent")} options={[{ value: "amount", label: "FCFA" }, { value: "percent", label: "% of balance" }]} style={{ width: 130 }} />
+            {mode === "amount" ? (
+              <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="500000" style={{ flex: 1 }} />
+            ) : (
+              <input type="number" min={0} max={100} value={percent} onChange={(e) => setPercent(e.target.value)} placeholder="25" style={{ flex: 1 }} />
+            )}
+          </div>
+        </Field>
+        <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Credits {formatXof(resolved)} to the account, reducing the balance. Appears as a credit line under Charges.</p>
+      </div>
+    </Modal>
   );
 }
 
@@ -111,17 +219,44 @@ function LinkQuickCreate({
 function InvoiceBlock({
   inv,
   onChange,
+  onRemove,
+  onEdit,
 }: {
   inv: AccountInvoice;
   onChange: (m: { kind: "ok" | "err"; text: string }) => void;
+  onRemove: () => void;
+  onEdit: () => void;
 }) {
+  // Credit memo (negative total) — a reversal credit, not a payable charge.
+  if (inv.total < 0) {
+    return (
+      <div className="card">
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <p className="h1" style={{ fontSize: 17, color: "var(--success)" }}>{inv.description ?? "Account credit"}</p>
+          <span className="badge paid">credit</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ fontWeight: 700, color: "var(--success)", fontVariantNumeric: "tabular-nums" }}>−{formatXof(-inv.total)}</span>
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>Account credit — offsets other or future charges.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-        <p className="h1" style={{ fontSize: 17 }}>Tuition — {inv.term}</p>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <p className="h1" style={{ fontSize: 17, margin: 0 }}>{inv.description ?? `Tuition — ${inv.term}`}</p>
         <span className={`badge ${inv.status}`}>{inv.status}</span>
         <span style={{ flex: 1 }} />
         <span className="muted">{formatXof(inv.paid)} / {formatXof(inv.total)}</span>
+        {inv.installments.length > 0 && (
+          <button onClick={onEdit} title="Edit payment plan" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 8, color: "var(--navy, #153b6a)", background: "var(--surface-2, #eef2f7)", border: "1px solid var(--border)", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+            <Pencil size={13} /> Edit plan
+          </button>
+        )}
+        <button onClick={onRemove} title="Remove charge" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 8, color: "#c0392b", background: "#fdeeeb", border: "1px solid #f1c9c1", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+          <Trash2 size={13} /> Remove
+        </button>
       </div>
 
       {inv.installments.length > 0 ? (
