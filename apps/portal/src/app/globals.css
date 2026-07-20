@@ -1,13 +1,32 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Saira:wght@400;500;600;700;800&family=Montserrat:wght@400;500;600;700&display=swap");
+/* Montserrat (body/UI) + IBM Plex Mono (code) from Google; Saira is self-hosted below.
+   Fraunces is used only by the login-page pull quote. */
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Montserrat:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 
+/* Self-hosted variable Saira (width 50-125%, weight 100-900) — shipped by the DAUST
+   design system. Replaces the Google-hosted static cuts: gives us the width axis the
+   wordmark relies on, and drops a render-blocking third-party request. */
+@font-face {
+  font-family: "Saira";
+  src: url("/fonts/Saira-VariableFont_wdth_wght.ttf") format("truetype-variations");
+  font-weight: 100 900;
+  font-stretch: 50% 125%;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================================
+   Design tokens — DAUST design system (design/Student information system design (1)/_ds).
+   Source of truth for brand, surfaces, type scale, spacing, elevation and motion.
+   ============================================================================ */
 :root {
-  /* DAUST brand */
+  /* Brand core */
   --daust-navy: #153b6a;
   --daust-navy-deep: #0f2c50;
   --daust-navy-700: #1d4a82;
   --daust-orange: #ed8425;
   --daust-orange-600: #d6731a;
   --daust-steel: #9da6ae;
+  --daust-white: #ffffff;
 
   /* cool, navy-tinted neutral ramp */
   --gray-50: #f5f7f9;
@@ -18,37 +37,119 @@
   --gray-500: #6c7884;
   --gray-600: #4d5965;
   --gray-700: #36414d;
+  --gray-800: #232c36;
   --gray-900: #141a21;
 
+  /* Semantic surfaces */
   --bg: #ffffff;
   --bg-subtle: #f5f7f9;
   --bg-tint: #eaf0f7;
+  --bg-navy: var(--daust-navy);
   --surface: #ffffff;
+  --surface-2: #f5f7f9;
+  --surface-sunk: #f5f7f9;
   --border: #d7dee6;
+  --border-strong: #bcc6d1;
   --divider: #e9edf2;
 
+  /* Foreground / text */
   --fg1: #141a21;
   --fg2: #4d5965;
   --fg3: #6c7884;
+  --fg-faint: #9da6ae;
+  --fg-on-navy: #ffffff;
+  --fg-on-navy-muted: #b9c4d4;
 
-  --success: #2e7d52;
-  --warning: #ed8425;
-  --danger: #c0392b;
-  --info: #1d4a82;
+  /* Accent / CTA roles */
+  --accent: var(--daust-navy);
+  --accent-hover: var(--daust-navy-700);
+  --accent-bg: #eaf0f7;
+  --accent-fg-on: #ffffff;
+  --cta: var(--daust-orange);
+  --cta-hover: var(--daust-orange-600);
+  --focus-ring: 0 0 0 3px rgba(21, 59, 106, 0.28);
 
+  /* Status — the -500 values are the canonical ones; short aliases kept for
+     the existing screens that already reference --success/--danger/etc. */
+  --success-500: #2e7d52;
+  --success-400: #4caf7d;
+  --warning-500: #ed8425;
+  --warning-400: #f0a05b;
+  --error-500: #c0392b;
+  --error-400: #e06557;
+  --info-500: #1d4a82;
+  --info-400: #5b89c0;
+  --success: var(--success-500);
+  --warning: var(--warning-500);
+  --danger: var(--error-500);
+  --info: var(--info-500);
+
+  /* Brand gradients — the navy ramp is the only true gradient in the system */
+  --grad-brand: linear-gradient(135deg, #153b6a 0%, #1d4a82 100%);
+  --grad-hero: linear-gradient(180deg, #ffffff 0%, #f5f7f9 100%);
+  --grad-dark-surface: linear-gradient(150deg, #0f2c50 0%, #153b6a 70%, #1d4a82 100%);
+
+  /* Type */
   --font-display: "Saira", system-ui, sans-serif;
-  --font-body: "Montserrat", system-ui, sans-serif;
+  --font-body: "Montserrat", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+  --text-4xl: 3rem;
+  --text-5xl: 4rem;
+  --text-6xl: 5.5rem;
+
+  --leading-tight: 1.05;
+  --leading-snug: 1.2;
+  --leading-normal: 1.55;
+  --tracking-wide: 0.04em;
+  --tracking-wider: 0.12em;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-black: 800;
+
+  /* Spacing (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+
+  /* Radii — the pill is core to the brand */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 14px;
   --radius-xl: 22px;
   --radius-pill: 999px;
 
-  --shadow-sm: 0 1px 2px rgba(15, 44, 80, 0.08);
-  --shadow-md: 0 4px 14px rgba(15, 44, 80, 0.1);
+  /* Elevation — navy-tinted, never gray/black */
+  --shadow-xs: 0 1px 2px rgba(15, 44, 80, 0.06);
+  --shadow-sm: 0 1px 3px rgba(15, 44, 80, 0.08), 0 1px 2px rgba(15, 44, 80, 0.06);
+  --shadow-md: 0 4px 14px rgba(15, 44, 80, 0.1), 0 2px 4px rgba(15, 44, 80, 0.06);
   --shadow-lg: 0 14px 40px rgba(15, 44, 80, 0.16);
+  --shadow-xl: 0 18px 50px rgba(15, 44, 80, 0.22);
+  --shadow-navy: 0 18px 50px rgba(15, 44, 80, 0.3);
 
-  --tracking-wider: 0.12em;
+  /* Motion — restrained: fades/rises, no bounce or spring */
+  --ease-standard: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 130ms;
+  --dur-base: 200ms;
+  --dur-slow: 280ms;
 }
 
 * {
@@ -520,23 +621,38 @@ input {
 }
 
 /* --- Dark theme (design ships dark tokens; toggled from the topbar) --- */
-:root[data-theme="dark"] {
-  --bg: #0d1520;
-  --bg-subtle: #0f1722;
-  --bg-tint: #16233a;
-  --surface: #17202e;
-  --border: #2b3950;
-  --divider: #223049;
-  --gray-50: #1b2636;
-  --gray-100: #243146;
-  --gray-200: #2f3f5a;
+/* Dark mode — navy-based per the design system, not neutral gray. Accent flips to a
+   lighter blue so it stays legible on dark navy surfaces. */
+:root[data-theme="dark"],
+.dark {
+  --bg: #0c1f38;
+  --bg-subtle: #0f2c50;
+  --bg-tint: rgba(111, 160, 216, 0.14);
+  --surface: #13294a;
+  --surface-2: #0f2c50;
+  --surface-sunk: #0f2c50;
+  --border: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.22);
+  --divider: rgba(255, 255, 255, 0.08);
+  --gray-50: #13294a;
+  --gray-100: #17325a;
+  --gray-200: #1d4a82;
   --gray-300: #47587a;
-  --fg1: #eef2f8;
-  --fg2: #c0cbdc;
-  --fg3: #8a97ad;
+  --fg1: #f5f7f9;
+  --fg2: #c4cedb;
+  --fg3: #97a6ba;
+  --fg-faint: #6c7884;
+  --accent: #6fa0d8;
+  --accent-hover: #8db6e4;
+  --accent-bg: rgba(111, 160, 216, 0.16);
+  --accent-fg-on: #0c1f38;
+  --focus-ring: 0 0 0 3px rgba(111, 160, 216, 0.34);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.55);
+  --shadow-xl: 0 18px 50px rgba(0, 0, 0, 0.6);
+  --shadow-navy: 0 18px 50px rgba(0, 0, 0, 0.65);
 }
 :root[data-theme="dark"] input,
 :root[data-theme="dark"] select,
@@ -544,6 +660,76 @@ input {
   background: var(--gray-50);
   color: var(--fg1);
   border-color: var(--border);
+}
+
+/* ---------- Interaction (design system) ----------
+   Restrained and professional: buttons darken + lift 1px, cards lift 2px with a
+   deeper navy-tinted shadow, press is a plain scale with no extra colour shift. */
+.sis-btn {
+  transition: filter var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
+}
+.sis-btn:hover:not(:disabled) {
+  filter: brightness(0.94);
+  transform: translateY(-1px);
+}
+.sis-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.sis-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.sis-card {
+  transition: transform var(--dur-base) var(--ease-standard),
+    box-shadow var(--dur-base) var(--ease-standard);
+}
+.sis-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-navy);
+}
+.sis-row:hover {
+  background: var(--bg-subtle);
+}
+
+/* ---------- Brand motifs (design system) ---------- */
+/* The tri-dash sits beneath wordmarks and section headings. On navy the first
+   dash flips to white so it reads against the background. */
+.tri-dash {
+  display: flex;
+  gap: 9px;
+}
+.tri-dash > span {
+  display: block;
+  width: 36px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+}
+.tri-dash > span:nth-child(1) { background: var(--daust-navy); }
+.tri-dash > span:nth-child(2) { background: var(--daust-orange); }
+.tri-dash > span:nth-child(3) { background: var(--daust-steel); }
+.tri-dash.on-navy > span:nth-child(1) { background: #fff; }
+
+.tri-dash.sm { gap: 4px; }
+.tri-dash.sm > span { width: 18px; height: 3px; }
+
+/* Scroll-reveal is translate-only, never opacity-gated, so content can never be
+   trapped invisible if the animation does not run. */
+@keyframes daust-rise {
+  from { transform: translateY(8px); }
+  to { transform: none; }
+}
+.fade-in { animation: daust-rise var(--dur-slow) var(--ease-out); }
+
+.eyebrow-brand {
+  font-family: var(--font-body);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--daust-orange);
 }
 
 /* ---------- Shared UI primitives (ui.tsx) ---------- */

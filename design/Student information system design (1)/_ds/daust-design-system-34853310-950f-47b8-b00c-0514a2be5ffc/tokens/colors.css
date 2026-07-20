@@ -1,0 +1,42 @@
+:root{
+  /* Brand core */
+  --daust-navy:#153b6a; --daust-navy-deep:#0f2c50; --daust-navy-700:#1d4a82;
+  --daust-orange:#ed8425; --daust-orange-600:#d6731a;
+  --daust-steel:#9da6ae; --daust-white:#ffffff;
+
+  /* Neutral ramp (cool, navy-tinted) */
+  --gray-50:#f5f7f9; --gray-100:#e9edf2; --gray-200:#d7dee6; --gray-300:#bcc6d1; --gray-400:#9da6ae;
+  --gray-500:#6c7884; --gray-600:#4d5965; --gray-700:#36414d; --gray-800:#232c36; --gray-900:#141a21;
+
+  /* Semantic surfaces */
+  --bg:#ffffff; --bg-subtle:#f5f7f9; --bg-tint:#eaf0f7; --bg-navy:var(--daust-navy);
+  --surface:#ffffff; --surface-2:#f5f7f9; --surface-sunk:#f5f7f9;
+  --border:#d7dee6; --border-strong:#bcc6d1; --divider:#e9edf2;
+
+  /* Foreground / text */
+  --fg1:#141a21; --fg2:#4d5965; --fg3:#6c7884; --fg-faint:#9da6ae;
+  --fg-on-navy:#ffffff; --fg-on-navy-muted:#b9c4d4;
+
+  /* Accent / CTA roles */
+  --accent:var(--daust-navy); --accent-hover:var(--daust-navy-700); --accent-bg:#eaf0f7; --accent-fg-on:#ffffff;
+  --cta:var(--daust-orange); --cta-hover:var(--daust-orange-600);
+  --focus-ring:0 0 0 3px rgba(21,59,106,.28);
+
+  /* Status */
+  --success-500:#2e7d52; --success-400:#4caf7d;
+  --warning-500:#ed8425; --warning-400:#f0a05b;
+  --error-500:#c0392b; --error-400:#e06557;
+  --info-500:#1d4a82; --info-400:#5b89c0;
+
+  /* Brand gradients */
+  --grad-brand:linear-gradient(135deg,#153b6a 0%,#1d4a82 100%); /* @kind other */
+  --grad-hero:linear-gradient(180deg,#ffffff 0%,#f5f7f9 100%); /* @kind other */
+  --grad-dark-surface:linear-gradient(150deg,#0f2c50 0%,#153b6a 70%,#1d4a82 100%); /* @kind other */
+}
+[data-theme="dark"], .dark{
+  --bg:#0c1f38; --bg-subtle:#0f2c50; --bg-tint:rgba(111,160,216,.14);
+  --surface:#13294a; --surface-2:#0f2c50;
+  --border:rgba(255,255,255,.12); --border-strong:rgba(255,255,255,.22); --divider:rgba(255,255,255,.08);
+  --fg1:#f5f7f9; --fg2:#c4cedb; --fg3:#97a6ba; --fg-faint:#6c7884;
+  --accent:#6fa0d8; --accent-hover:#8db6e4; --accent-bg:rgba(111,160,216,.16); --accent-fg-on:#0c1f38;
+}

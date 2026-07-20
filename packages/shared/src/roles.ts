@@ -1,10 +1,13 @@
 /** Canonical app RBAC roles (a person can hold several). Source of truth for all apps. */
 export const APP_ROLES = [
   "student",
+  "parent",
   "faculty",
   "registrar",
   "bursar",
   "hr",
+  // Retired with the dining/affairs/innovation consoles; still listed until those
+  // modules are deleted, since their controllers reference them.
   "student_affairs",
   "dining",
   "innovation",

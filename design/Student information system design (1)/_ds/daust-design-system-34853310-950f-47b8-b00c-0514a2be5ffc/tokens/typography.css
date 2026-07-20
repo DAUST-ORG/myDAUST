@@ -1,0 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@font-face{
+  font-family:'Saira'; src:url('../fonts/Saira-VariableFont_wdth_wght.ttf') format('truetype-variations');
+  font-weight:100 900; font-stretch:50% 125%; font-style:normal; font-display:swap;
+}
+:root{
+  --font-display:'Saira', system-ui, sans-serif;
+  --font-body:'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --text-xs:.75rem; --text-sm:.875rem; --text-base:1rem; --text-lg:1.125rem; --text-xl:1.375rem;
+  --text-2xl:1.75rem; --text-3xl:2.25rem; --text-4xl:3rem; --text-5xl:4rem; --text-6xl:5.5rem;
+
+  --leading-tight:1.05; --leading-snug:1.2; --leading-normal:1.55;
+  --tracking-wide:.04em; --tracking-wider:.12em;
+
+  --weight-regular:400; --weight-medium:500; --weight-semibold:600; --weight-bold:700; --weight-black:800;
+}
+h1,h2,h3,h4,h5,h6{font-family:var(--font-display);color:var(--fg1);margin:0}
+body{font-family:var(--font-body);color:var(--fg1);-webkit-font-smoothing:antialiased}
+.daust-h1,h1.daust{font-family:var(--font-display);font-weight:800;font-size:var(--text-5xl);line-height:var(--leading-tight);letter-spacing:var(--tracking-wide)}
+.daust-h2,h2.daust{font-family:var(--font-display);font-weight:700;font-size:var(--text-3xl);line-height:var(--leading-snug)}
+.daust-h3,h3.daust{font-family:var(--font-display);font-weight:600;font-size:var(--text-xl);line-height:var(--leading-snug)}
+.daust-eyebrow{font-family:var(--font-body);font-weight:700;font-size:var(--text-sm);letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--daust-orange)}
+.daust-p,p.daust{font-family:var(--font-body);font-weight:400;font-size:var(--text-base);line-height:var(--leading-normal);color:var(--fg2)}
+.daust-caption{font-family:var(--font-body);font-size:var(--text-sm);color:var(--fg3)}
+code,.daust-mono{font-family:var(--font-mono);font-size:.9em}

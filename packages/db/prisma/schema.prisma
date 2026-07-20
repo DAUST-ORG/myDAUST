@@ -15,6 +15,8 @@ enum PersonKind {
   student
   faculty
   staff
+  // Guardian of one or more students. Holds the `parent` role; never a Student row.
+  parent
 }
 
 enum PaymentMethod {
@@ -141,6 +143,10 @@ model Person {
   threadParticipations ThreadParticipant[]
   messagesSent Message[]
   projectMemberships ProjectMember[]
+  // --- SIS redesign ---
+  guardianOf      GuardianStudent[] @relation("GuardianOf")
+  guardianInvites GuardianInvite[]  @relation("GuardianInvites")
+  broadcasts      Broadcast[]       @relation("BroadcastSender")
 }
 
 model Student {
@@ -167,6 +173,29 @@ model Student {
   yearLevel        Int? // year of study 1..N
   cohort           String? // e.g. "Class of 2028"
   enrolledAt       DateTime? // first enrolment date
+  // --- Remaining SIS profile fields (SIS redesign; all optional) ---
+  preferredName    String?
+  nationalId       String?
+  maritalStatus    String?
+  personalEmail    String? // non-institutional address
+  language         String? // preferred language, e.g. "French"
+  bloodType        String?
+  allergies        String?
+  insurance        String? // provider + policy number
+  physician        String? // campus physician
+  emergencyName2   String?
+  emergencyPhone2  String?
+  major            String?
+  minor            String?
+  admitTerm        String?
+  expectedGrad     String?
+  enrollmentStatus String? // full-time | part-time | leave
+  catalogYear      String? // requirement set the student is audited against
+  standing         String? // Good Standing | Probation | ...
+  holds            StudentHold[]
+  alerts           StudentAlert[]
+  watchers         StaffWatch[]
+  guardians        GuardianStudent[]
   invoices    Invoice[]
   payments    Payment[]
   enrollments Enrollment[]
@@ -186,6 +215,11 @@ model Term {
   // Registration windows. Null = falls back to endDate (add) / unbounded (drop).
   addDeadline  DateTime?
   dropDeadline DateTime?
+  // Which catalog year this term belongs to (e.g. Fall 2026 -> 2026-2027).
+  academicYearId String?
+  academicYear   AcademicYear? @relation(fields: [academicYearId], references: [id])
+  // Fall | Spring | Summer — the semester slot a curriculum entry maps onto.
+  semester       String?
   invoices  Invoice[]
   sections  Section[]
 }
@@ -308,6 +342,25 @@ model Applicant {
   country     String?
   // 30k FCFA application fee, settled via the PayTech rail (IPN ref APPFEE-<id>).
   feePaid     Boolean  @default(false)
+  // --- Full application intake (SIS redesign; all optional) ---
+  phone       String?
+  dateOfBirth DateTime?
+  gender      String?
+  nationality String?
+  city        String?
+  // "high-school" | "transfer" — decides whether `school` reads as HS or prior university.
+  origin      String?
+  school      String?
+  priorGpa    String? // free text: "17.2/20" (BAC) or "3.4/4" (transfer)
+  // Guardian contact captured on the application. NOT a portal Guardian account —
+  // that is provisioned separately by the registrar after enrolment.
+  parentName  String?
+  parentPhone String?
+  parentEmail String?
+  allergies   String?
+  source      String? // how they heard about DAUST
+  essay       String?
+  term        String? // intake term, e.g. "Fall 2026"
   createdAt   DateTime @default(now())
 
   @@index([stage])
@@ -331,6 +384,7 @@ model Department {
   id       String    @id @default(uuid())
   code     String    @unique
   name     String
+  head     String? // department chair, free text (no faculty FK yet)
   programs Program[]
   courses  Course[]
 }
@@ -348,6 +402,9 @@ model Program {
   school       String? // e.g. "Engineering"
   tuition      Int? // reference annual tuition (XOF)
   color        String? // accent hex for cards
+  // --- SIS redesign ---
+  curricula    Curriculum[]
+  requirements ProgramRequirement[]
 }
 
 model Course {
@@ -359,8 +416,17 @@ model Course {
   department    Department @relation(fields: [departmentId], references: [id])
   sections      Section[]
   // Self many-to-many: a course's prerequisite courses.
+  // Superseded by CoursePrerequisite (which carries a minimum grade); kept until the
+  // enrolment prereq check is migrated over, then dropped.
   prerequisites Course[]   @relation("CoursePrereq")
   requiredFor   Course[]   @relation("CoursePrereq")
+  // --- Rule engine (SIS redesign) ---
+  rule            CourseRule?
+  prereqRules     CoursePrerequisite[] @relation("RuleCourse")
+  prereqFor       CoursePrerequisite[] @relation("PrereqCourse")
+  coreqRules      CourseCorequisite[]  @relation("CoreqRuleCourse")
+  coreqFor        CourseCorequisite[]  @relation("CoreqCourse")
+  curriculumSlots CurriculumEntry[]
 }
 
 model Section {
@@ -381,6 +447,13 @@ model Section {
   assignments  Assignment[]
   materials    SectionMaterial[]
   posts        SectionPost[]
+  // --- SIS redesign ---
+  // Which scale this section is graded on. Null = the institution default (letter).
+  gradingSchemeId String?
+  gradingScheme   GradingScheme?   @relation(fields: [gradingSchemeId], references: [id])
+  gradeSubmission GradeSubmission?
+  // Registration gate: closed sections are not offered to students.
+  status          String           @default("open") // open | closed
 
   @@unique([courseId, termId, sectionCode])
   @@index([termId])
@@ -831,6 +904,8 @@ model SectionMaterial {
   section   Section  @relation(fields: [sectionId], references: [id])
   title     String
   kind      String   @default("Document") // Document | Slides | Video | Link
+  // Taxonomy the course-materials screens group by.
+  category  MaterialCategory @default(resources)
   fileUrl   String?
   fileName  String?
   published Boolean  @default(true)
@@ -930,4 +1005,279 @@ model PaymentLink {
   createdAt      DateTime  @default(now())
 
   @@index([status])
+}
+
+// ============================================================================
+// SIS redesign — academic structure, rules, guardians, alerts and fee schedule.
+// Mirrors design/Student information system design (1).
+// ============================================================================
+
+enum MaterialCategory {
+  syllabus
+  lecture_notes
+  assignments
+  quizzes
+  resources
+}
+
+enum AcademicYearStatus {
+  draft
+  active
+  archived
+}
+
+/// Catalog year (e.g. "2026-2027"). Exactly one is `active` at a time; activating
+/// another archives the previous one.
+model AcademicYear {
+  id        String             @id @default(uuid())
+  label     String             @unique
+  status    AcademicYearStatus @default(draft)
+  startsOn  DateTime?
+  endsOn    DateTime?
+  terms     Term[]
+  curricula Curriculum[]
+  events    CalendarEvent[]
+  createdAt DateTime           @default(now())
+
+  @@index([status])
+}
+
+model CalendarEvent {
+  id             String       @id @default(uuid())
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  title          String
+  // registration | holiday | exam | deadline | event
+  type           String       @default("event")
+  startsOn       DateTime
+  endsOn         DateTime?
+  note           String?
+
+  @@index([academicYearId])
+}
+
+/// A program's course map for a catalog year: which courses sit in which
+/// year-of-study and semester. Drives the Programs & Curriculum editor.
+model Curriculum {
+  id             String            @id @default(uuid())
+  programId      String
+  program        Program           @relation(fields: [programId], references: [id])
+  academicYearId String
+  academicYear   AcademicYear      @relation(fields: [academicYearId], references: [id])
+  entries        CurriculumEntry[]
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([programId, academicYearId])
+}
+
+model CurriculumEntry {
+  id           String     @id @default(uuid())
+  curriculumId String
+  curriculum   Curriculum @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  yearIndex    Int
+  semester     String
+  courseId     String
+  course       Course     @relation(fields: [courseId], references: [id])
+  position     Int        @default(0)
+
+  @@index([curriculumId])
+}
+
+/// Degree-audit requirement bucket, e.g. "Core Engineering" needs 40 credits.
+/// Fulfilment is computed from completed/in-progress enrolments, never stored.
+model ProgramRequirement {
+  id              String  @id @default(uuid())
+  programId       String
+  program         Program @relation(fields: [programId], references: [id])
+  catalogYear     String
+  category        String
+  requiredCredits Int
+  position        Int     @default(0)
+
+  @@unique([programId, catalogYear, category])
+}
+
+/// Per-course registration rules. Enforced server-side at enrolment — the design
+/// prototype displays these but never checks them.
+model CourseRule {
+  id               String  @id @default(uuid())
+  courseId         String  @unique
+  course           Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  standingRequired String?
+  majorRestriction String?
+  capacity         Int?
+  waitlistEnabled  Boolean @default(false)
+}
+
+model CoursePrerequisite {
+  id             String  @id @default(uuid())
+  courseId       String
+  course         Course  @relation("RuleCourse", fields: [courseId], references: [id], onDelete: Cascade)
+  prereqCourseId String
+  prereqCourse   Course  @relation("PrereqCourse", fields: [prereqCourseId], references: [id])
+  /// Minimum letter grade required in the prerequisite, e.g. "C". Null = pass.
+  minGrade       String?
+
+  @@unique([courseId, prereqCourseId])
+}
+
+model CourseCorequisite {
+  id            String @id @default(uuid())
+  courseId      String
+  course        Course @relation("CoreqRuleCourse", fields: [courseId], references: [id], onDelete: Cascade)
+  coreqCourseId String
+  coreqCourse   Course @relation("CoreqCourse", fields: [coreqCourseId], references: [id])
+
+  @@unique([courseId, coreqCourseId])
+}
+
+/// Grading scale (Standard Letter 4.00, Pass/Fail, IEP levels). GPA is always
+/// derived from these points; it is never stored on the student.
+model GradingScheme {
+  id        String          @id @default(uuid())
+  key       String          @unique
+  name      String
+  isDefault Boolean         @default(false)
+  rows      GradeScaleRow[]
+  sections  Section[]
+}
+
+model GradeScaleRow {
+  id       String        @id @default(uuid())
+  schemeId String
+  scheme   GradingScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  grade    String
+  /// Null for non-numeric scales (Pass/Fail, IEP) which carry no GPA weight.
+  points   Float?
+  minScore Int?
+  maxScore Int?
+  position Int           @default(0)
+
+  @@index([schemeId])
+}
+
+enum GradeSubmissionStatus {
+  draft
+  submitted
+  approved
+  returned
+}
+
+/// Faculty submit a section's final grades; the registrar approves before they
+/// count toward GPA/transcript.
+model GradeSubmission {
+  id            String                @id @default(uuid())
+  sectionId     String                @unique
+  section       Section               @relation(fields: [sectionId], references: [id])
+  status        GradeSubmissionStatus @default(draft)
+  submittedById String?
+  submittedAt   DateTime?
+  approvedById  String?
+  approvedAt    DateTime?
+  note          String?
+
+  @@index([status])
+}
+
+/// Financial or advising hold. An active hold blocks course registration.
+model StudentHold {
+  id        String    @id @default(uuid())
+  studentId String
+  student   Student   @relation(fields: [studentId], references: [id])
+  type      String
+  reason    String?
+  active    Boolean   @default(true)
+  placedAt  DateTime  @default(now())
+  clearedAt DateTime?
+
+  @@index([studentId, active])
+}
+
+/// Early-alert flag raised when a student falls below the GPA/attendance
+/// thresholds. `warnedAt` records that the student was notified.
+model StudentAlert {
+  id        String    @id @default(uuid())
+  studentId String
+  student   Student   @relation(fields: [studentId], references: [id])
+  reason    String
+  level     String    @default("warning")
+  warnedAt  DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([studentId])
+}
+
+/// A staff member's personal watchlist for early-alert monitoring. Unrelated to
+/// the guardian relationship.
+model StaffWatch {
+  id        String   @id @default(uuid())
+  personId  String
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([personId, studentId])
+}
+
+/// Links a guardian Person (kind = parent) to a student they may view. All
+/// parent-facing reads authorise through this join.
+model GuardianStudent {
+  id         String   @id @default(uuid())
+  guardianId String
+  guardian   Person   @relation("GuardianOf", fields: [guardianId], references: [id], onDelete: Cascade)
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  relation   String?
+  createdAt  DateTime @default(now())
+
+  @@unique([guardianId, studentId])
+  @@index([studentId])
+}
+
+/// Single-use password-setup token emailed when the registrar provisions a
+/// guardian account. Hashed at rest; never stored or logged in the clear.
+model GuardianInvite {
+  id         String    @id @default(uuid())
+  guardianId String
+  guardian   Person    @relation("GuardianInvites", fields: [guardianId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([guardianId])
+}
+
+/// A registrar/faculty broadcast. Fans out into Thread/Message per recipient so
+/// replies use the existing messaging rail.
+model Broadcast {
+  id             String   @id @default(uuid())
+  senderId       String
+  sender         Person   @relation("BroadcastSender", fields: [senderId], references: [id])
+  audienceType   String
+  audienceValue  String?
+  subject        String
+  body           String
+  recipientCount Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@index([senderId])
+}
+
+/// Institution-wide payment plan (the DAUST fee sheet): four installments split
+/// across Fall/Spring, each with a full-package and a tuition-only amount.
+/// Seeds new student invoices; the money itself still rides Invoice/Installment.
+model FeePlanInstallment {
+  id                String    @id @default(uuid())
+  academicYearLabel String
+  semester          String
+  label             String
+  sequence          Int
+  dueOn             DateTime?
+  /// Tuition + cafeteria + housing, integer XOF.
+  amountFullXof     Int
+  /// Tuition only, integer XOF.
+  amountTuitionXof  Int
+
+  @@unique([academicYearLabel, sequence])
 }
