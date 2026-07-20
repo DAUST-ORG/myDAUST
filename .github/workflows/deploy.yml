@@ -72,6 +72,22 @@ jobs:
         run: |
           TAG="${GITHUB_SHA::7}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
+          # Images are environment-agnostic (api reads config from Secrets Manager at runtime;
+          # portal is built with a relative NEXT_PUBLIC_API_URL for both envs), so a tag already
+          # in ECR is a valid artifact for this env too. Promoting develop -> main is usually a
+          # fast-forward, which means the SAME sha deploys to staging then prod; ECR tags are
+          # immutable, so re-pushing would fail. Skip the rebuild and promote what's there.
+          # Uses batch-get-image, not describe-images: only the former is granted to the deploy
+          # role (see infra/global/main.tf), and a permission error here would look like "absent"
+          # and send us into a push that is guaranteed to fail.
+          have() {
+            [ "$(aws ecr batch-get-image --repository-name "$1" --image-ids imageTag="$TAG" \
+                 --query 'length(images)' --output text 2>/dev/null || echo 0)" != "0" ]
+          }
+          if have daust-api && have daust-portal; then
+            echo "Images for $TAG already in ECR - promoting existing artifact."
+            exit 0
+          fi
           docker build -f apps/api/Dockerfile -t "$ECR/daust-api:$TAG" .
           docker build -f apps/portal/Dockerfile --build-arg NEXT_PUBLIC_API_URL="" -t "$ECR/daust-portal:$TAG" .
           docker push "$ECR/daust-api:$TAG"
