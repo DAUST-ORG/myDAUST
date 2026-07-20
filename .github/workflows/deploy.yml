@@ -120,6 +120,34 @@ jobs:
                 --query 'tasks[0].containers[0].exitCode' --output text)
           echo "migration exit code: $EXIT"
           [ "$EXIT" = "0" ]
+          # Reused by the reference-data step below; both need the same new-image
+          # task def and the service's VPC config to reach the SG-locked database.
+          echo "MIGTD=$MIGTD" >> "$GITHUB_ENV"
+          echo "NET<<EOF" >> "$GITHUB_ENV"
+          echo "$NET" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+      - name: Load SIS reference data (one-off ECS task)
+        run: |
+          CLUSTER="daust-$ENV_NAME"
+          # Grading scales, catalogue years, degree requirements and the fee schedule
+          # are official configuration, not demo data. bootstrap-prod only runs against
+          # an empty database, so an environment bootstrapped before the SIS redesign
+          # would never receive them and those screens render empty. This loader is
+          # idempotent (upserts on natural keys) and asserts that no student, invoice
+          # or payment row changed before it exits, so it is safe on every deploy.
+          TASK=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$MIGTD" \
+                --launch-type FARGATE --network-configuration "$NET" \
+                --overrides '{"containerOverrides":[{"name":"api","command":["pnpm","--filter","@mydaust/db","run","load:sis-reference"]}]}' \
+                --query 'tasks[0].taskArn' --output text)
+          echo "reference-data task: $TASK"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
+          EXIT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" \
+                --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "reference-data exit code: $EXIT"
+          # Deliberately fails the deploy: a non-zero exit here means either the load
+          # broke or its money-row assertion tripped, and both are worth stopping for.
+          [ "$EXIT" = "0" ]
 
       - name: Roll services to the new images
         run: |
