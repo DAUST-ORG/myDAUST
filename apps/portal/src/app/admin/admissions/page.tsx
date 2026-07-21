@@ -3,8 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Download, Filter, UserPlus } from "lucide-react";
-import { type Admissions, createApplicant, getAdmissions } from "@/lib/api";
-import { Avatar, Badge, type BadgeTone, Field, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
+import { type Admissions, createApplicant, getAdmissions, setApplicantStage } from "@/lib/api";
+import { Avatar, Badge, type BadgeTone, Button, Field, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
 
 const STAGES = ["submitted", "review", "interview", "offer", "accepted", "rejected"];
 const STAGE_TONE: Record<string, BadgeTone> = {
@@ -24,6 +24,19 @@ const STAGE_LABEL: Record<string, string> = {
   rejected: "Rejected",
 };
 
+interface StageAction {
+  label: string;
+  next: string;
+  variant: "primary" | "navy" | "secondary";
+}
+/** One contextual advance per stage; accepted and rejected are terminal. */
+const STAGE_ACTION: Record<string, StageAction> = {
+  submitted: { label: "Submit for review", next: "review", variant: "primary" },
+  review: { label: "Admit", next: "offer", variant: "secondary" },
+  interview: { label: "Admit", next: "offer", variant: "secondary" },
+  offer: { label: "Confirm", next: "accepted", variant: "navy" },
+};
+
 export default function AdmissionsPage() {
   const router = useRouter();
   const [d, setD] = useState<Admissions | null>(null);
@@ -32,12 +45,27 @@ export default function AdmissionsPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [progF, setProgF] = useState("all");
   const [adding, setAdding] = useState(false);
+  const [advancing, setAdvancing] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const { sort, toggle, apply } = useSort({ key: "score", dir: "desc" });
 
   function load() {
     getAdmissions().then(setD).catch(() => {});
   }
   useEffect(() => load(), []);
+
+  async function advance(id: string, next: string) {
+    setAdvancing(id);
+    setErr(null);
+    try {
+      await setApplicantStage(id, next);
+      load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not update the applicant stage.");
+    } finally {
+      setAdvancing(null);
+    }
+  }
 
   const programs = useMemo(() => Array.from(new Set((d?.applicants ?? []).map((a) => a.program).filter((p) => p && p !== "—"))), [d]);
 
@@ -107,7 +135,7 @@ export default function AdmissionsPage() {
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-        <SearchInput value={q} onChange={setQ} placeholder="Search applicants…" width={280} />
+        <SearchInput value={q} onChange={setQ} placeholder="Filter applicants…" width={280} />
         {showFilters && (
           <>
             <Select value={stageF} onChange={setStageF} options={[{ value: "all", label: "All stages" }, ...STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s]! }))]} />
@@ -117,6 +145,8 @@ export default function AdmissionsPage() {
         <span style={{ flex: 1 }} />
         <button onClick={exportCsv} style={{ display: "flex", alignItems: "center", gap: 7 }}><Download size={15} /> Export</button>
       </div>
+
+      {err && <p className="card" style={{ color: "var(--danger)" }}>{err}</p>}
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
@@ -130,7 +160,7 @@ export default function AdmissionsPage() {
                 <th>Fee</th>
                 <SortTh label="Stage" sortKey="stage" sort={sort} onSort={toggle} />
                 <SortTh label="Submitted" sortKey="submitted" sort={sort} onSort={toggle} />
-                <th />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -151,7 +181,21 @@ export default function AdmissionsPage() {
                   <td>{a.feePaid ? <Badge tone="success">Paid</Badge> : <Badge tone="warning">Due</Badge>}</td>
                   <td><Badge tone={STAGE_TONE[a.stage] ?? "neutral"}>{STAGE_LABEL[a.stage] ?? a.stage}</Badge></td>
                   <td style={{ whiteSpace: "nowrap" }}>{a.submittedAt.slice(0, 10)}</td>
-                  <td style={{ textAlign: "right" }}><ChevronRight size={16} color="var(--fg3)" /></td>
+                  <td onClick={(e) => e.stopPropagation()} style={{ cursor: "default" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                      {STAGE_ACTION[a.stage] && (
+                        <Button
+                          size="sm"
+                          variant={STAGE_ACTION[a.stage]!.variant}
+                          disabled={advancing === a.id}
+                          onClick={() => advance(a.id, STAGE_ACTION[a.stage]!.next)}
+                        >
+                          {advancing === a.id ? "Saving…" : STAGE_ACTION[a.stage]!.label}
+                        </Button>
+                      )}
+                      <ChevronRight size={16} color="var(--fg3)" />
+                    </span>
+                  </td>
                 </tr>
               ))}
               {rows.length === 0 && (

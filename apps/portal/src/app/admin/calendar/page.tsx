@@ -1,20 +1,80 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CalendarDays } from "lucide-react";
-import { type CalendarEventRow, getAcademicCalendar } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { CalendarDays, Plus } from "lucide-react";
+import {
+  type AcademicYearRow,
+  type CalendarEventRow,
+  createCalendarEvent,
+  getAcademicCalendar,
+  getAcademicYears,
+} from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import { Badge, Card, EmptyState, PageHeader } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select } from "@/components/ui";
+
+const EVENT_TYPES = ["event", "registration", "holiday", "exam", "deadline"];
+
+interface EventDraft {
+  academicYearId: string;
+  title: string;
+  type: string;
+  startsOn: string;
+  endsOn: string;
+  note: string;
+}
 
 export default function AcademicCalendarPage() {
   const [rows, setRows] = useState<CalendarEventRow[] | null>(null);
+  const [years, setYears] = useState<AcademicYearRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<EventDraft | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     getAcademicCalendar().then(setRows).catch((e: Error) => setError(e.message));
   }, []);
+  useEffect(() => {
+    load();
+    getAcademicYears().then(setYears).catch(() => setYears([]));
+  }, [load]);
+
+  function openComposer() {
+    const active = years.find((y) => y.status === "active") ?? years[0];
+    setDraft({
+      academicYearId: active?.id ?? "",
+      title: "",
+      type: "event",
+      startsOn: "",
+      endsOn: "",
+      note: "",
+    });
+  }
+
+  async function save() {
+    if (!draft) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await createCalendarEvent({
+        academicYearId: draft.academicYearId,
+        title: draft.title.trim(),
+        type: draft.type,
+        startsOn: draft.startsOn,
+        endsOn: draft.endsOn || undefined,
+        note: draft.note.trim() || undefined,
+      });
+      setDraft(null);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add the event.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
+
+  const valid = draft !== null && !!draft.academicYearId && draft.title.trim() !== "" && draft.startsOn !== "";
 
   return (
     <>
@@ -22,6 +82,11 @@ export default function AcademicCalendarPage() {
         eyebrow="Academic structure"
         title="Academic calendar"
         subtitle="Key dates for the active catalogue year."
+        actions={
+          <Button variant="primary" icon={<Plus size={14} />} onClick={openComposer} disabled={years.length === 0}>
+            Add event
+          </Button>
+        }
       />
 
       {!rows && <p className="muted">Loading…</p>}
@@ -52,6 +117,58 @@ export default function AcademicCalendarPage() {
             </tbody>
           </table>
         </Card>
+      )}
+
+      {draft && (
+        <Modal
+          open
+          onClose={() => setDraft(null)}
+          title="Add calendar event"
+          width={480}
+          footer={
+            <>
+              <Button onClick={() => setDraft(null)} disabled={busy}>Cancel</Button>
+              <Button variant="navy" onClick={save} disabled={busy || !valid}>
+                {busy ? "Adding…" : "Add event"}
+              </Button>
+            </>
+          }
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Field label="Academic year">
+              <Select
+                value={draft.academicYearId}
+                onChange={(v) => setDraft((d) => (d ? { ...d, academicYearId: v } : d))}
+                options={years.map((y) => ({ value: y.id, label: y.status === "active" ? `${y.label} (active)` : y.label }))}
+              />
+            </Field>
+            <Field label="Title">
+              <Input
+                value={draft.title}
+                onChange={(v) => setDraft((d) => (d ? { ...d, title: v } : d))}
+                placeholder="e.g. Registration opens"
+              />
+            </Field>
+            <Field label="Type">
+              <Select
+                value={draft.type}
+                onChange={(v) => setDraft((d) => (d ? { ...d, type: v } : d))}
+                options={EVENT_TYPES}
+              />
+            </Field>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Starts on">
+                <Input type="date" value={draft.startsOn} onChange={(v) => setDraft((d) => (d ? { ...d, startsOn: v } : d))} />
+              </Field>
+              <Field label="Ends on" hint="Optional.">
+                <Input type="date" value={draft.endsOn} onChange={(v) => setDraft((d) => (d ? { ...d, endsOn: v } : d))} />
+              </Field>
+            </div>
+            <Field label="Note" hint="Optional.">
+              <Input value={draft.note} onChange={(v) => setDraft((d) => (d ? { ...d, note: v } : d))} />
+            </Field>
+          </div>
+        </Modal>
       )}
     </>
   );

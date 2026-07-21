@@ -8,7 +8,7 @@ import { formatXof } from "@/lib/format";
 import { Avatar, Badge, type BadgeTone, Field, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
 
 const STATUS_TONE: Record<string, BadgeTone> = { active: "success", probation: "warning" };
-const STATUS_LABEL: Record<string, string> = { active: "Enrolled", probation: "Probation" };
+const STATUS_LABEL: Record<string, string> = { active: "Active", probation: "Probation" };
 
 function gpaColor(gpa: number): string {
   if (gpa >= 3.5) return "var(--success)";

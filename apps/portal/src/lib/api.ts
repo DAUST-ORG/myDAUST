@@ -1200,7 +1200,7 @@ export const createGuardian = (input: {
   studentIds: string[];
   relation?: string;
 }) =>
-  request<{ id: string; email: string; inviteExpiresAt: string; inviteLink: string }>("/guardians", {
+  request<{ id: string; email: string; inviteExpiresAt: string | null }>("/guardians", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -1417,3 +1417,11 @@ export interface CalendarEventRow {
   note: string | null;
 }
 export const getAcademicCalendar = () => request<CalendarEventRow[]>("/registrar/calendar");
+export const createCalendarEvent = (input: {
+  academicYearId: string;
+  title: string;
+  type: string;
+  startsOn: string;
+  endsOn?: string;
+  note?: string;
+}) => request<CalendarEventRow>("/registrar/calendar", { method: "POST", body: JSON.stringify(input) });

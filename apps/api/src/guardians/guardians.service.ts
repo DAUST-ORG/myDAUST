@@ -140,13 +140,15 @@ export class GuardiansService {
       },
     });
 
+    // An already-activated guardian is just being linked to another child. Issuing
+    // a fresh invite here would let anyone who can create guardians reset an
+    // existing guardian's password without access to their mailbox.
+    if (guardian.passwordHash) {
+      return { id: guardian.id, email: guardian.email, inviteExpiresAt: null };
+    }
+
     const invite = await this.issueInvite(guardian.id, guardian.email, `${firstName} ${lastName}`);
-    return {
-      id: guardian.id,
-      email: guardian.email,
-      inviteExpiresAt: invite.expiresAt,
-      inviteLink: invite.link,
-    };
+    return { id: guardian.id, email: guardian.email, inviteExpiresAt: invite.expiresAt };
   }
 
   /** Issue (or re-issue) a password-setup token and email it. */
@@ -172,9 +174,6 @@ export class GuardiansService {
         <p>If you were not expecting this, you can ignore this email.</p>
       `,
     });
-    // The link goes back to the registrar too: they already hold the authority to
-    // create the account, and guardians routinely need it read out over the phone
-    // when the email does not arrive.
     return { expiresAt, link };
   }
 
@@ -191,8 +190,18 @@ export class GuardiansService {
       guardian.email,
       `${guardian.firstName} ${guardian.lastName}`,
     );
+    // The link is returned, not just emailed: guardians routinely need it read out
+    // when the mail does not arrive. Safe only on this path, which refuses a
+    // guardian who already has a password, so it can never reset a live account.
+    // Disclosure is audited because the token is a credential.
     await this.prisma.auditLog.create({
-      data: { entity: "Person", entityId: guardian.id, action: "guardian-invite-resent", actorId },
+      data: {
+        entity: "Person",
+        entityId: guardian.id,
+        action: "guardian-invite-resent",
+        actorId,
+        data: { linkDisclosedToActor: true },
+      },
     });
     return { ok: true, inviteLink: invite.link, inviteExpiresAt: invite.expiresAt };
   }
