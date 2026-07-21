@@ -23,12 +23,12 @@ import { PORTALS, type PortalKey } from "@/lib/nav";
  * navigate them into 403s. A true "view as *this student*" impersonation needs a
  * subject, not just a role, and is deliberately not part of this switcher.
  */
-const VIEW_AS_ALL: (ViewAsOption & { role: string })[] = [
-  { key: "student", label: "student", href: "/student", role: "student" },
-  { key: "faculty", label: "faculty", href: "/faculty", role: "faculty" },
-  { key: "registrar", label: "registrar", href: "/admin", role: "registrar" },
-  { key: "finance", label: "finance", href: "/finance", role: "bursar" },
-  { key: "parent", label: "parent", href: "/parent", role: "parent" },
+const VIEW_AS_ALL: (ViewAsOption & { roles: string[] })[] = [
+  { key: "student", label: "student", href: "/student", roles: ["student"] },
+  { key: "faculty", label: "faculty", href: "/faculty", roles: ["faculty"] },
+  { key: "registrar", label: "registrar", href: "/admin", roles: ["registrar", "admin"] },
+  { key: "finance", label: "finance", href: "/finance", roles: ["bursar"] },
+  { key: "parent", label: "parent", href: "/parent", roles: ["parent"] },
 ];
 
 /** Only the student portal has a profile screen behind the sidebar identity block. */
@@ -51,7 +51,9 @@ export function PortalShell({
   // The design gives the switcher to the registrar/admin console only.
   const isAdmin = me?.roles.includes("admin") ?? false;
   const options = isAdmin
-    ? VIEW_AS_ALL.filter((o) => me?.roles.includes(o.role)).map(({ role: _role, ...o }) => o)
+    ? VIEW_AS_ALL.filter((o) => o.roles.some((r) => me?.roles.includes(r))).map(
+        ({ roles: _roles, ...o }) => o,
+      )
     : [];
 
   return (
