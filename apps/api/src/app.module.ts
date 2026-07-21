@@ -13,6 +13,7 @@ import { ConfigModule } from "./config/config.module.js";
 import { FinanceModule } from "./finance/finance.module.js";
 import { GuardiansModule } from "./guardians/guardians.module.js";
 import { HealthController } from "./health.controller.js";
+import { NavModule } from "./nav/nav.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { RegistrarModule } from "./registrar/registrar.module.js";
 import { UploadsModule } from "./uploads/uploads.module.js";
@@ -25,6 +26,7 @@ import { UploadsModule } from "./uploads/uploads.module.js";
     MailModule,
     AppConfigModule,
     AuthModule,
+    NavModule,
     FinanceModule,
     GuardiansModule,
     RegistrarModule,

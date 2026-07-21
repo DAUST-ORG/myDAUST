@@ -37,6 +37,9 @@ export function standingLabel(gpa: number): string {
 /** Maximum credits a student may carry in one term (enrolled + newly added). */
 export const MAX_CREDITS_PER_TERM = 30;
 
+/** Applicant stages still awaiting a decision — what the dashboard counts as "in pipeline". */
+const OPEN_APPLICANT_STAGES = ["submitted", "review", "interview", "offer"];
+
 /** Class-standing ladder, used to evaluate a course rule's `standingRequired`. */
 const STANDING_RANK: Record<string, number> = {
   freshman: 1, sophomore: 2, junior: 3, senior: 4,
@@ -144,6 +147,7 @@ export class AcademicsService {
       title: s.course.title,
       credits: s.course.credits,
       sectionCode: s.sectionCode,
+      status: s.status,
       capacity: s.capacity,
       seatsTaken: s._count.enrollments,
       seatsLeft: s.capacity - s._count.enrollments,
@@ -1087,14 +1091,27 @@ export class AcademicsService {
 
   /** Admin: enrollment stats + by-program breakdown. */
   async adminStats() {
-    const [totalStudents, totalEnrolled, programs] = await Promise.all([
+    const [totalStudents, totalEnrolled, programs, openApplications, balances] = await Promise.all([
       this.prisma.student.count(),
       this.prisma.enrollment.count({ where: { status: "enrolled" } }),
       this.prisma.program.findMany({ include: { _count: { select: { students: true } } } }),
+      this.prisma.applicant.count({ where: { stage: { in: OPEN_APPLICANT_STAGES } } }),
+      // "Accounts with holds" on the registrar dashboard is a headcount, not money:
+      // it is the number of students carrying any unpaid balance. Grouping in the
+      // database keeps this off the finance endpoints a registrar cannot read.
+      this.prisma.invoice.groupBy({
+        by: ["studentId"],
+        _sum: { totalAmount: true, amountPaid: true },
+      }),
     ]);
+    const holdsCount = balances.filter(
+      (b) => (b._sum.totalAmount ?? 0) - (b._sum.amountPaid ?? 0) > 0,
+    ).length;
     return {
       totalStudents,
       totalEnrolled,
+      holdsCount,
+      openApplications,
       byProgram: programs.map((p) => ({ code: p.code, name: p.name, students: p._count.students })),
     };
   }
@@ -1392,7 +1409,7 @@ export class AcademicsService {
   async updateSection(
     actorId: string,
     id: string,
-    input: { sectionCode?: string; termId?: string; instructorId?: string | null; capacity?: number; days?: string; startTime?: string; endTime?: string; room?: string | null },
+    input: { sectionCode?: string; termId?: string; instructorId?: string | null; capacity?: number; days?: string; startTime?: string; endTime?: string; room?: string | null; status?: string },
   ) {
     const section = await this.prisma.section.findUnique({ where: { id } });
     if (!section) throw new NotFoundException("Section not found");
@@ -1415,6 +1432,7 @@ export class AcademicsService {
         ...(input.startTime !== undefined ? { startTime: input.startTime } : {}),
         ...(input.endTime !== undefined ? { endTime: input.endTime } : {}),
         ...(input.room !== undefined ? { room: input.room } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
       },
     });
     await this.prisma.auditLog.create({ data: { entity: "Section", entityId: id, action: "section-updated", actorId } });

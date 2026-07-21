@@ -79,6 +79,8 @@ const UpdateSectionInput = z.object({
   startTime: z.string().regex(TIME_RE).optional(),
   endTime: z.string().regex(TIME_RE).optional(),
   room: z.string().max(40).nullable().optional(),
+  // Closing a section removes it from registration; seats remaining is a separate concern.
+  status: z.enum(["open", "closed"]).optional(),
 });
 
 const UpdateStudentInput = z.object({

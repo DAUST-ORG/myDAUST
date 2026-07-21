@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Check, ChevronDown, HelpCircle, LogOut, Menu, Moon, Repeat, Search, Sun } from "lucide-react";
+import { Bell, LogOut, Menu, Moon, Search, Sun } from "lucide-react";
 import {
   type Announcement,
   type Me,
@@ -15,6 +15,7 @@ import {
   logout,
 } from "@/lib/api";
 import type { NavGroup } from "./AppShell";
+import { PAGE_META } from "@/lib/nav";
 
 interface SearchHit {
   group: string;
@@ -39,32 +40,20 @@ const AREA_LINKS: { role: string; href: string; label: string }[] = [
 
 const SEEN_KEY = "daust-announcements-seen";
 
-export interface RoleView {
-  key: string;
-  label: string;
-}
 export function Topbar({
   me,
   nav,
-  pageTitle,
   onToggleNav,
-  viewAs,
-  onViewAs,
-  viewAsRoles,
 }: {
   me: Me;
   nav: NavGroup[];
-  pageTitle: string;
   onToggleNav: () => void;
-  viewAs?: string;
-  onViewAs?: (key: string) => void;
-  viewAsRoles?: RoleView[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const [term, setTerm] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState<null | "search" | "bell" | "user" | "role" | "help">(null);
+  const [open, setOpen] = useState<null | "search" | "bell" | "user">(null);
   const [data, setData] = useState<SearchHit[]>([]);
   const [news, setNews] = useState<Announcement[]>([]);
   const [seenAt, setSeenAt] = useState<number>(0);
@@ -155,6 +144,18 @@ export function Topbar({
       .slice(0, 8);
   }, [query, navHits, data]);
 
+  // Title + breadcrumb come from the design's per-view strings; deeper routes
+  // (e.g. /admin/students/<id>) inherit the closest ancestor's entry.
+  const meta = useMemo(() => {
+    const keys = Object.keys(PAGE_META)
+      .filter((k) => pathname === k || pathname.startsWith(k + "/"))
+      .sort((a, b) => b.length - a.length);
+    return keys[0] ? PAGE_META[keys[0]] : undefined;
+  }, [pathname]);
+  const navLabel = nav.flatMap((g) => g.items).find((i) => i.href === pathname)?.label;
+  const pageTitle = meta?.title ?? navLabel ?? "";
+  const pageCrumb = meta?.crumb.replace("{term}", term ?? "").replace(/\s+·\s*$/, "").trim();
+
   const unread = news.filter((n) => new Date(n.createdAt).getTime() > seenAt).length;
   const announcementsHref = ["student", "faculty", "admin"].includes(area) ? `/${area}/announcements` : null;
 
@@ -202,10 +203,13 @@ export function Topbar({
       <button className="nav-burger" onClick={onToggleNav} aria-label="Menu">
         <Menu size={20} />
       </button>
-      <span className="page">{pageTitle}</span>
+      <div style={{ minWidth: 0 }}>
+        <span className="page">{pageTitle}</span>
+        {pageCrumb && <span className="crumb">{pageCrumb}</span>}
+      </div>
 
       {/* Functional global search */}
-      <div style={{ position: "relative", flex: 1, maxWidth: 460 }}>
+      <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
         <div className="search" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px" }}>
           <Search size={15} color="var(--daust-steel)" />
           <input
@@ -222,7 +226,7 @@ export function Topbar({
             onKeyDown={(e) => {
               if (e.key === "Enter" && results[0]) go(results[0].href);
             }}
-            placeholder="Search…"
+            placeholder="Search courses, people, records…"
             style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: 13, color: "var(--fg1)" }}
           />
           <kbd style={{ fontSize: 10, color: "var(--fg3)", border: "1px solid var(--gray-200)", borderRadius: 5, padding: "1px 5px", background: "var(--surface, #fff)" }}>⌘K</kbd>
@@ -246,53 +250,6 @@ export function Topbar({
       </div>
 
       <span className="spacer" />
-
-      {/* Term + date chip */}
-      {term && (
-        <span className="term-chip" style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--gray-50)", border: "1px solid var(--gray-100)", borderRadius: 999, padding: "6px 14px", fontSize: 12.5, whiteSpace: "nowrap" }}>
-          <strong style={{ fontFamily: "var(--font-display)" }}>{term}</strong>
-          <span className="muted">{new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</span>
-        </span>
-      )}
-
-      {/* Viewing-as role preview (admin only; cosmetic — real authz is server-side) */}
-      {viewAsRoles && viewAsRoles.length > 0 && (
-        <div style={{ position: "relative" }} className="viewas">
-          <button
-            onClick={() => setOpen(open === "role" ? null : "role")}
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 10, border: "1px solid var(--gray-100)", background: "var(--surface)", cursor: "pointer", fontSize: 13, color: "var(--fg2)", fontWeight: 600, whiteSpace: "nowrap" }}
-          >
-            <Repeat size={15} color="var(--daust-orange)" />
-            <span className="viewas-label">
-              Viewing as: <b style={{ color: "var(--fg1)" }}>{viewAsRoles.find((r) => r.key === viewAs)?.label ?? viewAsRoles[0]?.label}</b>
-            </span>
-            <ChevronDown size={15} color="var(--fg3)" />
-          </button>
-          {open === "role" && (
-            <div style={{ ...dropdownCard, width: 232, top: 46 }}>
-              <div className="muted" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", padding: "10px 14px 4px" }}>Preview role access</div>
-              {viewAsRoles.map((r) => (
-                <button
-                  key={r.key}
-                  onClick={() => {
-                    onViewAs?.(r.key);
-                    setOpen(null);
-                  }}
-                  style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "9px 14px", border: "none", background: r.key === viewAs ? "var(--bg-tint)" : "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: r.key === viewAs ? "var(--daust-navy)" : "var(--fg1)" }}
-                >
-                  <span style={{ flex: 1 }}>{r.label}</span>
-                  {r.key === viewAs && <Check size={15} color="var(--daust-navy)" />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Theme toggle */}
-      <button onClick={toggleTheme} aria-label="Toggle theme" style={{ width: 38, height: 38, borderRadius: 10, border: "1px solid var(--gray-100)", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-        {theme === "dark" ? <Sun size={17} color="var(--daust-orange)" /> : <Moon size={17} color="var(--daust-navy)" />}
-      </button>
 
       {/* Announcements bell */}
       <div style={{ position: "relative" }}>
@@ -322,36 +279,14 @@ export function Topbar({
         )}
       </div>
 
-      {/* Help */}
-      <div style={{ position: "relative" }}>
-        <button onClick={() => setOpen(open === "help" ? null : "help")} aria-label="Help" style={{ width: 38, height: 38, borderRadius: 10, border: "1px solid var(--gray-100)", background: "var(--surface, #fff)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-          <HelpCircle size={17} color="var(--daust-navy)" />
-        </button>
-        {open === "help" && (
-          <div style={dropdownCard}>
-            <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--divider)", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 14 }}>Help & shortcuts</div>
-            <div style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                <span className="muted">Search anything</span>
-                <kbd style={{ fontSize: 11, border: "1px solid var(--gray-200)", borderRadius: 5, padding: "1px 6px" }}>⌘K</kbd>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                <span className="muted">Toggle theme</span>
-                <span style={{ fontWeight: 600 }}>Top-right sun/moon</span>
-              </div>
-            </div>
-            <a href="mailto:support@daust.org" style={{ display: "block", padding: "10px 16px", borderTop: "1px solid var(--divider)", fontSize: 12.5, fontWeight: 600, color: "var(--daust-navy)" }}>
-              Contact IT support →
-            </a>
-          </div>
-        )}
-      </div>
-
-      {/* User menu + portal switcher */}
-      <div style={{ position: "relative" }}>
-        <button onClick={() => setOpen(open === "user" ? null : "user")} style={{ display: "flex", alignItems: "center", gap: 9, border: "1px solid var(--gray-100)", background: "var(--surface, #fff)", borderRadius: 999, padding: "4px 12px 4px 4px", cursor: "pointer" }}>
-          <span style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--daust-orange)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 12 }}>{initials}</span>
-          <span className="user-name" style={{ fontSize: 13, fontWeight: 600, color: "var(--fg1)" }}>{me.name.split(" ")[0]}</span>
+      {/* User block — name + email beside the avatar, per the design's right cluster */}
+      <div style={{ position: "relative", paddingLeft: 16, borderLeft: "1px solid var(--border)" }}>
+        <button onClick={() => setOpen(open === "user" ? null : "user")} style={{ display: "flex", alignItems: "center", gap: 11, border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
+          <span className="user-name" style={{ textAlign: "right", lineHeight: 1.25 }}>
+            <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--fg1)" }}>{me.name}</span>
+            <span style={{ display: "block", fontSize: 11, color: "var(--fg3)" }}>{me.email}</span>
+          </span>
+          <span style={{ width: 36, height: 36, borderRadius: "50%", background: "var(--daust-orange)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 13 }}>{initials}</span>
         </button>
         {open === "user" && (
           <div style={{ ...dropdownCard, width: 260 }}>
@@ -372,6 +307,10 @@ export function Topbar({
                 ))}
               </div>
             )}
+            <button onClick={toggleTheme} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "11px 16px", border: "none", borderBottom: "1px solid var(--divider)", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--fg1)" }}>
+              {theme === "dark" ? <Sun size={15} color="var(--daust-orange)" /> : <Moon size={15} color="var(--daust-navy)" />}
+              {theme === "dark" ? "Light mode" : "Dark mode"}
+            </button>
             <button onClick={signOut} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "11px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--danger, #c0392b)" }}>
               <LogOut size={15} /> Sign out
             </button>

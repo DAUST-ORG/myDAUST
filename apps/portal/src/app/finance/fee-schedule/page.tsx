@@ -1,20 +1,46 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { type FeePlan, getFeePlan, updateFeePlanRow } from "@/lib/api";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Pencil } from "lucide-react";
+import { type FeePlan, type FeePlanRow, getFeePlan, updateFeePlanRow } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
-import { Badge, Button, Card, EmptyState, Input, PageHeader } from "@/components/ui";
+import { Button, Card, EmptyState, Eyebrow, Field, Input, Modal, PageHeader, Stat } from "@/components/ui";
+
+interface RowDraft {
+  label: string;
+  dueOn: string;
+  full: number;
+  tuition: number;
+}
 
 /** Strips separators so "1 071 250" and "1,071,250" both parse. */
 function toInt(v: string): number {
   return Math.max(0, Math.round(Number(v.replace(/[^\d]/g, "")) || 0));
 }
 
+function toDateInput(iso: string | null): string {
+  return iso ? iso.slice(0, 10) : "";
+}
+
+function draftOf(r: FeePlanRow): RowDraft {
+  return { label: r.label, dueOn: toDateInput(r.dueOn), full: r.amountFullXof, tuition: r.amountTuitionXof };
+}
+
+function changed(r: FeePlanRow, d: RowDraft): boolean {
+  return (
+    d.label !== r.label ||
+    d.dueOn !== toDateInput(r.dueOn) ||
+    d.full !== r.amountFullXof ||
+    d.tuition !== r.amountTuitionXof
+  );
+}
+
 export default function FeeSchedulePage() {
   const [plan, setPlan] = useState<FeePlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [edits, setEdits] = useState<Record<string, { full: number; tuition: number }>>({});
+  const [open, setOpen] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -22,25 +48,47 @@ export default function FeeSchedulePage() {
   }, []);
   useEffect(load, [load]);
 
-  function edit(id: string, field: "full" | "tuition", value: string, current: { full: number; tuition: number }) {
-    setEdits((e) => ({
-      ...e,
-      [id]: { ...current, ...e[id], [field]: toInt(value) },
-    }));
+  const rows = useMemo(
+    () => [...(plan?.rows ?? [])].sort((a, b) => a.sequence - b.sequence),
+    [plan],
+  );
+
+  // Semesters in installment order, so the table reads Fall then Spring without hardcoding either.
+  const semesters = useMemo(() => {
+    const seen: string[] = [];
+    for (const r of rows) if (!seen.includes(r.semester)) seen.push(r.semester);
+    return seen;
+  }, [rows]);
+
+  function openEditor() {
+    setDrafts(Object.fromEntries(rows.map((r) => [r.id, draftOf(r)])));
+    setNote(null);
+    setOpen(true);
   }
 
-  async function save(id: string) {
-    const change = edits[id];
-    if (!change) return;
+  function edit(id: string, current: RowDraft, patch: Partial<RowDraft>) {
+    setDrafts((d) => ({ ...d, [id]: { ...current, ...d[id], ...patch } }));
+  }
+
+  async function saveSchedule() {
+    const dirty = rows
+      .map((r) => ({ row: r, draft: drafts[r.id] }))
+      .filter((e): e is { row: FeePlanRow; draft: RowDraft } => !!e.draft && changed(e.row, e.draft));
+    if (dirty.length === 0) {
+      setOpen(false);
+      return;
+    }
     setBusy(true);
-    setNote(null);
     try {
-      await updateFeePlanRow(id, { amountFullXof: change.full, amountTuitionXof: change.tuition });
-      setEdits((e) => {
-        const next = { ...e };
-        delete next[id];
-        return next;
-      });
+      for (const { row, draft: d } of dirty) {
+        await updateFeePlanRow(row.id, {
+          label: d.label,
+          dueOn: d.dueOn || undefined,
+          amountFullXof: d.full,
+          amountTuitionXof: d.tuition,
+        });
+      }
+      setOpen(false);
       setNote("Fee schedule updated. Invoices already raised are unchanged.");
       load();
     } catch (e) {
@@ -52,26 +100,15 @@ export default function FeeSchedulePage() {
 
   if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
 
-  const rows = plan?.rows ?? [];
-  // Live totals reflect unsaved edits so staff can see the annual figure before saving.
-  const totals = rows.reduce(
-    (acc, r) => {
-      const e = edits[r.id];
-      return {
-        full: acc.full + (e?.full ?? r.amountFullXof),
-        tuition: acc.tuition + (e?.tuition ?? r.amountTuitionXof),
-      };
-    },
-    { full: 0, tuition: 0 },
-  );
+  const year = plan?.academicYearLabel ?? "";
+  const totals = plan?.totals ?? { full: 0, tuition: 0 };
+  const housingAndCafeteria = totals.full - totals.tuition;
 
   return (
     <>
       <PageHeader
-        eyebrow="Fee structure"
-        title="Fee schedule"
-        subtitle="The institution-wide payment plan. Editing it changes what new invoices are seeded with; invoices already raised keep their own installments."
-        actions={plan?.academicYearLabel ? <Badge tone="info">{plan.academicYearLabel}</Badge> : undefined}
+        title="Tuition & Fees"
+        subtitle={`Manage tuition rates and payment plan${year ? ` · effective ${year}` : ""}`}
       />
 
       {note && <p className="card" style={{ color: "var(--success-500)" }}>{note}</p>}
@@ -85,72 +122,161 @@ export default function FeeSchedulePage() {
       )}
 
       {rows.length > 0 && (
-        <Card pad={false}>
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Installment</th>
-                <th>Semester</th>
-                <th>Due</th>
-                <th style={{ textAlign: "right" }}>Tuition + cafeteria + housing</th>
-                <th style={{ textAlign: "right" }}>Tuition only</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const e = edits[r.id];
-                const dirty = !!e && (e.full !== r.amountFullXof || e.tuition !== r.amountTuitionXof);
-                const current = { full: r.amountFullXof, tuition: r.amountTuitionXof };
+        <>
+          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+            <Stat label="Yearly tuition" value={formatXof(totals.tuition)} sub="per year" />
+            <Stat label="Yearly housing + cafeteria" value={formatXof(housingAndCafeteria)} sub="per year" />
+            <Stat
+              label="Full annual package"
+              value={formatXof(totals.full)}
+              sub="tuition + housing + cafeteria"
+            />
+          </div>
+
+          <Card
+            title="Fee Schedule"
+            action={
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span className="muted" style={{ fontSize: 12.5 }}>
+                  {rows.length} installments across {semesters.join(" and ")}
+                  {year ? ` · ${year}` : ""}
+                </span>
+                <Button variant="secondary" size="sm" icon={<Pencil size={14} />} onClick={openEditor}>
+                  Edit plan
+                </Button>
+              </div>
+            }
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>Installment</th>
+                  <th style={{ textAlign: "right", width: 220 }}>Tuition + cafeteria + housing</th>
+                  <th style={{ textAlign: "right", width: 150 }}>Tuition only</th>
+                </tr>
+              </thead>
+              <tbody>
+                {semesters.map((sem) => (
+                  <Fragment key={sem}>
+                    <tr>
+                      <td
+                        colSpan={3}
+                        style={{
+                          fontSize: 11,
+                          letterSpacing: ".1em",
+                          textTransform: "uppercase",
+                          fontWeight: 700,
+                          color: "var(--daust-navy)",
+                        }}
+                      >
+                        {sem}
+                      </td>
+                    </tr>
+                    {rows
+                      .filter((r) => r.semester === sem)
+                      .map((r) => (
+                        <tr key={r.id}>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{r.label}</div>
+                            <div style={{ fontSize: 12, color: "var(--fg3)" }}>
+                              {r.dueOn ? formatDate(r.dueOn) : "No due date"}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                            {formatXof(r.amountFullXof)}
+                          </td>
+                          <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                            {formatXof(r.amountTuitionXof)}
+                          </td>
+                        </tr>
+                      ))}
+                  </Fragment>
+                ))}
+                <tr style={{ background: "var(--surface-2)" }}>
+                  <td style={{ fontWeight: 800 }}>Annual total</td>
+                  <td style={{ textAlign: "right", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
+                    {formatXof(totals.full)}
+                  </td>
+                  <td style={{ textAlign: "right", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
+                    {formatXof(totals.tuition)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
+
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Edit Fee Schedule"
+        width={640}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="navy" icon={<Check size={15} />} disabled={busy} onClick={saveSchedule}>
+              Save schedule
+            </Button>
+          </>
+        }
+      >
+        <p className="muted" style={{ margin: "0 0 16px", fontSize: 13 }}>
+          Adjust installment dates and amounts{year ? ` · ${year}` : ""}
+        </p>
+
+        {semesters.map((sem) => (
+          <div key={sem} style={{ marginBottom: 18 }}>
+            <Eyebrow>{sem}</Eyebrow>
+            {rows
+              .filter((r) => r.semester === sem)
+              .map((r) => {
+                const d = drafts[r.id] ?? draftOf(r);
                 return (
-                  <tr key={r.id}>
-                    <td>{r.sequence}</td>
-                    <td style={{ fontWeight: 600 }}>{r.label}</td>
-                    <td>{r.semester}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{r.dueOn ? formatDate(r.dueOn) : "—"}</td>
-                    <td style={{ textAlign: "right" }}>
+                  <div
+                    key={r.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 12,
+                      padding: 14,
+                      marginTop: 10,
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-md)",
+                    }}
+                  >
+                    <Field label="Installment">
+                      <Input value={d.label} onChange={(v) => edit(r.id, d, { label: v })} />
+                    </Field>
+                    <Field label="Due date">
+                      <Input type="date" value={d.dueOn} onChange={(v) => edit(r.id, d, { dueOn: v })} />
+                    </Field>
+                    <Field label="Tuition + cafeteria + housing" hint="FCFA">
                       <Input
-                        value={e?.full ?? r.amountFullXof}
-                        onChange={(v) => edit(r.id, "full", v, current)}
+                        value={d.full}
+                        onChange={(v) => edit(r.id, d, { full: toInt(v) })}
                         align="right"
-                        width={130}
                         inputMode="numeric"
                       />
-                    </td>
-                    <td style={{ textAlign: "right" }}>
+                    </Field>
+                    <Field label="Tuition only" hint="FCFA">
                       <Input
-                        value={e?.tuition ?? r.amountTuitionXof}
-                        onChange={(v) => edit(r.id, "tuition", v, current)}
+                        value={d.tuition}
+                        onChange={(v) => edit(r.id, d, { tuition: toInt(v) })}
                         align="right"
-                        width={130}
                         inputMode="numeric"
                       />
-                    </td>
-                    <td>
-                      {dirty && (
-                        <Button variant="navy" size="sm" disabled={busy} onClick={() => save(r.id)}>
-                          Save
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
+                    </Field>
+                  </div>
                 );
               })}
-              <tr>
-                <td colSpan={4} style={{ fontWeight: 700 }}>Annual total</td>
-                <td style={{ textAlign: "right", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
-                  {formatXof(totals.full)}
-                </td>
-                <td style={{ textAlign: "right", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
-                  {formatXof(totals.tuition)}
-                </td>
-                <td />
-              </tr>
-            </tbody>
-          </table>
-        </Card>
-      )}
+          </div>
+        ))}
+
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+          Amounts are in FCFA. Annual totals recalculate automatically from the installment amounts.
+        </p>
+      </Modal>
     </>
   );
 }

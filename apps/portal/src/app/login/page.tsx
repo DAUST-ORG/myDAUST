@@ -6,12 +6,14 @@ import { AlertCircle, Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
 import { login } from "@/lib/api";
 import { portalForRoles } from "@/lib/nav";
 
+// One demo account per portal, in the order the portals are listed in the design,
+// plus the admin account that also carries the "view as" portal switcher.
 const DEMO_ACCOUNTS = [
-  { email: "aissatou.diallo@daust.edu", role: "Student" },
-  { email: "parent@daust.edu", role: "Parent" },
-  { email: "amadou.ba@daust.edu", role: "Faculty" },
   { email: "registrar@daust.edu", role: "Registrar" },
-  { email: "bursar@daust.edu", role: "Bursar" },
+  { email: "bursar@daust.edu", role: "Finance" },
+  { email: "aissatou.diallo@daust.edu", role: "Student" },
+  { email: "amadou.ba@daust.edu", role: "Faculty" },
+  { email: "parent@daust.edu", role: "Parent" },
   { email: "admin@daust.edu", role: "Admin" },
 ];
 const DEMO_PASSWORD = "daust-dev-2026";

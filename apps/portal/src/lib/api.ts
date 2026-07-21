@@ -53,6 +53,13 @@ export const login = (email: string, password: string) =>
     body: JSON.stringify({ email, password }),
   });
 export const logout = () => request<{ ok: boolean }>("/auth/logout", { method: "POST" });
+
+/** Sidebar badge counts + the identity line, both scoped to the caller's roles. */
+export interface NavContext {
+  badges: Record<string, string>;
+  meta: string | null;
+}
+export const getNavContext = () => request<NavContext>("/nav/context");
 export const getMe = () => request<Me>("/auth/me");
 
 // --- Finance: student ---
@@ -125,6 +132,8 @@ export interface Section {
   title: string;
   credits: number;
   sectionCode: string;
+  /** Registration status set by the registrar: "open" | "closed". Independent of seats left. */
+  status: string;
   capacity: number;
   seatsTaken: number;
   seatsLeft: number;
@@ -391,6 +400,9 @@ export const getMyGrades = () => request<GradeRow[]>("/academics/my/grades");
 export interface AdminStats {
   totalStudents: number;
   totalEnrolled: number;
+  /** Students carrying an unpaid balance — a headcount, not an amount. */
+  holdsCount: number;
+  openApplications: number;
   byProgram: { code: string; name: string; students: number }[];
 }
 export interface AdminStudent {
@@ -495,7 +507,10 @@ export interface SectionInput {
 }
 export const createSection = (input: SectionInput) =>
   request<{ id: string }>("/academics/admin/sections", { method: "POST", body: JSON.stringify(input) });
-export const updateSection = (id: string, input: Partial<Omit<SectionInput, "courseCode">>) =>
+export const updateSection = (
+  id: string,
+  input: Partial<Omit<SectionInput, "courseCode">> & { status?: "open" | "closed" },
+) =>
   request(`/academics/admin/sections/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const deleteSection = (id: string) =>
   request<{ ok: boolean }>(`/academics/admin/sections/${id}`, { method: "DELETE" });

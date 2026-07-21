@@ -31,7 +31,7 @@ function hourFloat(t: string): number {
 }
 
 /** The weekly master-schedule grid + sections table (the schedule we built).
- *  Rendered standalone at /admin/schedule and as the Programs "Schedule" tab. */
+ *  Rendered on the Course Enrollment screen (/admin/offerings). */
 export function MasterSchedule() {
   const [term, setTerm] = useState<Term | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
