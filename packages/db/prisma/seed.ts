@@ -42,9 +42,6 @@ const STAFF: StaffSpec[] = [
   { id: "usr_registrar", email: "registrar@daust.edu", firstName: "Fatou", lastName: "Sow", roles: ["registrar"] },
   { id: "usr_bursar", email: "bursar@daust.edu", firstName: "Mariama", lastName: "Ndiaye", roles: ["bursar"] },
   { id: "usr_hr", email: "hr@daust.edu", firstName: "Ousmane", lastName: "Fall", roles: ["hr"] },
-  { id: "usr_saffairs", email: "studentaffairs@daust.edu", firstName: "Khady", lastName: "Diop", roles: ["student_affairs"] },
-  { id: "usr_dining", email: "dining@daust.edu", firstName: "Ibrahima", lastName: "Sarr", roles: ["dining"] },
-  { id: "usr_innovation", email: "innovation@daust.edu", firstName: "Awa", lastName: "Gueye", roles: ["innovation"] },
   { id: "usr_it", email: "it@daust.edu", firstName: "Modou", lastName: "Cissé", roles: ["it_admin"] },
   { id: "usr_admin", email: "admin@daust.edu", firstName: "Director", lastName: "DAUST", roles: ["admin", "bursar"] },
 ];
@@ -514,7 +511,7 @@ async function seedDining() {
   console.log(`Dining: ${await prisma.menuItem.count()} menu items, meal plans seeded.`);
 }
 
-async function seedAffairs() {
+async function seedHousing() {
   if ((await prisma.hall.count()) === 0) {
     await prisma.hall.createMany({
       data: [
@@ -545,115 +542,8 @@ async function seedAffairs() {
     });
   }
 
-  // Roommate profiles for matching.
-  const profiles: { id: string; sleep: string; tidy: string; social: string; study: string }[] = [
-    { id: "stu_bineta", sleep: "early", tidy: "very", social: "moderate", study: "quiet" },
-    { id: "stu_demo_aissatou", sleep: "early", tidy: "very", social: "moderate", study: "quiet" },
-    { id: "stu_demo_i1", sleep: "early", tidy: "very", social: "low", study: "quiet" },
-    { id: "stu_demo_i2", sleep: "late", tidy: "moderate", social: "high", study: "music" },
-    { id: "stu_demo_i3", sleep: "early", tidy: "moderate", social: "moderate", study: "quiet" },
-  ];
-  for (const p of profiles) {
-    if (!(await prisma.student.findUnique({ where: { id: p.id } }))) continue;
-    await prisma.roommateProfile.upsert({
-      where: { studentId: p.id },
-      update: {},
-      create: { studentId: p.id, sleep: p.sleep, tidy: p.tidy, social: p.social, study: p.study },
-    });
-  }
-
-  if ((await prisma.conductCase.count()) === 0) {
-    await prisma.conductCase.createMany({
-      data: [
-        { subject: "Anonymous (referral)", type: "Academic integrity", stage: "investigation", severity: "high", officer: "Dean Faye", slaDueAt: new Date("2026-09-10") },
-        { subject: "Residence noise", type: "Residence noise", stage: "mediation", severity: "med", officer: "A. Ndour", slaDueAt: new Date("2026-09-20") },
-        { subject: "Roommate dispute", type: "Interpersonal conflict", stage: "intake", severity: "med", slaDueAt: new Date("2026-06-25") },
-        { subject: "Lab safety violation", type: "Policy breach", stage: "hearing", severity: "high", officer: "Dean Faye", slaDueAt: new Date("2026-09-30") },
-      ],
-    });
-  }
-
-  if ((await prisma.club.count()) === 0) {
-    await prisma.club.createMany({
-      data: [
-        { name: "Robotics & Automation Society", category: "Engineering", members: 84, budgetXof: 3_200_000, status: "active", lead: "Ousmane Sow" },
-        { name: "DAUST Women in STEM", category: "Advocacy", members: 132, budgetXof: 2_600_000, status: "active", lead: "Aïssatou Diallo" },
-        { name: "Teranga Cultural Collective", category: "Culture", members: 210, budgetXof: 4_100_000, status: "active", lead: "Marième Faye" },
-        { name: "Entrepreneurship Lab", category: "Business", members: 96, budgetXof: 3_800_000, status: "active", lead: "Ibrahima Cissé" },
-        { name: "Debate & Model UN", category: "Academic", members: 61, budgetXof: 1_400_000, status: "review", lead: "Fatou Ndiaye" },
-      ],
-    });
-  }
-
-  if ((await prisma.coCurricularLine.count()) === 0) {
-    await prisma.coCurricularLine.createMany({
-      data: [
-        { line: "Clubs & organizations", allocatedXof: 14_000_000, spentXof: 9_600_000, color: "#153b6a" },
-        { line: "Events & programming", allocatedXof: 16_500_000, spentXof: 11_200_000, color: "#1d4a82" },
-        { line: "Study abroad support", allocatedXof: 8_000_000, spentXof: 4_100_000, color: "#3a6ea5" },
-        { line: "Internship stipends", allocatedXof: 5_000_000, spentXof: 2_300_000, color: "#ed8425" },
-        { line: "Wellness & support", allocatedXof: 3_000_000, spentXof: 1_200_000, color: "#6c7884" },
-      ],
-    });
-  }
-  console.log("Student Affairs: halls, housing, roommate profiles, conduct, clubs, budget seeded.");
+  console.log("Housing: halls and room assignments seeded (backs the student Housing screen).");
 }
-
-async function seedInnovation() {
-  if ((await prisma.project.count()) > 0) {
-    console.log("Innovation: projects already seeded.");
-    return;
-  }
-  const aissatou = await prisma.student.findUnique({ where: { id: "stu_demo_aissatou" }, include: { person: true } });
-  const mamadou = await prisma.student.findUnique({ where: { id: "stu_mamadou" }, include: { person: true } });
-  if (!aissatou || !mamadou) return;
-
-  const project = await prisma.project.create({
-    data: {
-      name: "Solar-Powered Water Purifier",
-      description: "An off-grid water purification unit for rural Senegalese communities.",
-      phase: "build",
-      advisor: "Awa Gueye",
-      members: {
-        create: [
-          { personId: aissatou.person.id, role: "lead" },
-          { personId: mamadou.person.id, role: "member" },
-        ],
-      },
-      tasks: {
-        create: [
-          { title: "Submit Project Proposal", phase: "proposal", status: "done", dueDate: new Date("2025-10-03") },
-          { title: "Literature Review Report", phase: "research", status: "done", dueDate: new Date("2025-11-14") },
-          { title: "Design Document & Architecture", phase: "design", status: "done", dueDate: new Date("2025-12-19") },
-          { title: "Working Prototype Demo", phase: "build", status: "todo", dueDate: new Date("2026-03-06") },
-          { title: "Test Plan & Results", phase: "test", status: "todo", dueDate: new Date("2026-04-17") },
-        ],
-      },
-      submissions: {
-        create: [
-          { title: "Proposal v1", kind: "Document", status: "reviewed", grade: "A", feedback: "Clear problem framing." },
-          { title: "Mid-year prototype video", kind: "Video", status: "submitted" },
-        ],
-      },
-    },
-  });
-
-  // A second project entirely awaiting review (drives the review queue + projects list).
-  const bineta = await prisma.student.findUnique({ where: { id: "stu_bineta" }, include: { person: true } });
-  if (bineta) {
-    await prisma.project.create({
-      data: {
-        name: "Campus Waste Sorting Robot",
-        phase: "research",
-        advisor: "Awa Gueye",
-        members: { create: [{ personId: bineta.person.id, role: "lead" }] },
-        submissions: { create: [{ title: "Literature review", kind: "Document", status: "submitted" }] },
-      },
-    });
-  }
-  console.log(`Innovation: seeded project "${project.name}" + review-queue project.`);
-}
-
 
 async function seedTrackD() {
   // Course materials + class posts for CE 201 (faculty course-detail tabs).
@@ -778,8 +668,7 @@ async function main() {
   await seedCampus();
   await seedMessages();
   await seedDining();
-  await seedAffairs();
-  await seedInnovation();
+  await seedHousing();
   await seedTrackD();
   await seedSisReference(prisma);
   await seedGuardians(passwordHash);

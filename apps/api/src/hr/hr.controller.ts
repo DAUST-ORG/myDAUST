@@ -4,7 +4,7 @@ import { Roles } from "../auth/decorators.js";
 import { HrService } from "./hr.service.js";
 
 @Controller("hr")
-@Roles("faculty", "hr", "admin", "registrar", "bursar", "student_affairs", "dining", "innovation", "it_admin")
+@Roles("faculty", "hr", "admin", "registrar", "bursar", "it_admin")
 export class HrController {
   constructor(private readonly hr: HrService) {}
 

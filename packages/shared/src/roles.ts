@@ -6,11 +6,6 @@ export const APP_ROLES = [
   "registrar",
   "bursar",
   "hr",
-  // Retired with the dining/affairs/innovation consoles; still listed until those
-  // modules are deleted, since their controllers reference them.
-  "student_affairs",
-  "dining",
-  "innovation",
   "it_admin",
   "admin",
 ] as const;

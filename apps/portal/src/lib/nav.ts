@@ -11,6 +11,10 @@ import {
   GraduationCap,
   LayoutDashboard,
   Layers,
+  LineChart,
+  Link2,
+  Clock,
+  PieChart,
   LibraryBig,
   type LucideIcon,
   Mail,
@@ -122,17 +126,34 @@ export const REGISTRAR_NAV: PortalNav = {
       { href: "/admin/staff", label: "Roles & Permissions", icon: UserCog },
       { href: "/admin/settings", label: "Security & System", icon: ShieldCheck },
     ]),
-    g("Communication", [{ href: "/admin/messages", label: "Messages", icon: Mail }]),
+    g("Communication", [
+      { href: "/admin/messages", label: "Messages", icon: Mail },
+      { href: "/admin/announcements", label: "Announcements", icon: Megaphone },
+    ]),
   ],
 };
 
 export const FINANCE_NAV: PortalNav = {
   label: "Finance Office",
   groups: [
-    g("Overview", [{ href: "/finance", label: "Dashboard", icon: LayoutDashboard }]),
-    g("Finance", [
-      { href: "/finance/fee-schedule", label: "Fee Schedule", icon: Coins },
+    g("Overview", [
+      { href: "/finance", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/admin/finance/director", label: "Money in & out", icon: LineChart },
+    ]),
+    g("Receivables", [
       { href: "/finance/accounts", label: "Student Accounts", icon: Receipt },
+      { href: "/finance/fee-schedule", label: "Fee Schedule", icon: Coins },
+      { href: "/admin/finance", label: "Collections", icon: Wallet },
+      { href: "/admin/finance/aging", label: "A/R Aging", icon: Clock },
+      { href: "/admin/finance/links", label: "Payment Links", icon: Link2 },
+    ]),
+    // The management-accounting suite predates the redesign and still lives under
+    // /admin/finance. It is the bursar's toolset, so it belongs in this nav — the
+    // registrar sidebar no longer carries finance entries at all.
+    g("Management accounting", [
+      { href: "/admin/finance/expenses", label: "Expenses", icon: Receipt },
+      { href: "/admin/finance/budgets", label: "Budgets", icon: PieChart },
+      { href: "/admin/reports", label: "Reports", icon: FileSpreadsheet },
     ]),
   ],
 };

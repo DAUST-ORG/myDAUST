@@ -14,7 +14,7 @@ export class CommsController {
   }
 
   @Post("announcements")
-  @Roles("admin", "registrar", "bursar", "student_affairs", "hr", "faculty")
+  @Roles("admin", "registrar", "bursar", "hr", "faculty")
   createAnnouncement(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const input = CreateAnnouncementInput.parse(body);
     return this.comms.createAnnouncement(input, user.name);
