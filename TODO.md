@@ -106,3 +106,32 @@ Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 desig
 
 ---
 **Done & verified (for reference):** payments/IPN/plans/reconciliation/receipts/refunds/aging/reports/director-cockpit · seat-locked academics with gradebook→GPA loop, assignments, insights, advising · messaging, events, library, uploads, email seam, printable documents · vitrine + anonymous Apply + BAC scholarships · dining pass/QR/scanner/kanban/menus · housing/roommate/conduct/clubs/budget · innovation 7-phase tracker + review queue · HR payslips (personId-joined)/leave/booking · student ID + QR · security fixes (Zod 400 filter, payslip IDOR).
+
+## SIS redesign — shipped 2026-07-20
+
+Five portals (student, parent, faculty, registrar, finance) built to
+`design/Student information system design (1)/` and deployed to prod. The dining
+console, student affairs and innovation portals were retired.
+
+Open items left by that work:
+
+- **Drop the retired tables.** `ConductCase`, `Club`, `CoCurricularLine`,
+  `RoommateProfile`, `AbroadProgram`, `OnboardingCase`, `MaintenanceTicket`,
+  `Project*`, `GlobalTask*`, `DiningOrder*`, `MenuItem`. Nothing reads them now.
+  Deliberately not done: dropping tables is irreversible and needs confirmation
+  they are empty in prod first. `MealPlan`, `DiningScan`, `Hall` and
+  `HousingAssignment` must be **kept** — the student Dining and Housing screens
+  read them.
+- **Curriculum editor.** `Curriculum`/`CurriculumEntry` are modelled, migrated
+  and seeded but have no UI yet; the design's Programs & Curriculum screen shows
+  a per-year/semester course map.
+- **Faculty grade submission.** `GradeSubmission` and the registrar's approval
+  queue exist; faculty still need the action that moves a section to `submitted`.
+- **Rule engine writes.** `PATCH /registrar/rules/:courseId` exists and is
+  audited, but the screen is read-only — prerequisites are still seeded, not
+  edited in the UI.
+- **Waitlists.** `CourseRule.waitlistEnabled` is stored and displayed; no
+  waitlist behaviour is implemented at enrolment.
+- **Orphaned-but-live pages.** `/admin/library`, `/student/{events,documents,
+  library,id,assignments}` predate the redesign and are not in any nav. They
+  work; decide whether to surface or retire them.
