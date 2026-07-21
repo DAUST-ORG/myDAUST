@@ -2,134 +2,124 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { BookOpen, ClipboardCheck, PencilLine, TrendingUp, Users } from "lucide-react";
-import { Panel } from "@/components/Panel";
-import { StatCard } from "@/components/StatCard";
-import {
-  type Announcement,
-  type FacultyOverview,
-  getAnnouncements,
-  getFacultyOverview,
-} from "@/lib/api";
+import { Badge, Card, EmptyState, Stat } from "@/components/ui";
+import { type FacultyOverview, getFacultyOverview, getMe } from "@/lib/api";
 
-const NAVY = "var(--daust-navy)";
-const ORANGE = "var(--daust-orange)";
+/** "CSC 301" → "C3": first character of each whitespace-separated part. */
+function codeInitials(code: string): string {
+  return code
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0] ?? "")
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function lastName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return parts[parts.length - 1] ?? name;
+}
 
 export default function FacultyDashboard() {
   const router = useRouter();
   const [ov, setOv] = useState<FacultyOverview | null>(null);
-  const [news, setNews] = useState<Announcement[]>([]);
+  const [name, setName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getFacultyOverview(), getAnnouncements()])
-      .then(([o, a]) => {
-        setOv(o);
-        setNews(a);
-      })
-      .catch(() => {});
+    getFacultyOverview().then(setOv).catch((e: Error) => setError(e.message));
+    getMe().then((me) => setName(me.name)).catch(() => {});
   }, []);
 
+  if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
   if (!ov) return <p className="muted">Loading…</p>;
+
   const k = ov.kpis;
+  const term = ov.classes[0]?.term;
 
   return (
     <>
-      <p className="eyebrow">Fall 2026</p>
-      <h1 className="page-title">Dashboard</h1>
+      {term && <p className="eyebrow">{term}</p>}
+      <h1 className="page-title">{name ? `Welcome, Prof. ${lastName(name)}` : "Welcome"}</h1>
+      <p className="muted" style={{ margin: "2px 0 22px", fontSize: 14 }}>
+        Your teaching load and what needs attention.
+      </p>
 
-      <div style={{ display: "flex", gap: 16, marginBottom: 22, flexWrap: "wrap" }}>
-        <StatCard value={k.activeCourses} label="Active courses" icon={BookOpen} color={NAVY} onClick={() => router.push("/faculty/classes")} />
-        <StatCard value={k.studentsTaught} label="Students taught" icon={Users} color="var(--daust-navy-700)" />
-        <StatCard value={k.itemsToGrade} label="Items to grade" icon={PencilLine} color={ORANGE} />
-        <StatCard value={k.avgAttendance !== null ? `${k.avgAttendance}%` : "—"} label="Avg. attendance" icon={TrendingUp} color="#2e7d52" />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 16,
+          marginBottom: 22,
+        }}
+      >
+        <Stat label="Active courses" value={k.activeCourses} />
+        <Stat label="Students taught" value={k.studentsTaught} />
+        <Stat label="To grade" value={k.itemsToGrade} sub="submissions" tone="var(--daust-orange)" />
+        {k.avgAttendance !== null && (
+          <Stat label="Avg attendance" value={`${k.avgAttendance}%`} tone="var(--success-500)" />
+        )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.55fr 1fr", gap: 20, alignItems: "start" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          <Panel title={`Today · ${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}`} action="Full schedule" onAction={() => router.push("/faculty/schedule")}>
-            {ov.today.length === 0 ? (
-              <p className="muted">No classes scheduled today.</p>
-            ) : (
-              ov.today.map((t, i) => (
-                <div key={t.sectionId} style={{ display: "flex", gap: 16, cursor: "pointer" }} onClick={() => router.push(`/faculty/classes/${t.sectionId}`)}>
-                  <div style={{ width: 52, textAlign: "right", paddingTop: 14, flexShrink: 0, fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14 }}>{t.time}</div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
-                    <span style={{ width: 12, height: 12, borderRadius: "50%", background: i === 0 ? ORANGE : "#fff", border: `2.5px solid ${i === 0 ? ORANGE : NAVY}`, marginTop: 15 }} />
-                    {i < ov.today.length - 1 && <span style={{ flex: 1, width: 2, background: "var(--divider)" }} />}
-                  </div>
-                  <div style={{ flex: 1, paddingBottom: i < ov.today.length - 1 ? 14 : 0 }}>
-                    <div style={{ background: "var(--gray-50)", border: "1px solid var(--divider)", borderRadius: 12, padding: "12px 15px" }}>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{t.label}</div>
-                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{t.sub} · until {t.end}</div>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </Panel>
-
-          <Panel title="My Classes" action="View all" onAction={() => router.push("/faculty/classes")}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              {ov.classes.map((c) => (
-                <div
-                  key={c.sectionId}
-                  onClick={() => router.push(`/faculty/classes/${c.sectionId}`)}
-                  style={{ border: "1px solid var(--gray-100)", borderRadius: 13, overflow: "hidden", cursor: "pointer", background: "var(--surface)" }}
-                >
-                  <div style={{ height: 4, background: c.color }} />
-                  <div style={{ padding: 15 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 14, color: c.color }}>{c.code}</span>
-                      {c.ungraded > 0 && <span className="badge pending">{c.ungraded} to grade</span>}
-                    </div>
-                    <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 15.5, marginTop: 7, lineHeight: 1.25 }}>{c.title}</div>
-                    <div className="muted" style={{ display: "flex", gap: 14, marginTop: 11, fontSize: 12 }}>
-                      <span>👥 {c.students}</span>
-                      <span>📍 {c.room ?? "—"}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          <Panel title="Needs your attention" pad="2px 20px">
-            {ov.needsAttention.length === 0 ? (
-              <p className="muted" style={{ padding: "14px 0" }}>All caught up.</p>
-            ) : (
-              ov.needsAttention.map((a, i) => (
-                <div
-                  key={i}
-                  onClick={() => router.push(`/faculty/classes/${a.sectionId}`)}
-                  style={{ display: "flex", alignItems: "center", gap: 13, padding: "13px 0", borderBottom: i < ov.needsAttention.length - 1 ? "1px solid var(--divider)" : "none", cursor: "pointer" }}
-                >
-                  <div style={{ width: 38, height: 38, borderRadius: 10, background: "color-mix(in srgb, var(--daust-orange) 14%, white)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <PencilLine size={18} color={ORANGE} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>{a.label}</div>
-                    <div style={{ fontSize: 12, color: ORANGE, fontWeight: 600, marginTop: 2 }}>{a.meta}</div>
-                  </div>
-                </div>
-              ))
-            )}
-          </Panel>
-
-          <Panel title="Announcements" action="View all" onAction={() => router.push("/faculty/announcements")} pad="4px 20px">
-            {news.slice(0, 3).map((n, i) => (
-              <div key={n.id} style={{ display: "flex", gap: 11, padding: "13px 0", borderBottom: i < 2 ? "1px solid var(--divider)" : "none" }}>
-                <div style={{ width: 7, paddingTop: 5 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: ORANGE, display: "block" }} /></div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: "var(--font-body)", fontWeight: 600, fontSize: 12, color: NAVY }}>{n.author ?? n.category}</div>
-                  <div style={{ fontSize: 13, color: "var(--fg2)", marginTop: 3, lineHeight: 1.35 }}>{n.title}</div>
+      <Card
+        title={
+          <div>
+            <h3 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 15.5, fontWeight: 700 }}>My classes</h3>
+            <p className="muted" style={{ margin: "2px 0 0", fontSize: 12.5 }}>This term</p>
+          </div>
+        }
+      >
+        {ov.classes.length === 0 ? (
+          <EmptyState
+            title="You are not teaching any sections"
+            note="Sections appear here once the registrar assigns you as instructor."
+          />
+        ) : (
+          ov.classes.map((c, i) => (
+            <div
+              key={c.sectionId}
+              className="sis-row"
+              onClick={() => router.push("/faculty/gradebook")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                padding: "13px 8px",
+                borderBottom: i < ov.classes.length - 1 ? "1px solid var(--divider)" : "none",
+                borderRadius: 8,
+                cursor: "pointer",
+              }}
+            >
+              <span
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  background: "var(--accent-bg)",
+                  color: "var(--daust-navy)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontFamily: "var(--font-display)",
+                  fontWeight: 700,
+                  fontSize: 15,
+                  flexShrink: 0,
+                }}
+              >
+                {codeInitials(c.code)}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{c.code}</div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                  {c.title} · {c.room ?? "room TBA"} · {c.students} students
                 </div>
               </div>
-            ))}
-          </Panel>
-        </div>
-      </div>
+              <Badge tone="navy">{c.students}</Badge>
+            </div>
+          ))
+        )}
+      </Card>
     </>
   );
 }

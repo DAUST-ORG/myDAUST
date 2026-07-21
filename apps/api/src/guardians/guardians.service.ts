@@ -14,6 +14,14 @@ import { computeGpa, standingLabel } from "../academics/academics.service.js";
 /** Password-setup invites are short-lived; the registrar can always re-issue one. */
 const INVITE_TTL_HOURS = 72;
 
+/** Attendance rate as a percentage; a late counts as half a present. */
+function attendanceRate(records: { status: string }[]): number | null {
+  if (records.length === 0) return null;
+  const present = records.filter((r) => r.status === "present").length;
+  const late = records.filter((r) => r.status === "late").length;
+  return Math.round(((present + late * 0.5) / records.length) * 100);
+}
+
 /** One graded course on a child's transcript. */
 export interface TranscriptRow {
   code: string;
@@ -353,11 +361,23 @@ export class GuardiansService {
             person: true,
             program: true,
             invoices: true,
-            enrollments: { include: { section: { include: { course: true } } } },
+            enrollments: {
+              include: { section: { include: { course: true } }, attendance: true },
+            },
           },
         },
       },
     });
+
+    // Credits required for the degree come from the programme's requirement
+    // categories, the same source the student's own degree audit sums.
+    const requirements = await this.prisma.programRequirement.groupBy({
+      by: ["programId"],
+      _sum: { requiredCredits: true },
+    });
+    const requiredByProgram = new Map(
+      requirements.map((r) => [r.programId, r._sum.requiredCredits ?? 0]),
+    );
 
     return links.map(({ student, relation }) => {
       const graded = student.enrollments
@@ -378,6 +398,8 @@ export class GuardiansService {
         completedCredits,
         standing: student.standing ?? standingLabel(gpa),
         balance: billed - paid,
+        requiredCredits: student.programId ? requiredByProgram.get(student.programId) ?? null : null,
+        attendanceRate: attendanceRate(student.enrollments.flatMap((e) => e.attendance)),
       };
     });
   }

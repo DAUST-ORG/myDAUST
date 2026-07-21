@@ -1,8 +1,15 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { CreateAnnouncementInput, SendMessageInput, StartThreadInput } from "@mydaust/shared";
+import { z } from "zod";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { CommsService } from "./comms.service.js";
+
+// Local zod (the api's own instance) — keeps the ESM/CJS dual-package hazard away from shared.
+const BroadcastInput = z.object({
+  subject: z.string().min(1).max(200).optional(),
+  body: z.string().min(1).max(5000),
+});
 
 @Controller("comms")
 export class CommsController {
@@ -45,5 +52,12 @@ export class CommsController {
   startThread(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const input = StartThreadInput.parse(body);
     return this.comms.startThread(user.personId, input.recipientId, input.subject, input.body);
+  }
+
+  @Post("sections/:id/broadcast")
+  @Roles("faculty", "admin", "registrar")
+  broadcast(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+    const input = BroadcastInput.parse(body);
+    return this.comms.broadcastToSection(user.personId, id, input.subject, input.body);
   }
 }

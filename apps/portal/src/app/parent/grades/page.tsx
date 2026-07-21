@@ -38,8 +38,8 @@ export default function ParentGrades() {
     <>
       <PageHeader
         eyebrow="Academic record"
-        title="Grades"
-        subtitle={active ? `${active.name} · ${active.program}` : undefined}
+        title={active ? `Grades — ${active.name}` : "Grades"}
+        subtitle={active ? `${active.program} · academic record` : undefined}
         actions={
           data ? <Badge tone="info">Cumulative GPA {data.cumulativeGpa.toFixed(2)}</Badge> : undefined
         }

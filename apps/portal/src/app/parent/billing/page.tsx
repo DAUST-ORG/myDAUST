@@ -30,8 +30,8 @@ export default function ParentBilling() {
     <>
       <PageHeader
         eyebrow="Fees & payment"
-        title="Billing"
-        subtitle={active ? `${active.name} · ${active.studentNo}` : undefined}
+        title={active ? `Billing — ${active.name}` : "Billing"}
+        subtitle="Pay university fees on behalf of your child"
       />
 
       <ChildSwitcher children={children} activeId={activeId} onSelect={select} />

@@ -16,6 +16,7 @@ import { AcademicsService } from "./academics.service.js";
 const CreateMaterialInput = z.object({
   title: z.string().min(1).max(200),
   kind: z.string().min(1).max(40),
+  category: z.enum(["syllabus", "lecture_notes", "assignments", "quizzes", "resources"]).optional(),
   fileUrl: z.string().min(1).optional(),
   fileName: z.string().min(1).optional(),
 });

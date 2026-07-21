@@ -25,11 +25,7 @@ export default function ParentDashboard() {
       <PageHeader
         eyebrow="Guardian access"
         title="Family overview"
-        subtitle={
-          children.length > 1
-            ? `You are following ${children.length} students.`
-            : `Following ${children[0]?.name}.`
-        }
+        subtitle="Select a child to view their academics, attendance and billing."
       />
 
       <ChildSwitcher children={children} activeId={activeId} onSelect={select} />
@@ -44,32 +40,38 @@ export default function ParentDashboard() {
               icon={<GraduationCap size={16} />}
             />
             <Stat
-              label="Credits earned"
-              value={active.completedCredits}
-              sub="toward the degree"
+              label="Credits"
+              value={
+                active.requiredCredits
+                  ? `${active.completedCredits} / ${active.requiredCredits}`
+                  : active.completedCredits
+              }
+              sub={active.requiredCredits ? "earned / required" : "earned"}
               icon={<Layers size={16} />}
+            />
+            <Stat
+              label="Attendance"
+              value={active.attendanceRate === null ? "—" : `${active.attendanceRate}%`}
+              sub="this term"
+              tone={active.attendanceRate === null ? undefined : "var(--success)"}
+              icon={<UserCheck size={16} />}
             />
             <Stat
               label="Balance due"
               value={active.balance <= 0 ? "0 FCFA" : formatXof(active.balance)}
-              sub={active.balance <= 0 ? "Settled — thank you" : "See Billing to pay"}
+              sub={active.balance <= 0 ? "Settled" : "See Billing to pay"}
               tone={active.balance > 0 ? "var(--danger)" : "var(--success)"}
               icon={<Wallet size={16} />}
-            />
-            <Stat
-              label="Programme"
-              value={<span style={{ fontSize: 16 }}>{active.program}</span>}
-              sub={active.yearLevel ? `Year ${active.yearLevel}` : undefined}
-              icon={<UserCheck size={16} />}
             />
           </div>
 
           <div className="card">
-            <p className="muted" style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6 }}>
-              You are viewing <strong>{active.name}</strong> ({active.studentNo})
-              {active.relation ? ` — ${active.relation.toLowerCase()}` : ""}. Use the sidebar to
-              review grades and attendance, or to settle outstanding fees. Records are read-only;
-              contact the registrar for corrections.
+            <p className="h1" style={{ fontSize: 16, marginBottom: 6 }}>{active.name}</p>
+            <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+              {active.program}
+              {active.yearLevel ? ` · Year ${active.yearLevel}` : ""} · use the sidebar to view
+              grades, attendance and billing. Records are read-only; contact the registrar for
+              corrections.
             </p>
           </div>
         </>

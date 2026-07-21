@@ -15,6 +15,7 @@ import {
   payDiningOrder,
 } from "@/lib/api";
 import { type DiningToday, getDiningToday } from "@/lib/api-dining";
+import { PageHeader, Segmented } from "@/components/ui";
 
 const TABS = ["Home", "Pass", "Weekend orders", "My plan"] as const;
 type Tab = (typeof TABS)[number];
@@ -72,11 +73,13 @@ export default function StudentDiningPage() {
 
   return (
     <>
-      <p className="eyebrow">Campus dining</p>
-      <h1 className="page-title">Dining</h1>
+      <PageHeader
+        title="Dining & Meal Plan"
+        subtitle={pass?.plan ? `${pass.plan} plan · ${pass.active ? "active" : "inactive"}` : "Meal plan"}
+      />
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-        {TABS.map((t) => <button key={t} onClick={() => setTab(t)} className={tab === t ? "primary" : ""}>{t}</button>)}
+      <div style={{ marginBottom: 16 }}>
+        <Segmented options={TABS.map((t) => ({ value: t, label: t }))} value={tab} onChange={(v) => setTab(v as Tab)} />
       </div>
 
       {tab === "Home" && (() => {

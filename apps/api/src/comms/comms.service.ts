@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import type { AuthUser } from "../auth/current-user.js";
 
@@ -148,6 +148,36 @@ export class CommsService {
     return { threadId: thread.id };
   }
 
+  /**
+   * Message every student enrolled in one of the caller's own sections.
+   *
+   * Fans out into ordinary one-to-one threads rather than a group thread, so a
+   * student's reply reaches only the instructor. Ownership is checked here: an
+   * instructor may only broadcast to a section they teach.
+   */
+  async broadcastToSection(personId: string, sectionId: string, subject: string | undefined, body: string) {
+    const section = await this.prisma.section.findUnique({
+      where: { id: sectionId },
+      include: {
+        course: true,
+        enrollments: {
+          where: { status: "enrolled" },
+          include: { student: { select: { personId: true } } },
+        },
+      },
+    });
+    if (!section) throw new NotFoundException("Section not found");
+    if (section.instructorId !== personId) {
+      throw new ForbiddenException("You do not teach this section");
+    }
+
+    const recipients = section.enrollments.map((e) => e.student.personId);
+    for (const recipientId of recipients) {
+      await this.startThread(personId, recipientId, subject, body);
+    }
+    return { sent: recipients.length, course: section.course.code };
+  }
+
   /** Directory of people the requester may message, scoped by role/relationship. */
   async contacts(personId: string) {
     const me = await this.prisma.person.findUniqueOrThrow({
@@ -175,7 +205,7 @@ export class CommsService {
 
     // Support staff are reachable by everyone.
     const staff = await this.prisma.person.findMany({
-      where: { roles: { hasSome: ["registrar", "bursar", "student_affairs", "admin"] } },
+      where: { roles: { hasSome: ["registrar", "bursar", "admin"] } },
       select: { id: true },
     });
     for (const s of staff) ids.add(s.id);

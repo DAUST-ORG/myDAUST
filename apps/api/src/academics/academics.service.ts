@@ -679,14 +679,19 @@ export class AcademicsService {
   /** Gradebook: enrolled students + their current (final) grade/status. Ownership-checked. */
   async getGradebook(sectionId: string, personId: string, isAdmin: boolean) {
     const section = await this.assertSectionOwner(sectionId, personId, isAdmin);
-    const enrollments = await this.prisma.enrollment.findMany({
-      where: { sectionId, status: { in: ["enrolled", "completed"] } },
-      include: { student: { include: { person: true } } },
-      orderBy: { student: { studentNo: "asc" } },
-    });
+    const [enrollments, submission] = await Promise.all([
+      this.prisma.enrollment.findMany({
+        where: { sectionId, status: { in: ["enrolled", "completed"] } },
+        include: { student: { include: { person: true } } },
+        orderBy: { student: { studentNo: "asc" } },
+      }),
+      this.prisma.gradeSubmission.findUnique({ where: { sectionId } }),
+    ]);
     return {
       course: `${section.course.code} — ${section.course.title}`,
       sectionCode: section.sectionCode,
+      status: submission?.status ?? "draft",
+      statusNote: submission?.note ?? null,
       students: enrollments.map((e) => ({
         enrollmentId: e.id,
         studentNo: e.student.studentNo,
@@ -713,6 +718,13 @@ export class AcademicsService {
             grade: g.grade,
             ...(input.finalize ? { status: g.grade ? "completed" : "enrolled" } : {}),
           },
+        });
+      }
+      if (input.finalize) {
+        await tx.gradeSubmission.upsert({
+          where: { sectionId },
+          create: { sectionId, status: "submitted", submittedById: personId, submittedAt: new Date() },
+          update: { status: "submitted", submittedById: personId, submittedAt: new Date(), note: null },
         });
       }
       await tx.auditLog.create({
@@ -1927,7 +1939,7 @@ export class AcademicsService {
 
   async createSectionMaterial(
     sectionId: string,
-    input: { title: string; kind: string; fileUrl?: string; fileName?: string },
+    input: { title: string; kind: string; category?: string; fileUrl?: string; fileName?: string },
     personId: string,
     isAdmin: boolean,
   ) {
@@ -1937,6 +1949,7 @@ export class AcademicsService {
         sectionId,
         title: input.title,
         kind: input.kind,
+        ...(input.category ? { category: input.category as never } : {}),
         fileUrl: input.fileUrl ?? null,
         fileName: input.fileName ?? null,
       },

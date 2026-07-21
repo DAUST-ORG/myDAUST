@@ -91,7 +91,7 @@ export function Topbar({
         hits.push(...students.map((s) => ({ group: "Students", label: s.name, sub: s.studentNo, href: `/admin/students/${s.id}` })));
       } else if (me.roles.includes("faculty")) {
         const ov = await getFacultyOverview();
-        hits.push(...ov.classes.map((c) => ({ group: "My classes", label: `${c.code} — ${c.title}`, sub: c.room ?? undefined, href: `/faculty/classes/${c.sectionId}` })));
+        hits.push(...ov.classes.map((c) => ({ group: "My classes", label: `${c.code} — ${c.title}`, sub: c.room ?? undefined, href: "/faculty/gradebook" })));
       } else if (me.roles.includes("student")) {
         const enr = await getMyEnrollments();
         hits.push(...enr.map((e) => ({ group: "My courses", label: `${e.courseCode} — ${e.title}`, sub: e.schedule, href: `/student/courses/${e.sectionId}` })));

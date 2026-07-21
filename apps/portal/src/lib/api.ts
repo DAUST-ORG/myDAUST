@@ -633,6 +633,12 @@ export const sendThreadMessage = (id: string, body: string) =>
   request<{ id: string }>(`/comms/threads/${id}/messages`, { method: "POST", body: JSON.stringify({ body }) });
 export const startThread = (recipientId: string, body: string, subject?: string) =>
   request<{ threadId: string }>("/comms/threads", { method: "POST", body: JSON.stringify({ recipientId, body, subject }) });
+/** Message every enrolled student in one of your own sections, as individual threads. */
+export const broadcastToSection = (sectionId: string, body: string, subject?: string) =>
+  request<{ sent: number; course: string }>(`/comms/sections/${sectionId}/broadcast`, {
+    method: "POST",
+    body: JSON.stringify({ body, subject }),
+  });
 
 // --- Campus: events + library ---
 export interface CampusEvent {
@@ -1144,6 +1150,10 @@ export interface ChildSummary {
   completedCredits: number;
   standing: string;
   balance: number;
+  /** Credits the programme requires, summed from its requirement categories. */
+  requiredCredits: number | null;
+  /** Percentage; a late counts as half a present. Null when nothing is recorded. */
+  attendanceRate: number | null;
 }
 export const getMyChildren = () => request<ChildSummary[]>("/parent/children");
 

@@ -33,8 +33,12 @@ export default function ParentAttendance() {
     <>
       <PageHeader
         eyebrow="Attendance record"
-        title="Attendance"
-        subtitle={active ? `${active.name} · this term` : undefined}
+        title={active ? `Attendance — ${active.name}` : "Attendance"}
+        subtitle={
+          active?.attendanceRate === null || active === null
+            ? undefined
+            : `Overall attendance ${active.attendanceRate}%`
+        }
         actions={
           data?.overall !== null && data?.overall !== undefined ? (
             <Badge tone={data.overall >= 90 ? "success" : data.overall >= 75 ? "warning" : "error"}>

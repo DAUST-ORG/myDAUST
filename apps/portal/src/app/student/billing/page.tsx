@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { type BillingInvoice, getMyBilling, initiatePayment } from "@/lib/api";
-import { useAuth } from "@/lib/use-auth";
+import { useEffect, useMemo, useState } from "react";
+import {
+  type BillingInvoice,
+  type MyProfile,
+  getCurrentTerm,
+  getMyBilling,
+  getMyProfile,
+  initiatePayment,
+} from "@/lib/api";
+import { Card, EmptyState, PageHeader, Select } from "@/components/ui";
 import { formatDate, formatXof } from "@/lib/format";
 
 const METHODS = [
@@ -11,140 +18,213 @@ const METHODS = [
   { value: "card", label: "Bank card" },
 ];
 
+interface ChargeRow {
+  id: string;
+  invoiceId: string;
+  description: string;
+  note: string;
+  amount: number;
+  outstanding: number;
+  dueDate: string;
+  status: string;
+}
+
+function statusStyle(status: string): { bg: string; fg: string; label: string } {
+  if (status === "paid") return { bg: "rgba(46,125,82,.12)", fg: "#1f6b42", label: "Paid" };
+  if (status === "overdue") return { bg: "rgba(192,57,43,.10)", fg: "var(--error-500)", label: "Overdue" };
+  if (status === "partial") return { bg: "rgba(237,132,37,.14)", fg: "#a85f16", label: "Partial" };
+  return { bg: "rgba(237,132,37,.14)", fg: "#a85f16", label: "Due" };
+}
+
 export default function BillingPage() {
-  const { me, loading: authLoading } = useAuth();
   const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
+  const [profile, setProfile] = useState<MyProfile | null>(null);
+  const [term, setTerm] = useState("");
+  const [method, setMethod] = useState("wave");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    if (!me) return;
     getMyBilling()
       .then(setInvoices)
       .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [me]);
+      .finally(() => setLoaded(true));
+    getMyProfile().then(setProfile).catch(() => {});
+    getCurrentTerm().then((t) => setTerm(t.name)).catch(() => {});
+  }, []);
 
-  if (authLoading || (me && loading)) return <main>Loading…</main>;
-  if (!me) return <main>Redirecting…</main>;
-  if (error)
-    return (
-      <main>
-        <p className="card" style={{ color: "var(--bad)" }}>Error: {error}</p>
-      </main>
-    );
-
-  return (
-    <main>
-      <p className="h1">Billing & payments</p>
-      {invoices.length === 0 && <p className="card muted">No invoices yet.</p>}
-      {invoices.map((inv) => (
-        <InvoiceCard key={inv.id} invoice={inv} />
-      ))}
-    </main>
+  const charges: ChargeRow[] = useMemo(
+    () =>
+      invoices
+        .flatMap((inv) =>
+          inv.installments.map<ChargeRow>((i) => ({
+            id: i.id,
+            invoiceId: inv.id,
+            description: `Installment ${i.sequence} — ${inv.term}`,
+            note: `Installment ${i.sequence} of ${inv.installments.length}`,
+            amount: i.amountDue,
+            outstanding: i.amountDue - i.amountPaid,
+            dueDate: i.dueDate,
+            status: i.status,
+          })),
+        )
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
+    [invoices],
   );
-}
 
-function InvoiceCard({ invoice }: { invoice: BillingInvoice }) {
-  const [amount, setAmount] = useState<number>(
-    invoice.installments.find((i) => i.status !== "paid")?.amountDue ?? invoice.balance,
-  );
-  const [method, setMethod] = useState("wave");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const pct = invoice.total === 0 ? 0 : Math.round((invoice.paid / invoice.total) * 100);
+  const balance = invoices.reduce((s, i) => s + i.balance, 0);
+  const nextCharge = charges.find((c) => c.outstanding > 0);
+  const settled = balance <= 0;
 
   async function pay() {
+    if (!nextCharge) return;
     setBusy(true);
-    setErr(null);
+    setError(null);
     try {
-      const { redirectUrl } = await initiatePayment(invoice.id, amount, method);
+      const { redirectUrl } = await initiatePayment(nextCharge.invoiceId, nextCharge.outstanding, method);
       window.location.href = redirectUrl; // hand off to PayTech checkout
     } catch (e) {
-      setErr((e as Error).message);
+      setError((e as Error).message);
       setBusy(false);
     }
   }
 
   return (
-    <div className="card">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-        <p className="h1" style={{ fontSize: 18 }}>Tuition — {invoice.term}</p>
-        <span className={`badge ${invoice.status}`}>{invoice.status}</span>
-      </div>
+    <>
+      <PageHeader
+        title="Billing & Financials"
+        subtitle={[term || null, profile ? `Account ${profile.studentNo}` : null].filter(Boolean).join(" · ")}
+      />
 
-      <div className="row" style={{ margin: "12px 0" }}>
-        <div className="kpi"><div className="label">Total</div><div className="value">{formatXof(invoice.total)}</div></div>
-        <div className="kpi"><div className="label">Paid</div><div className="value">{formatXof(invoice.paid)}</div></div>
-        <div className="kpi"><div className="label">Balance</div><div className="value">{formatXof(invoice.balance)}</div></div>
-      </div>
-      <div className="bar"><span style={{ width: `${pct}%` }} /></div>
-      <p className="muted" style={{ fontSize: 13 }}>{pct}% paid</p>
+      {error && <p className="card" style={{ color: "var(--error-500)" }}>{error}</p>}
 
-      {invoice.installments.length > 0 && (
-        <>
-          <p className="muted" style={{ marginTop: 14, fontWeight: 600 }}>Payment schedule</p>
-          <table>
-            <thead>
-              <tr><th>#</th><th>Due</th><th>Amount</th><th>Paid</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              {invoice.installments.map((i) => (
-                <tr key={i.id}>
-                  <td>{i.sequence}</td>
-                  <td>{formatDate(i.dueDate)}</td>
-                  <td>{formatXof(i.amountDue)}</td>
-                  <td>{formatXof(i.amountPaid)}</td>
-                  <td><span className={`badge ${i.status}`}>{i.status}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
+      {loaded && invoices.length === 0 ? (
+        <EmptyState title="No invoices yet" note="Charges appear here once the bursar issues them." />
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 1fr) minmax(0, 1.6fr)", gap: 18, alignItems: "start" }}>
+          <div
+            style={{
+              background: "var(--grad-brand)",
+              color: "#fff",
+              borderRadius: "var(--radius-lg)",
+              padding: 24,
+              boxShadow: "var(--shadow-navy)",
+            }}
+          >
+            <div style={{ fontSize: 13, opacity: 0.8 }}>Current balance</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 800, marginTop: 4 }}>
+              {formatXof(balance)}
+            </div>
+            <div style={{ fontSize: 12.5, marginTop: 4, color: settled ? "rgba(180,240,200,.9)" : "#ffb3a8" }}>
+              {settled
+                ? "Account settled — thank you"
+                : nextCharge
+                  ? `${nextCharge.note} due`
+                  : "Payment outstanding"}
+            </div>
 
-      {invoice.balance > 0 && (
-        <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            type="number"
-            value={amount}
-            min={1}
-            max={invoice.balance}
-            onChange={(e) => setAmount(Number(e.target.value))}
-            style={{ width: 160 }}
-          />
-          <select value={method} onChange={(e) => setMethod(e.target.value)}>
-            {METHODS.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
-          <button className="primary" disabled={busy || amount <= 0 || amount > invoice.balance} onClick={pay}>
-            {busy ? "Redirecting…" : `Pay ${formatXof(amount)}`}
-          </button>
-          {err && <span style={{ color: "var(--bad)" }}>{err}</span>}
+            {!settled && nextCharge && (
+              <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+                <Select value={method} onChange={setMethod} options={METHODS} style={{ width: "100%" }} />
+                <button
+                  disabled={busy}
+                  onClick={pay}
+                  style={{
+                    width: "100%",
+                    padding: "11px 18px",
+                    borderRadius: "var(--radius-pill)",
+                    border: "1px solid transparent",
+                    background: "var(--daust-orange)",
+                    color: "#fff",
+                    fontWeight: 700,
+                    fontSize: 13.5,
+                    cursor: busy ? "not-allowed" : "pointer",
+                    opacity: busy ? 0.6 : 1,
+                  }}
+                >
+                  {busy ? "Redirecting…" : `Pay ${formatXof(nextCharge.outstanding)}`}
+                </button>
+              </div>
+            )}
+
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.2)", margin: "18px 0 12px" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+              <span style={{ opacity: 0.8 }}>Next due date</span>
+              <strong>{nextCharge ? formatDate(nextCharge.dueDate) : "—"}</strong>
+            </div>
+            <p style={{ fontSize: 11, opacity: 0.7, margin: "12px 0 0" }}>
+              {charges.length > 0
+                ? `${charges.length} installments · ${formatXof(charges.reduce((s, c) => s + c.amount, 0))} total`
+                : "No payment plan on this account."}
+            </p>
+          </div>
+
+          <Card pad={false}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0,2fr) 130px 120px 90px",
+                gap: 12,
+                padding: "12px 18px",
+                borderBottom: "1px solid var(--border)",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: ".06em",
+                textTransform: "uppercase",
+                color: "var(--fg-faint)",
+              }}
+            >
+              <span>Description</span>
+              <span style={{ textAlign: "right" }}>Amount</span>
+              <span style={{ textAlign: "right" }}>Due</span>
+              <span style={{ textAlign: "right" }}>Status</span>
+            </div>
+            {charges.map((c, i) => {
+              const s = statusStyle(c.status);
+              return (
+                <div
+                  key={c.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0,2fr) 130px 120px 90px",
+                    gap: 12,
+                    alignItems: "center",
+                    padding: "13px 18px",
+                    borderBottom: i < charges.length - 1 ? "1px solid var(--divider)" : undefined,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>{c.description}</div>
+                    <div className="muted" style={{ fontSize: 11.5 }}>{c.note}</div>
+                  </div>
+                  <span style={{ textAlign: "right", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+                    {formatXof(c.amount)}
+                  </span>
+                  <span className="muted" style={{ textAlign: "right", fontSize: 12.5 }}>
+                    {formatDate(c.dueDate)}
+                  </span>
+                  <span style={{ textAlign: "right" }}>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        padding: "3px 10px",
+                        borderRadius: "var(--radius-pill)",
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        background: s.bg,
+                        color: s.fg,
+                      }}
+                    >
+                      {s.label}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </Card>
         </div>
       )}
-
-      {invoice.payments.length > 0 && (
-        <>
-          <p className="muted" style={{ marginTop: 16, fontWeight: 600 }}>Payment history</p>
-          <table>
-            <thead>
-              <tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              {invoice.payments.map((p) => (
-                <tr key={p.id}>
-                  <td>{formatDate(p.createdAt)}</td>
-                  <td>{formatXof(p.amount)}</td>
-                  <td>{p.method}</td>
-                  <td><span className={`badge ${p.status}`}>{p.status}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-    </div>
+    </>
   );
 }

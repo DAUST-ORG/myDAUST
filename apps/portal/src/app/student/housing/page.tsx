@@ -2,16 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { Building2 } from "lucide-react";
-import { type MyHousing, getMyHousing } from "@/lib/api";
+import { type MyHousing, getCurrentTerm, getMyHousing } from "@/lib/api";
 import { Badge, Card, EmptyState, PageHeader } from "@/components/ui";
 
 export default function StudentHousing() {
   const [h, setH] = useState<MyHousing | null>(null);
+  const [term, setTerm] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getMyHousing().then(setH).catch((e: Error) => setError(e.message));
+    getCurrentTerm().then((t) => setTerm(t.name)).catch(() => {});
   }, []);
+
+  const subtitle = ["Residential Life", term || null].filter(Boolean).join(" · ");
 
   if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
   if (!h) return <p className="muted">Loading…</p>;
@@ -19,7 +23,7 @@ export default function StudentHousing() {
   if (!h.assigned) {
     return (
       <>
-        <PageHeader eyebrow="Campus" title="Housing" />
+        <PageHeader title="Housing" subtitle={subtitle} />
         <EmptyState
           icon={<Building2 size={22} />}
           title="No housing assignment"
@@ -29,19 +33,20 @@ export default function StudentHousing() {
     );
   }
 
-  const rows: [string, string | null][] = [
+  const fields: [string, string | null][] = [
     ["Building", h.building],
     ["Room", h.room],
     ["Room type", h.kind],
-    ["Roommates", h.roommates.length > 0 ? h.roommates.join(", ") : "None assigned"],
+    ["Roommate", h.roommates.length > 0 ? h.roommates.join(", ") : "None assigned"],
+    ["Assignment status", h.status],
     ["Note", h.note],
   ];
 
   return (
     <>
       <PageHeader
-        eyebrow="Campus"
         title="Housing"
+        subtitle={subtitle}
         actions={<Badge tone={h.status === "assigned" ? "success" : "warning"}>{h.status}</Badge>}
       />
 
@@ -49,32 +54,33 @@ export default function StudentHousing() {
         style={{
           background: "var(--grad-brand)",
           color: "#fff",
-          borderRadius: "var(--radius-lg)",
-          padding: 24,
-          marginBottom: 18,
+          borderRadius: "var(--radius-lg) var(--radius-lg) 0 0",
+          padding: "34px 26px",
           boxShadow: "var(--shadow-navy)",
         }}
       >
-        <div style={{ fontSize: 11, letterSpacing: "var(--tracking-wider)", textTransform: "uppercase", opacity: 0.7, fontWeight: 700 }}>
-          Your assignment
+        <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", opacity: 0.7, fontWeight: 700 }}>
+          Assignment
         </div>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 800, marginTop: 6 }}>
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 800, marginTop: 6 }}>
           {h.building ?? "Campus residence"}
         </div>
-        {h.room && <div style={{ fontSize: 15, opacity: 0.9, marginTop: 2 }}>Room {h.room}</div>}
+        {h.room && <div style={{ fontSize: 14, opacity: 0.85, marginTop: 2 }}>Room {h.room}</div>}
       </div>
 
-      <Card title="Details">
-        <dl style={{ margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-          {rows.map(([k, v]) => (
-            <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 14, fontSize: 13.5 }}>
-              <dt className="muted" style={{ margin: 0 }}>{k}</dt>
-              <dd style={{ margin: 0, fontWeight: 500, textAlign: "right" }}>
-                {v ? v : <span className="muted">—</span>}
-              </dd>
+      <Card>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 18 }}>
+          {fields.map(([label, value]) => (
+            <div key={label}>
+              <div style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--fg3)", fontWeight: 700 }}>
+                {label}
+              </div>
+              <div style={{ fontSize: 14.5, fontWeight: 600, marginTop: 3 }}>
+                {value ? value : <span className="muted">—</span>}
+              </div>
             </div>
           ))}
-        </dl>
+        </div>
       </Card>
     </>
   );

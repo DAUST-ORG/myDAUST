@@ -2,207 +2,277 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { BookOpen, CheckCheck, ClipboardList, FileText, TrendingUp, Wallet } from "lucide-react";
 import {
   type Announcement,
   type BillingInvoice,
+  type DegreeAudit,
   type MyAssignment,
+  type MyAttendance,
   type MyEnrollment,
   type MySummary,
   getAnnouncements,
+  getCurrentTerm,
+  getDegreeAudit,
   getMe,
   getMyAssignments,
+  getMyAttendance,
   getMyBilling,
   getMyEnrollments,
   getMySummary,
 } from "@/lib/api";
 import { formatXof } from "@/lib/format";
+import { Card, Progress, Stat } from "@/components/ui";
+import { COURSE_COLORS, parseDayIndexes } from "@/lib/student-schedule";
 
-const NAVY = "var(--daust-navy)";
-const ORANGE = "var(--daust-orange)";
-
-/* "MWF"/"TTh" -> weekday indices, Mon=0 (mirrors api parseDays). */
-function parseDays(s: string): number[] {
-  const out: number[] = [];
-  const map: Record<string, number> = { M: 0, T: 1, W: 2, F: 4 };
-  let i = 0;
-  while (i < s.length) {
-    if (s.slice(i, i + 2) === "Th") {
-      out.push(3);
-      i += 2;
-    } else {
-      const d = map[s[i]!];
-      if (d !== undefined) out.push(d);
-      i += 1;
-    }
-  }
-  return out;
+interface TodoItem {
+  key: string;
+  href: string;
+  icon: React.ReactNode;
+  title: string;
+  due: string;
 }
 
-const initials = (name: string) =>
-  name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]!.toUpperCase()).join("");
+const dayLabel = (iso: string) => new Date(iso).toLocaleDateString("fr-SN", { day: "numeric", month: "short" });
 
 export default function StudentDashboard() {
-  const [name, setName] = useState("");
+  const [first, setFirst] = useState("");
+  const [term, setTerm] = useState("");
   const [summary, setSummary] = useState<MySummary | null>(null);
   const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
   const [courses, setCourses] = useState<MyEnrollment[]>([]);
   const [news, setNews] = useState<Announcement[]>([]);
   const [assignments, setAssignments] = useState<MyAssignment[]>([]);
+  const [attendance, setAttendance] = useState<MyAttendance | null>(null);
+  const [degree, setDegree] = useState<DegreeAudit | null>(null);
 
   useEffect(() => {
-    Promise.all([getMe(), getMySummary(), getMyBilling(), getMyEnrollments(), getAnnouncements()])
-      .then(([me, s, inv, enr, ann]) => {
-        setName(me.name);
-        setSummary(s);
-        setInvoices(inv);
-        setCourses(enr);
-        setNews(ann);
-      })
-      .catch(() => {});
+    getMe().then((me) => setFirst(me.name.split(" ")[0] ?? "")).catch(() => {});
+    getCurrentTerm().then((t) => setTerm(t.name)).catch(() => {});
+    getMySummary().then(setSummary).catch(() => {});
+    getMyBilling().then(setInvoices).catch(() => {});
+    getMyEnrollments().then(setCourses).catch(() => {});
+    getAnnouncements().then(setNews).catch(() => {});
     getMyAssignments().then(setAssignments).catch(() => {});
+    getMyAttendance().then(setAttendance).catch(() => {});
+    getDegreeAudit().then(setDegree).catch(() => {});
   }, []);
 
   const balance = invoices.reduce((b, i) => b + i.balance, 0);
 
-  const todayIdx = (new Date().getDay() + 6) % 7;
+  /* Falls back to Monday on a weekend so the panel is never empty for a student who has classes. */
+  const jsDay = new Date().getDay();
+  const todayIdx = jsDay === 0 || jsDay === 6 ? 0 : jsDay - 1;
   const todayClasses = courses
-    .filter((c) => parseDays(c.days).includes(todayIdx))
+    .filter((c) => parseDayIndexes(c.days).includes(todayIdx))
     .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
-  const now = Date.now();
-  const dueInstallments = invoices
+  const colorOf = (code: string) => {
+    const i = courses.findIndex((c) => c.courseCode === code);
+    return COURSE_COLORS[(i < 0 ? 0 : i) % COURSE_COLORS.length]!;
+  };
+
+  const nextInstallment = invoices
     .flatMap((inv) => inv.installments)
     .filter((i) => i.status !== "paid")
-    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-  const openAssignments = assignments.filter((a) => a.status === "assigned");
-  const actionCount = dueInstallments.length + openAssignments.length;
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+
+  const todos: TodoItem[] = [
+    ...assignments
+      .filter((a) => a.status === "assigned")
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+      .slice(0, 3)
+      .map<TodoItem>((a) => ({
+        key: a.assignmentId,
+        href: "/student/assignments",
+        icon: <FileText size={16} color="#a3291b" />,
+        title: `${a.courseCode} — ${a.title}`,
+        due: `Due ${dayLabel(a.dueDate)}`,
+      })),
+    ...(nextInstallment
+      ? [
+          {
+            key: nextInstallment.id,
+            href: "/student/billing",
+            icon: <Wallet size={16} color="var(--daust-orange)" />,
+            title: `Tuition installment ${nextInstallment.sequence}`,
+            due: `Due ${dayLabel(nextInstallment.dueDate)} · ${formatXof(
+              nextInstallment.amountDue - nextInstallment.amountPaid,
+            )}`,
+          },
+        ]
+      : []),
+  ];
 
   return (
     <>
-      <p className="eyebrow">Fall 2026</p>
-      <h1 className="page-title">Welcome back, {name.split(" ")[0] || "student"}</h1>
-      <p className="muted" style={{ marginBottom: 22 }}>Here&apos;s where things stand this term.</p>
+      <p className="eyebrow">{term || "Current term"}</p>
+      <h1 className="page-title">Welcome back, {first || "student"}</h1>
+      <p className="muted" style={{ marginBottom: 22, fontSize: 14.5 }}>
+        Here&apos;s where things stand this term.
+      </p>
 
-      <div className="kpi-grid">
-        <div className="kpi"><div className="label">Enrolled courses</div><div className="value">{summary?.enrolledCourses ?? "—"}</div><div className="trend">{summary?.credits ?? 0} credits</div></div>
-        <div className="kpi"><div className="label">GPA</div><div className="value">{summary?.gpa?.toFixed(2) ?? "—"}</div><div className="trend">{summary?.completedCredits ?? 0} credits completed</div></div>
-        <div className="kpi"><div className="label">Balance due</div><div className="value">{formatXof(balance)}</div><div className={`trend ${balance > 0 ? "down" : "up"}`}>{balance > 0 ? "Payment due" : "Paid up"}</div></div>
-        <div className="kpi"><div className="label">Announcements</div><div className="value">{news.length}</div><div className="trend">campus updates</div></div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 18 }}>
+        <Link href="/student/schedule" style={{ textDecoration: "none", color: "inherit" }}>
+          <Stat
+            label="Enrolled courses"
+            value={summary?.enrolledCourses ?? "—"}
+            sub={`${summary?.credits ?? 0} credits${term ? ` · ${term}` : ""}`}
+            icon={<BookOpen size={16} />}
+          />
+        </Link>
+        <Link href="/student/grades" style={{ textDecoration: "none", color: "inherit" }}>
+          <Stat
+            label="Cumulative GPA"
+            value={summary ? summary.gpa.toFixed(2) : "—"}
+            sub={`${summary?.completedCredits ?? 0} credits completed`}
+            tone="var(--daust-navy)"
+            icon={<TrendingUp size={16} />}
+          />
+        </Link>
+        <Link href="/student/billing" style={{ textDecoration: "none", color: "inherit" }}>
+          <Stat
+            label="Balance due"
+            value={formatXof(balance)}
+            sub={
+              balance > 0
+                ? nextInstallment
+                  ? `Due ${dayLabel(nextInstallment.dueDate)}`
+                  : "Payment due"
+                : "Settled"
+            }
+            tone={balance > 0 ? "var(--error-500)" : "var(--success-500)"}
+            icon={<Wallet size={16} />}
+          />
+        </Link>
+        <Link href="/student/attendance" style={{ textDecoration: "none", color: "inherit" }}>
+          <Stat
+            label="Attendance"
+            value={attendance?.overall === null || attendance?.overall === undefined ? "—" : `${attendance.overall}%`}
+            sub="This term"
+            tone="var(--success-500)"
+            icon={<CheckCheck size={16} />}
+          />
+        </Link>
       </div>
 
-      <div className="row" style={{ alignItems: "stretch" }}>
-        <div className="card" style={{ flex: "2 1 340px" }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <p className="h1" style={{ fontSize: 16 }}>
-              Today · {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
-            </p>
-            <span style={{ flex: 1 }} />
-            <Link href="/student/schedule">Full schedule →</Link>
-          </div>
-          {todayClasses.length === 0 ? (
-            <p className="muted">No classes scheduled today.</p>
-          ) : (
-            todayClasses.map((c, i) => (
-              <div key={c.enrollmentId} style={{ display: "flex", gap: 16 }}>
-                <div style={{ width: 52, textAlign: "right", paddingTop: 14, flexShrink: 0, fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 14 }}>{c.startTime}</div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
-                  <span style={{ width: 12, height: 12, borderRadius: "50%", background: i === 0 ? ORANGE : "var(--surface, #fff)", border: `2.5px solid ${i === 0 ? ORANGE : NAVY}`, marginTop: 15 }} />
-                  {i < todayClasses.length - 1 && <span style={{ flex: 1, width: 2, background: "var(--divider)" }} />}
-                </div>
-                <div style={{ flex: 1, paddingBottom: i < todayClasses.length - 1 ? 14 : 0 }}>
-                  <div style={{ background: "var(--gray-50)", border: "1px solid var(--divider)", borderRadius: 12, padding: "12px 15px" }}>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{c.courseCode} — {c.title}</div>
-                    <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{c.room ?? "Room TBA"} · until {c.endTime}</div>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="card" style={{ flex: "1 1 280px" }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <p className="h1" style={{ fontSize: 16 }}>Action items</p>
-            {actionCount > 0 && <span className="badge pending" style={{ marginLeft: 10 }}>{actionCount}</span>}
-          </div>
-          {actionCount === 0 ? (
-            <p className="muted">All caught up. Nothing needs your attention.</p>
-          ) : (
-            <>
-              {dueInstallments.slice(0, 3).map((inst) => {
-                const overdue = inst.status === "overdue" || new Date(inst.dueDate).getTime() < now;
-                return (
-                  <Link key={inst.id} href="/student/billing" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid var(--divider)", color: "inherit", textDecoration: "none" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 16, alignItems: "start" }}>
+        <div style={{ gridColumn: "span 1", minWidth: 0 }}>
+          <Card
+            title="Today's schedule"
+            action={
+              <Link href="/student/schedule" style={{ fontSize: 12.5, fontWeight: 600 }}>
+                Full week →
+              </Link>
+            }
+          >
+            {todayClasses.length === 0 ? (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>No classes scheduled.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {todayClasses.map((c, i) => (
+                  <div key={c.enrollmentId} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ width: 4, alignSelf: "stretch", minHeight: 38, borderRadius: 2, background: colorOf(c.courseCode) }} />
+                    <span style={{ width: 96, fontSize: 12.5, color: "var(--fg2)", fontVariantNumeric: "tabular-nums" }}>
+                      {c.startTime}–{c.endTime}
+                    </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>Installment {inst.sequence} — {formatXof(inst.amountDue - inst.amountPaid)}</div>
-                      <div style={{ fontSize: 12, color: overdue ? "var(--danger)" : "var(--fg2)", marginTop: 2 }}>
-                        {overdue ? "Overdue since" : "Due"} {new Date(inst.dueDate).toLocaleDateString()}
+                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>{c.title}</div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>
+                        {c.courseCode} · {c.room ?? "room TBA"}
                       </div>
                     </div>
-                    <span className={`badge ${overdue ? "overdue" : "pending"}`}>{overdue ? "overdue" : "unpaid"}</span>
-                  </Link>
-                );
-              })}
-              {openAssignments.slice(0, 3).map((a) => (
-                <Link key={a.assignmentId} href="/student/assignments" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid var(--divider)", color: "inherit", textDecoration: "none" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title}</div>
-                    <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{a.courseCode} · due {new Date(a.dueDate).toLocaleDateString()}</div>
+                    <span
+                      style={{
+                        padding: "2px 10px",
+                        borderRadius: "var(--radius-pill)",
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                        background: i === 0 ? "rgba(237,132,37,.14)" : "var(--bg-subtle)",
+                        color: i === 0 ? "#a85f16" : "var(--fg3)",
+                      }}
+                    >
+                      {i === 0 ? "Next" : "Upcoming"}
+                    </span>
                   </div>
-                  <span className="badge pending">to submit</span>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+
+        <Card title="To-do">
+          {todos.length === 0 ? (
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>Nothing needs your attention.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {todos.map((t) => (
+                <Link key={t.key} href={t.href} style={{ display: "flex", gap: 10, alignItems: "flex-start", textDecoration: "none", color: "inherit" }}>
+                  <span style={{ marginTop: 1 }}>{t.icon}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>{t.title}</div>
+                    <div className="muted" style={{ fontSize: 11.5 }}>{t.due}</div>
+                  </div>
                 </Link>
               ))}
-            </>
+            </div>
           )}
-        </div>
-
-        <div className="card" style={{ flex: "1 1 220px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, textAlign: "center" }}>
-          <div style={{ width: 64, height: 64, borderRadius: "50%", background: NAVY, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22 }}>
-            {initials(name) || "ID"}
-          </div>
-          <div>
-            <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15 }}>{name || "Student"}</div>
-            <div className="muted" style={{ fontSize: 12 }}>DAUST student ID</div>
-          </div>
-          <Link href="/student/id" style={{ fontWeight: 600, color: ORANGE }}>Open ID →</Link>
-        </div>
+        </Card>
       </div>
 
-      <div className="row">
-        <div className="card" style={{ flex: "2 1 360px" }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <p className="h1" style={{ fontSize: 16 }}>My courses</p>
-            <span style={{ flex: 1 }} />
-            <Link href="/student/courses">Register →</Link>
-          </div>
-          {courses.length === 0 ? (
-            <p className="muted">Not enrolled yet. <Link href="/student/courses">Browse sections</Link>.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, alignItems: "start" }}>
+        <Card
+          title="Degree progress"
+          action={
+            <Link href="/student/degree" style={{ fontSize: 12.5, fontWeight: 600 }}>
+              Audit →
+            </Link>
+          }
+        >
+          {!degree ? (
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>Loading…</p>
           ) : (
-            <table>
-              <thead><tr><th>Course</th><th>Schedule</th><th>Room</th></tr></thead>
-              <tbody>
-                {courses.map((c) => (
-                  <tr key={c.enrollmentId}>
-                    <td>{c.courseCode} — {c.title}</td>
-                    <td>{c.schedule}</td>
-                    <td>{c.room}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 }}>
+                <span style={{ fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 800, color: "var(--daust-navy)" }}>
+                  {degree.pctComplete}%
+                </span>
+                <span className="muted" style={{ fontSize: 12.5 }}>
+                  complete · {degree.completed}/{degree.total} credits
+                </span>
+              </div>
+              <Progress pct={degree.pctComplete} height={10} />
+              <p className="muted" style={{ margin: "12px 0 0", fontSize: 12.5 }}>
+                Cumulative GPA <strong style={{ color: "var(--fg1)" }}>{summary ? summary.gpa.toFixed(2) : "—"}</strong> ·{" "}
+                {degree.inProgress} credits in progress
+              </p>
+            </>
           )}
-        </div>
+        </Card>
 
-        <div className="card" style={{ flex: "1 1 280px" }}>
-          <p className="h1" style={{ fontSize: 16 }}>Announcements</p>
-          {news.slice(0, 4).map((a) => (
-            <div key={a.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--divider)" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--daust-orange)", letterSpacing: ".08em", textTransform: "uppercase" }}>{a.category}</div>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{a.title}</div>
-              <div className="muted" style={{ fontSize: 13 }}>{a.body}</div>
+        <Card
+          title="Announcements"
+          action={
+            <Link href="/student/announcements" style={{ fontSize: 12.5, fontWeight: 600 }}>
+              View all
+            </Link>
+          }
+        >
+          {news.length === 0 ? (
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>No campus updates.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {news.slice(0, 3).map((a) => (
+                <div key={a.id}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-navy-700)" }}>
+                    {a.category}
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: 13.5 }}>{a.title}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </Card>
       </div>
     </>
   );
