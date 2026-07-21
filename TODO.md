@@ -4,6 +4,28 @@ Synthesized 2026-06-28 from a full 9-agent completion audit of the codebase vs t
 
 Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 design-parity gap · ⚪ decision needed
 
+## 0 · SIS redesign — remaining backend gaps (audited 2026-07-21)
+
+All five portals now follow `design/Student information system design (1)`. These are
+the design elements that could not be built because the backend has no such
+endpoint or field. Each names what is required.
+
+- [ ] 🟠 **Registrar broadcast composer** (`/admin/messages`) — the `Broadcast` model exists in the schema with **zero** API references. Needs `POST`/`GET /comms/broadcasts` with `{audienceType: individual|year|program|all, audienceValue, subject, body}` fanning out into `Thread`/`Message`. Biggest missing capability; the page is currently just the shared inbox. (Faculty already has per-section broadcast via `POST /comms/sections/:id/broadcast`.)
+- [ ] 🟠 **RBAC matrix** (`/admin/staff`) — no permission model or endpoint exists; the page is a read-only staff list under a "Roles & Permissions" label. ⚪ Also needs a decision on the design's "Advisor" role, which is absent from `APP_ROLES`.
+- [ ] 🟠 **Security & System** (`/admin/settings`) — the design's 12 toggles have no `SystemSetting` model and, more importantly, no enforcement. Do not ship decorative switches.
+- [ ] 🟠 **Student Success** — needs a per-student `level` on the payload (`warnStudent` hardcodes `level:"warning"` though the column exists), `StaffWatch` endpoints for the follow/star panel (model exists, zero usages), and a warnings-history endpoint.
+- [ ] 🟠 **Grading schemes are read-only** — `GradeScaleRow` needs write endpoints for add/edit row.
+- [ ] 🟠 **Rule engine prerequisites** — `setCourseRule` has no `prerequisites`/`corequisites` keys, so the prereq chips cannot be edited.
+- [ ] 🟠 **Grade approvals** — needs a `graded` count and per-student grades to show "{n}/{m} graded" and the grade chips.
+- [ ] 🟡 **Applicant record is much thinner than the design** — the form captures ~20 fields, `createApplicant` takes 6. ⚪ Stage vocabulary also differs (`submitted/review/interview/offer/accepted/rejected` vs the design's Applied/Documents/Admitted/Confirmed) — pick one.
+- [ ] 🟡 **Student record + documents** — the design's ~35-field record and 6 PDF document slots are unbacked. There is also **no student invite flow** (only `GuardianInvite`), so any "password-setup email sent" copy on the students screen would be untrue today.
+- [ ] 🟡 **Invoices have no human-readable number** — the finance Billings tab shows a truncated uuid where the design shows `BILL-2026-001`. Needs a nullable `Invoice.number` plus a generator.
+- [ ] 🟡 Smaller CRUD gaps: department delete, parent edit/delete (and expose guardian `id`), calendar event `PATCH`/`DELETE` + term status.
+- [ ] 🟡 **Unbacked student screens** — dining swipe balance/history, housing move-in checklist, profile documents tab, schedule .ics export. Each needs a model or endpoint that does not exist.
+- [ ] ⚪ **"View as" is portal-scoped, not impersonation** — it lists only the portals the admin's own roles grant, because student/faculty/parent endpoints are scoped to *your own* record. A true "view as this student" needs a session subject + audit trail. Decide whether to build it.
+- [ ] ⚪ **Kept but unreachable from the new nav:** `student/documents` (transcript + enrollment verification — the only working transcript output), `student/assignments` (linked from the dashboard To-do), `student/id` (signed QR campus pass). Decide whether to relocate them into the design's screens or retire them.
+- [ ] 🔴 **Staging carries no demo parent** until one is provisioned through the registrar flow; the seeded `parent@daust.edu` exists locally only.
+
 ## 1 · Correctness & hygiene — ✅ FIXED 2026-06-28 (fix-pack, all verified live)
 
 - [ ] 🔴 **`apps/api/uploads/` is committed to git** — *the one remaining item; user action (git is user-managed):* add `apps/api/uploads/` to `.gitignore` and run `git rm --cached "apps/api/uploads/c2a5d2cd-10ef-4f42-8674-957764b172e2.txt"`.

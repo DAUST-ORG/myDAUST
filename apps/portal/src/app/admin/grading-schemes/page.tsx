@@ -4,6 +4,13 @@ import { useEffect, useState } from "react";
 import { type GradingSchemeRow, getGradingSchemes } from "@/lib/api";
 import { Badge, Card, EmptyState, PageHeader, Segmented } from "@/components/ui";
 
+/** Spec title form: "{scheme name} · {max GPA points}", the points suffix dropped for unscored scales. */
+function schemeTitle(scheme: GradingSchemeRow): string {
+  const points = scheme.rows.map((r) => r.points).filter((p): p is number => p !== null);
+  if (points.length === 0) return scheme.name;
+  return `${scheme.name} · ${Math.max(...points).toFixed(2)}`;
+}
+
 export default function GradingSchemesPage() {
   const [schemes, setSchemes] = useState<GradingSchemeRow[] | null>(null);
   const [active, setActive] = useState<string>("");
@@ -38,7 +45,14 @@ export default function GradingSchemesPage() {
         />
       </div>
 
-      <Card pad={false}>
+      <Card
+        pad={false}
+        title={
+          <h3 style={{ margin: 0, padding: "16px 18px 0", fontFamily: "var(--font-display)", fontSize: 15.5, fontWeight: 700 }}>
+            {schemeTitle(scheme)}
+          </h3>
+        }
+      >
         <table>
           <thead>
             <tr><th>Grade</th><th style={{ textAlign: "right" }}>Points</th><th style={{ textAlign: "right" }}>Score range</th></tr>

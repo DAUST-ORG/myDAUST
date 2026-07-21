@@ -22,6 +22,7 @@ export default function ParentsPage() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ fullName: "", email: "", relation: "", studentIds: [] as string[] });
   const [childQuery, setChildQuery] = useState("");
+  const [listQuery, setListQuery] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -39,6 +40,17 @@ export default function ParentsPage() {
       : students;
     return list.slice(0, 40);
   }, [students, childQuery]);
+
+  const visible = useMemo(() => {
+    const needle = listQuery.trim().toLowerCase();
+    if (!needle) return rows ?? [];
+    return (rows ?? []).filter(
+      (g) =>
+        g.name.toLowerCase().includes(needle) ||
+        g.email.toLowerCase().includes(needle) ||
+        g.children.some((c) => c.name.toLowerCase().includes(needle) || c.studentNo.toLowerCase().includes(needle)),
+    );
+  }, [rows, listQuery]);
 
   const valid = form.fullName.trim() && form.email.trim() && form.studentIds.length > 0;
 
@@ -81,7 +93,12 @@ export default function ParentsPage() {
         eyebrow="Overview"
         title="Parents"
         subtitle="Guardian accounts and the students each may follow. Guardians never self-register."
-        actions={<Button variant="primary" onClick={() => setAdding(true)}>New parent</Button>}
+        actions={
+          <>
+            <SearchInput value={listQuery} onChange={setListQuery} placeholder="Filter parents or students…" width={260} />
+            <Button variant="primary" onClick={() => setAdding(true)}>New parent</Button>
+          </>
+        }
       />
 
       {error && <p className="card" style={{ color: "var(--danger)" }}>{error}</p>}
@@ -92,12 +109,14 @@ export default function ParentsPage() {
         <EmptyState title="No parent accounts yet" note="Create one to give a guardian read access to their child's record." />
       )}
 
-      {rows && rows.length > 0 && (
+      {rows && rows.length > 0 && visible.length === 0 && <EmptyState title="No parents match" />}
+
+      {visible.length > 0 && (
         <Card pad={false}>
           <table>
-            <thead><tr><th>Parent</th><th>Email</th><th>Status</th><th>Children</th><th /></tr></thead>
+            <thead><tr><th>Parent</th><th>Email</th><th>Status</th><th>Assigned students</th><th>Actions</th></tr></thead>
             <tbody>
-              {rows.map((g) => (
+              {visible.map((g) => (
                 <tr key={g.id} className="sis-row">
                   <td>
                     <span style={{ display: "flex", alignItems: "center", gap: 9, fontWeight: 600 }}>
