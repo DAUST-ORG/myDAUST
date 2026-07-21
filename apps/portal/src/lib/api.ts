@@ -1187,15 +1187,28 @@ export interface GuardianRow {
   status: string; // active | invited | invite-expired
   children: { studentId: string; studentNo: string; name: string; relation: string | null }[];
 }
+/** Public: a guardian redeeming their single-use password-setup invite. */
+export const redeemGuardianInvite = (token: string, password: string) =>
+  request<{ ok: boolean }>("/guardian-invites/redeem", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
 export const getGuardians = () => request<GuardianRow[]>("/guardians");
 export const createGuardian = (input: {
   fullName: string;
   email: string;
   studentIds: string[];
   relation?: string;
-}) => request<{ id: string; email: string }>("/guardians", { method: "POST", body: JSON.stringify(input) });
+}) =>
+  request<{ id: string; email: string; inviteExpiresAt: string; inviteLink: string }>("/guardians", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 export const resendGuardianInvite = (id: string) =>
-  request<{ ok: boolean }>(`/guardians/${id}/resend-invite`, { method: "POST" });
+  request<{ ok: boolean; inviteLink: string; inviteExpiresAt: string }>(
+    `/guardians/${id}/resend-invite`,
+    { method: "POST" },
+  );
 export const setGuardianChildren = (id: string, studentIds: string[]) =>
   request<{ ok: boolean }>(`/guardians/${id}/children`, { method: "PATCH", body: JSON.stringify({ studentIds }) });
 

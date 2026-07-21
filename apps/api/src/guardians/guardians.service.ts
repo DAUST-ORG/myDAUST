@@ -141,7 +141,12 @@ export class GuardiansService {
     });
 
     const invite = await this.issueInvite(guardian.id, guardian.email, `${firstName} ${lastName}`);
-    return { id: guardian.id, email: guardian.email, inviteExpiresAt: invite.expiresAt };
+    return {
+      id: guardian.id,
+      email: guardian.email,
+      inviteExpiresAt: invite.expiresAt,
+      inviteLink: invite.link,
+    };
   }
 
   /** Issue (or re-issue) a password-setup token and email it. */
@@ -152,8 +157,10 @@ export class GuardiansService {
       data: { guardianId, tokenHash: this.hashToken(token), expiresAt },
     });
 
+    // Top level, not /parent/*: everything under the parent area sits behind the
+    // authenticated portal layout, and the guardian has no password yet.
     const origin = process.env.PUBLIC_URL ?? "http://localhost:3000";
-    const link = `${origin}/parent/set-password?token=${token}`;
+    const link = `${origin}/set-password?token=${token}`;
     await this.mail.send({
       to: email,
       subject: "Set up your myDAUST parent account",
@@ -165,7 +172,10 @@ export class GuardiansService {
         <p>If you were not expecting this, you can ignore this email.</p>
       `,
     });
-    return { expiresAt };
+    // The link goes back to the registrar too: they already hold the authority to
+    // create the account, and guardians routinely need it read out over the phone
+    // when the email does not arrive.
+    return { expiresAt, link };
   }
 
   async resendInvite(actorId: string, guardianId: string) {
@@ -176,11 +186,15 @@ export class GuardiansService {
     if (guardian.passwordHash) {
       throw new BadRequestException("This guardian has already set a password");
     }
-    await this.issueInvite(guardian.id, guardian.email, `${guardian.firstName} ${guardian.lastName}`);
+    const invite = await this.issueInvite(
+      guardian.id,
+      guardian.email,
+      `${guardian.firstName} ${guardian.lastName}`,
+    );
     await this.prisma.auditLog.create({
       data: { entity: "Person", entityId: guardian.id, action: "guardian-invite-resent", actorId },
     });
-    return { ok: true };
+    return { ok: true, inviteLink: invite.link, inviteExpiresAt: invite.expiresAt };
   }
 
   /** Replace a guardian's linked students. */
