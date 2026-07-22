@@ -30,13 +30,23 @@ const GENERAL = [
 export default function SettingsPage() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [myId, setMyId] = useState<string>("");
+  // Fees, scholarships and role management are all admin-only writes. A plain
+  // registrar views this page read-only, and must not fetch the admin users list
+  // (that endpoint 403s for them).
+  const [isAdmin, setIsAdmin] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState<string[]>([]);
   const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    getUsers().then(setUsers).catch(() => {});
-    getMe().then((m) => setMyId(m.personId)).catch(() => {});
+    getMe()
+      .then((m) => {
+        setMyId(m.personId);
+        const admin = m.roles.includes("admin");
+        setIsAdmin(admin);
+        if (admin) getUsers().then(setUsers).catch(() => {});
+      })
+      .catch(() => {});
   }, []);
   useEffect(() => load(), [load]);
 
@@ -73,9 +83,10 @@ export default function SettingsPage() {
         </table>
       </div>
 
-      <FeesEditor />
-      <TiersEditor />
+      <FeesEditor editable={isAdmin} />
+      <TiersEditor editable={isAdmin} />
 
+      {isAdmin && (
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <p className="h1" style={{ fontSize: 16, flex: 1 }}>Users & roles ({users.length})</p>
@@ -122,11 +133,12 @@ export default function SettingsPage() {
         </table>
         <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Role changes are audit-logged. You cannot edit your own roles.</p>
       </div>
+      )}
     </>
   );
 }
 
-function FeesEditor() {
+function FeesEditor({ editable }: { editable: boolean }) {
   const [fees, setFees] = useState<FeeItem[]>([]);
   const [editKey, setEditKey] = useState<string | null>(null);
   const [row, setRow] = useState<{ minXof: number; maxXof: string; period: string }>({ minXof: 0, maxXof: "", period: "year" });
@@ -159,7 +171,7 @@ function FeesEditor() {
         {note && <span className="muted" style={{ fontSize: 12 }}>{note}</span>}
       </div>
       <table>
-        <thead><tr><th>Fee</th><th>Amount</th><th>Period</th><th>Note</th><th /></tr></thead>
+        <thead><tr><th>Fee</th><th>Amount</th><th>Period</th><th>Note</th>{editable && <th />}</tr></thead>
         <tbody>
           {fees.map((f) => (
             <tr key={f.key}>
@@ -185,6 +197,7 @@ function FeesEditor() {
                 )}
               </td>
               <td className="muted" style={{ fontSize: 12 }}>{f.note}</td>
+              {editable && (
               <td style={{ whiteSpace: "nowrap" }}>
                 {editKey === f.key ? (
                   <>
@@ -195,6 +208,7 @@ function FeesEditor() {
                   <button onClick={() => { setEditKey(f.key); setRow({ minXof: f.minXof, maxXof: f.maxXof?.toString() ?? "", period: f.period }); }} style={{ fontSize: 12 }}>Edit</button>
                 )}
               </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -203,7 +217,7 @@ function FeesEditor() {
   );
 }
 
-function TiersEditor() {
+function TiersEditor({ editable }: { editable: boolean }) {
   const [tiers, setTiers] = useState<ScholarshipTierRow[]>([]);
   const [editId, setEditId] = useState<string | null>(null);
   const [row, setRow] = useState({ minScore: 12, pct: 10, band: "" });
@@ -250,10 +264,10 @@ function TiersEditor() {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <p className="h1" style={{ fontSize: 16, flex: 1 }}>Merit scholarships — auto-awarded on BAC (director-configurable)</p>
         {note && <span className="muted" style={{ fontSize: 12 }}>{note}</span>}
-        <button className="primary" onClick={() => { setAdding(true); setEditId(null); setRow({ minScore: 12, pct: 10, band: "" }); }} style={{ fontSize: 12 }}>Add tier</button>
+        {editable && <button className="primary" onClick={() => { setAdding(true); setEditId(null); setRow({ minScore: 12, pct: 10, band: "" }); }} style={{ fontSize: 12 }}>Add tier</button>}
       </div>
       <table>
-        <thead><tr><th>Min BAC</th><th>Discount</th><th>Band</th><th /></tr></thead>
+        <thead><tr><th>Min BAC</th><th>Discount</th><th>Band</th>{editable && <th />}</tr></thead>
         <tbody>
           {tiers.map((t) =>
             editId === t.id ? (
@@ -263,10 +277,12 @@ function TiersEditor() {
                 <td>≥ {t.minScore}</td>
                 <td><strong>{t.pct}%</strong></td>
                 <td>{t.band}{t.note && <div className="muted" style={{ fontSize: 11 }}>{t.note}</div>}</td>
+                {editable && (
                 <td style={{ whiteSpace: "nowrap" }}>
                   <button onClick={() => { setEditId(t.id); setAdding(false); setRow({ minScore: t.minScore, pct: t.pct, band: t.band }); }} style={{ fontSize: 12, marginRight: 6 }}>Edit</button>
                   <button onClick={() => remove(t.id)} style={{ fontSize: 12 }}>Delete</button>
                 </td>
+                )}
               </tr>
             ),
           )}

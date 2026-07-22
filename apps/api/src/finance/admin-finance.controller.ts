@@ -130,7 +130,11 @@ export class AdminFinanceController {
     return this.finance.listStudentAccounts();
   }
 
+  // The registrar's student profile has a read-only Finance tab (balance + payment
+  // history), so this one read overrides the bursar/admin class default. The write
+  // endpoints (charges, discounts, plans) stay bursar/admin only.
   @Get("students/:id/account")
+  @Roles("bursar", "admin", "registrar")
   account(@Param("id") id: string) {
     return this.finance.getStudentAccount(id);
   }

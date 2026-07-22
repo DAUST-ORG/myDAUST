@@ -134,7 +134,7 @@ export default function AdminStudentDetailPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginTop: 16 }}>
         <ProfileStat label="Account balance" icon={Wallet} value={balanceLabel} color={s.balance === 0 ? "var(--success)" : balanceTone} />
         <ProfileStat label="Cumulative GPA" icon={Award} value={s.gpa > 0 ? s.gpa.toFixed(2) : "—"} unit="/ 4.0" color="var(--daust-navy)" />
-        <ProfileStat label="Credits earned" icon={Layers} value={String(s.completedCredits)} unit="/ 160" />
+        <ProfileStat label="Credits earned" icon={Layers} value={String(s.completedCredits)} unit="/ 132" />
         <ProfileStat label="Standing" icon={CheckCircle2} value={s.standing === "Academic Probation" ? "Probation" : s.standing === "Dean's List" ? "Dean's List" : "Good"} />
       </div>
 
@@ -182,7 +182,7 @@ export default function AdminStudentDetailPage() {
           <ProfileCard title="Standing" icon={Award} action={pencil("enrollment")}>
             <KV k="Cumulative GPA" v={<b>{s.gpa > 0 ? `${s.gpa.toFixed(2)} / 4.0` : "—"}</b>} />
             <KV k="Academic standing" v={s.standing} />
-            <KV k="Credits earned" v={`${s.completedCredits} / 160`} />
+            <KV k="Credits earned" v={`${s.completedCredits} / 132`} />
             <KV k="Credits this term" v={String(s.currentTermCredits)} />
             <KV k="Major" v={s.major ?? "—"} />
             <KV k="Minor" v={s.minor ?? "—"} />
