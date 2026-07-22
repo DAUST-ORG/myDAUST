@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Pencil } from "lucide-react";
+import { FEE_STRUCTURE } from "@mydaust/shared";
 import { type FeePlan, type FeePlanRow, getFeePlan, updateFeePlanRow } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
 import { Button, Card, EmptyState, Eyebrow, Field, Input, Modal, PageHeader, Stat } from "@/components/ui";
@@ -102,7 +103,9 @@ export default function FeeSchedulePage() {
 
   const year = plan?.academicYearLabel ?? "";
   const totals = plan?.totals ?? { full: 0, tuition: 0 };
-  const housingAndCafeteria = totals.full - totals.tuition;
+  // The plan carries only the full and tuition-only totals; the housing/cafeteria
+  // breakdown lives in the shared fee constant (they sum to full − tuition).
+  const { housingPerYear, cafeteriaPerYear } = FEE_STRUCTURE;
 
   return (
     <>
@@ -125,7 +128,8 @@ export default function FeeSchedulePage() {
         <>
           <div className="kpi-grid" style={{ marginBottom: 20 }}>
             <Stat label="Yearly tuition" value={formatXof(totals.tuition)} sub="per year" />
-            <Stat label="Yearly housing + cafeteria" value={formatXof(housingAndCafeteria)} sub="per year" />
+            <Stat label="Yearly housing" value={formatXof(housingPerYear)} sub="per year" />
+            <Stat label="Yearly cafeteria" value={formatXof(cafeteriaPerYear)} sub="per year" />
             <Stat
               label="Full annual package"
               value={formatXof(totals.full)}

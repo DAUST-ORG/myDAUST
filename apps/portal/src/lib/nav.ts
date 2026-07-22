@@ -7,24 +7,18 @@ import {
   CalendarDays,
   CalendarRange,
   CheckCheck,
-  Clock,
   ClipboardCheck,
   ClipboardList,
-  Coins,
-  FileSpreadsheet,
   FolderOpen,
   GitBranch,
   GraduationCap,
   HeartPulse,
   LayoutDashboard,
-  LineChart,
-  Link2,
   ListChecks,
   type LucideIcon,
   Mail,
   Megaphone,
   Network,
-  PieChart,
   Receipt,
   Scale,
   Settings,
@@ -158,18 +152,6 @@ export const FINANCE_NAV: PortalNav = {
     g("Finance", [
       { href: "/finance/fee-schedule", label: "Fee Schedule", icon: Receipt },
       { href: "/finance/accounts", label: "Student Accounts", icon: Wallet },
-    ]),
-    // Beyond the design: the management-accounting suite that already ships. The
-    // design's finance portal covers receivables only, so these stay in their own
-    // group rather than being dropped along with the screens they support.
-    g("Management accounting", [
-      { href: "/admin/finance/director", label: "Money in & out", icon: LineChart },
-      { href: "/admin/finance", label: "Collections", icon: Coins },
-      { href: "/admin/finance/aging", label: "A/R Aging", icon: Clock },
-      { href: "/admin/finance/links", label: "Payment Links", icon: Link2 },
-      { href: "/admin/finance/expenses", label: "Expenses", icon: Receipt },
-      { href: "/admin/finance/budgets", label: "Budgets", icon: PieChart },
-      { href: "/admin/reports", label: "Reports", icon: FileSpreadsheet },
     ]),
   ],
 };
