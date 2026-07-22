@@ -220,6 +220,8 @@ model Term {
   academicYear   AcademicYear? @relation(fields: [academicYearId], references: [id])
   // Fall | Spring | Summer — the semester slot a curriculum entry maps onto.
   semester       String?
+  // active | planning | draft — the registrar's term lifecycle. Only one active.
+  status         String?
   invoices  Invoice[]
   sections  Section[]
 }

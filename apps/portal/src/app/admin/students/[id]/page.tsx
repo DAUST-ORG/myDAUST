@@ -156,11 +156,11 @@ export default function AdminStudentDetailPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>
           <ProfileCard title="Enrollment" icon={BookOpen} action={pencil("enrollment")}>
             <KV k="Program" v={s.program ?? "—"} />
+            <KV k="Major" v={s.major ?? "—"} />
             <KV k="Year of study" v={s.yearLevel ? `Year ${s.yearLevel}` : "—"} />
             <KV k="Cohort" v={s.cohort ?? "—"} />
-            <KV k="Enrolled" v={s.enrolledAt ?? "—"} />
+            <KV k="Enrollment status" v={s.enrollmentStatus ?? (s.status === "probation" ? "Probation" : "Active")} />
             <KV k="Advisor" v={s.advisor ?? "—"} />
-            <KV k="Status" v={s.status === "probation" ? "Probation" : "Enrolled"} />
           </ProfileCard>
           <ProfileCard title="Account summary" icon={Receipt}>
             <KV k="Balance" v={<span style={{ color: s.balance === 0 ? "var(--success)" : balanceTone, fontWeight: 700 }}>{balanceLabel}</span>} />
@@ -179,12 +179,16 @@ export default function AdminStudentDetailPage() {
 
       {tab === "academics" && (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.5fr)", gap: 16, alignItems: "start" }}>
-          <ProfileCard title="Standing" icon={Award}>
+          <ProfileCard title="Standing" icon={Award} action={pencil("enrollment")}>
             <KV k="Cumulative GPA" v={<b>{s.gpa > 0 ? `${s.gpa.toFixed(2)} / 4.0` : "—"}</b>} />
             <KV k="Academic standing" v={s.standing} />
             <KV k="Credits earned" v={`${s.completedCredits} / 160`} />
             <KV k="Credits this term" v={String(s.currentTermCredits)} />
-            <KV k="Expected graduation" v={s.cohort ?? "—"} />
+            <KV k="Major" v={s.major ?? "—"} />
+            <KV k="Minor" v={s.minor ?? "—"} />
+            <KV k="Catalog year" v={s.catalogYear ?? "—"} />
+            <KV k="Admit term" v={s.admitTerm ?? "—"} />
+            <KV k="Expected graduation" v={s.expectedGrad ?? s.cohort ?? "—"} />
             <KV k="Advisor" v={s.advisor ?? "—"} />
           </ProfileCard>
           <ProfileCard title="Courses & enrollment" icon={BookOpen}>
@@ -310,21 +314,31 @@ export default function AdminStudentDetailPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>
           <ProfileCard title="Personal details" icon={UserPlus} action={pencil("personal")}>
             <KV k="Full name" v={s.name} />
+            <KV k="Preferred name" v={s.preferredName ?? "—"} />
             <KV k="Student ID" v={s.studentNo} />
+            <KV k="National ID" v={s.nationalId ?? "—"} />
             <KV k="Date of birth" v={s.dateOfBirth ?? "—"} />
             <KV k="Gender" v={s.gender ?? "—"} />
+            <KV k="Blood type" v={s.bloodType ?? "—"} />
+            <KV k="Marital status" v={s.maritalStatus ?? "—"} />
             <KV k="Nationality" v={s.nationality ?? "—"} />
           </ProfileCard>
           <ProfileCard title="Contact" icon={Phone} action={pencil("contact")}>
             <KV k="Email" v={s.email} />
+            <KV k="Personal email" v={s.personalEmail ?? "—"} />
             <KV k="Phone" v={s.phone ?? "—"} />
             <KV k="Address" v={s.address ?? "—"} />
             <KV k="City" v={s.city ?? "—"} />
           </ProfileCard>
-          <ProfileCard title="Guardian / emergency" icon={Users} action={pencil("guardian")}>
-            <KV k="Name" v={s.guardianName ?? "—"} />
+          <ProfileCard title="Emergency & health" icon={Users} action={pencil("guardian")}>
+            <KV k="Guardian name" v={s.guardianName ?? "—"} />
             <KV k="Relationship" v={s.guardianRelation ?? "—"} />
-            <KV k="Phone" v={s.guardianPhone ?? "—"} />
+            <KV k="Guardian phone" v={s.guardianPhone ?? "—"} />
+            <KV k="Secondary contact" v={s.emergencyName2 ?? "—"} />
+            <KV k="Secondary phone" v={s.emergencyPhone2 ?? "—"} />
+            <KV k="Allergies / conditions" v={s.allergies ?? "—"} />
+            <KV k="Health insurance" v={s.insurance ?? "—"} />
+            <KV k="Campus physician" v={s.physician ?? "—"} />
           </ProfileCard>
         </div>
       )}

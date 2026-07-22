@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { type DepartmentRow, getDepartments, upsertDepartment } from "@/lib/api";
-import { Button, Card, EmptyState, Field, Input, Modal, PageHeader, SearchInput } from "@/components/ui";
+import { Pencil, Trash2 } from "lucide-react";
+import { type DepartmentRow, deleteDepartment, getDepartments, upsertDepartment } from "@/lib/api";
+import { Button, Card, EmptyState, Field, IconButton, Input, Modal, PageHeader, SearchInput } from "@/components/ui";
 
 export default function DepartmentsPage() {
   const [rows, setRows] = useState<DepartmentRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Partial<DepartmentRow> | null>(null);
+  const [removing, setRemoving] = useState<DepartmentRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
 
@@ -35,7 +37,24 @@ export default function DepartmentsPage() {
     }
   }
 
-  if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
+  async function remove() {
+    if (!removing) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteDepartment(removing.id);
+      setRemoving(null);
+      load();
+    } catch (e) {
+      // The API refuses while the department still owns programmes or courses.
+      setError(e instanceof Error ? e.message : "Could not delete the department.");
+      setRemoving(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error && !rows) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
 
   const needle = q.trim().toLowerCase();
   const visible = (rows ?? []).filter(
@@ -60,6 +79,8 @@ export default function DepartmentsPage() {
         }
       />
 
+      {error && rows && <p className="card" style={{ color: "var(--danger)" }}>{error}</p>}
+
       {!rows && <p className="muted">Loading…</p>}
       {rows && rows.length === 0 && <EmptyState title="No departments yet" />}
       {rows && rows.length > 0 && visible.length === 0 && <EmptyState title="No departments match" />}
@@ -78,7 +99,12 @@ export default function DepartmentsPage() {
                   <td>{d.head ?? <span className="muted">—</span>}</td>
                   <td style={{ textAlign: "right" }}>{d.programs}</td>
                   <td style={{ textAlign: "right" }}>{d.courses}</td>
-                  <td><Button size="sm" onClick={() => setEditing(d)}>Edit</Button></td>
+                  <td>
+                    <span style={{ display: "inline-flex", gap: 6 }}>
+                      <IconButton label="Edit department" onClick={() => setEditing(d)}><Pencil size={15} /></IconButton>
+                      <IconButton label="Delete department" tone="danger" onClick={() => setRemoving(d)}><Trash2 size={15} /></IconButton>
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -105,6 +131,27 @@ export default function DepartmentsPage() {
             <Field label="Name"><Input value={editing.name ?? ""} onChange={(v) => setEditing((e) => ({ ...e, name: v }))} /></Field>
             <Field label="Head" hint="Department chair (free text)."><Input value={editing.head ?? ""} onChange={(v) => setEditing((e) => ({ ...e, head: v }))} /></Field>
           </div>
+        </Modal>
+      )}
+
+      {removing && (
+        <Modal
+          open
+          onClose={() => setRemoving(null)}
+          title="Delete department"
+          footer={
+            <>
+              <Button onClick={() => setRemoving(null)} disabled={busy}>Cancel</Button>
+              <Button variant="danger" onClick={remove} disabled={busy}>
+                {busy ? "Deleting…" : "Delete"}
+              </Button>
+            </>
+          }
+        >
+          <p style={{ margin: 0 }}>
+            Delete <strong>{removing.name}</strong> ({removing.code})? This cannot be undone. Departments that still own
+            programmes or courses cannot be removed.
+          </p>
         </Modal>
       )}
     </>

@@ -8,6 +8,7 @@ import { type AdminPrograms, type ProgramDetail, type ProgramRow, getAdminProgra
 import { formatXof, formatXofCompact } from "@/lib/format";
 import { Avatar, Badge, type BadgeTone, Tabs } from "@/components/ui";
 import { ProgramEditModal } from "../ProgramEditModal";
+import { CurriculumEditor } from "./CurriculumEditor";
 
 const STATUS_TONE: Record<string, BadgeTone> = { active: "success", probation: "warning" };
 const STATUS_LABEL: Record<string, string> = { active: "Enrolled", probation: "Probation" };
@@ -74,7 +75,7 @@ export default function ProgramDetailPage() {
       </div>
 
       <div style={{ marginTop: 22 }}>
-        <Tabs tabs={[{ value: "overview", label: "Overview" }, { value: "courses", label: "Courses" }, { value: "students", label: "Students" }]} active={tab} onChange={setTab} />
+        <Tabs tabs={[{ value: "overview", label: "Overview" }, { value: "courses", label: "Courses" }, { value: "curriculum", label: "Curriculum" }, { value: "students", label: "Students" }]} active={tab} onChange={setTab} />
       </div>
 
       {tab === "overview" && (
@@ -128,6 +129,8 @@ export default function ProgramDetailPage() {
           </p>
         </div>
       )}
+
+      {tab === "curriculum" && <CurriculumEditor code={p.code} name={p.name} />}
 
       {tab === "students" && (
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>

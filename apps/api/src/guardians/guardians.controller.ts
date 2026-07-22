@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Patch } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Patch } from "@nestjs/common";
 import { z } from "zod";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Public, Roles } from "../auth/decorators.js";
@@ -14,6 +14,11 @@ const CreateGuardianInput = z.object({
 
 const SetChildrenInput = z.object({
   studentIds: z.array(z.string().min(1).max(64)).min(1).max(20),
+});
+
+const UpdateGuardianInput = z.object({
+  fullName: z.string().min(1).max(120).optional(),
+  email: z.string().email().max(160).optional(),
 });
 
 const RedeemInviteInput = z.object({
@@ -45,6 +50,16 @@ export class GuardiansController {
   @Patch(":id/children")
   setChildren(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
     return this.guardians.setChildren(user.personId, id, SetChildrenInput.parse(body).studentIds);
+  }
+
+  @Patch(":id")
+  update(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+    return this.guardians.update(user.personId, id, UpdateGuardianInput.parse(body));
+  }
+
+  @Delete(":id")
+  remove(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.guardians.remove(user.personId, id);
   }
 }
 

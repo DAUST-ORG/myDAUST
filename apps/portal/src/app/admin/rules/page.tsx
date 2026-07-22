@@ -1,14 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { type CourseRuleRow, getCourseRules, setCourseRule } from "@/lib/api";
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, SearchInput, Toggle } from "@/components/ui";
+import { Plus, X } from "lucide-react";
+import { type CourseRuleRow, getCourseRules, setCourseRequisites, setCourseRule } from "@/lib/api";
+import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, SearchInput, Select, Toggle } from "@/components/ui";
+
+const MIN_GRADES = ["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D"] as const;
+
+interface PrereqDraft {
+  code: string;
+  minGrade: string;
+}
 
 interface RuleDraft {
   standingRequired: string;
   majorRestriction: string;
   capacity: string;
   waitlistEnabled: boolean;
+  prerequisites: PrereqDraft[];
+  corequisites: string[];
 }
 
 export default function RuleEnginePage() {
@@ -31,7 +41,14 @@ export default function RuleEnginePage() {
       majorRestriction: r.majorRestriction ?? "",
       capacity: r.capacity === null ? "" : String(r.capacity),
       waitlistEnabled: r.waitlistEnabled,
+      prerequisites: r.prerequisites.map((p) => ({ code: p.code, minGrade: p.minGrade ?? "" })),
+      corequisites: [...r.corequisites],
     });
+  }
+
+  function closeEditor() {
+    setEditing(null);
+    setDraft(null);
   }
 
   async function save() {
@@ -45,8 +62,11 @@ export default function RuleEnginePage() {
         capacity: draft.capacity.trim() === "" ? null : Number(draft.capacity),
         waitlistEnabled: draft.waitlistEnabled,
       });
-      setEditing(null);
-      setDraft(null);
+      await setCourseRequisites(editing.courseId, {
+        prerequisites: draft.prerequisites.map((p) => ({ code: p.code, minGrade: p.minGrade || null })),
+        corequisites: draft.corequisites,
+      });
+      closeEditor();
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save the rules.");
@@ -64,6 +84,37 @@ export default function RuleEnginePage() {
 
   const capacityInvalid =
     draft !== null && draft.capacity.trim() !== "" && !/^\d{1,4}$/.test(draft.capacity.trim());
+
+  // Selectable codes are the other courses in the catalogue, minus this course and ones already picked.
+  const allCodes = (rows ?? []).map((r) => r.code);
+  const prereqOptions =
+    editing && draft
+      ? allCodes.filter((c) => c !== editing.code && !draft.prerequisites.some((p) => p.code === c))
+      : [];
+  const coreqOptions =
+    editing && draft
+      ? allCodes.filter((c) => c !== editing.code && !draft.corequisites.includes(c))
+      : [];
+
+  function addPrereq(code: string) {
+    if (!code) return;
+    setDraft((d) => (d ? { ...d, prerequisites: [...d.prerequisites, { code, minGrade: "" }] } : d));
+  }
+  function removePrereq(code: string) {
+    setDraft((d) => (d ? { ...d, prerequisites: d.prerequisites.filter((p) => p.code !== code) } : d));
+  }
+  function setPrereqGrade(code: string, minGrade: string) {
+    setDraft((d) =>
+      d ? { ...d, prerequisites: d.prerequisites.map((p) => (p.code === code ? { ...p, minGrade } : p)) } : d,
+    );
+  }
+  function addCoreq(code: string) {
+    if (!code) return;
+    setDraft((d) => (d ? { ...d, corequisites: [...d.corequisites, code] } : d));
+  }
+  function removeCoreq(code: string) {
+    setDraft((d) => (d ? { ...d, corequisites: d.corequisites.filter((c) => c !== code) } : d));
+  }
 
   return (
     <>
@@ -115,22 +166,55 @@ export default function RuleEnginePage() {
       {editing && draft && (
         <Modal
           open
-          onClose={() => { setEditing(null); setDraft(null); }}
+          onClose={closeEditor}
           title={`Rules — ${editing.code}`}
-          width={480}
+          width={520}
           footer={
             <>
-              <Button onClick={() => { setEditing(null); setDraft(null); }} disabled={busy}>Cancel</Button>
+              <Button onClick={closeEditor} disabled={busy}>Cancel</Button>
               <Button variant="navy" onClick={save} disabled={busy || capacityInvalid}>
                 {busy ? "Saving…" : "Save rules"}
               </Button>
             </>
           }
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
-              Prerequisites and corequisites are managed in the course catalogue and are read-only here.
-            </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <Field label="Prerequisites" hint="Each prerequisite may require a minimum grade.">
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {draft.prerequisites.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>None required.</span>}
+                {draft.prerequisites.map((p) => (
+                  <div key={p.code} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Badge tone="navy">{p.code}</Badge>
+                    <Select
+                      value={p.minGrade}
+                      onChange={(v) => setPrereqGrade(p.code, v)}
+                      options={[{ value: "", label: "No min grade" }, ...MIN_GRADES.map((g) => ({ value: g, label: `min ${g}` }))]}
+                      style={{ flex: 1 }}
+                    />
+                    <RemoveChip label={`Remove prerequisite ${p.code}`} onClick={() => removePrereq(p.code)} />
+                  </div>
+                ))}
+                {prereqOptions.length > 0 && (
+                  <AddSelect placeholder="Add prerequisite…" options={prereqOptions} onPick={addPrereq} />
+                )}
+              </div>
+            </Field>
+
+            <Field label="Corequisites" hint="Courses that must be taken in the same term.">
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {draft.corequisites.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>None required.</span>}
+                {draft.corequisites.map((c) => (
+                  <div key={c} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Badge tone="navy">{c}</Badge>
+                    <RemoveChip label={`Remove corequisite ${c}`} onClick={() => removeCoreq(c)} />
+                  </div>
+                ))}
+                {coreqOptions.length > 0 && (
+                  <AddSelect placeholder="Add corequisite…" options={coreqOptions} onPick={addCoreq} />
+                )}
+              </div>
+            </Field>
+
             <Field label="Class standing" hint="Leave blank for any standing.">
               <Input
                 value={draft.standingRequired}
@@ -163,5 +247,57 @@ export default function RuleEnginePage() {
         </Modal>
       )}
     </>
+  );
+}
+
+/** Small round remove control for a requisite chip row. */
+function RemoveChip({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className="sis-btn"
+      style={{
+        width: 30,
+        height: 30,
+        padding: 0,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: "var(--radius-md)",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        color: "var(--fg2)",
+        cursor: "pointer",
+        flexShrink: 0,
+      }}
+    >
+      <X size={14} />
+    </button>
+  );
+}
+
+/** A select acting as an "add" affordance: resets to placeholder after each pick. */
+function AddSelect({
+  placeholder,
+  options,
+  onPick,
+}: {
+  placeholder: string;
+  options: string[];
+  onPick: (code: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--fg3)" }}>
+      <Plus size={14} />
+      <Select
+        value=""
+        onChange={onPick}
+        options={[{ value: "", label: placeholder }, ...options.map((c) => ({ value: c, label: c }))]}
+        style={{ flex: 1 }}
+      />
+    </div>
   );
 }

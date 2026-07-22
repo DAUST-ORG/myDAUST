@@ -236,6 +236,44 @@ export class GuardiansService {
     return { ok: true };
   }
 
+  /** Edit a guardian's name and/or email. */
+  async update(actorId: string, guardianId: string, input: { fullName?: string; email?: string }) {
+    const guardian = await this.prisma.person.findFirst({ where: { id: guardianId, kind: "parent" } });
+    if (!guardian) throw new NotFoundException("Guardian not found");
+
+    const data: { firstName?: string; lastName?: string; email?: string } = {};
+    if (input.fullName !== undefined) {
+      const { firstName, lastName } = this.splitName(input.fullName);
+      data.firstName = firstName;
+      data.lastName = lastName;
+    }
+    if (input.email !== undefined) {
+      const email = input.email.trim().toLowerCase();
+      const clash = await this.prisma.person.findUnique({ where: { email } });
+      if (clash && clash.id !== guardianId) {
+        throw new BadRequestException("That email already belongs to another account");
+      }
+      data.email = email;
+    }
+    const updated = await this.prisma.person.update({ where: { id: guardianId }, data });
+    await this.prisma.auditLog.create({
+      data: { entity: "Person", entityId: guardianId, action: "guardian-updated", actorId, data: { email: updated.email } },
+    });
+    return { id: updated.id, name: `${updated.firstName} ${updated.lastName}`, email: updated.email };
+  }
+
+  /** Remove a guardian account and its student links. */
+  async remove(actorId: string, guardianId: string) {
+    const guardian = await this.prisma.person.findFirst({ where: { id: guardianId, kind: "parent" } });
+    if (!guardian) throw new NotFoundException("Guardian not found");
+    // GuardianStudent and GuardianInvite cascade on the guardian relation.
+    await this.prisma.person.delete({ where: { id: guardianId } });
+    await this.prisma.auditLog.create({
+      data: { entity: "Person", entityId: guardianId, action: "guardian-deleted", actorId, data: { email: guardian.email } },
+    });
+    return { ok: true };
+  }
+
   // --- Invite redemption (public) -----------------------------------------
 
   /**

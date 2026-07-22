@@ -59,7 +59,8 @@ export default function SettingsPage() {
   return (
     <>
       <p className="eyebrow">System</p>
-      <h1 className="page-title">Settings</h1>
+      <h1 className="page-title">Security & System</h1>
+      <p className="muted" style={{ marginTop: -6, marginBottom: 20 }}>Institution configuration, fees, scholarships and role assignment.</p>
 
       <div className="card" style={{ marginBottom: 16 }}>
         <p className="h1" style={{ fontSize: 16 }}>General</p>

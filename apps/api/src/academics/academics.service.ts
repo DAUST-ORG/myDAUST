@@ -114,6 +114,22 @@ export interface UpdateStudentFields {
   advisor?: string | null;
   yearLevel?: number | null;
   cohort?: string | null;
+  preferredName?: string | null;
+  nationalId?: string | null;
+  maritalStatus?: string | null;
+  personalEmail?: string | null;
+  bloodType?: string | null;
+  allergies?: string | null;
+  insurance?: string | null;
+  physician?: string | null;
+  emergencyName2?: string | null;
+  emergencyPhone2?: string | null;
+  major?: string | null;
+  minor?: string | null;
+  admitTerm?: string | null;
+  expectedGrad?: string | null;
+  enrollmentStatus?: string | null;
+  catalogYear?: string | null;
 }
 
 @Injectable()
@@ -1562,6 +1578,22 @@ export class AcademicsService {
       yearLevel: student.yearLevel,
       cohort: student.cohort,
       enrolledAt: student.enrolledAt ? student.enrolledAt.toISOString().slice(0, 10) : null,
+      preferredName: student.preferredName,
+      nationalId: student.nationalId,
+      maritalStatus: student.maritalStatus,
+      personalEmail: student.personalEmail,
+      bloodType: student.bloodType,
+      allergies: student.allergies,
+      insurance: student.insurance,
+      physician: student.physician,
+      emergencyName2: student.emergencyName2,
+      emergencyPhone2: student.emergencyPhone2,
+      major: student.major,
+      minor: student.minor,
+      admitTerm: student.admitTerm,
+      expectedGrad: student.expectedGrad,
+      enrollmentStatus: student.enrollmentStatus,
+      catalogYear: student.catalogYear,
       enrollments: student.enrollments.map((e) => ({
         enrollmentId: e.id,
         courseCode: e.section.course.code,
@@ -1652,6 +1684,22 @@ export class AcademicsService {
       ...(input.advisor !== undefined ? { advisor: input.advisor } : {}),
       ...(input.yearLevel !== undefined ? { yearLevel: input.yearLevel } : {}),
       ...(input.cohort !== undefined ? { cohort: input.cohort } : {}),
+      ...(input.preferredName !== undefined ? { preferredName: input.preferredName } : {}),
+      ...(input.nationalId !== undefined ? { nationalId: input.nationalId } : {}),
+      ...(input.maritalStatus !== undefined ? { maritalStatus: input.maritalStatus } : {}),
+      ...(input.personalEmail !== undefined ? { personalEmail: input.personalEmail } : {}),
+      ...(input.bloodType !== undefined ? { bloodType: input.bloodType } : {}),
+      ...(input.allergies !== undefined ? { allergies: input.allergies } : {}),
+      ...(input.insurance !== undefined ? { insurance: input.insurance } : {}),
+      ...(input.physician !== undefined ? { physician: input.physician } : {}),
+      ...(input.emergencyName2 !== undefined ? { emergencyName2: input.emergencyName2 } : {}),
+      ...(input.emergencyPhone2 !== undefined ? { emergencyPhone2: input.emergencyPhone2 } : {}),
+      ...(input.major !== undefined ? { major: input.major } : {}),
+      ...(input.minor !== undefined ? { minor: input.minor } : {}),
+      ...(input.admitTerm !== undefined ? { admitTerm: input.admitTerm } : {}),
+      ...(input.expectedGrad !== undefined ? { expectedGrad: input.expectedGrad } : {}),
+      ...(input.enrollmentStatus !== undefined ? { enrollmentStatus: input.enrollmentStatus } : {}),
+      ...(input.catalogYear !== undefined ? { catalogYear: input.catalogYear } : {}),
     };
 
     await this.prisma.$transaction([

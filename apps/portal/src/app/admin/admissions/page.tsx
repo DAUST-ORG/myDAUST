@@ -2,9 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Download, Filter, UserPlus } from "lucide-react";
-import { type Admissions, createApplicant, getAdmissions, setApplicantStage } from "@/lib/api";
-import { Avatar, Badge, type BadgeTone, Button, Field, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
+import { ChevronRight, Download, FilePlus2, Filter } from "lucide-react";
+import { type Admissions, getAdmissions, getAdminPrograms, setApplicantStage } from "@/lib/api";
+import { Avatar, Badge, type BadgeTone, Button, PageHeader, SearchInput, Select, SortTh, Stat, useSort } from "@/components/ui";
+import { ApplicationModal, type ProgramOption } from "./ApplicationModal";
 
 const STAGES = ["submitted", "review", "interview", "offer", "accepted", "rejected"];
 const STAGE_TONE: Record<string, BadgeTone> = {
@@ -40,6 +41,7 @@ const STAGE_ACTION: Record<string, StageAction> = {
 export default function AdmissionsPage() {
   const router = useRouter();
   const [d, setD] = useState<Admissions | null>(null);
+  const [programOptions, setProgramOptions] = useState<ProgramOption[]>([]);
   const [q, setQ] = useState("");
   const [stageF, setStageF] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
@@ -53,6 +55,11 @@ export default function AdmissionsPage() {
     getAdmissions().then(setD).catch(() => {});
   }
   useEffect(() => load(), []);
+  useEffect(() => {
+    getAdminPrograms()
+      .then((p) => setProgramOptions(p.programs.map((x) => ({ code: x.code, name: x.name }))))
+      .catch(() => {});
+  }, []);
 
   async function advance(id: string, next: string) {
     setAdvancing(id);
@@ -68,6 +75,22 @@ export default function AdmissionsPage() {
   }
 
   const programs = useMemo(() => Array.from(new Set((d?.applicants ?? []).map((a) => a.program).filter((p) => p && p !== "—"))), [d]);
+
+  const stats = useMemo(() => {
+    const cnt = (st: string) => d?.funnel.find((f) => f.stage === st)?.count ?? 0;
+    const total = (d?.funnel ?? []).reduce((s, f) => s + f.count, 0);
+    return {
+      total,
+      underReview: cnt("review") + cnt("interview"),
+      admitted: cnt("offer"),
+      confirmed: cnt("accepted"),
+      // Funnel bars: cumulative narrowing of the pipeline.
+      funApplied: total,
+      funReviewed: total - cnt("submitted"),
+      funAdmitted: cnt("offer") + cnt("accepted"),
+      funConfirmed: cnt("accepted"),
+    };
+  }, [d]);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -104,174 +127,135 @@ export default function AdmissionsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Admissions & Registration"
         title="Admissions"
-        subtitle="Track applicants through the pipeline — from first submission to enrollment."
+        subtitle="Fall 2026 intake pipeline"
         actions={
-          <>
-            <button onClick={() => setShowFilters((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 7 }}><Filter size={15} /> Filters</button>
-            <button className="primary" onClick={() => setAdding(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}><UserPlus size={15} /> Add applicant</button>
-          </>
+          <button className="primary" onClick={() => setAdding(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <FilePlus2 size={15} /> New application
+          </button>
         }
       />
 
-      {/* Funnel */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-        {STAGES.map((st) => {
-          const count = d.funnel.find((f) => f.stage === st)?.count ?? 0;
-          const on = stageF === st;
-          return (
-            <button
-              key={st}
-              onClick={() => setStageF(on ? "all" : st)}
-              className="card lift"
-              style={{ flex: "1 1 130px", minWidth: 0, margin: 0, textAlign: "left", padding: 16, cursor: "pointer", borderColor: on ? "var(--daust-navy)" : "var(--border)" }}
-            >
-              <div className="muted" style={{ fontSize: 11.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{STAGE_LABEL[st]}</div>
-              <div style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 800, marginTop: 6 }}>{count}</div>
-            </button>
-          );
-        })}
+      {/* Semantic stat cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 20 }}>
+        <Stat label="Applications" value={stats.total} sub="FALL 2026" />
+        <Stat label="Under review" value={stats.underReview} sub="awaiting decision" tone="var(--daust-orange)" />
+        <Stat label="Admitted" value={stats.admitted} sub="offers sent" tone="var(--daust-navy)" />
+        <Stat label="Confirmed" value={stats.confirmed} sub="deposits paid" tone="var(--success)" />
       </div>
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-        <SearchInput value={q} onChange={setQ} placeholder="Filter applicants…" width={280} />
-        {showFilters && (
-          <>
-            <Select value={stageF} onChange={setStageF} options={[{ value: "all", label: "All stages" }, ...STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s]! }))]} />
-            <Select value={progF} onChange={setProgF} options={[{ value: "all", label: "All programs" }, ...programs.map((p) => ({ value: p, label: p }))]} />
-          </>
-        )}
-        <span style={{ flex: 1 }} />
-        <button onClick={exportCsv} style={{ display: "flex", alignItems: "center", gap: 7 }}><Download size={15} /> Export</button>
-      </div>
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+        {/* Pipeline funnel */}
+        <div className="card" style={{ margin: 0, flex: "1 1 280px", maxWidth: 360, minWidth: 260 }}>
+          <h3 style={{ margin: "0 0 16px", fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 700 }}>Pipeline funnel</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <FunnelBar label="Applied" count={stats.funApplied} max={stats.funApplied} />
+            <FunnelBar label="Reviewed" count={stats.funReviewed} max={stats.funApplied} />
+            <FunnelBar label="Admitted" count={stats.funAdmitted} max={stats.funApplied} />
+            <FunnelBar label="Confirmed" count={stats.funConfirmed} max={stats.funApplied} />
+          </div>
+        </div>
 
-      {err && <p className="card" style={{ color: "var(--danger)" }}>{err}</p>}
+        {/* Applicant list */}
+        <div style={{ flex: "3 1 480px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <SearchInput value={q} onChange={setQ} placeholder="Filter applicants…" width={280} />
+            <button onClick={() => setShowFilters((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 7 }}><Filter size={15} /> Filters</button>
+            {showFilters && (
+              <>
+                <Select value={stageF} onChange={setStageF} options={[{ value: "all", label: "All stages" }, ...STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s]! }))]} />
+                <Select value={progF} onChange={setProgF} options={[{ value: "all", label: "All programs" }, ...programs.map((p) => ({ value: p, label: p }))]} />
+              </>
+            )}
+            <span style={{ flex: 1 }} />
+            <button onClick={exportCsv} style={{ display: "flex", alignItems: "center", gap: 7 }}><Download size={15} /> Export</button>
+          </div>
 
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table>
-            <thead>
-              <tr>
-                <SortTh label="Applicant" sortKey="name" sort={sort} onSort={toggle} />
-                <SortTh label="Program" sortKey="program" sort={sort} onSort={toggle} />
-                <SortTh label="Country" sortKey="country" sort={sort} onSort={toggle} />
-                <SortTh label="BAC" sortKey="score" sort={sort} onSort={toggle} />
-                <th>Fee</th>
-                <SortTh label="Stage" sortKey="stage" sort={sort} onSort={toggle} />
-                <SortTh label="Submitted" sortKey="submitted" sort={sort} onSort={toggle} />
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((a) => (
-                <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/admin/admissions/${a.id}`)}>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <Avatar name={a.name} size={30} />
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{a.name}</div>
-                        <div className="muted" style={{ fontSize: 11.5 }}>{a.email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td><Badge tone="neutral">{a.program}</Badge></td>
-                  <td>{a.country ?? "—"}</td>
-                  <td style={{ fontWeight: 700 }}>{a.score ?? "—"}</td>
-                  <td>{a.feePaid ? <Badge tone="success">Paid</Badge> : <Badge tone="warning">Due</Badge>}</td>
-                  <td><Badge tone={STAGE_TONE[a.stage] ?? "neutral"}>{STAGE_LABEL[a.stage] ?? a.stage}</Badge></td>
-                  <td style={{ whiteSpace: "nowrap" }}>{a.submittedAt.slice(0, 10)}</td>
-                  <td onClick={(e) => e.stopPropagation()} style={{ cursor: "default" }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                      {STAGE_ACTION[a.stage] && (
-                        <Button
-                          size="sm"
-                          variant={STAGE_ACTION[a.stage]!.variant}
-                          disabled={advancing === a.id}
-                          onClick={() => advance(a.id, STAGE_ACTION[a.stage]!.next)}
-                        >
-                          {advancing === a.id ? "Saving…" : STAGE_ACTION[a.stage]!.label}
-                        </Button>
-                      )}
-                      <ChevronRight size={16} color="var(--fg3)" />
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr><td colSpan={8} className="muted" style={{ textAlign: "center", padding: 32 }}>No applicants match.</td></tr>
-              )}
-            </tbody>
-          </table>
+          {err && <p className="card" style={{ margin: 0, color: "var(--danger)" }}>{err}</p>}
+
+          <div className="card" style={{ margin: 0, padding: 0, overflow: "hidden" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <SortTh label="Applicant" sortKey="name" sort={sort} onSort={toggle} />
+                    <SortTh label="Program" sortKey="program" sort={sort} onSort={toggle} />
+                    <SortTh label="Country" sortKey="country" sort={sort} onSort={toggle} />
+                    <SortTh label="BAC" sortKey="score" sort={sort} onSort={toggle} />
+                    <th>Fee</th>
+                    <SortTh label="Stage" sortKey="stage" sort={sort} onSort={toggle} />
+                    <SortTh label="Submitted" sortKey="submitted" sort={sort} onSort={toggle} />
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((a) => (
+                    <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/admin/admissions/${a.id}`)}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <Avatar name={a.name} size={30} />
+                          <div>
+                            <div style={{ fontWeight: 600 }}>{a.name}</div>
+                            <div className="muted" style={{ fontSize: 11.5 }}>{a.email}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td><Badge tone="neutral">{a.program}</Badge></td>
+                      <td>{a.country ?? "—"}</td>
+                      <td style={{ fontWeight: 700 }}>{a.score ?? "—"}</td>
+                      <td>{a.feePaid ? <Badge tone="success">Paid</Badge> : <Badge tone="warning">Due</Badge>}</td>
+                      <td><Badge tone={STAGE_TONE[a.stage] ?? "neutral"}>{STAGE_LABEL[a.stage] ?? a.stage}</Badge></td>
+                      <td style={{ whiteSpace: "nowrap" }}>{a.submittedAt.slice(0, 10)}</td>
+                      <td onClick={(e) => e.stopPropagation()} style={{ cursor: "default" }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                          {STAGE_ACTION[a.stage] && (
+                            <Button
+                              size="sm"
+                              variant={STAGE_ACTION[a.stage]!.variant}
+                              disabled={advancing === a.id}
+                              onClick={() => advance(a.id, STAGE_ACTION[a.stage]!.next)}
+                            >
+                              {advancing === a.id ? "Saving…" : STAGE_ACTION[a.stage]!.label}
+                            </Button>
+                          )}
+                          <ChevronRight size={16} color="var(--fg3)" />
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {rows.length === 0 && (
+                    <tr><td colSpan={8} className="muted" style={{ textAlign: "center", padding: 32 }}>No applicants match.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
 
-      {adding && <AddApplicantModal programs={programs} onClose={() => setAdding(false)} onCreated={(id) => router.push(`/admin/admissions/${id}`)} />}
+      {adding && (
+        <ApplicationModal
+          mode="create"
+          programs={programOptions}
+          onClose={() => setAdding(false)}
+          onSaved={(id) => router.push(`/admin/admissions/${id}`)}
+        />
+      )}
     </>
   );
 }
 
-function AddApplicantModal({ programs, onClose, onCreated }: { programs: string[]; onClose: () => void; onCreated: (id: string) => void }) {
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [program, setProgram] = useState("");
-  const [country, setCountry] = useState("");
-  const [score, setScore] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function submit() {
-    setErr(null);
-    if (!firstName.trim() || !lastName.trim() || !email.trim()) {
-      setErr("First name, last name and email are required.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await createApplicant({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email.trim(),
-        programCode: program || null,
-        country: country.trim() || null,
-        score: score.trim() === "" ? null : Number(score),
-      });
-      onCreated(res.id);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not add applicant.");
-      setBusy(false);
-    }
-  }
-
+function FunnelBar({ label, count, max }: { label: string; count: number; max: number }) {
+  const pct = max > 0 ? Math.max(0, Math.min(100, Math.round((count / max) * 100))) : 0;
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Add applicant"
-      width={480}
-      footer={
-        <>
-          <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Adding…" : "Add applicant"}</button>
-        </>
-      }
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="First name"><input value={firstName} onChange={(e) => setFirstName(e.target.value)} /></Field>
-          <Field label="Last name"><input value={lastName} onChange={(e) => setLastName(e.target.value)} /></Field>
-        </div>
-        <Field label="Email"><input value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="Program" hint="Optional">
-            <Select value={program} onChange={setProgram} options={[{ value: "", label: "—" }, ...programs.map((p) => ({ value: p, label: p }))]} />
-          </Field>
-          <Field label="BAC score" hint="0–20, optional"><input type="number" min={0} max={20} step="0.01" value={score} onChange={(e) => setScore(e.target.value)} /></Field>
-        </div>
-        <Field label="Country" hint="Optional"><input value={country} onChange={(e) => setCountry(e.target.value)} /></Field>
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
+        <span style={{ color: "var(--fg2)" }}>{label}</span>
+        <span style={{ color: "var(--fg1)", fontVariantNumeric: "tabular-nums" }}>{count}</span>
       </div>
-    </Modal>
+      <div style={{ height: 10, background: "var(--gray-100)", borderRadius: "var(--radius-pill)", overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: "var(--daust-navy)", borderRadius: "var(--radius-pill)" }} />
+      </div>
+    </div>
   );
 }

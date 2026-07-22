@@ -100,6 +100,22 @@ const UpdateStudentInput = z.object({
   advisor: z.string().max(120).nullable().optional(),
   yearLevel: z.number().int().min(1).max(8).nullable().optional(),
   cohort: z.string().max(40).nullable().optional(),
+  preferredName: z.string().max(80).nullish(),
+  nationalId: z.string().max(60).nullish(),
+  maritalStatus: z.string().max(30).nullish(),
+  personalEmail: z.string().email().nullish(),
+  bloodType: z.string().max(8).nullish(),
+  allergies: z.string().max(300).nullish(),
+  insurance: z.string().max(120).nullish(),
+  physician: z.string().max(120).nullish(),
+  emergencyName2: z.string().max(120).nullish(),
+  emergencyPhone2: z.string().max(40).nullish(),
+  major: z.string().max(120).nullish(),
+  minor: z.string().max(120).nullish(),
+  admitTerm: z.string().max(40).nullish(),
+  expectedGrad: z.string().max(40).nullish(),
+  enrollmentStatus: z.string().max(40).nullish(),
+  catalogYear: z.string().max(20).nullish(),
 });
 
 @Controller("academics")

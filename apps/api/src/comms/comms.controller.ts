@@ -11,6 +11,13 @@ const BroadcastInput = z.object({
   body: z.string().min(1).max(5000),
 });
 
+const AudienceBroadcastInput = z.object({
+  audienceType: z.enum(["individual", "year", "program", "all"]),
+  audienceValue: z.string().max(64).optional(),
+  subject: z.string().min(1).max(200),
+  body: z.string().min(1).max(5000),
+});
+
 @Controller("comms")
 export class CommsController {
   constructor(private readonly comms: CommsService) {}
@@ -59,5 +66,17 @@ export class CommsController {
   broadcast(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
     const input = BroadcastInput.parse(body);
     return this.comms.broadcastToSection(user.personId, id, input.subject, input.body);
+  }
+
+  @Post("broadcasts")
+  @Roles("admin", "registrar")
+  sendBroadcast(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.comms.broadcastToAudience(user.personId, AudienceBroadcastInput.parse(body));
+  }
+
+  @Get("broadcasts")
+  @Roles("admin", "registrar")
+  listBroadcasts(@CurrentUser() user: AuthUser) {
+    return this.comms.listBroadcasts(user.personId);
   }
 }

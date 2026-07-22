@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import type { AuthUser } from "../auth/current-user.js";
 
@@ -176,6 +176,100 @@ export class CommsService {
       await this.startThread(personId, recipientId, subject, body);
     }
     return { sent: recipients.length, course: section.course.code };
+  }
+
+  /**
+   * Registrar broadcast: message a whole audience (one student, a year, a
+   * programme, or every student). Unlike startThread this does not gate on the
+   * caller's contacts — a registrar is authorised to reach any student by role,
+   * checked at the controller — and it fans out into individual 1:1 threads so a
+   * reply goes back only to the registrar. The Broadcast row records what was sent.
+   */
+  async broadcastToAudience(
+    personId: string,
+    input: { audienceType: "individual" | "year" | "program" | "all"; audienceValue?: string; subject: string; body: string },
+  ) {
+    const recipientIds = await this.resolveAudience(input.audienceType, input.audienceValue);
+    if (recipientIds.length === 0) throw new BadRequestException("That audience has no students");
+
+    for (const recipientId of recipientIds) {
+      const existing = await this.prisma.thread.findFirst({
+        where: {
+          AND: [
+            { participants: { some: { personId } } },
+            { participants: { some: { personId: recipientId } } },
+          ],
+        },
+      });
+      const thread =
+        existing ??
+        (await this.prisma.thread.create({
+          data: { subject: input.subject, participants: { create: [{ personId }, { personId: recipientId }] } },
+        }));
+      await this.sendMessage(thread.id, personId, input.body);
+    }
+
+    const broadcast = await this.prisma.broadcast.create({
+      data: {
+        senderId: personId,
+        audienceType: input.audienceType,
+        audienceValue: input.audienceValue ?? null,
+        subject: input.subject,
+        body: input.body,
+        recipientCount: recipientIds.length,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Broadcast",
+        entityId: broadcast.id,
+        action: "broadcast-sent",
+        actorId: personId,
+        data: { audienceType: input.audienceType, audienceValue: input.audienceValue ?? null, recipients: recipientIds.length },
+      },
+    });
+    return { id: broadcast.id, sent: recipientIds.length };
+  }
+
+  private async resolveAudience(
+    audienceType: "individual" | "year" | "program" | "all",
+    audienceValue?: string,
+  ): Promise<string[]> {
+    if (audienceType === "individual") {
+      if (!audienceValue) throw new BadRequestException("Select a student");
+      const student = await this.prisma.student.findFirst({
+        where: { OR: [{ id: audienceValue }, { studentNo: audienceValue }] },
+        select: { personId: true },
+      });
+      if (!student) throw new NotFoundException("Student not found");
+      return [student.personId];
+    }
+    const where =
+      audienceType === "year"
+        ? { yearLevel: Number(audienceValue) }
+        : audienceType === "program"
+          ? { program: { code: audienceValue } }
+          : {};
+    const students = await this.prisma.student.findMany({ where, select: { personId: true } });
+    return students.map((s) => s.personId);
+  }
+
+  /** Broadcasts the caller has sent, most recent first, for the "Sent messages" list. */
+  async listBroadcasts(personId: string) {
+    const rows = await this.prisma.broadcast.findMany({
+      where: { senderId: personId },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+    });
+    return rows.map((b) => ({
+      id: b.id,
+      audienceType: b.audienceType,
+      audienceValue: b.audienceValue,
+      subject: b.subject,
+      body: b.body,
+      recipientCount: b.recipientCount,
+      createdAt: b.createdAt,
+    }));
   }
 
   /** Directory of people the requester may message, scoped by role/relationship. */

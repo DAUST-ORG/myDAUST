@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, BadgeCheck, Check, CheckCircle2, Clock, Flag, Gift, GraduationCap, MapPin, Target, UserCheck, X } from "lucide-react";
-import { type ApplicantDetail, createStudent, getApplicant, setApplicantStage } from "@/lib/api";
+import { ArrowLeft, ArrowRight, BadgeCheck, Check, CheckCircle2, Clock, Flag, Gift, GraduationCap, MapPin, Pencil, Target, UserCheck, X } from "lucide-react";
+import { type ApplicantDetail, createStudent, getApplicant, getAdminPrograms, setApplicantStage } from "@/lib/api";
 import { formatXof } from "@/lib/format";
 import { Avatar, Badge, type BadgeTone, Field, Modal, Tabs } from "@/components/ui";
+import { ApplicationModal, type ProgramOption } from "../ApplicationModal";
 
 const STAGES = ["submitted", "review", "interview", "offer", "accepted"];
 const STAGE_TONE: Record<string, BadgeTone> = { submitted: "neutral", review: "info", interview: "warning", offer: "teal", accepted: "success", rejected: "error" };
@@ -23,11 +24,18 @@ export default function ApplicantDetailPage() {
   const [a, setA] = useState<ApplicantDetail | null>(null);
   const [tab, setTab] = useState("overview");
   const [enrolling, setEnrolling] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [programOptions, setProgramOptions] = useState<ProgramOption[]>([]);
 
   const load = useCallback(() => {
     getApplicant(id).then(setA).catch(() => setA(null));
   }, [id]);
   useEffect(() => load(), [load]);
+  useEffect(() => {
+    getAdminPrograms()
+      .then((p) => setProgramOptions(p.programs.map((x) => ({ code: x.code, name: x.name }))))
+      .catch(() => {});
+  }, []);
 
   async function move(stage: string) {
     await setApplicantStage(id, stage);
@@ -52,6 +60,7 @@ export default function ApplicantDetailPage() {
           <ArrowLeft size={16} /> All applicants
         </Link>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button onClick={() => setEditing(true)} style={{ display: "flex", alignItems: "center", gap: 6 }}><Pencil size={15} /> Edit</button>
           {a.stage !== "rejected" && a.stage !== "accepted" && (
             <>
               <button onClick={() => move("rejected")} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--danger)" }}><X size={15} /> Reject</button>
@@ -155,6 +164,27 @@ export default function ApplicantDetailPage() {
 
       {enrolling && (
         <EnrollFromApplicant applicant={a} onClose={() => setEnrolling(false)} onEnrolled={(sid) => router.push(`/admin/students/${sid}`)} />
+      )}
+
+      {editing && (
+        <ApplicationModal
+          mode="edit"
+          applicantId={a.id}
+          programs={programOptions}
+          initial={{
+            firstName: a.firstName,
+            lastName: a.lastName,
+            email: a.email,
+            programCode: a.programCode,
+            score: a.score,
+            country: a.country,
+          }}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            load();
+          }}
+        />
       )}
     </>
   );

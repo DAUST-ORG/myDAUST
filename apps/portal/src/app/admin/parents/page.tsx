@@ -1,17 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Mail } from "lucide-react";
+import { Mail, Pencil, Trash2, X } from "lucide-react";
 import {
   type AdminStudent,
   type GuardianRow,
   createGuardian,
+  deleteGuardian,
   getAdminStudents,
   getGuardians,
   resendGuardianInvite,
+  updateGuardian,
 } from "@/lib/api";
 import {
-  Avatar, Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, SearchInput,
+  Avatar, Badge, Button, Card, EmptyState, Field, IconButton, Input, Modal, PageHeader, SearchInput,
 } from "@/components/ui";
 
 export default function ParentsPage() {
@@ -21,6 +23,8 @@ export default function ParentsPage() {
   const [note, setNote] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ fullName: "", email: "", relation: "", studentIds: [] as string[] });
+  const [editing, setEditing] = useState<{ id: string; fullName: string; email: string } | null>(null);
+  const [removing, setRemoving] = useState<GuardianRow | null>(null);
   const [childQuery, setChildQuery] = useState("");
   const [listQuery, setListQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -59,20 +63,51 @@ export default function ParentsPage() {
     setBusy(true);
     setError(null);
     try {
-      await createGuardian({
+      const created = await createGuardian({
         fullName: form.fullName.trim(),
         email: form.email.trim(),
         studentIds: form.studentIds,
         relation: form.relation.trim() || undefined,
       });
       setNote(
-        `Parent account created for ${form.fullName.trim()}. A password-setup email has been sent to ${form.email.trim()}.`,
+        `Parent account created for ${form.fullName.trim()} · ID ${created.id}. A password-setup email has been sent to ${form.email.trim()}.`,
       );
       setAdding(false);
       setForm({ fullName: "", email: "", relation: "", studentIds: [] });
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create the parent account.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdit() {
+    if (!editing || !editing.fullName.trim() || !editing.email.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await updateGuardian(editing.id, { fullName: editing.fullName.trim(), email: editing.email.trim() });
+      setEditing(null);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update the parent account.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!removing) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteGuardian(removing.id);
+      setRemoving(null);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete the parent account.");
+      setRemoving(null);
     } finally {
       setBusy(false);
     }
@@ -102,7 +137,15 @@ export default function ParentsPage() {
       />
 
       {error && <p className="card" style={{ color: "var(--danger)" }}>{error}</p>}
-      {note && <p className="card" style={{ color: "var(--success-500)" }}>{note}</p>}
+      {note && (
+        <div
+          className="card"
+          style={{ color: "var(--success-500)", display: "flex", alignItems: "flex-start", gap: 12, justifyContent: "space-between" }}
+        >
+          <span>{note}</span>
+          <IconButton label="Dismiss notice" onClick={() => setNote(null)}><X size={15} /></IconButton>
+        </div>
+      )}
 
       {!rows && <p className="muted">Loading…</p>}
       {rows && rows.length === 0 && (
@@ -119,9 +162,12 @@ export default function ParentsPage() {
               {visible.map((g) => (
                 <tr key={g.id} className="sis-row">
                   <td>
-                    <span style={{ display: "flex", alignItems: "center", gap: 9, fontWeight: 600 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
                       <Avatar name={g.name} size={28} />
-                      {g.name}
+                      <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.3 }}>
+                        <span style={{ fontWeight: 600 }}>{g.name}</span>
+                        <span className="muted" style={{ fontSize: 11.5, fontFamily: "var(--font-mono, monospace)" }}>{g.id}</span>
+                      </span>
                     </span>
                   </td>
                   <td className="muted">{g.email}</td>
@@ -138,11 +184,22 @@ export default function ParentsPage() {
                     ))}
                   </td>
                   <td>
-                    {g.status !== "active" && (
-                      <Button size="sm" icon={<Mail size={12} />} onClick={() => resend(g.id, g.email)}>
-                        Resend invite
-                      </Button>
-                    )}
+                    <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                      {g.status !== "active" && (
+                        <Button size="sm" icon={<Mail size={12} />} onClick={() => resend(g.id, g.email)}>
+                          Resend invite
+                        </Button>
+                      )}
+                      <IconButton
+                        label="Edit parent"
+                        onClick={() => setEditing({ id: g.id, fullName: g.name, email: g.email })}
+                      >
+                        <Pencil size={15} />
+                      </IconButton>
+                      <IconButton label="Delete parent" tone="danger" onClick={() => setRemoving(g)}>
+                        <Trash2 size={15} />
+                      </IconButton>
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -201,12 +258,62 @@ export default function ParentsPage() {
                       }
                     />
                     <span style={{ fontSize: 13 }}>{s.name}</span>
-                    <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>{s.studentNo}</span>
+                    <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>{s.studentNo} · {s.program}</span>
                   </label>
                 );
               })}
             </div>
           </div>
+        </Modal>
+      )}
+
+      {editing && (
+        <Modal
+          open
+          onClose={() => setEditing(null)}
+          title="Edit parent"
+          footer={
+            <>
+              <Button onClick={() => setEditing(null)} disabled={busy}>Cancel</Button>
+              <Button
+                variant="navy"
+                onClick={saveEdit}
+                disabled={busy || !editing.fullName.trim() || !editing.email.trim()}
+              >
+                {busy ? "Saving…" : "Save changes"}
+              </Button>
+            </>
+          }
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Field label="Full name">
+              <Input value={editing.fullName} onChange={(v) => setEditing((e) => (e ? { ...e, fullName: v } : e))} />
+            </Field>
+            <Field label="Email">
+              <Input type="email" value={editing.email} onChange={(v) => setEditing((e) => (e ? { ...e, email: v } : e))} />
+            </Field>
+          </div>
+        </Modal>
+      )}
+
+      {removing && (
+        <Modal
+          open
+          onClose={() => setRemoving(null)}
+          title="Delete parent"
+          footer={
+            <>
+              <Button onClick={() => setRemoving(null)} disabled={busy}>Cancel</Button>
+              <Button variant="danger" onClick={remove} disabled={busy}>
+                {busy ? "Deleting…" : "Delete"}
+              </Button>
+            </>
+          }
+        >
+          <p style={{ margin: 0 }}>
+            Delete the guardian account for <strong>{removing.name}</strong> ({removing.email})? This revokes their access
+            to the assigned student record(s). This cannot be undone.
+          </p>
         </Modal>
       )}
     </>

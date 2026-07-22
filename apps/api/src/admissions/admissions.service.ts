@@ -5,6 +5,28 @@ import { MailService } from "../mail/mail.service.js";
 import { AppConfigService } from "../app-config/app-config.service.js";
 import { PAYMENT_PROVIDER, type PaymentProvider } from "../finance/payment-provider.js";
 
+/** Optional applicant columns the registrar form captures beyond name + email. */
+export interface ApplicantFields {
+  programCode?: string | null;
+  country?: string | null;
+  score?: number | null;
+  phone?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  nationality?: string | null;
+  city?: string | null;
+  origin?: string | null;
+  school?: string | null;
+  priorGpa?: string | null;
+  parentName?: string | null;
+  parentPhone?: string | null;
+  parentEmail?: string | null;
+  allergies?: string | null;
+  source?: string | null;
+  essay?: string | null;
+  term?: string | null;
+}
+
 @Injectable()
 export class AdmissionsService {
   private readonly logger = new Logger(AdmissionsService.name);
@@ -97,6 +119,22 @@ export class AdmissionsService {
       feePaid: a.feePaid,
       appFee,
       submittedAt: a.createdAt.toISOString(),
+      // Extended application-form fields, surfaced so the detail page + edit modal prefill.
+      phone: a.phone,
+      dateOfBirth: a.dateOfBirth ? a.dateOfBirth.toISOString().slice(0, 10) : null,
+      gender: a.gender,
+      nationality: a.nationality,
+      city: a.city,
+      origin: a.origin,
+      school: a.school,
+      priorGpa: a.priorGpa,
+      parentName: a.parentName,
+      parentPhone: a.parentPhone,
+      parentEmail: a.parentEmail,
+      allergies: a.allergies,
+      source: a.source,
+      essay: a.essay,
+      term: a.term,
       scholarship,
     };
   }
@@ -104,25 +142,58 @@ export class AdmissionsService {
   private static readonly STAGES = ["submitted", "review", "interview", "offer", "accepted", "rejected"];
 
   /** Registrar/admin: manually add an applicant to the pipeline. Audited. */
-  async adminCreateApplicant(
-    actorId: string,
-    input: { firstName: string; lastName: string; email: string; programCode?: string | null; country?: string | null; score?: number | null },
-  ) {
+  async adminCreateApplicant(actorId: string, input: ApplicantFields & { firstName: string; lastName: string; email: string }) {
     const applicant = await this.prisma.applicant.create({
-      data: {
-        firstName: input.firstName,
-        lastName: input.lastName,
-        email: input.email,
-        programCode: input.programCode ?? null,
-        country: input.country ?? null,
-        score: input.score ?? null,
-        stage: "submitted",
-      },
+      data: { ...this.applicantData(input), firstName: input.firstName, lastName: input.lastName, email: input.email, stage: "submitted" },
     });
     await this.prisma.auditLog.create({
       data: { entity: "Applicant", entityId: applicant.id, action: "applicant-created", actorId },
     });
     return applicant;
+  }
+
+  /** Registrar/admin: edit an applicant's captured details (not the stage). Audited. */
+  async adminUpdateApplicant(actorId: string, id: string, input: ApplicantFields & { firstName?: string; lastName?: string; email?: string }) {
+    const applicant = await this.prisma.applicant.findUnique({ where: { id } });
+    if (!applicant) throw new NotFoundException("Applicant not found");
+    const updated = await this.prisma.applicant.update({
+      where: { id },
+      data: {
+        ...this.applicantData(input),
+        ...(input.firstName !== undefined ? { firstName: input.firstName } : {}),
+        ...(input.lastName !== undefined ? { lastName: input.lastName } : {}),
+        ...(input.email !== undefined ? { email: input.email } : {}),
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "Applicant", entityId: id, action: "applicant-updated", actorId },
+    });
+    return updated;
+  }
+
+  /** The optional application-form columns, undefined keys left untouched on update. */
+  private applicantData(input: ApplicantFields) {
+    const set = <T>(v: T | undefined | null) => (v === undefined ? undefined : v ?? null);
+    return {
+      programCode: set(input.programCode),
+      country: set(input.country),
+      score: set(input.score),
+      phone: set(input.phone),
+      dateOfBirth: input.dateOfBirth === undefined ? undefined : input.dateOfBirth ? new Date(input.dateOfBirth) : null,
+      gender: set(input.gender),
+      nationality: set(input.nationality),
+      city: set(input.city),
+      origin: set(input.origin),
+      school: set(input.school),
+      priorGpa: set(input.priorGpa),
+      parentName: set(input.parentName),
+      parentPhone: set(input.parentPhone),
+      parentEmail: set(input.parentEmail),
+      allergies: set(input.allergies),
+      source: set(input.source),
+      essay: set(input.essay),
+      term: set(input.term),
+    };
   }
 
   /** Registrar/admin: advance/reject an applicant's pipeline stage. Audited. */

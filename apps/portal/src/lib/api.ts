@@ -546,6 +546,22 @@ export interface AdminStudentDetail {
   yearLevel: number | null;
   cohort: string | null;
   enrolledAt: string | null;
+  preferredName: string | null;
+  nationalId: string | null;
+  maritalStatus: string | null;
+  personalEmail: string | null;
+  bloodType: string | null;
+  allergies: string | null;
+  insurance: string | null;
+  physician: string | null;
+  emergencyName2: string | null;
+  emergencyPhone2: string | null;
+  major: string | null;
+  minor: string | null;
+  admitTerm: string | null;
+  expectedGrad: string | null;
+  enrollmentStatus: string | null;
+  catalogYear: string | null;
   enrollments: { enrollmentId: string; courseCode: string; title: string; credits: number; term: string; sectionCode: string; instructor: string | null; status: string; grade: string | null }[];
 }
 export const getAdminStudentDetail = (id: string) =>
@@ -574,6 +590,22 @@ export interface UpdateStudentInput {
   advisor?: string | null;
   yearLevel?: number | null;
   cohort?: string | null;
+  preferredName?: string | null;
+  nationalId?: string | null;
+  maritalStatus?: string | null;
+  personalEmail?: string | null;
+  bloodType?: string | null;
+  allergies?: string | null;
+  insurance?: string | null;
+  physician?: string | null;
+  emergencyName2?: string | null;
+  emergencyPhone2?: string | null;
+  major?: string | null;
+  minor?: string | null;
+  admitTerm?: string | null;
+  expectedGrad?: string | null;
+  enrollmentStatus?: string | null;
+  catalogYear?: string | null;
 }
 export const updateStudent = (id: string, input: UpdateStudentInput) =>
   request<AdminStudentDetail>(`/academics/admin/students/${id}`, { method: "PATCH", body: JSON.stringify(input) });
@@ -1011,14 +1043,35 @@ export interface Admissions {
   applicants: Applicant[];
 }
 export const getAdmissions = () => request<Admissions>("/academics/admin/applicants");
-export const createApplicant = (input: {
-  firstName: string;
-  lastName: string;
-  email: string;
+/** The full application form; only name + email are required to create an entry. */
+export interface ApplicantInput {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
   programCode?: string | null;
   country?: string | null;
   score?: number | null;
-}) => request<{ id: string }>("/admissions/applicants", { method: "POST", body: JSON.stringify(input) });
+  phone?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  nationality?: string | null;
+  city?: string | null;
+  origin?: "high-school" | "transfer" | null;
+  school?: string | null;
+  priorGpa?: string | null;
+  parentName?: string | null;
+  parentPhone?: string | null;
+  parentEmail?: string | null;
+  allergies?: string | null;
+  source?: string | null;
+  essay?: string | null;
+  term?: string | null;
+}
+export const createApplicant = (
+  input: ApplicantInput & { firstName: string; lastName: string; email: string },
+) => request<{ id: string }>("/admissions/applicants", { method: "POST", body: JSON.stringify(input) });
+export const updateApplicant = (id: string, input: ApplicantInput) =>
+  request<{ id: string }>(`/admissions/applicants/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const setApplicantStage = (id: string, stage: string) =>
   request(`/admissions/applicants/${id}/stage`, { method: "PATCH", body: JSON.stringify({ stage }) });
 export interface ApplicantDetail {
@@ -1035,6 +1088,21 @@ export interface ApplicantDetail {
   feePaid: boolean;
   appFee: number;
   submittedAt: string;
+  phone: string | null;
+  dateOfBirth: string | null;
+  gender: string | null;
+  nationality: string | null;
+  city: string | null;
+  origin: string | null;
+  school: string | null;
+  priorGpa: string | null;
+  parentName: string | null;
+  parentPhone: string | null;
+  parentEmail: string | null;
+  allergies: string | null;
+  source: string | null;
+  essay: string | null;
+  term: string | null;
   scholarship: { pct: number; band: string | null };
 }
 export const getApplicant = (id: string) => request<ApplicantDetail>(`/admissions/applicants/${id}`);
@@ -1211,6 +1279,10 @@ export const resendGuardianInvite = (id: string) =>
   );
 export const setGuardianChildren = (id: string, studentIds: string[]) =>
   request<{ ok: boolean }>(`/guardians/${id}/children`, { method: "PATCH", body: JSON.stringify({ studentIds }) });
+export const updateGuardian = (id: string, input: { fullName?: string; email?: string }) =>
+  request<{ id: string; name: string; email: string }>(`/guardians/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+export const deleteGuardian = (id: string) =>
+  request<{ ok: boolean }>(`/guardians/${id}`, { method: "DELETE" });
 
 // --- Institution fee schedule (the DAUST payment-plan sheet) ---
 export interface FeePlanRow {
@@ -1370,6 +1442,11 @@ export const setCourseRule = (
   courseId: string,
   input: { standingRequired?: string | null; majorRestriction?: string | null; capacity?: number | null; waitlistEnabled?: boolean },
 ) => request<unknown>(`/registrar/rules/${courseId}`, { method: "PATCH", body: JSON.stringify(input) });
+/** Replace a course's prerequisite (with min grade) and corequisite lists. */
+export const setCourseRequisites = (
+  courseId: string,
+  input: { prerequisites: { code: string; minGrade?: string | null }[]; corequisites: string[] },
+) => request<{ ok: boolean }>(`/registrar/rules/${courseId}/requisites`, { method: "PUT", body: JSON.stringify(input) });
 
 export interface GradeApprovalRow {
   id: string;
@@ -1382,6 +1459,8 @@ export interface GradeApprovalRow {
   term: string;
   instructor: string | null;
   students: number;
+  graded: number;
+  grades: { name: string; grade: string | null }[];
 }
 export const getGradeApprovals = () => request<GradeApprovalRow[]>("/registrar/grade-approvals");
 export const decideGradeApproval = (id: string, decision: "approved" | "returned", note?: string) =>
@@ -1390,23 +1469,39 @@ export const decideGradeApproval = (id: string, decision: "approved" | "returned
     body: JSON.stringify({ decision, note }),
   });
 
+export interface FlaggedStudent {
+  studentId: string;
+  studentNo: string;
+  name: string;
+  program: string | null;
+  gpa: number;
+  attendance: number | null;
+  flags: string[];
+  level: "warning" | "critical";
+  watching: boolean;
+  lastWarnedAt: string | null;
+}
 export interface StudentSuccess {
   thresholds: { minGpa: number; minAttendance: number };
   total: number;
-  flagged: {
-    studentId: string;
-    studentNo: string;
-    name: string;
-    program: string | null;
-    gpa: number;
-    attendance: number | null;
-    flags: string[];
-    lastWarnedAt: string | null;
-  }[];
+  atRisk: number;
+  watch: number;
+  warningsSent: number;
+  flagged: FlaggedStudent[];
 }
 export const getStudentSuccess = () => request<StudentSuccess>("/registrar/student-success");
-export const warnStudent = (studentId: string, reason: string) =>
-  request<unknown>("/registrar/student-success/warn", { method: "POST", body: JSON.stringify({ studentId, reason }) });
+export const warnStudent = (studentId: string, reason: string, level?: "warning" | "critical") =>
+  request<unknown>("/registrar/student-success/warn", { method: "POST", body: JSON.stringify({ studentId, reason, level }) });
+
+export interface WatchedStudent { studentId: string; studentNo: string; name: string; program: string | null }
+export const getWatching = () => request<WatchedStudent[]>("/registrar/student-success/watching");
+export const watchStudent = (studentId: string) =>
+  request<{ ok: boolean }>(`/registrar/student-success/watch/${studentId}`, { method: "POST" });
+export const unwatchStudent = (studentId: string) =>
+  request<{ ok: boolean }>(`/registrar/student-success/watch/${studentId}`, { method: "DELETE" });
+
+export interface WarningRow { id: string; name: string; studentNo: string; reason: string; level: string; warnedAt: string | null }
+export const getWarnings = () => request<WarningRow[]>("/registrar/student-success/warnings");
 
 export interface CalendarEventRow {
   id: string;
@@ -1425,3 +1520,76 @@ export const createCalendarEvent = (input: {
   endsOn?: string;
   note?: string;
 }) => request<CalendarEventRow>("/registrar/calendar", { method: "POST", body: JSON.stringify(input) });
+export const updateCalendarEvent = (
+  id: string,
+  input: { title?: string; type?: string; startsOn?: string; endsOn?: string | null; note?: string | null },
+) => request<CalendarEventRow>(`/registrar/calendar/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+export const deleteCalendarEvent = (id: string) =>
+  request<{ ok: boolean }>(`/registrar/calendar/${id}`, { method: "DELETE" });
+
+// --- Registrar: grading-scheme rows ---
+export const addGradeRow = (
+  schemeId: string,
+  input: { grade: string; points: number | null; minScore: number | null; maxScore: number | null },
+) => request<unknown>(`/registrar/grading-schemes/${schemeId}/rows`, { method: "POST", body: JSON.stringify(input) });
+export const updateGradeRow = (
+  rowId: string,
+  input: { grade?: string; points?: number | null; minScore?: number | null; maxScore?: number | null },
+) => request<unknown>(`/registrar/grading-schemes/rows/${rowId}`, { method: "PATCH", body: JSON.stringify(input) });
+export const deleteGradeRow = (rowId: string) =>
+  request<{ ok: boolean }>(`/registrar/grading-schemes/rows/${rowId}`, { method: "DELETE" });
+
+// --- Registrar: terms (calendar term cards) ---
+export interface TermRow {
+  id: string;
+  name: string;
+  status: string | null;
+  startDate: string;
+  endDate: string;
+  addDeadline: string | null;
+  dropDeadline: string | null;
+  academicYear: string | null;
+}
+export const getTerms = () => request<TermRow[]>("/registrar/terms");
+export const updateTerm = (
+  id: string,
+  input: { status?: "active" | "planning" | "draft"; startDate?: string; endDate?: string; addDeadline?: string | null; dropDeadline?: string | null },
+) => request<TermRow>(`/registrar/terms/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+
+// --- Registrar: curriculum (programme x catalogue-year course map) ---
+export interface CurriculumEntryRow { yearIndex: number; semester: string; courseCode: string; courseTitle: string; credits: number }
+export interface CurriculumData {
+  programCode: string;
+  academicYearId: string;
+  entries: CurriculumEntryRow[];
+  allCourses: { id: string; code: string; title: string; credits: number }[];
+}
+export const getCurriculum = (programCode: string, academicYearId: string) =>
+  request<CurriculumData>(`/registrar/curriculum?programCode=${encodeURIComponent(programCode)}&academicYearId=${academicYearId}`);
+export const saveCurriculum = (
+  programCode: string,
+  academicYearId: string,
+  entries: { yearIndex: number; semester: string; courseCode: string }[],
+) => request<{ ok: boolean }>("/registrar/curriculum", { method: "PUT", body: JSON.stringify({ programCode, academicYearId, entries }) });
+
+// --- Registrar: department delete ---
+export const deleteDepartment = (id: string) =>
+  request<{ ok: boolean }>(`/registrar/departments/${id}`, { method: "DELETE" });
+
+// --- Registrar: broadcast composer ---
+export interface BroadcastRow {
+  id: string;
+  audienceType: string;
+  audienceValue: string | null;
+  subject: string;
+  body: string;
+  recipientCount: number;
+  createdAt: string;
+}
+export const getBroadcasts = () => request<BroadcastRow[]>("/comms/broadcasts");
+export const sendBroadcast = (input: {
+  audienceType: "individual" | "year" | "program" | "all";
+  audienceValue?: string;
+  subject: string;
+  body: string;
+}) => request<{ id: string; sent: number }>("/comms/broadcasts", { method: "POST", body: JSON.stringify(input) });
