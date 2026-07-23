@@ -146,6 +146,7 @@ model Person {
   // --- SIS redesign ---
   guardianOf      GuardianStudent[] @relation("GuardianOf")
   guardianInvites GuardianInvite[]  @relation("GuardianInvites")
+  studentInvites  StudentInvite[]   @relation("StudentInvites")
   broadcasts      Broadcast[]       @relation("BroadcastSender")
 }
 
@@ -204,6 +205,7 @@ model Student {
   diningScans DiningScan[]
   housing     HousingAssignment?
   roommateProfile RoommateProfile?
+  documents   StudentDocument[]
   createdAt   DateTime     @default(now())
 }
 
@@ -228,6 +230,8 @@ model Term {
 
 model Invoice {
   id             String        @id @default(uuid())
+  // Human-readable billing handle shown to staff, e.g. "BILL-2026-001".
+  number         String?       @unique
   studentId      String
   student        Student       @relation(fields: [studentId], references: [id])
   termId         String
@@ -264,6 +268,8 @@ model Installment {
   planId      String
   plan        PaymentPlan       @relation(fields: [planId], references: [id])
   sequence    Int
+  // Staff-facing name for this installment, e.g. "Inscription"; null falls back to the sequence.
+  label       String?
   dueDate     DateTime
   amountDue   Int
   amountPaid  Int               @default(0)
@@ -414,6 +420,10 @@ model Course {
   code          String     @unique
   title         String
   credits       Int
+  // Catalog lifecycle + presentation (SIS design's Course modal).
+  status        String?    // active | draft
+  description   String?
+  semestersOffered String? // comma-joined subset of fall,spring,summer
   departmentId  String
   department    Department @relation(fields: [departmentId], references: [id])
   sections      Section[]
@@ -1253,6 +1263,36 @@ model GuardianInvite {
   createdAt  DateTime  @default(now())
 
   @@index([guardianId])
+}
+
+/// A student's single-use, expiring password-setup token. Mirrors GuardianInvite:
+/// the registrar provisions the account and the student sets their own password at
+/// the public /set-password page (same redemption path).
+model StudentInvite {
+  id              String    @id @default(uuid())
+  studentPersonId String
+  person          Person    @relation("StudentInvites", fields: [studentPersonId], references: [id], onDelete: Cascade)
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([studentPersonId])
+}
+
+/// A document on a student's record. `slot` is a fixed key for the six typed slots
+/// (transcript, id-card, enrollment, immunization, aid-letter, passport) or "other"
+/// for the free list. `url` is a stored relative upload path served from disk/S3.
+model StudentDocument {
+  id         String   @id @default(uuid())
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  slot       String
+  name       String?
+  url        String
+  uploadedAt DateTime @default(now())
+
+  @@index([studentId])
 }
 
 /// A registrar/faculty broadcast. Fans out into Thread/Message per recipient so

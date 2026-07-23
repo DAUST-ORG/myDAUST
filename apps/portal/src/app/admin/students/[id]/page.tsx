@@ -14,33 +14,27 @@ import {
   Clock,
   GraduationCap,
   Layers,
-  Link2,
   type LucideIcon,
   Pencil,
   Phone,
   Receipt,
-  Send,
-  Trash2,
   UserPlus,
   Users,
   Wallet,
 } from "lucide-react";
 import {
-  type AccountInvoice,
   type AdminStudentDetail,
   type StudentAccount,
   type StudentActivity,
   adminDropEnrollment,
-  createPaymentLink,
   getAdminStudentActivity,
   getAdminStudentDetail,
   getStudentAccount,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
-import { Avatar, Badge, Field, Modal, Tabs } from "@/components/ui";
+import { Avatar, Tabs } from "@/components/ui";
 import { EditStudentModal, type EditSection } from "./EditStudentModal";
-import { RemoveChargeConfirm } from "@/components/RemoveChargeConfirm";
-import { EditPlanModal } from "@/components/EditPlanModal";
+import { StudentDocuments } from "./StudentDocuments";
 
 const ENROLL_BADGE: Record<string, string> = { enrolled: "enrolled", completed: "completed", dropped: "dropped" };
 
@@ -58,9 +52,6 @@ export default function AdminStudentDetailPage() {
   const [activity, setActivity] = useState<StudentActivity[]>([]);
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState<EditSection | null>(null);
-  const [linkOpen, setLinkOpen] = useState(false);
-  const [pendingRemove, setPendingRemove] = useState<AccountInvoice | null>(null);
-  const [pendingEdit, setPendingEdit] = useState<AccountInvoice | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const pencil = (section: EditSection) => (
     <button onClick={() => setEditing(section)} title="Edit" style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: "var(--fg3)", border: "none", background: "none" }}>
@@ -103,15 +94,6 @@ export default function AdminStudentDetailPage() {
           <ArrowLeft size={16} /> All students
         </Link>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button onClick={() => window.print()} style={{ display: "flex", alignItems: "center", gap: 7 }}><BookOpen size={15} /> Transcript</button>
-          {s.balance > 0 && (
-            <Link href={`/admin/finance/students/${id}`} className="btn" style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 14px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", color: "var(--fg1)", fontWeight: 500 }}>
-              <Send size={15} /> Payment reminder
-            </Link>
-          )}
-          {s.balance > 0 && (
-            <button onClick={() => setLinkOpen(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}><Link2 size={15} /> Payment link</button>
-          )}
           <button className="primary" onClick={() => setEditing("all")} style={{ display: "flex", alignItems: "center", gap: 7 }}><Pencil size={15} /> Edit record</button>
         </div>
       </div>
@@ -145,6 +127,7 @@ export default function AdminStudentDetailPage() {
             { value: "academics", label: "Academics" },
             { value: "finance", label: "Finance" },
             { value: "personal", label: "Personal & contact" },
+            { value: "documents", label: "Documents" },
             { value: "activity", label: "Activity" },
           ]}
           active={tab}
@@ -228,14 +211,7 @@ export default function AdminStudentDetailPage() {
             <KV k="Total billed" v={account ? formatXof(account.totals.billed) : "—"} />
             <KV k="Total paid" v={account ? formatXof(account.totals.paid) : "—"} />
             <KV k="Last payment" v={lastPayment ? new Date(lastPayment.createdAt).toLocaleDateString("fr-SN", { day: "numeric", month: "short", year: "numeric" }) : "—"} />
-            {s.balance > 0 && (
-              <button onClick={() => setLinkOpen(true)} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", marginTop: 14 }}>
-                <Link2 size={15} /> Generate payment link
-              </button>
-            )}
-            <Link href={`/admin/finance/students/${id}`} className="primary" style={{ display: "block", textAlign: "center", marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "var(--daust-orange)", color: "#fff", fontWeight: 600 }}>
-              Manage finance account →
-            </Link>
+            <p className="muted" style={{ fontSize: 12, margin: "14px 0 0" }}>Billing is managed by the Bursar in the Finance portal.</p>
           </ProfileCard>
           <ProfileCard title="Payment history" icon={Clock}>
             {payments.length ? (
@@ -272,16 +248,6 @@ export default function AdminStudentDetailPage() {
                       <span style={{ fontWeight: 700, color: "var(--success)", fontVariantNumeric: "tabular-nums" }}>−{formatXof(-inv.total)}</span>
                     ) : (
                       <span className="muted">{formatXof(inv.paid)} / {formatXof(inv.total)}</span>
-                    )}
-                    {!isCredit && inv.installments.length > 0 && (
-                      <button onClick={() => setPendingEdit(inv)} title="Edit payment plan" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 8, color: "var(--navy, #153b6a)", background: "var(--surface-2, #eef2f7)", border: "1px solid var(--border)", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                        <Pencil size={13} /> Edit plan
-                      </button>
-                    )}
-                    {!isCredit && (
-                      <button onClick={() => setPendingRemove(inv)} title="Remove charge" style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 8, color: "#c0392b", background: "#fdeeeb", border: "1px solid #f1c9c1", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                        <Trash2 size={13} /> Remove
-                      </button>
                     )}
                   </div>
                   {!isCredit && inv.installments.length > 0 && (
@@ -343,6 +309,8 @@ export default function AdminStudentDetailPage() {
         </div>
       )}
 
+      {tab === "documents" && <StudentDocuments studentId={id} />}
+
       {tab === "activity" && (
         <ProfileCard title="Activity timeline" icon={Activity}>
           {activity.length ? (
@@ -380,76 +348,7 @@ export default function AdminStudentDetailPage() {
           }}
         />
       )}
-      {linkOpen && account && <PaymentLinkModal student={s} account={account} onClose={() => setLinkOpen(false)} />}
-      {pendingRemove && (
-        <RemoveChargeConfirm charge={pendingRemove} onClose={() => setPendingRemove(null)} onRemoved={() => { setPendingRemove(null); load(); }} />
-      )}
-      {pendingEdit && (
-        <EditPlanModal invoice={pendingEdit} onClose={() => setPendingEdit(null)} onSaved={() => { setPendingEdit(null); load(); }} />
-      )}
     </>
-  );
-}
-
-function PaymentLinkModal({ student, account, onClose }: { student: AdminStudentDetail; account: StudentAccount; onClose: () => void }) {
-  const openInvoice = account.invoices.find((i) => i.balance > 0);
-  const [amount, setAmount] = useState(String(Math.max(0, account.totals.balance)));
-  const [purpose, setPurpose] = useState("Tuition payment");
-  const [link, setLink] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function create() {
-    setErr(null);
-    const amt = Number(String(amount).replace(/[^\d]/g, "")) || 0;
-    if (amt <= 0) {
-      setErr("Enter an amount.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await createPaymentLink({
-        payeeName: student.name,
-        payeeMeta: `${student.studentNo}${student.program ? ` · ${student.program}` : ""}`,
-        studentId: student.id,
-        invoiceId: openInvoice && amt <= openInvoice.balance ? openInvoice.id : undefined,
-        amountXof: amt,
-        purpose: purpose.trim() || "Tuition payment",
-      });
-      setLink(res.url);
-      navigator.clipboard?.writeText(res.url).then(() => { setCopied(true); }).catch(() => {});
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not create link.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Generate payment link"
-      width={480}
-      footer={link ? <button className="primary" onClick={onClose}>Done</button> : <><button onClick={onClose}>Cancel</button><button className="primary" onClick={create} disabled={busy}>{busy ? "Creating…" : "Create link"}</button></>}
-    >
-      {link ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <p style={{ margin: 0, fontSize: 13.5 }}>Share this link with <strong>{student.name}</strong> to pay <strong>{formatXof(Number(String(amount).replace(/[^\d]/g, "")) || 0)}</strong>.</p>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "4px 4px 4px 12px" }}>
-            <input readOnly value={link} style={{ flex: 1, border: "none", background: "none", outline: "none", fontSize: 12.5, color: "var(--fg2)" }} />
-            <button className="primary" onClick={() => { navigator.clipboard?.writeText(link); setCopied(true); }}>{copied ? "Copied" : "Copy"}</button>
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
-          <Field label="Amount (FCFA)"><input value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
-          <Field label="Purpose"><input value={purpose} onChange={(e) => setPurpose(e.target.value)} /></Field>
-        </div>
-      )}
-    </Modal>
   );
 }
 

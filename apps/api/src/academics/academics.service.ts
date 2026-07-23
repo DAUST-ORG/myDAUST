@@ -98,6 +98,17 @@ export function meetingsOverlap(a: MeetingLike, b: MeetingLike): boolean {
 }
 
 /** Editable fields for updateStudent (all optional; null clears a nullable field). */
+export interface CatalogCourseInput {
+  title?: string;
+  credits?: number;
+  departmentId?: string;
+  status?: "active" | "draft";
+  description?: string | null;
+  semestersOffered?: ("fall" | "spring" | "summer")[];
+  prerequisiteCodes?: string[];
+  corequisiteCodes?: string[];
+}
+
 export interface UpdateStudentFields {
   fullName?: string;
   email?: string;
@@ -168,8 +179,13 @@ export class AcademicsService {
       seatsTaken: s._count.enrollments,
       seatsLeft: s.capacity - s._count.enrollments,
       schedule: `${s.days} ${s.startTime}–${s.endTime}`,
+      days: s.days,
+      startTime: s.startTime,
+      endTime: s.endTime,
       room: s.room,
       instructor: s.instructor ? `${s.instructor.firstName} ${s.instructor.lastName}` : null,
+      instructorId: s.instructorId,
+      termId: s.termId,
       prerequisites: s.course.prerequisites.map((p) => p.code),
     }));
   }
@@ -1185,7 +1201,7 @@ export class AcademicsService {
         include: { department: true, _count: { select: { students: true } } },
         orderBy: { code: "asc" },
       }),
-      this.prisma.course.findMany({ include: { department: true }, orderBy: { code: "asc" } }),
+      this.prisma.course.findMany({ include: { department: true, prerequisites: { select: { code: true } } }, orderBy: { code: "asc" } }),
       this.prisma.department.findMany({ orderBy: { name: "asc" } }),
     ]);
     return {
@@ -1199,7 +1215,14 @@ export class AcademicsService {
         tuition: p.tuition,
         color: p.color,
       })),
-      courses: courses.map((c) => ({ code: c.code, title: c.title, credits: c.credits, department: c.department.name })),
+      courses: courses.map((c) => ({
+        code: c.code,
+        title: c.title,
+        credits: c.credits,
+        department: c.department.name,
+        status: c.status ?? "active",
+        prereq: c.prerequisites.map((p) => p.code).join(", ") || null,
+      })),
       departments: departments.map((d) => ({ id: d.id, code: d.code, name: d.name })),
     };
   }
@@ -1307,16 +1330,49 @@ export class AcademicsService {
   }
 
   /** Registrar/admin: create a catalog course. Audited. */
-  async adminCreateCourse(actorId: string, input: { code: string; title: string; credits: number; departmentId: string }) {
-    const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId } });
+  async adminCreateCourse(actorId: string, input: CatalogCourseInput & { code: string }) {
+    const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId! } });
     if (!dept) throw new BadRequestException("Unknown department");
     const dup = await this.prisma.course.findUnique({ where: { code: input.code } });
     if (dup) throw new ConflictException(`Course code "${input.code}" already exists`);
     const course = await this.prisma.course.create({
-      data: { code: input.code, title: input.title, credits: input.credits, departmentId: input.departmentId },
+      data: {
+        code: input.code,
+        title: input.title!,
+        credits: input.credits!,
+        departmentId: input.departmentId!,
+        status: input.status ?? "active",
+        description: input.description ?? null,
+        semestersOffered: input.semestersOffered ? input.semestersOffered.join(",") : null,
+        ...(await this.prereqConnect(input.prerequisiteCodes, input.code)),
+      },
     });
+    await this.setCoreqs(course.id, input.corequisiteCodes);
     await this.prisma.auditLog.create({ data: { entity: "Course", entityId: course.id, action: "course-created", actorId } });
     return course;
+  }
+
+  private async prereqConnect(codes: string[] | undefined, selfCode: string) {
+    if (codes === undefined) return {};
+    const prereqs = await this.prisma.course.findMany({
+      where: { code: { in: codes.filter((c) => c !== selfCode) } },
+      select: { id: true },
+    });
+    return { prerequisites: { connect: prereqs.map((p) => ({ id: p.id })) } };
+  }
+
+  /** Replace a course's corequisites (shared with the Rule Engine's coreq rows). */
+  private async setCoreqs(courseId: string, codes: string[] | undefined) {
+    if (codes === undefined) return;
+    const coreqs = await this.prisma.course.findMany({
+      where: { code: { in: codes.filter(Boolean) } },
+      select: { id: true },
+    });
+    await this.prisma.courseCorequisite.deleteMany({ where: { courseId } });
+    for (const c of coreqs) {
+      if (c.id === courseId) continue;
+      await this.prisma.courseCorequisite.create({ data: { courseId, coreqCourseId: c.id } });
+    }
   }
 
   /** Admin: one course's detail — catalog fields, prerequisites, and its sections across terms. */
@@ -1326,6 +1382,7 @@ export class AcademicsService {
       include: {
         department: true,
         prerequisites: true,
+        coreqRules: { include: { coreqCourse: { select: { code: true, title: true } } } },
         sections: {
           include: { term: true, instructor: true, _count: { select: { enrollments: true } } },
           orderBy: [{ term: { startDate: "desc" } }, { sectionCode: "asc" }],
@@ -1343,9 +1400,13 @@ export class AcademicsService {
       code: course.code,
       title: course.title,
       credits: course.credits,
+      status: course.status ?? "active",
+      description: course.description,
+      semestersOffered: course.semestersOffered ? course.semestersOffered.split(",").filter(Boolean) : [],
       department: course.department.name,
       departmentId: course.departmentId,
       prerequisites: course.prerequisites.map((p) => ({ code: p.code, title: p.title })),
+      corequisites: course.coreqRules.map((c) => ({ code: c.coreqCourse.code, title: c.coreqCourse.title })),
       sections: course.sections.map((s) => ({
         id: s.id,
         sectionCode: s.sectionCode,
@@ -1367,11 +1428,7 @@ export class AcademicsService {
   }
 
   /** Registrar/admin: update a course's catalog fields + prerequisites. Audited. (`code` is immutable.) */
-  async updateCourse(
-    actorId: string,
-    code: string,
-    input: { title?: string; credits?: number; departmentId?: string; prerequisiteCodes?: string[] },
-  ) {
+  async updateCourse(actorId: string, code: string, input: CatalogCourseInput) {
     const course = await this.prisma.course.findUnique({ where: { code } });
     if (!course) throw new NotFoundException("Course not found");
     if (input.departmentId !== undefined) {
@@ -1392,11 +1449,34 @@ export class AcademicsService {
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.credits !== undefined ? { credits: input.credits } : {}),
         ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.semestersOffered !== undefined ? { semestersOffered: input.semestersOffered.join(",") || null } : {}),
         ...(prereqSet ? { prerequisites: { set: prereqSet } } : {}),
       },
     });
+    await this.setCoreqs(course.id, input.corequisiteCodes);
     await this.prisma.auditLog.create({ data: { entity: "Course", entityId: course.id, action: "course-updated", actorId } });
     return updated;
+  }
+
+  /** Delete a course — refused while any section (and thus enrollments) still exists. Audited. */
+  async deleteCourse(actorId: string, code: string) {
+    const course = await this.prisma.course.findUnique({
+      where: { code },
+      include: { _count: { select: { sections: true } } },
+    });
+    if (!course) throw new NotFoundException("Course not found");
+    if (course._count.sections > 0) {
+      throw new BadRequestException("Retire the course's sections before deleting it");
+    }
+    await this.prisma.$transaction([
+      this.prisma.courseCorequisite.deleteMany({ where: { OR: [{ courseId: course.id }, { coreqCourseId: course.id }] } }),
+      this.prisma.coursePrerequisite.deleteMany({ where: { OR: [{ courseId: course.id }, { prereqCourseId: course.id }] } }),
+      this.prisma.course.delete({ where: { id: course.id } }),
+    ]);
+    await this.prisma.auditLog.create({ data: { entity: "Course", entityId: course.id, action: "course-deleted", actorId, data: { code } } });
+    return { ok: true };
   }
 
   /** Registrar/admin: create a section (a scheduled offering of a course in a term). Audited. */

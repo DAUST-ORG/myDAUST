@@ -8,6 +8,7 @@ import {
   type ScholarshipTierRow,
   createScholarshipTier,
   deleteScholarshipTier,
+  getCurrentTerm,
   getFeeConfig,
   getMe,
   getScholarshipConfig,
@@ -16,16 +17,20 @@ import {
   updateScholarshipTier,
   updateUserRoles,
 } from "@/lib/api";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 const xof = (n: number) => `${n.toLocaleString("en-US")} XOF`;
 
-const GENERAL = [
-  ["Institution", "Dakar American University of Science & Technology"],
-  ["Current term", "Fall 2026"],
-  ["Language of instruction", "English"],
-  ["Accreditation", "ANAQ-Sup"],
-  ["Payment gateway", "PayTech (Wave · Orange Money · Card)"],
-];
+/** Institution facts; `Current term` is filled from live Term data at render. */
+function generalRows(currentTerm: string): [string, string][] {
+  return [
+    ["Institution", "Dakar American University of Science & Technology"],
+    ["Current term", currentTerm],
+    ["Language of instruction", "English"],
+    ["Accreditation", "ANAQ-Sup"],
+    ["Payment gateway", "PayTech (Wave · Orange Money · Card)"],
+  ];
+}
 
 export default function SettingsPage() {
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -37,6 +42,7 @@ export default function SettingsPage() {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState<string[]>([]);
   const [note, setNote] = useState<string | null>(null);
+  const [currentTerm, setCurrentTerm] = useState("—");
 
   const load = useCallback(() => {
     getMe()
@@ -48,7 +54,10 @@ export default function SettingsPage() {
       })
       .catch(() => {});
   }, []);
-  useEffect(() => load(), [load]);
+  useEffect(() => {
+    load();
+    getCurrentTerm().then((t) => setCurrentTerm(t.name)).catch(() => {});
+  }, [load]);
 
   function startEdit(u: AppUser) {
     setEditing(u.id);
@@ -76,7 +85,7 @@ export default function SettingsPage() {
         <p className="h1" style={{ fontSize: 16 }}>General</p>
         <table>
           <tbody>
-            {GENERAL.map(([k, v]) => (
+            {generalRows(currentTerm).map(([k, v]) => (
               <tr key={k}><td className="muted" style={{ width: "35%" }}>{k}</td><td><strong>{v}</strong></td></tr>
             ))}
           </tbody>
@@ -223,6 +232,7 @@ function TiersEditor({ editable }: { editable: boolean }) {
   const [row, setRow] = useState({ minScore: 12, pct: 10, band: "" });
   const [adding, setAdding] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ScholarshipTierRow | null>(null);
 
   const load = useCallback(() => {
     getScholarshipConfig().then(setTiers).catch(() => {});
@@ -243,6 +253,7 @@ function TiersEditor({ editable }: { editable: boolean }) {
   }
   async function remove(id: string) {
     await deleteScholarshipTier(id);
+    setPendingDelete(null);
     setNote("Tier removed (audit-logged).");
     load();
   }
@@ -280,7 +291,7 @@ function TiersEditor({ editable }: { editable: boolean }) {
                 {editable && (
                 <td style={{ whiteSpace: "nowrap" }}>
                   <button onClick={() => { setEditId(t.id); setAdding(false); setRow({ minScore: t.minScore, pct: t.pct, band: t.band }); }} style={{ fontSize: 12, marginRight: 6 }}>Edit</button>
-                  <button onClick={() => remove(t.id)} style={{ fontSize: 12 }}>Delete</button>
+                  <button onClick={() => setPendingDelete(t)} style={{ fontSize: 12 }}>Delete</button>
                 </td>
                 )}
               </tr>
@@ -290,6 +301,15 @@ function TiersEditor({ editable }: { editable: boolean }) {
         </tbody>
       </table>
       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Highest matching threshold wins. Changes apply to new applications immediately; the vitrine reads these live.</p>
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Remove scholarship tier?"
+          confirmLabel="Remove tier"
+          message={<>Remove the <strong>{pendingDelete.band}</strong> tier (≥ {pendingDelete.minScore} → {pendingDelete.pct}%)? New applications will no longer award from it.</>}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={() => remove(pendingDelete.id)}
+        />
+      )}
     </div>
   );
 }

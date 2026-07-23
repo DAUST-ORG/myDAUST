@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { CreateAnnouncementInput, SendMessageInput, StartThreadInput } from "@mydaust/shared";
 import { z } from "zod";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
@@ -78,5 +78,14 @@ export class CommsController {
   @Roles("admin", "registrar")
   listBroadcasts(@CurrentUser() user: AuthUser) {
     return this.comms.listBroadcasts(user.personId);
+  }
+
+  @Get("broadcasts/preview")
+  @Roles("admin", "registrar")
+  previewBroadcast(
+    @Query("audienceType") audienceType: "individual" | "year" | "program" | "all",
+    @Query("audienceValue") audienceValue?: string,
+  ) {
+    return this.comms.previewAudience(audienceType, audienceValue);
   }
 }

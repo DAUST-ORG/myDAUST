@@ -10,6 +10,7 @@ import {
   getAdminStudents,
   getGuardians,
   resendGuardianInvite,
+  setGuardianChildren,
   updateGuardian,
 } from "@/lib/api";
 import {
@@ -23,9 +24,8 @@ export default function ParentsPage() {
   const [note, setNote] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ fullName: "", email: "", relation: "", studentIds: [] as string[] });
-  const [editing, setEditing] = useState<{ id: string; fullName: string; email: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; fullName: string; email: string; studentIds: string[] } | null>(null);
   const [removing, setRemoving] = useState<GuardianRow | null>(null);
-  const [childQuery, setChildQuery] = useState("");
   const [listQuery, setListQuery] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -37,13 +37,8 @@ export default function ParentsPage() {
     getAdminStudents().then(setStudents).catch(() => setStudents([]));
   }, [load]);
 
-  const childOptions = useMemo(() => {
-    const q = childQuery.trim().toLowerCase();
-    const list = q
-      ? students.filter((s) => s.name.toLowerCase().includes(q) || s.studentNo.toLowerCase().includes(q))
-      : students;
-    return list.slice(0, 40);
-  }, [students, childQuery]);
+  const toggleId = (ids: string[], id: string) =>
+    ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
 
   const visible = useMemo(() => {
     const needle = listQuery.trim().toLowerCase();
@@ -88,6 +83,7 @@ export default function ParentsPage() {
     setError(null);
     try {
       await updateGuardian(editing.id, { fullName: editing.fullName.trim(), email: editing.email.trim() });
+      await setGuardianChildren(editing.id, editing.studentIds);
       setEditing(null);
       load();
     } catch (e) {
@@ -192,7 +188,7 @@ export default function ParentsPage() {
                       )}
                       <IconButton
                         label="Edit parent"
-                        onClick={() => setEditing({ id: g.id, fullName: g.name, email: g.email })}
+                        onClick={() => setEditing({ id: g.id, fullName: g.name, email: g.email, studentIds: g.children.map((c) => c.studentId) })}
                       >
                         <Pencil size={15} />
                       </IconButton>
@@ -231,38 +227,11 @@ export default function ParentsPage() {
             <Field label="Relationship" hint="Optional, e.g. Father, Mother, Guardian.">
               <Input value={form.relation} onChange={(v) => setForm((f) => ({ ...f, relation: v }))} />
             </Field>
-            <Field label={`Children (${form.studentIds.length} selected)`}>
-              <SearchInput value={childQuery} onChange={setChildQuery} placeholder="Filter students…" />
-            </Field>
-            <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}>
-              {childOptions.length === 0 && <p className="muted" style={{ padding: 12, margin: 0, fontSize: 13 }}>No students match.</p>}
-              {childOptions.map((s) => {
-                const checked = form.studentIds.includes(s.id);
-                return (
-                  <label
-                    key={s.id}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 9, padding: "8px 12px",
-                      borderBottom: "1px solid var(--divider)", cursor: "pointer",
-                      background: checked ? "var(--accent-bg)" : undefined,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() =>
-                        setForm((f) => ({
-                          ...f,
-                          studentIds: checked ? f.studentIds.filter((x) => x !== s.id) : [...f.studentIds, s.id],
-                        }))
-                      }
-                    />
-                    <span style={{ fontSize: 13 }}>{s.name}</span>
-                    <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>{s.studentNo} · {s.program}</span>
-                  </label>
-                );
-              })}
-            </div>
+            <ChildChecklist
+              students={students}
+              selected={form.studentIds}
+              onToggle={(id) => setForm((f) => ({ ...f, studentIds: toggleId(f.studentIds, id) }))}
+            />
           </div>
         </Modal>
       )}
@@ -272,6 +241,7 @@ export default function ParentsPage() {
           open
           onClose={() => setEditing(null)}
           title="Edit parent"
+          width={560}
           footer={
             <>
               <Button onClick={() => setEditing(null)} disabled={busy}>Cancel</Button>
@@ -292,6 +262,11 @@ export default function ParentsPage() {
             <Field label="Email">
               <Input type="email" value={editing.email} onChange={(v) => setEditing((e) => (e ? { ...e, email: v } : e))} />
             </Field>
+            <ChildChecklist
+              students={students}
+              selected={editing.studentIds}
+              onToggle={(id) => setEditing((e) => (e ? { ...e, studentIds: toggleId(e.studentIds, id) } : e))}
+            />
           </div>
         </Modal>
       )}
@@ -301,6 +276,7 @@ export default function ParentsPage() {
           open
           onClose={() => setRemoving(null)}
           title="Delete parent"
+          width={480}
           footer={
             <>
               <Button onClick={() => setRemoving(null)} disabled={busy}>Cancel</Button>
@@ -316,6 +292,58 @@ export default function ParentsPage() {
           </p>
         </Modal>
       )}
+    </>
+  );
+}
+
+function ChildChecklist({
+  students,
+  selected,
+  onToggle,
+}: {
+  students: AdminStudent[];
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const options = useMemo(() => {
+    const n = q.trim().toLowerCase();
+    const list = n
+      ? students.filter(
+          (s) =>
+            s.name.toLowerCase().includes(n) ||
+            s.studentNo.toLowerCase().includes(n) ||
+            s.program.toLowerCase().includes(n),
+        )
+      : students;
+    return list.slice(0, 60);
+  }, [students, q]);
+
+  return (
+    <>
+      <Field label={`Assign students (${selected.length} selected)`}>
+        <SearchInput value={q} onChange={setQ} placeholder="Filter students by name, ID or program…" />
+      </Field>
+      <div style={{ maxHeight: 280, overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}>
+        {options.length === 0 && <p className="muted" style={{ padding: 12, margin: 0, fontSize: 13 }}>No students match your filter.</p>}
+        {options.map((s) => {
+          const checked = selected.includes(s.id);
+          return (
+            <label
+              key={s.id}
+              style={{
+                display: "flex", alignItems: "center", gap: 9, padding: "8px 12px",
+                borderBottom: "1px solid var(--divider)", cursor: "pointer",
+                background: checked ? "var(--accent-bg)" : undefined,
+              }}
+            >
+              <input type="checkbox" checked={checked} onChange={() => onToggle(s.id)} />
+              <span style={{ fontSize: 13 }}>{s.name}</span>
+              <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>{s.studentNo} · {s.program}</span>
+            </label>
+          );
+        })}
+      </div>
     </>
   );
 }

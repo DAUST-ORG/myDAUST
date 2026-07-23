@@ -21,6 +21,7 @@ import {
   PageHeader,
   Segmented,
 } from "@/components/ui";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type SchemeRowData = GradingSchemeRow["rows"][number];
 
@@ -63,6 +64,7 @@ export default function GradingSchemesPage() {
   // null editor closed; { rowId: null } is an add; { rowId } is an edit of an existing row.
   const [editor, setEditor] = useState<{ rowId: string | null } | null>(null);
   const [draft, setDraft] = useState<RowDraft>(EMPTY_DRAFT);
+  const [removing, setRemoving] = useState<SchemeRowData | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -140,8 +142,8 @@ export default function GradingSchemesPage() {
     <>
       <PageHeader
         eyebrow="Policy & rules"
-        title="Grading schemes"
-        subtitle="Grade scales used across the institution. GPA is always derived from these points, never stored."
+        title="Grading Scales & Schemes"
+        subtitle="Define grade values, GPA points and score ranges. GPA is always derived from these points, never stored."
         actions={scheme.isDefault ? <Badge tone="success">Institution default</Badge> : undefined}
       />
 
@@ -170,8 +172,8 @@ export default function GradingSchemesPage() {
           <thead>
             <tr>
               <th>Grade</th>
-              <th style={{ textAlign: "right" }}>GPA points</th>
-              <th style={{ textAlign: "right" }}>Score range</th>
+              <th style={{ textAlign: "center" }}>GPA points</th>
+              <th style={{ textAlign: "center" }}>Score range</th>
               <th style={{ width: 96 }} />
             </tr>
           </thead>
@@ -179,10 +181,10 @@ export default function GradingSchemesPage() {
             {scheme.rows.map((r) => (
               <tr key={r.id}>
                 <td style={{ fontWeight: 700 }}>{r.grade}</td>
-                <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                <td style={{ textAlign: "center", fontVariantNumeric: "tabular-nums" }}>
                   {r.points === null ? <span className="muted">not counted</span> : r.points.toFixed(2)}
                 </td>
-                <td style={{ textAlign: "right" }}>
+                <td style={{ textAlign: "center" }}>
                   {r.minScore === null || r.maxScore === null ? <span className="muted">—</span> : `${r.minScore}–${r.maxScore}`}
                 </td>
                 <td>
@@ -190,7 +192,7 @@ export default function GradingSchemesPage() {
                     <IconButton label={`Edit ${r.grade}`} disabled={busy} onClick={() => openEdit(r)}>
                       <Pencil size={14} />
                     </IconButton>
-                    <IconButton label={`Delete ${r.grade}`} tone="danger" disabled={busy} onClick={() => removeRow(r.id)}>
+                    <IconButton label={`Delete ${r.grade}`} tone="danger" disabled={busy} onClick={() => setRemoving(r)}>
                       <Trash2 size={14} />
                     </IconButton>
                   </div>
@@ -204,6 +206,16 @@ export default function GradingSchemesPage() {
       <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>
         Scales without grade points (pass/fail, IEP levels) are excluded from GPA rather than counted as zero.
       </p>
+
+      {removing && (
+        <ConfirmDialog
+          title="Delete grade row?"
+          confirmLabel="Delete row"
+          message={<>Delete the <strong>{removing.grade}</strong> row from {scheme.name}? Existing grades of {removing.grade} will lose their GPA-point mapping until a replacement row is added.</>}
+          onClose={() => setRemoving(null)}
+          onConfirm={async () => { await removeRow(removing.id); setRemoving(null); }}
+        />
+      )}
 
       {editor && (
         <Modal

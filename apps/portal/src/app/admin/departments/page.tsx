@@ -12,6 +12,8 @@ export default function DepartmentsPage() {
   const [removing, setRemoving] = useState<DepartmentRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
+  const [addCode, setAddCode] = useState("");
+  const [addName, setAddName] = useState("");
 
   const load = useCallback(() => {
     getDepartments().then(setRows).catch((e: Error) => setError(e.message));
@@ -32,6 +34,22 @@ export default function DepartmentsPage() {
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save the department.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addDept() {
+    if (!addCode.trim() || !addName.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await upsertDepartment({ code: addCode.trim(), name: addName.trim(), head: null });
+      setAddCode("");
+      setAddName("");
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add the department.");
     } finally {
       setBusy(false);
     }
@@ -71,34 +89,26 @@ export default function DepartmentsPage() {
         eyebrow="Academic structure"
         title="Departments"
         subtitle="Academic departments, chairs and program counts"
-        actions={
-          <>
-            <SearchInput value={q} onChange={setQ} placeholder="Filter departments…" width={240} />
-            <Button variant="primary" onClick={() => setEditing({})}>New department</Button>
-          </>
-        }
+        actions={<SearchInput value={q} onChange={setQ} placeholder="Filter departments…" width={240} />}
       />
 
       {error && rows && <p className="card" style={{ color: "var(--danger)" }}>{error}</p>}
 
       {!rows && <p className="muted">Loading…</p>}
-      {rows && rows.length === 0 && <EmptyState title="No departments yet" />}
-      {rows && rows.length > 0 && visible.length === 0 && <EmptyState title="No departments match" />}
 
-      {visible.length > 0 && (
+      {rows && (
         <Card pad={false}>
           <table>
             <thead>
-              <tr><th>Code</th><th>Department</th><th>Chair</th><th style={{ textAlign: "right" }}>Programs</th><th style={{ textAlign: "right" }}>Courses</th><th>Actions</th></tr>
+              <tr><th>Code</th><th>Department</th><th>Chair</th><th style={{ textAlign: "right" }}>Programs</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {visible.map((d) => (
                 <tr key={d.id} className="sis-row">
-                  <td style={{ fontWeight: 700 }}>{d.code}</td>
+                  <td style={{ fontWeight: 700, fontFamily: "ui-monospace, monospace", color: "var(--daust-orange)" }}>{d.code}</td>
                   <td>{d.name}</td>
                   <td>{d.head ?? <span className="muted">—</span>}</td>
                   <td style={{ textAlign: "right" }}>{d.programs}</td>
-                  <td style={{ textAlign: "right" }}>{d.courses}</td>
                   <td>
                     <span style={{ display: "inline-flex", gap: 6 }}>
                       <IconButton label="Edit department" onClick={() => setEditing(d)}><Pencil size={15} /></IconButton>
@@ -107,6 +117,16 @@ export default function DepartmentsPage() {
                   </td>
                 </tr>
               ))}
+              {rows.length > 0 && visible.length === 0 && (
+                <tr><td colSpan={5} className="muted" style={{ textAlign: "center", padding: 20 }}>No departments match.</td></tr>
+              )}
+              <tr style={{ background: "var(--bg-subtle)" }}>
+                <td><Input value={addCode} onChange={setAddCode} placeholder="Code" width={100} /></td>
+                <td colSpan={3}><Input value={addName} onChange={setAddName} placeholder="New department name" /></td>
+                <td>
+                  <Button variant="primary" size="sm" disabled={busy || !addCode.trim() || !addName.trim()} onClick={addDept}>Add department</Button>
+                </td>
+              </tr>
             </tbody>
           </table>
         </Card>
@@ -116,20 +136,20 @@ export default function DepartmentsPage() {
         <Modal
           open
           onClose={() => setEditing(null)}
-          title={editing.id ? "Edit department" : "New department"}
+          title="Edit Department"
           footer={
             <>
               <Button onClick={() => setEditing(null)} disabled={busy}>Cancel</Button>
-              <Button variant="navy" onClick={save} disabled={busy || !editing.code || !editing.name}>
-                {busy ? "Saving…" : "Save"}
+              <Button variant="primary" onClick={save} disabled={busy || !editing.code || !editing.name}>
+                {busy ? "Saving…" : "Save changes"}
               </Button>
             </>
           }
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Field label="Code"><Input value={editing.code ?? ""} onChange={(v) => setEditing((e) => ({ ...e, code: v }))} /></Field>
-            <Field label="Name"><Input value={editing.name ?? ""} onChange={(v) => setEditing((e) => ({ ...e, name: v }))} /></Field>
-            <Field label="Head" hint="Department chair (free text)."><Input value={editing.head ?? ""} onChange={(v) => setEditing((e) => ({ ...e, head: v }))} /></Field>
+            <Field label="Code *"><Input value={editing.code ?? ""} onChange={(v) => setEditing((e) => ({ ...e, code: v }))} /></Field>
+            <Field label="Department name *"><Input value={editing.name ?? ""} onChange={(v) => setEditing((e) => ({ ...e, name: v }))} /></Field>
+            <Field label="Chair / head"><Input value={editing.head ?? ""} onChange={(v) => setEditing((e) => ({ ...e, head: v }))} /></Field>
           </div>
         </Modal>
       )}

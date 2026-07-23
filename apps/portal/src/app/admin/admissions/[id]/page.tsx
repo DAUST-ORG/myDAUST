@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, BadgeCheck, Check, CheckCircle2, Clock, Flag, Gift, GraduationCap, MapPin, Pencil, Target, UserCheck, X } from "lucide-react";
-import { type ApplicantDetail, createStudent, getApplicant, getAdminPrograms, setApplicantStage } from "@/lib/api";
+import { ArrowLeft, BadgeCheck, Check, CheckCircle2, Clock, Flag, Gift, GraduationCap, MapPin, Pencil, Target, UserCheck, X } from "lucide-react";
+import { type ApplicantDetail, createRegistrarStudent, getApplicant, getAdminPrograms, setApplicantStage } from "@/lib/api";
 import { formatXof } from "@/lib/format";
 import { Avatar, Badge, type BadgeTone, Field, Modal, Tabs } from "@/components/ui";
 import { ApplicationModal, type ProgramOption } from "../ApplicationModal";
@@ -18,6 +18,15 @@ function nextStage(stage: string): string | null {
   return i >= 0 && i < STAGES.length - 1 ? STAGES[i + 1]! : null;
 }
 
+// A single, non-overlapping forward action per stage (labels lean on the design's
+// Submit-for-review / Admit / Confirm vocabulary without renaming the stored enum).
+const ADVANCE_LABEL: Record<string, string> = {
+  submitted: "Submit for review",
+  review: "Move to interview",
+  interview: "Make offer",
+  offer: "Mark accepted",
+};
+
 export default function ApplicantDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -26,6 +35,7 @@ export default function ApplicantDetailPage() {
   const [enrolling, setEnrolling] = useState(false);
   const [editing, setEditing] = useState(false);
   const [programOptions, setProgramOptions] = useState<ProgramOption[]>([]);
+  const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(() => {
     getApplicant(id).then(setA).catch(() => setA(null));
@@ -38,8 +48,13 @@ export default function ApplicantDetailPage() {
   }, []);
 
   async function move(stage: string) {
-    await setApplicantStage(id, stage);
-    load();
+    setErr(null);
+    try {
+      await setApplicantStage(id, stage);
+      load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not update the application stage.");
+    }
   }
 
   if (!a) return <p className="muted">Loading…</p>;
@@ -64,12 +79,11 @@ export default function ApplicantDetailPage() {
           {a.stage !== "rejected" && a.stage !== "accepted" && (
             <>
               <button onClick={() => move("rejected")} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--danger)" }}><X size={15} /> Reject</button>
-              {nextStage(a.stage) && nextStage(a.stage) !== "accepted" && (
-                <button onClick={() => move(nextStage(a.stage)!)} style={{ display: "flex", alignItems: "center", gap: 6 }}><ArrowRight size={15} /> Advance</button>
+              {nextStage(a.stage) && (
+                <button className="primary" onClick={() => move(nextStage(a.stage)!)} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <Check size={15} /> {ADVANCE_LABEL[a.stage] ?? "Advance"}
+                </button>
               )}
-              <button className="primary" onClick={() => move(a.stage === "offer" ? "accepted" : "offer")} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <Check size={15} /> {a.stage === "offer" ? "Accept" : "Make offer"}
-              </button>
             </>
           )}
           {a.stage === "accepted" && (
@@ -77,6 +91,8 @@ export default function ApplicantDetailPage() {
           )}
         </div>
       </div>
+
+      {err && <div className="card" style={{ marginBottom: 16, color: "var(--danger)" }}>{err}</div>}
 
       {/* Hero */}
       <div style={{ background: "linear-gradient(120deg, var(--daust-navy), var(--daust-navy-deep))", borderRadius: "var(--radius-xl)", padding: "26px 28px", color: "#fff", display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
@@ -124,26 +140,52 @@ export default function ApplicantDetailPage() {
       </div>
 
       {tab === "overview" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, alignItems: "start" }}>
-          <Card title="Applicant">
-            <KV k="Full name" v={a.name} />
-            <KV k="Email" v={a.email} />
-            <KV k="Country" v={a.country ?? "—"} />
-            <KV k="Application ID" v={a.id.slice(0, 8)} />
-          </Card>
-          <Card title="Application">
-            <KV k="Applying to" v={a.program ?? a.programCode ?? "Undeclared"} />
-            <KV k="Submitted" v={a.submittedAt.slice(0, 10)} />
-            <KV k="Current stage" v={<Badge tone={STAGE_TONE[a.stage] ?? "neutral"}>{STAGE_LABEL[a.stage] ?? a.stage}</Badge>} />
-            <KV k="Application fee" v={a.feePaid ? "Paid" : `${formatXof(a.appFee)} due`} />
-          </Card>
-          <Card title="Scholarship (est.)">
-            <KV k="BAC score" v={a.score != null ? `${a.score} / 20` : "—"} />
-            <KV k="Merit award" v={a.scholarship.pct > 0 ? `${a.scholarship.pct}%` : "No award"} />
-            <KV k="Band" v={a.scholarship.band ?? "—"} />
-            <p className="muted" style={{ fontSize: 11.5, marginTop: 10, marginBottom: 0 }}>Computed from the current BAC scholarship tiers; confirmed at enrolment.</p>
-          </Card>
-        </div>
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, alignItems: "start" }}>
+            <Card title="Application">
+              <KV k="Application ID" v={a.id.slice(0, 8)} />
+              <KV k="Admission term" v={a.term ?? "—"} />
+              <KV k="Program of choice" v={a.program ?? a.programCode ?? "Undeclared"} />
+              <KV k="Applied on" v={a.submittedAt.slice(0, 10)} />
+              <KV k="Entrance score" v={a.score != null ? `${a.score} / 20` : "—"} />
+            </Card>
+            <Card title="Personal">
+              <KV k="Full name" v={a.name} />
+              <KV k="Date of birth" v={a.dateOfBirth ?? "—"} />
+              <KV k="Gender" v={a.gender ?? "—"} />
+              <KV k="Nationality" v={a.nationality ?? "—"} />
+              <KV k="City" v={a.city ?? "—"} />
+              <KV k="Email" v={a.email} />
+              <KV k="Phone" v={a.phone ?? "—"} />
+            </Card>
+            <Card title="Academic background">
+              <KV k="Applying from" v={a.origin ?? "—"} />
+              <KV k={a.origin === "University transfer" ? "Previous university" : "High school"} v={a.school ?? "—"} />
+              <KV k="GPA / average" v={a.priorGpa ?? "—"} />
+            </Card>
+            <Card title="Parent / guardian">
+              <KV k="Name" v={a.parentName ?? "—"} />
+              <KV k="Phone" v={a.parentPhone ?? "—"} />
+              <KV k="Email" v={a.parentEmail ?? "—"} />
+            </Card>
+            <Card title="Health & other">
+              <KV k="Allergies" v={a.allergies ?? "—"} />
+              <KV k="Heard about DAUST via" v={a.source ?? "—"} />
+            </Card>
+            <Card title="Scholarship (est.)">
+              <KV k="Merit award" v={a.scholarship.pct > 0 ? `${a.scholarship.pct}%` : "No award"} />
+              <KV k="Band" v={a.scholarship.band ?? "—"} />
+              <p className="muted" style={{ fontSize: 11.5, marginTop: 10, marginBottom: 0 }}>Computed from the current BAC scholarship tiers; confirmed at enrolment.</p>
+            </Card>
+          </div>
+          {a.essay && (
+            <div style={{ marginTop: 16 }}>
+              <Card title="Statement of purpose">
+                <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{a.essay}</p>
+              </Card>
+            </div>
+          )}
+        </>
       )}
 
       {tab === "timeline" && (
@@ -191,25 +233,26 @@ export default function ApplicantDetailPage() {
 }
 
 function EnrollFromApplicant({ applicant, onClose, onEnrolled }: { applicant: ApplicantDetail; onClose: () => void; onEnrolled: (studentId: string) => void }) {
-  const [dob, setDob] = useState("");
-  const [billTuition, setBillTuition] = useState(true);
+  const [studentNo, setStudentNo] = useState("");
+  const [dob, setDob] = useState(applicant.dateOfBirth ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function submit() {
     setErr(null);
-    if (!dob) {
-      setErr("Date of birth is required.");
+    if (!studentNo.trim()) {
+      setErr("A Student ID is required.");
       return;
     }
     setBusy(true);
     try {
-      const res = await createStudent({
-        fullName: applicant.name,
-        dateOfBirth: dob,
+      const res = await createRegistrarStudent({
+        studentNo: studentNo.trim(),
+        firstName: applicant.firstName,
+        lastName: applicant.lastName,
         email: applicant.email,
-        programCode: applicant.programCode ?? undefined,
-        billTuition,
+        dateOfBirth: dob || null,
+        programCode: applicant.programCode ?? null,
       });
       onEnrolled(res.id);
     } catch (e) {
@@ -219,16 +262,15 @@ function EnrollFromApplicant({ applicant, onClose, onEnrolled }: { applicant: Ap
   }
 
   return (
-    <Modal open onClose={onClose} title="Enroll student" width={440}
-      footer={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={submit} disabled={busy}>{busy ? "Enrolling…" : "Enroll student"}</button></>}>
+    <Modal open onClose={onClose} title="Enroll student" width={460}
+      footer={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={submit} disabled={busy}>{busy ? "Enrolling…" : "Create student"}</button></>}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
-        <p className="muted" style={{ fontSize: 13, margin: 0 }}>Create a student record for <strong>{applicant.name}</strong> ({applicant.program ?? "no program"}).</p>
-        <Field label="Date of birth" hint="Required — the payment-portal second factor"><input type="date" value={dob} onChange={(e) => setDob(e.target.value)} /></Field>
-        <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13.5, cursor: "pointer" }}>
-          <input type="checkbox" checked={billTuition} onChange={(e) => setBillTuition(e.target.checked)} style={{ width: 16, height: 16 }} />
-          Bill standard tuition
-        </label>
+        <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+          Create a student record + account for <strong>{applicant.name}</strong> ({applicant.program ?? "no program"}). A password-setup email is sent on save; billing is handled separately by the Bursar.
+        </p>
+        <Field label="Student ID" hint="Assigned by the Registrar"><input value={studentNo} onChange={(e) => setStudentNo(e.target.value)} placeholder="e.g. DAUST-2026-0001" /></Field>
+        <Field label="Date of birth" hint="The payment-portal second factor"><input type="date" value={dob} onChange={(e) => setDob(e.target.value)} /></Field>
       </div>
     </Modal>
   );

@@ -34,6 +34,18 @@ const AddChargeInput = z.object({
   amountXof: z.number().int().positive().max(100_000_000),
   costCenterCode: z.string().max(8).optional(),
   dueDate: z.string().optional(),
+  // Optional installment schedule (the design's New Billing); omitted = single charge.
+  installments: z
+    .array(
+      z.object({
+        dueDate: z.string().min(8).max(40),
+        amountXof: z.number().int().positive().max(100_000_000),
+        label: z.string().max(80).nullish(),
+      }),
+    )
+    .min(1)
+    .max(24)
+    .optional(),
 });
 
 const ApplyDiscountInput = z.object({
@@ -58,6 +70,7 @@ const UpdatePlanInput = z.object({
         id: z.string().min(1).max(64),
         dueDate: z.string().min(8).max(40),
         amountDue: z.number().int().min(0).max(100_000_000),
+        label: z.string().max(80).nullish(),
       }),
     )
     .min(1)

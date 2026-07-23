@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, Clock, ListChecks, MapPin, Pencil, Plus, Trash2, User } from "lucide-react";
 import {
@@ -17,8 +16,7 @@ import {
   getStaff,
   updateSection,
 } from "@/lib/api";
-import { Badge, Button, EmptyState, Field, IconButton, Modal, PageHeader, Progress, SearchInput, Segmented, Select, Tabs } from "@/components/ui";
-import { MasterSchedule } from "@/components/MasterSchedule";
+import { Badge, Button, EmptyState, Field, IconButton, Modal, PageHeader, Progress, Segmented, Select } from "@/components/ui";
 
 const DAY_TOKENS = ["M", "T", "W", "Th", "F"];
 
@@ -38,13 +36,11 @@ function seatTone(s: Section): string {
 }
 
 export default function AdminOfferingsPage() {
-  const router = useRouter();
   const [term, setTerm] = useState<Term | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
-  const [view, setView] = useState("sections");
   const [filter, setFilter] = useState("all");
-  const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Section | null>(null);
 
   const load = useCallback(() => {
     getCurrentTerm()
@@ -60,18 +56,12 @@ export default function AdminOfferingsPage() {
   const closedCount = sections.length - openCount;
 
   const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
     return sections.filter((s) => {
       if (filter === "open" && !isOpen(s)) return false;
       if (filter === "closed" && isOpen(s)) return false;
-      if (!needle) return true;
-      return (
-        s.courseCode.toLowerCase().includes(needle) ||
-        s.title.toLowerCase().includes(needle) ||
-        (s.instructor ?? "").toLowerCase().includes(needle)
-      );
+      return true;
     });
-  }, [sections, filter, q]);
+  }, [sections, filter]);
 
   return (
     <>
@@ -82,16 +72,6 @@ export default function AdminOfferingsPage() {
         actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => setAdding(true)}>Add course</Button>}
       />
 
-      <Tabs
-        tabs={[{ value: "sections", label: "Sections" }, { value: "grid", label: "Weekly grid" }]}
-        active={view}
-        onChange={setView}
-      />
-
-      {view === "grid" && <MasterSchedule />}
-
-      {view === "sections" && (
-      <>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <Segmented
           value={filter}
@@ -102,7 +82,6 @@ export default function AdminOfferingsPage() {
             { value: "closed", label: `Closed (${closedCount})` },
           ]}
         />
-        <SearchInput value={q} onChange={setQ} placeholder="Filter offerings…" width={280} />
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -111,7 +90,7 @@ export default function AdminOfferingsPage() {
             key={s.id}
             section={s}
             term={term}
-            onEdit={() => router.push(`/admin/programs/courses/${encodeURIComponent(s.courseCode)}`)}
+            onEdit={() => setEditing(s)}
             onDeleted={load}
             onChanged={load}
           />
@@ -122,10 +101,9 @@ export default function AdminOfferingsPage() {
           </div>
         )}
       </div>
-      </>
-      )}
 
       {adding && <OfferingModal onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
+      {editing && <OfferingModal section={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </>
   );
 }
@@ -169,11 +147,22 @@ function OfferingCard({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <IconButton label="Edit section" onClick={onEdit}><Pencil size={15} /></IconButton>
+        <ToggleButton section={section} onChanged={onChanged} />
+        <IconButton label="Edit offering" onClick={onEdit}><Pencil size={15} /></IconButton>
         <DeleteSectionButton section={section} onDeleted={onDeleted} />
       </div>
     </div>
   );
+}
+
+function ToggleButton({ section, onChanged }: { section: Section; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function flip() {
+    setBusy(true);
+    try { await updateSection(section.id, { status: isOpen(section) ? "closed" : "open" }); onChanged(); }
+    finally { setBusy(false); }
+  }
+  return <Button size="sm" onClick={flip} disabled={busy}>{busy ? "…" : "Toggle"}</Button>;
 }
 
 /** Opens or closes the section to registration. `enroll()` enforces the same flag. */
@@ -234,29 +223,40 @@ function DeleteSectionButton({ section, onDeleted }: { section: Section; onDelet
   );
 }
 
-function OfferingModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function parseDayTokens(s: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < s.length) {
+    if (s.slice(i, i + 2) === "Th") { out.push("Th"); i += 2; }
+    else { const c = s[i]!; if (DAY_TOKENS.includes(c)) out.push(c); i += 1; }
+  }
+  return out;
+}
+
+function OfferingModal({ section, onClose, onSaved }: { section?: Section; onClose: () => void; onSaved: () => void }) {
+  const editing = !!section;
   const [catalog, setCatalog] = useState<AdminPrograms["courses"]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [terms, setTerms] = useState<{ id: string; name: string }[]>([]);
-  const [courseCode, setCourseCode] = useState("");
-  const [termId, setTermId] = useState("");
-  const [sectionCode, setSectionCode] = useState("A");
-  const [instructorId, setInstructorId] = useState("");
-  const [days, setDays] = useState<string[]>(["M", "W", "F"]);
-  const [startTime, setStartTime] = useState("10:00");
-  const [endTime, setEndTime] = useState("11:00");
-  const [room, setRoom] = useState("");
-  const [capacity, setCapacity] = useState("40");
+  const [courseCode, setCourseCode] = useState(section?.courseCode ?? "");
+  const [termId, setTermId] = useState(section?.termId ?? "");
+  const [sectionCode, setSectionCode] = useState(section?.sectionCode ?? "A");
+  const [instructorId, setInstructorId] = useState(section?.instructorId ?? "");
+  const [days, setDays] = useState<string[]>(section ? parseDayTokens(section.days) : ["M", "W", "F"]);
+  const [startTime, setStartTime] = useState(section?.startTime ?? "10:00");
+  const [endTime, setEndTime] = useState(section?.endTime ?? "11:00");
+  const [room, setRoom] = useState(section?.room ?? "");
+  const [capacity, setCapacity] = useState(String(section?.capacity ?? 40));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     getAdminPrograms().then((d) => {
       setCatalog(d.courses);
-      setCourseCode((c) => c || d.courses[0]?.code || "");
+      if (!editing) setCourseCode((c) => c || d.courses[0]?.code || "");
     }).catch(() => {});
     getStaff().then(setStaff).catch(() => {});
-  }, []);
+  }, [editing]);
 
   // The term list is only exposed through a course's admin detail, so it reloads per course.
   useEffect(() => {
@@ -264,14 +264,15 @@ function OfferingModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
     getAdminCourseDetail(courseCode)
       .then((d) => {
         setTerms(d.terms);
-        setTermId((t) => (d.terms.some((x) => x.id === t) ? t : d.terms[0]?.id ?? ""));
+        setTermId((t) => (d.terms.some((x) => x.id === t) ? t : section?.termId ?? d.terms[0]?.id ?? ""));
       })
       .catch(() => setTerms([]));
-  }, [courseCode]);
+  }, [courseCode, section?.termId]);
 
   const instructors = staff.filter((s) => s.kind === "faculty" || s.roles.includes("faculty"));
   const instructorOptions = (instructors.length ? instructors : staff).map((s) => ({ value: s.id, label: s.name }));
   const daysStr = DAY_TOKENS.filter((d) => days.includes(d)).join("");
+  const endsAfterStart = startTime < endTime;
 
   function toggleDay(d: string) {
     setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
@@ -283,22 +284,36 @@ function OfferingModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
       setErr("Course, term, section, days and times are required.");
       return;
     }
+    if (!instructorId) { setErr("An instructor is required."); return; }
+    if (!endsAfterStart) { setErr("The end time must be after the start time."); return; }
     setBusy(true);
     try {
-      await createSection({
-        courseCode,
-        termId,
-        sectionCode: sectionCode.trim().toUpperCase(),
-        instructorId: instructorId || null,
-        capacity: Number(capacity) || 40,
-        days: daysStr,
-        startTime,
-        endTime,
-        room: room.trim() || null,
-      });
+      if (editing) {
+        await updateSection(section!.id, {
+          sectionCode: sectionCode.trim().toUpperCase(),
+          instructorId,
+          capacity: Number(capacity) || 40,
+          days: daysStr,
+          startTime,
+          endTime,
+          room: room.trim() || null,
+        });
+      } else {
+        await createSection({
+          courseCode,
+          termId,
+          sectionCode: sectionCode.trim().toUpperCase(),
+          instructorId,
+          capacity: Number(capacity) || 40,
+          days: daysStr,
+          startTime,
+          endTime,
+          room: room.trim() || null,
+        });
+      }
       onSaved();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not add the offering.");
+      setErr(e instanceof Error ? e.message : "Could not save the offering.");
       setBusy(false);
     }
   }
@@ -307,28 +322,38 @@ function OfferingModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
     <Modal
       open
       onClose={onClose}
-      title="Add Course to Enrollment"
-      width={500}
+      title={editing ? "Edit Course Offering" : "Add Course to Enrollment"}
+      width={520}
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Adding…" : "Add to enrollment"}</button>
+          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Saving…" : editing ? "Save changes" : "Add to enrollment"}</button>
         </>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>Offer a catalog course for a given term.</p>
         {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
-        <Field label="Course">
-          <Select value={courseCode} onChange={setCourseCode} options={catalog.map((c) => ({ value: c.code, label: `${c.code} · ${c.title}` }))} />
+        <Field label="Course" hint={editing ? "Not editable" : undefined}>
+          {editing ? (
+            <input value={`${section!.courseCode} · ${section!.title}`} readOnly style={{ background: "var(--bg-subtle)", color: "var(--fg3)" }} />
+          ) : (
+            <Select value={courseCode} onChange={setCourseCode} options={catalog.map((c) => ({ value: c.code, label: `${c.code} · ${c.title}` }))} />
+          )}
         </Field>
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
-          <Field label="Term"><Select value={termId} onChange={setTermId} options={terms.map((t) => ({ value: t.id, label: t.name }))} /></Field>
+          <Field label="Term">
+            {editing ? (
+              <input value={terms.find((t) => t.id === termId)?.name ?? "—"} readOnly style={{ background: "var(--bg-subtle)", color: "var(--fg3)" }} />
+            ) : (
+              <Select value={termId} onChange={setTermId} options={terms.map((t) => ({ value: t.id, label: t.name }))} />
+            )}
+          </Field>
           <Field label="Section"><input value={sectionCode} onChange={(e) => setSectionCode(e.target.value.toUpperCase())} placeholder="A" /></Field>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
-          <Field label="Instructor" hint="Optional">
-            <Select value={instructorId} onChange={setInstructorId} options={[{ value: "", label: "— TBA —" }, ...instructorOptions]} />
+          <Field label="Instructor">
+            <Select value={instructorId} onChange={setInstructorId} options={[{ value: "", label: "— Assign instructor —" }, ...instructorOptions]} />
           </Field>
           <Field label="Max participants"><input type="number" min={1} value={capacity} onChange={(e) => setCapacity(e.target.value)} /></Field>
         </div>

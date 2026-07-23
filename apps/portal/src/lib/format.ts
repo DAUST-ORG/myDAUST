@@ -31,3 +31,16 @@ export function formatXofCompact(amount: number): string {
   if (abs >= 10_000) return `${sign}${Math.round(abs / 1_000)}k FCFA`;
   return formatXof(amount);
 }
+
+/**
+ * Bare abbreviated amount for dashboard KPI tiles, where the stat's own sub-label
+ * carries the unit ("41M" above "FCFA due") — so the value never repeats "FCFA".
+ */
+export function formatXofAbbrev(amount: number): string {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "−" : "";
+  if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `${sign}${Math.round(abs / 1_000_000)}M`;
+  if (abs >= 1_000) return `${sign}${Math.round(abs / 1_000)}K`;
+  return `${sign}${abs}`;
+}

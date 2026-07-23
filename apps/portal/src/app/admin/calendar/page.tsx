@@ -182,7 +182,7 @@ export default function AcademicCalendarPage() {
     <>
       <PageHeader
         eyebrow="Academic structure"
-        title="Academic calendar & terms"
+        title="Academic Calendar & Terms"
         subtitle="Configure academic terms and key dates."
         actions={
           <Button variant="primary" icon={<Plus size={14} />} onClick={openComposer} disabled={years.length === 0}>

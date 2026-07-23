@@ -1,13 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { CalendarClock } from "lucide-react";
 import { type AcademicYearRow, activateAcademicYear, createAcademicYear, getAcademicYears } from "@/lib/api";
-import { Badge, Button, Card, EmptyState, PageHeader, Select } from "@/components/ui";
+import { Badge, Button, EmptyState, PageHeader, Select } from "@/components/ui";
 
 const STATUS_LABEL: Record<AcademicYearRow["status"], string> = {
   active: "Active",
   draft: "Draft",
   archived: "Archived",
+};
+const STATUS_SUB: Record<AcademicYearRow["status"], string> = {
+  active: "Current catalog year",
+  draft: "Planning · not yet active",
+  archived: "Closed catalog",
 };
 
 export default function AcademicYearsPage() {
@@ -50,8 +56,8 @@ export default function AcademicYearsPage() {
     <>
       <PageHeader
         eyebrow="Academic structure"
-        title="Academic years"
-        subtitle="Catalogue years. Exactly one is active; activating another archives the current one."
+        title="Academic Years"
+        subtitle="Catalog years governing curriculum, admissions and requirements."
         actions={
           <>
             <Select
@@ -64,7 +70,7 @@ export default function AcademicYearsPage() {
                 { value: "archived", label: "Archived" },
               ]}
             />
-            <Button variant="primary" onClick={add} disabled={busy || !rows}>Add year</Button>
+            <Button variant="primary" onClick={add} disabled={busy || !rows}>Add academic year</Button>
           </>
         }
       />
@@ -74,31 +80,25 @@ export default function AcademicYearsPage() {
       {rows && rows.length > 0 && visible.length === 0 && <EmptyState title="No academic years match" />}
 
       {visible.length > 0 && (
-        <Card pad={false}>
-          <table>
-            <thead><tr><th>Year</th><th>Status</th><th style={{ textAlign: "right" }}>Terms</th><th /></tr></thead>
-            <tbody>
-              {visible.map((y) => (
-                <tr key={y.id} className="sis-row">
-                  <td style={{ fontWeight: 700 }}>{y.label}</td>
-                  <td>
-                    <Badge tone={y.status === "active" ? "success" : y.status === "draft" ? "warning" : "neutral"}>
-                      {STATUS_LABEL[y.status]}
-                    </Badge>
-                  </td>
-                  <td style={{ textAlign: "right" }}>{y._count.terms}</td>
-                  <td>
-                    {y.status !== "active" && (
-                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => activate(y.id)}>
-                        Set active
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 660 }}>
+          {visible.map((y) => (
+            <div key={y.id} className="card" style={{ margin: 0, display: "flex", alignItems: "center", gap: 14 }}>
+              <span style={{ width: 40, height: 40, borderRadius: 10, background: "var(--bg-tint)", color: "var(--daust-navy)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <CalendarClock size={18} />
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15 }}>{y.label}</div>
+                <div className="muted" style={{ fontSize: 12.5 }}>{STATUS_SUB[y.status]} · {y._count.terms} term{y._count.terms === 1 ? "" : "s"}</div>
+              </div>
+              <Badge tone={y.status === "active" ? "success" : y.status === "draft" ? "warning" : "neutral"}>
+                {STATUS_LABEL[y.status]}
+              </Badge>
+              {y.status !== "active" && (
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => activate(y.id)}>Set active</Button>
+              )}
+            </div>
+          ))}
+        </div>
       )}
     </>
   );

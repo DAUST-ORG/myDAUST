@@ -2,16 +2,53 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+/** HTTP error carrying the status so callers can branch; `message` is always human-readable. */
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+// Friendly copy for statuses whose server body is jargon or empty. 4xx validation/conflict
+// messages (e.g. "This ID is already assigned") are user-meaningful, so those are kept as-is.
+const FRIENDLY: Record<number, string> = {
+  401: "Your session has expired. Please sign in again.",
+  403: "You do not have permission to do that.",
+  500: "Something went wrong on our end. Please try again.",
+  502: "The server is unavailable right now. Please try again.",
+  503: "The server is unavailable right now. Please try again.",
+};
+
+async function toApiError(res: Response): Promise<ApiError> {
+  const text = await res.text();
+  let serverMsg = "";
+  try {
+    const body = JSON.parse(text);
+    serverMsg = typeof body?.message === "string"
+      ? body.message
+      : Array.isArray(body?.message)
+        ? body.message.join(", ")
+        : typeof body?.error === "string"
+          ? body.error
+          : "";
+  } catch {
+    serverMsg = text;
+  }
+  const overrideWithFriendly = res.status >= 500 || res.status === 401 || res.status === 403;
+  const message = overrideWithFriendly
+    ? FRIENDLY[res.status] ?? serverMsg ?? `Request failed (${res.status}).`
+    : serverMsg || FRIENDLY[res.status] || `Request failed (${res.status}).`;
+  return new ApiError(res.status, message);
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}/api${path}`, {
     ...init,
     credentials: "include", // send/receive the session cookie
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`${res.status}: ${text}`);
-  }
+  if (!res.ok) throw await toApiError(res);
   const ct = res.headers.get("content-type") ?? "";
   return (ct.includes("application/json") ? res.json() : res.text()) as Promise<T>;
 }
@@ -35,7 +72,7 @@ export async function uploadFile(file: File): Promise<UploadResult> {
     credentials: "include",
     body: form,
   });
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  if (!res.ok) throw await toApiError(res);
   return res.json() as Promise<UploadResult>;
 }
 
@@ -138,8 +175,13 @@ export interface Section {
   seatsTaken: number;
   seatsLeft: number;
   schedule: string;
+  days: string;
+  startTime: string;
+  endTime: string;
   room: string | null;
   instructor: string | null;
+  instructorId: string | null;
+  termId: string;
   prerequisites: string[];
 }
 export interface MyEnrollment {
@@ -432,12 +474,12 @@ export interface ProgramRow {
 }
 export interface AdminPrograms {
   programs: ProgramRow[];
-  courses: { code: string; title: string; credits: number; department: string }[];
+  courses: { code: string; title: string; credits: number; department: string; status: string; prereq: string | null }[];
   departments: { id: string; code: string; name: string }[];
 }
 export const createProgram = (input: { code: string; name: string; departmentId: string; degree?: string | null; school?: string | null; tuition?: number | null; color?: string | null }) =>
   request<{ id: string }>("/academics/admin/programs", { method: "POST", body: JSON.stringify(input) });
-export const createCourse = (input: { code: string; title: string; credits: number; departmentId: string }) =>
+export const createCourse = (input: { code: string; title: string; credits: number; departmentId: string } & CourseCatalogInput) =>
   request<{ id: string }>("/academics/admin/courses", { method: "POST", body: JSON.stringify(input) });
 
 export interface ProgramDetail {
@@ -483,16 +525,33 @@ export interface AdminCourseDetail {
   code: string;
   title: string;
   credits: number;
+  status: string;
+  description: string | null;
+  semestersOffered: string[];
   department: string;
   departmentId: string;
   prerequisites: { code: string; title: string }[];
+  corequisites: { code: string; title: string }[];
   sections: CourseSection[];
   allCourses: { code: string; title: string }[];
   departments: { id: string; code: string; name: string }[];
   terms: { id: string; name: string }[];
 }
+
+export interface CourseCatalogInput {
+  title?: string;
+  credits?: number;
+  departmentId?: string;
+  status?: "active" | "draft";
+  description?: string | null;
+  semestersOffered?: ("fall" | "spring" | "summer")[];
+  prerequisiteCodes?: string[];
+  corequisiteCodes?: string[];
+}
+export const deleteCourse = (code: string) =>
+  request<{ ok: boolean }>(`/academics/admin/courses/${encodeURIComponent(code)}`, { method: "DELETE" });
 export const getAdminCourseDetail = (code: string) => request<AdminCourseDetail>(`/academics/admin/courses/${encodeURIComponent(code)}`);
-export const updateCourse = (code: string, input: { title?: string; credits?: number; departmentId?: string; prerequisiteCodes?: string[] }) =>
+export const updateCourse = (code: string, input: CourseCatalogInput) =>
   request(`/academics/admin/courses/${encodeURIComponent(code)}`, { method: "PATCH", body: JSON.stringify(input) });
 export interface SectionInput {
   courseCode: string;
@@ -835,6 +894,7 @@ export const bookRoom = (body: { room: string; date: string; startTime: string; 
 export interface AccountInstallment {
   id: string;
   sequence: number;
+  label: string | null;
   dueDate: string;
   amountDue: number;
   amountPaid: number;
@@ -874,8 +934,67 @@ export interface StudentAccountRow {
   overdue: boolean;
   status: string; // paid | due | overdue
   invoiceId: string | null;
+  billingNumber: string | null;
+  billingDescription: string | null;
 }
 export const listStudentAccounts = () => request<StudentAccountRow[]>("/finance/admin/accounts");
+
+// Registrar student provisioning (design flow): creates the record + account + a
+// password-setup invite email, and bills nothing (money stays in the Finance portal).
+export interface RegistrarStudentInput {
+  studentNo: string;
+  firstName: string;
+  lastName?: string;
+  email: string;
+  dateOfBirth?: string | null;
+  programCode?: string | null;
+  gender?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  nationality?: string | null;
+  preferredName?: string | null;
+  nationalId?: string | null;
+  maritalStatus?: string | null;
+  personalEmail?: string | null;
+  bloodType?: string | null;
+  allergies?: string | null;
+  insurance?: string | null;
+  physician?: string | null;
+  guardianName?: string | null;
+  guardianPhone?: string | null;
+  emergencyName2?: string | null;
+  emergencyPhone2?: string | null;
+  advisor?: string | null;
+  yearLevel?: number | null;
+  cohort?: string | null;
+  major?: string | null;
+  minor?: string | null;
+  admitTerm?: string | null;
+  expectedGrad?: string | null;
+  enrollmentStatus?: string | null;
+  catalogYear?: string | null;
+}
+export const createRegistrarStudent = (input: RegistrarStudentInput) =>
+  request<{ id: string; studentNo: string; email: string; inviteExpiresAt: string }>(
+    "/registrar/students",
+    { method: "POST", body: JSON.stringify(input) },
+  );
+
+// Student "Documents on file": six typed PDF slots + an open "other" list.
+export interface StudentDocumentRow {
+  id: string;
+  slot: string;
+  name: string | null;
+  url: string;
+  uploadedAt: string;
+}
+export const getStudentDocuments = (studentId: string) =>
+  request<StudentDocumentRow[]>(`/registrar/students/${studentId}/documents`);
+export const addStudentDocument = (studentId: string, input: { slot: string; url: string; name?: string | null }) =>
+  request<StudentDocumentRow>(`/registrar/students/${studentId}/documents`, { method: "POST", body: JSON.stringify(input) });
+export const removeStudentDocument = (documentId: string) =>
+  request<{ ok: boolean }>(`/registrar/student-documents/${documentId}`, { method: "DELETE" });
 
 // Standalone billing admin: create students + add/remove ad-hoc charges (single or bulk).
 export const createStudent = (input: {
@@ -892,6 +1011,7 @@ export const addCharge = (input: {
   amountXof: number;
   costCenterCode?: string;
   dueDate?: string;
+  installments?: { dueDate: string; amountXof: number; label?: string | null }[];
 }) => request<{ ok: boolean; count: number }>("/finance/admin/charges", { method: "POST", body: JSON.stringify(input) });
 export const removeCharge = (invoiceId: string) =>
   request<{ ok: boolean }>(`/finance/admin/charges/${invoiceId}`, { method: "DELETE" });
@@ -899,7 +1019,7 @@ export const applyDiscount = (input: { studentId: string; label: string; amountX
   request<{ ok: boolean; creditId: string }>("/finance/admin/discounts", { method: "POST", body: JSON.stringify(input) });
 export const updatePaymentPlan = (
   invoiceId: string,
-  installments: { id: string; dueDate: string; amountDue: number }[],
+  installments: { id: string; dueDate: string; amountDue: number; label?: string | null }[],
 ) => request<{ ok: boolean }>(`/finance/admin/plans/${invoiceId}`, { method: "PATCH", body: JSON.stringify({ installments }) });
 
 export interface OverdueRow {
@@ -1593,3 +1713,7 @@ export const sendBroadcast = (input: {
   subject: string;
   body: string;
 }) => request<{ id: string; sent: number }>("/comms/broadcasts", { method: "POST", body: JSON.stringify(input) });
+export const previewBroadcast = (audienceType: "individual" | "year" | "program" | "all", audienceValue?: string) => {
+  const qs = new URLSearchParams({ audienceType, ...(audienceValue ? { audienceValue } : {}) });
+  return request<{ count: number }>(`/comms/broadcasts/preview?${qs.toString()}`);
+};

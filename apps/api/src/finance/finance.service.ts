@@ -173,7 +173,7 @@ export class FinanceService {
   async updatePaymentPlan(
     actorId: string,
     invoiceId: string,
-    rows: { id: string; dueDate: string; amountDue: number }[],
+    rows: { id: string; dueDate: string; amountDue: number; label?: string | null }[],
   ) {
     if (rows.length === 0) throw new BadRequestException("At least one installment is required");
 
@@ -214,7 +214,12 @@ export class FinanceService {
           : "pending";
         await tx.installment.update({
           where: { id: r.id },
-          data: { amountDue: r.amountDue, dueDate: due, status },
+          data: {
+            amountDue: r.amountDue,
+            dueDate: due,
+            status,
+            ...(r.label === undefined ? {} : { label: r.label?.trim() || null }),
+          },
         });
       }
 
@@ -556,6 +561,9 @@ export class FinanceService {
       const billed = s.invoices.reduce((a, i) => a + i.totalAmount, 0);
       const paid = s.invoices.reduce((a, i) => a + i.amountPaid, 0);
       const balance = billed - paid;
+      // The billing row represents a real charge, so skip negative credit memos
+      // (discounts/reversals) when picking which invoice the row stands for.
+      const primary = s.invoices.find((i) => i.totalAmount > 0) ?? s.invoices[0];
       const installments = s.invoices.flatMap((i) => i.plan?.installments ?? []);
       const openCharges = installments.filter((i) => i.amountPaid < i.amountDue).length;
       const overdue = installments.some((i) => i.amountPaid < i.amountDue && i.dueDate.getTime() < now);
@@ -571,7 +579,10 @@ export class FinanceService {
         openCharges,
         overdue,
         status: balance <= 0 ? "paid" : overdue ? "overdue" : "due",
-        invoiceId: s.invoices[0]?.id ?? null,
+        invoiceId: primary?.id ?? null,
+        // Human handle + description drive the design's "Billing" and "Plan" columns.
+        billingNumber: primary?.number ?? null,
+        billingDescription: primary?.description ?? null,
       };
     });
   }
@@ -655,8 +666,10 @@ export class FinanceService {
       dueDate: new Date(`${d}T00:00:00Z`),
       amountDue: amounts[idx] ?? 0,
     }));
+    const year = new Date().getUTCFullYear();
     const invoice = await this.prisma.invoice.create({
       data: {
+        number: this.billingNumber(year, await this.nextBillingSeq(year)),
         studentId,
         termId: term.id,
         totalAmount: STANDARD_TUITION_XOF,
@@ -723,9 +736,35 @@ export class FinanceService {
   }
 
   /** Add an ad-hoc charge to one, several, or all students. Each charge = one single-installment invoice. */
+  private billingNumber(year: number, seq: number): string {
+    return `BILL-${year}-${String(seq).padStart(3, "0")}`;
+  }
+
+  /**
+   * Next free sequence for this year's BILL-<year>-NNN handles. A bulk charge
+   * reserves a contiguous block from this base; the unique index is the real guard.
+   */
+  private async nextBillingSeq(year: number): Promise<number> {
+    const prefix = `BILL-${year}-`;
+    const last = await this.prisma.invoice.findFirst({
+      where: { number: { startsWith: prefix } },
+      orderBy: { number: "desc" },
+      select: { number: true },
+    });
+    const seq = last?.number ? Number.parseInt(last.number.slice(prefix.length), 10) : 0;
+    return (Number.isFinite(seq) ? seq : 0) + 1;
+  }
+
   async addCharge(
     actorId: string,
-    input: { studentIds: string[]; description: string; amountXof: number; costCenterCode?: string; dueDate?: string },
+    input: {
+      studentIds: string[];
+      description: string;
+      amountXof: number;
+      costCenterCode?: string;
+      dueDate?: string;
+      installments?: { dueDate: string; amountXof: number; label?: string | null }[];
+    },
   ) {
     const description = input.description.trim();
     if (!description) throw new BadRequestException("Charge description is required");
@@ -741,6 +780,24 @@ export class FinanceService {
     const dueDate = input.dueDate ? new Date(input.dueDate) : new Date();
     if (Number.isNaN(dueDate.getTime())) throw new BadRequestException("Invalid due date");
 
+    // A billing may carry its own installment schedule; without one it stays the
+    // single-installment charge the bulk "charge all" path has always created.
+    const schedule = input.installments?.length
+      ? input.installments.map((line, idx) => {
+          const due = new Date(line.dueDate);
+          if (Number.isNaN(due.getTime())) throw new BadRequestException("Invalid installment due date");
+          const amountDue = Math.floor(line.amountXof);
+          if (!Number.isFinite(amountDue) || amountDue <= 0) {
+            throw new BadRequestException("Installment amounts must be positive");
+          }
+          return { sequence: idx + 1, dueDate: due, amountDue, label: line.label?.trim() || null };
+        })
+      : [{ sequence: 1, dueDate, amountDue: amount, label: null }];
+    const scheduled = schedule.reduce((sum, line) => sum + line.amountDue, 0);
+    if (scheduled !== amount) {
+      throw new BadRequestException(`Installments (${scheduled}) must sum to the billing total (${amount})`);
+    }
+
     const ids = [...new Set(input.studentIds)];
     if (ids.length === 0) throw new BadRequestException("No students selected");
     const validIds = (
@@ -748,15 +805,19 @@ export class FinanceService {
     ).map((s) => s.id);
     if (validIds.length === 0) throw new NotFoundException("No matching students");
 
+    const billYear = new Date().getUTCFullYear();
+    const billBase = await this.nextBillingSeq(billYear);
+
     // Chunk so a big "charge all" stays comfortably under the interactive-transaction timeout.
     const CHUNK = 25;
     let count = 0;
     for (let i = 0; i < validIds.length; i += CHUNK) {
       const slice = validIds.slice(i, i + CHUNK);
       await this.prisma.$transaction(
-        slice.map((studentId) =>
+        slice.map((studentId, j) =>
           this.prisma.invoice.create({
             data: {
+              number: this.billingNumber(billYear, billBase + i + j),
               studentId,
               termId: term.id,
               totalAmount: amount,
@@ -765,7 +826,7 @@ export class FinanceService {
               plan: {
                 create: {
                   createdById: actorId,
-                  installments: { create: [{ sequence: 1, dueDate, amountDue: amount }] },
+                  installments: { create: schedule },
                 },
               },
             },
@@ -780,7 +841,7 @@ export class FinanceService {
         entityId: "bulk",
         action: "charges-added",
         actorId,
-        data: { description, amount, costCenterCode, count, studentIds: validIds },
+        data: { description, amount, costCenterCode, count, installments: schedule.length, studentIds: validIds },
       },
     });
     return { ok: true, count };

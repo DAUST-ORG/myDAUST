@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BellRing, Star, StarOff } from "lucide-react";
+import { BellRing, Star, StarOff, X } from "lucide-react";
 import {
   type FlaggedStudent,
   type StudentSuccess,
@@ -15,7 +15,7 @@ import {
   watchStudent,
 } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import { Badge, Button, Card, EmptyState, IconButton, PageHeader, SearchInput, Select, Stat } from "@/components/ui";
+import { Avatar, Badge, Button, Card, EmptyState, IconButton, PageHeader, SearchInput, Select, Stat } from "@/components/ui";
 
 /** Below the flagging threshold is a warning; these are the harder "at risk" cut-offs. */
 const CRITICAL_GPA = 2;
@@ -104,6 +104,18 @@ export default function StudentSuccessPage() {
     catch (e) { setError(e instanceof Error ? e.message : "Could not update the follow list."); }
     finally { setBusy(null); }
   }
+
+  async function unfollow(studentId: string) {
+    setBusy(studentId);
+    try { await unwatchStudent(studentId); load(); }
+    catch (e) { setError(e instanceof Error ? e.message : "Could not update the follow list."); }
+    finally { setBusy(null); }
+  }
+
+  const flaggedById = useMemo(
+    () => new Map((data?.flagged ?? []).map((f) => [f.studentId, f])),
+    [data],
+  );
 
   if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
   if (!data) return <p className="muted">Loading…</p>;
@@ -223,14 +235,25 @@ export default function StudentSuccessPage() {
             <EmptyState title="Not following anyone yet" note="Star a flagged student to follow their progress here." />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {watching.map((w) => (
-                <div key={w.studentId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{w.name}</div>
-                    <div className="muted" style={{ fontSize: 12 }}>{w.program ?? w.studentNo}</div>
+              {watching.map((w) => {
+                const f = flaggedById.get(w.studentId);
+                const sub = f
+                  ? `GPA ${f.gpa.toFixed(2)} · ${f.attendance === null ? "—" : `${f.attendance}%`} · ${f.flags.join(" · ")}`
+                  : "No active flags";
+                return (
+                  <div key={w.studentId} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <Avatar name={w.name} size={30} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600 }}>{w.name}</div>
+                      <div className="muted" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>
+                    </div>
+                    {f && <LevelBadge level={f.level} />}
+                    <IconButton label="Unfollow student" disabled={busy === w.studentId} onClick={() => unfollow(w.studentId)}>
+                      <X size={15} />
+                    </IconButton>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>

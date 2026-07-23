@@ -1,11 +1,11 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Pencil } from "lucide-react";
+import { CalendarClock, Check, Pencil } from "lucide-react";
 import { FEE_STRUCTURE } from "@mydaust/shared";
 import { type FeePlan, type FeePlanRow, getFeePlan, updateFeePlanRow } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
-import { Button, Card, EmptyState, Eyebrow, Field, Input, Modal, PageHeader, Stat } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Eyebrow, Field, Input, Modal, PageHeader, Stat } from "@/components/ui";
 
 interface RowDraft {
   label: string;
@@ -142,10 +142,10 @@ export default function FeeSchedulePage() {
             action={
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <span className="muted" style={{ fontSize: 12.5 }}>
-                  {rows.length} installments across {semesters.join(" and ")}
+                  {rows.length} installments across {semesters.join(" and ")} semesters
                   {year ? ` · ${year}` : ""}
                 </span>
-                <Button variant="secondary" size="sm" icon={<Pencil size={14} />} onClick={openEditor}>
+                <Button variant="navy" size="sm" icon={<Pencil size={14} />} onClick={openEditor}>
                   Edit plan
                 </Button>
               </div>
@@ -219,15 +219,35 @@ export default function FeeSchedulePage() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button variant="navy" icon={<Check size={15} />} disabled={busy} onClick={saveSchedule}>
+            <Button variant="primary" icon={<Check size={15} />} disabled={busy} onClick={saveSchedule}>
               Save schedule
             </Button>
           </>
         }
       >
-        <p className="muted" style={{ margin: "0 0 16px", fontSize: 13 }}>
+        <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>
           Adjust installment dates and amounts{year ? ` · ${year}` : ""}
         </p>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 12px",
+            marginBottom: 16,
+            borderRadius: "var(--radius-md)",
+            background: "var(--accent-bg)",
+          }}
+        >
+          <CalendarClock size={16} style={{ color: "var(--daust-navy)", flexShrink: 0 }} />
+          <span style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 700, color: "var(--fg3)" }}>
+            Academic year
+          </span>
+          <strong style={{ fontSize: 13.5 }}>{year || "—"}</strong>
+          <span style={{ flex: 1 }} />
+          <Badge tone="neutral">Auto-filled · active</Badge>
+        </div>
 
         {semesters.map((sem) => (
           <div key={sem} style={{ marginBottom: 18 }}>

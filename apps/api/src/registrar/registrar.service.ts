@@ -1,15 +1,219 @@
+import { createHash, randomBytes } from "node:crypto";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { MailService } from "../mail/mail.service.js";
 import { computeGpa } from "../academics/academics.service.js";
 
 /** Defaults for the early-alert thresholds shown on Student Success. */
 const DEFAULT_MIN_GPA = 2.5;
 const DEFAULT_MIN_ATTENDANCE = 75;
+const INVITE_TTL_HOURS = 72;
+
+/** The extended student columns the design's Add/Edit record modal captures. */
+export interface RegistrarStudentInput {
+  studentNo: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  dateOfBirth?: string | null;
+  programCode?: string | null;
+  gender?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  nationality?: string | null;
+  preferredName?: string | null;
+  nationalId?: string | null;
+  maritalStatus?: string | null;
+  personalEmail?: string | null;
+  bloodType?: string | null;
+  allergies?: string | null;
+  insurance?: string | null;
+  physician?: string | null;
+  guardianName?: string | null;
+  guardianPhone?: string | null;
+  emergencyName2?: string | null;
+  emergencyPhone2?: string | null;
+  advisor?: string | null;
+  yearLevel?: number | null;
+  cohort?: string | null;
+  major?: string | null;
+  minor?: string | null;
+  admitTerm?: string | null;
+  expectedGrad?: string | null;
+  enrollmentStatus?: string | null;
+  catalogYear?: string | null;
+}
 
 @Injectable()
 export class RegistrarService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mail: MailService,
+  ) {}
+
+  // --- Students -----------------------------------------------------------
+
+  /**
+   * Provision a student record + account and email a password-setup link — the
+   * registrar's design flow. Deliberately does NOT bill tuition: money stays in the
+   * bursar's Finance portal, so this touches no invoices and no finance code.
+   */
+  async createStudent(actorId: string, input: RegistrarStudentInput) {
+    const studentNo = input.studentNo.trim();
+    if (!studentNo) throw new BadRequestException("A Student ID is required");
+    if (await this.prisma.student.findUnique({ where: { studentNo } })) {
+      throw new BadRequestException(`This ID is already assigned to another student.`);
+    }
+    const email = input.email.trim().toLowerCase();
+    if (!email) throw new BadRequestException("An email is required");
+    if (await this.prisma.person.findUnique({ where: { email } })) {
+      throw new BadRequestException(`Email ${email} is already in use`);
+    }
+    const dob = input.dateOfBirth
+      ? new Date(`${input.dateOfBirth.slice(0, 10)}T00:00:00Z`)
+      : null;
+    if (dob && Number.isNaN(dob.getTime())) throw new BadRequestException("Invalid date of birth");
+
+    let programId: string | null = null;
+    if (input.programCode) {
+      const program = await this.prisma.program.findUnique({ where: { code: input.programCode } });
+      if (!program) throw new BadRequestException("Unknown program");
+      programId = program.id;
+    }
+
+    const norm = (v: string | null | undefined) => {
+      const t = typeof v === "string" ? v.trim() : v;
+      return t ? t : null;
+    };
+
+    const student = await this.prisma.$transaction(async (tx) => {
+      const person = await tx.person.create({
+        data: {
+          email,
+          firstName: input.firstName.trim(),
+          lastName: input.lastName.trim() || input.firstName.trim(),
+          kind: "student",
+          roles: ["student"],
+        },
+      });
+      const created = await tx.student.create({
+        data: {
+          personId: person.id,
+          studentNo,
+          dateOfBirth: dob,
+          programId,
+          gender: norm(input.gender),
+          phone: norm(input.phone),
+          address: norm(input.address),
+          city: norm(input.city),
+          nationality: norm(input.nationality),
+          preferredName: norm(input.preferredName),
+          nationalId: norm(input.nationalId),
+          maritalStatus: norm(input.maritalStatus),
+          personalEmail: norm(input.personalEmail),
+          bloodType: norm(input.bloodType),
+          allergies: norm(input.allergies),
+          insurance: norm(input.insurance),
+          physician: norm(input.physician),
+          guardianName: norm(input.guardianName),
+          guardianPhone: norm(input.guardianPhone),
+          emergencyName2: norm(input.emergencyName2),
+          emergencyPhone2: norm(input.emergencyPhone2),
+          advisor: norm(input.advisor),
+          yearLevel: input.yearLevel ?? null,
+          cohort: norm(input.cohort),
+          major: norm(input.major),
+          minor: norm(input.minor),
+          admitTerm: norm(input.admitTerm),
+          expectedGrad: norm(input.expectedGrad),
+          enrollmentStatus: norm(input.enrollmentStatus),
+          catalogYear: norm(input.catalogYear),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          entity: "Student",
+          entityId: created.id,
+          action: "student-created",
+          actorId,
+          data: { studentNo, email },
+        },
+      });
+      return { student: created, person };
+    });
+
+    const name = `${input.firstName.trim()} ${input.lastName.trim()}`.trim();
+    const invite = await this.issueStudentInvite(student.person.id, email, name);
+    return { id: student.student.id, studentNo, email, inviteExpiresAt: invite.expiresAt };
+  }
+
+  /** Invite tokens are stored hashed — a leaked database row must not grant access. */
+  private hashToken(token: string): string {
+    return createHash("sha256").update(token).digest("hex");
+  }
+
+  /** Issue a student password-setup token and email it (mirrors the guardian invite). */
+  private async issueStudentInvite(studentPersonId: string, email: string, name: string) {
+    const token = randomBytes(32).toString("base64url");
+    const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 3600_000);
+    await this.prisma.studentInvite.create({
+      data: { studentPersonId, tokenHash: this.hashToken(token), expiresAt },
+    });
+    const origin = process.env.PUBLIC_URL ?? "http://localhost:3000";
+    const link = `${origin}/set-password?token=${token}`;
+    await this.mail.send({
+      to: email,
+      subject: "Set up your myDAUST student account",
+      html: `
+        <p>Hello ${name},</p>
+        <p>A myDAUST student account has been created for you.</p>
+        <p><a href="${link}">Set your password</a> (link valid for ${INVITE_TTL_HOURS} hours).</p>
+        <p>If you were not expecting this, you can ignore this email.</p>
+      `,
+    });
+    return { expiresAt, link };
+  }
+
+  // --- Student documents (design's "Documents on file") -------------------
+
+  async listDocuments(studentId: string) {
+    return this.prisma.studentDocument.findMany({
+      where: { studentId },
+      orderBy: { uploadedAt: "desc" },
+    });
+  }
+
+  async addDocument(
+    actorId: string,
+    studentId: string,
+    input: { slot: string; url: string; name?: string | null },
+  ) {
+    const student = await this.prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) throw new NotFoundException("Student not found");
+    // The six typed slots hold one document each; "other" is an open list.
+    if (input.slot !== "other") {
+      await this.prisma.studentDocument.deleteMany({ where: { studentId, slot: input.slot } });
+    }
+    const doc = await this.prisma.studentDocument.create({
+      data: { studentId, slot: input.slot, url: input.url, name: input.name ?? null },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "StudentDocument", entityId: doc.id, action: "created", actorId, data: { studentId, slot: input.slot } },
+    });
+    return doc;
+  }
+
+  async removeDocument(actorId: string, documentId: string) {
+    const doc = await this.prisma.studentDocument.findUnique({ where: { id: documentId } });
+    if (!doc) throw new NotFoundException("Document not found");
+    await this.prisma.studentDocument.delete({ where: { id: documentId } });
+    await this.prisma.auditLog.create({
+      data: { entity: "StudentDocument", entityId: documentId, action: "deleted", actorId, data: { studentId: doc.studentId, slot: doc.slot } },
+    });
+    return { ok: true };
+  }
 
   // --- Departments --------------------------------------------------------
 
@@ -343,6 +547,12 @@ export class RegistrarService {
    * stored, so the list always reflects current grades and attendance.
    */
   async studentSuccess(actorId: string, minGpa = DEFAULT_MIN_GPA, minAttendance = DEFAULT_MIN_ATTENDANCE) {
+    // "Warnings sent this term" is scoped to the active term's date range; falls
+    // back to all-time only when no term is marked active.
+    const activeTerm = await this.prisma.term.findFirst({ where: { status: "active" } });
+    const warnWhere = activeTerm
+      ? { warnedAt: { gte: activeTerm.startDate, lte: activeTerm.endDate } }
+      : { warnedAt: { not: null } };
     const [students, watched, warningsSent] = await Promise.all([
       this.prisma.student.findMany({
         include: {
@@ -355,7 +565,7 @@ export class RegistrarService {
         },
       }),
       this.prisma.staffWatch.findMany({ where: { personId: actorId }, select: { studentId: true } }),
-      this.prisma.studentAlert.count({ where: { warnedAt: { not: null } } }),
+      this.prisma.studentAlert.count({ where: warnWhere }),
     ]);
     const watchedIds = new Set(watched.map((w) => w.studentId));
 

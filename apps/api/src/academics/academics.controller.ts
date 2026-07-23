@@ -36,11 +36,17 @@ const CreateProgramInput = z.object({
   color: z.string().max(20).nullable().optional(),
 });
 
+const SEMESTERS = z.array(z.enum(["fall", "spring", "summer"]));
 const CreateCourseInput = z.object({
   code: z.string().min(1).max(20),
   title: z.string().min(1).max(160),
   credits: z.number().int().min(1).max(12),
   departmentId: z.string().min(1),
+  status: z.enum(["active", "draft"]).optional(),
+  description: z.string().max(2000).nullish(),
+  semestersOffered: SEMESTERS.optional(),
+  prerequisiteCodes: z.array(z.string().max(20)).optional(),
+  corequisiteCodes: z.array(z.string().max(20)).optional(),
 });
 
 const UpdateProgramInput = z.object({
@@ -56,7 +62,11 @@ const UpdateCourseInput = z.object({
   title: z.string().min(1).max(160).optional(),
   credits: z.number().int().min(1).max(12).optional(),
   departmentId: z.string().min(1).optional(),
+  status: z.enum(["active", "draft"]).optional(),
+  description: z.string().max(2000).nullish(),
+  semestersOffered: SEMESTERS.optional(),
   prerequisiteCodes: z.array(z.string().max(20)).optional(),
+  corequisiteCodes: z.array(z.string().max(20)).optional(),
 });
 
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -261,6 +271,12 @@ export class AcademicsController {
   updateCourse(@CurrentUser() user: AuthUser, @Param("code") code: string, @Body() body: unknown) {
     const input = UpdateCourseInput.parse(body);
     return this.academics.updateCourse(user.personId, code, input);
+  }
+
+  @Delete("admin/courses/:code")
+  @Roles("admin", "registrar")
+  deleteCourse(@CurrentUser() user: AuthUser, @Param("code") code: string) {
+    return this.academics.deleteCourse(user.personId, code);
   }
 
   @Post("admin/sections")

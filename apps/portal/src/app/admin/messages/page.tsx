@@ -17,6 +17,7 @@ import {
   getAdminPrograms,
   getAdminStudents,
   getBroadcasts,
+  previewBroadcast,
   sendBroadcast,
   type AdminStudent,
   type BroadcastRow,
@@ -59,13 +60,14 @@ export default function RegistrarMessagesPage() {
 
   const [audienceType, setAudienceType] = useState<AudienceType>("individual");
   const [studentNo, setStudentNo] = useState("");
-  const [year, setYear] = useState("1");
-  const [programCode, setProgramCode] = useState("");
+  const [year, setYear] = useState("all");
+  const [programCode, setProgramCode] = useState("all");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
 
   const [sending, setSending] = useState(false);
   const [sentNote, setSentNote] = useState<string | null>(null);
+  const [preview, setPreview] = useState<number | null>(null);
 
   useEffect(() => {
     getAdminStudents().then(setStudents).catch(() => setStudents([]));
@@ -73,18 +75,34 @@ export default function RegistrarMessagesPage() {
     getBroadcasts().then(setBroadcasts).catch(() => setBroadcasts([]));
   }, []);
 
-  const audienceValue = useMemo(() => {
-    if (audienceType === "individual") return studentNo || undefined;
-    if (audienceType === "year") return year;
-    if (audienceType === "program") return programCode || undefined;
-    return undefined;
+  // "All years"/"All programs" collapse to the whole student body.
+  const effective = useMemo<{ type: AudienceType; value?: string }>(() => {
+    if (audienceType === "individual") return { type: "individual", value: studentNo || undefined };
+    if (audienceType === "year") return year === "all" ? { type: "all" } : { type: "year", value: year };
+    if (audienceType === "program") return programCode === "all" ? { type: "all" } : { type: "program", value: programCode };
+    return { type: "all" };
   }, [audienceType, studentNo, year, programCode]);
+
+  const audienceLabel = useMemo(() => {
+    if (audienceType === "individual") return students.find((s) => s.studentNo === studentNo)?.name ?? "Select a student";
+    if (audienceType === "year") return year === "all" ? "All years" : `Year ${year}`;
+    if (audienceType === "program") return programCode === "all" ? "All programs" : programs.find((p) => p.code === programCode)?.name ?? programCode;
+    return "All students";
+  }, [audienceType, studentNo, year, programCode, students, programs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (audienceType === "individual") { setPreview(studentNo ? 1 : 0); return; }
+    previewBroadcast(effective.type, effective.value)
+      .then((r) => { if (!cancelled) setPreview(r.count); })
+      .catch(() => { if (!cancelled) setPreview(null); });
+    return () => { cancelled = true; };
+  }, [audienceType, studentNo, effective.type, effective.value]);
 
   const canSend =
     subject.trim().length > 0 &&
     body.trim().length > 0 &&
-    (audienceType !== "individual" || studentNo.length > 0) &&
-    (audienceType !== "program" || programCode.length > 0);
+    (audienceType !== "individual" || studentNo.length > 0);
 
   async function handleSend() {
     if (!canSend || sending) return;
@@ -92,8 +110,8 @@ export default function RegistrarMessagesPage() {
     setSentNote(null);
     try {
       const res = await sendBroadcast({
-        audienceType,
-        audienceValue,
+        audienceType: effective.type,
+        audienceValue: effective.value,
         subject: subject.trim(),
         body: body.trim(),
       });
@@ -118,7 +136,7 @@ export default function RegistrarMessagesPage() {
 
   const programOptions = useMemo(
     () => [
-      { value: "", label: "— Select program —" },
+      { value: "all", label: "All programs" },
       ...programs.map((p) => ({ value: p.code, label: `${p.code} · ${p.name}` })),
     ],
     [programs],
@@ -169,17 +187,24 @@ export default function RegistrarMessagesPage() {
                 <Select
                   value={year}
                   onChange={setYear}
-                  options={[1, 2, 3, 4].map((n) => ({ value: String(n), label: `Year ${n}` }))}
+                  options={[{ value: "all", label: "All years" }, ...[1, 2, 3, 4].map((n) => ({ value: String(n), label: `Year ${n}` }))]}
                   style={selectStyle}
                 />
               </Field>
             )}
 
             {audienceType === "program" && (
-              <Field label="Program">
+              <Field label="Program (major)">
                 <Select value={programCode} onChange={setProgramCode} options={programOptions} style={selectStyle} />
               </Field>
             )}
+
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 7, alignSelf: "flex-start", background: "var(--accent-bg)", color: "var(--daust-navy)", borderRadius: 999, padding: "6px 13px", fontSize: 13, fontWeight: 600 }}>
+              <Users size={14} />
+              {audienceType === "individual" && !studentNo
+                ? "Select a student"
+                : `${preview ?? "…"} recipient${preview === 1 ? "" : "s"} · ${audienceLabel}`}
+            </div>
 
             <Field label="Subject">
               <input

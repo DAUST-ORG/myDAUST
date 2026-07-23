@@ -1,10 +1,9 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Check, Undo2 } from "lucide-react";
 import { type GradeApprovalRow, decideGradeApproval, getGradeApprovals } from "@/lib/api";
-import { formatDate } from "@/lib/format";
-import { Badge, Button, Card, EmptyState, PageHeader, SearchInput, Select } from "@/components/ui";
+import { Badge, EmptyState, PageHeader, SearchInput, Select } from "@/components/ui";
 
 const STATUS_LABEL: Record<string, string> = {
   draft: "Draft",
@@ -19,21 +18,11 @@ export default function GradeApprovalsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [statusF, setStatusF] = useState("all");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(() => {
     getGradeApprovals().then(setRows).catch((e: Error) => setError(e.message));
   }, []);
   useEffect(load, [load]);
-
-  function toggle(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
 
   async function decide(id: string, decision: "approved" | "returned") {
     setBusy(id);
@@ -56,7 +45,7 @@ export default function GradeApprovalsPage() {
     <>
       <PageHeader
         eyebrow="Policy & rules"
-        title="Grade approvals"
+        title="Grade Approvals"
         subtitle={`${pending.length} submission(s) awaiting approval`}
         actions={
           <>
@@ -83,88 +72,53 @@ export default function GradeApprovalsPage() {
       {rows && rows.length > 0 && visible.length === 0 && <EmptyState title="No submissions match" />}
 
       {visible.length > 0 && (
-        <Card pad={false}>
-          <table>
-            <thead>
-              <tr>
-                <th style={{ width: 34 }} />
-                <th>Course</th><th>Term</th><th>Instructor</th><th style={{ textAlign: "right" }}>Graded</th><th>Status</th><th>Submitted</th><th />
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((r) => {
-                const open = expanded.has(r.id);
-                return (
-                  <Fragment key={r.id}>
-                    <tr className="sis-row">
-                      <td>
-                        <button
-                          type="button"
-                          aria-label={open ? "Collapse students" : "Expand students"}
-                          aria-expanded={open}
-                          onClick={() => toggle(r.id)}
-                          className="sis-btn"
-                          style={{ width: 28, height: 28, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--radius-md)", background: "transparent", border: "none", color: "var(--fg3)", cursor: "pointer" }}
-                        >
-                          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                        </button>
-                      </td>
-                      <td><div style={{ fontWeight: 600 }}>{r.course}</div><div className="muted" style={{ fontSize: 12 }}>§{r.sectionCode}</div></td>
-                      <td>{r.term}</td>
-                      <td>{r.instructor ?? "—"}</td>
-                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.graded}/{r.students} graded</td>
-                      <td>
-                        <Badge tone={r.status === "approved" ? "success" : r.status === "submitted" ? "warning" : r.status === "returned" ? "error" : "neutral"}>
-                          {STATUS_LABEL[r.status] ?? r.status}
-                        </Badge>
-                      </td>
-                      <td>{r.submittedAt ? formatDate(r.submittedAt) : <span className="muted">—</span>}</td>
-                      <td>
-                        {r.status === "submitted" && (
-                          <span style={{ display: "flex", gap: 6 }}>
-                            <Button size="sm" variant="navy" icon={<Check size={12} />} disabled={busy === r.id} onClick={() => decide(r.id, "approved")}>Approve</Button>
-                            <Button size="sm" icon={<Undo2 size={12} />} disabled={busy === r.id} onClick={() => decide(r.id, "returned")}>Return</Button>
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                    {open && (
-                      <tr>
-                        <td />
-                        <td colSpan={7} style={{ paddingTop: 4, paddingBottom: 14 }}>
-                          {r.grades.length === 0 ? (
-                            <span className="muted" style={{ fontSize: 12.5 }}>No students enrolled.</span>
-                          ) : (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                              {r.grades.map((g) => (
-                                <span
-                                  key={g.name}
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: 8,
-                                    padding: "4px 6px 4px 12px",
-                                    borderRadius: "var(--radius-pill)",
-                                    border: "1px solid var(--border)",
-                                    background: "var(--surface)",
-                                    fontSize: 12.5,
-                                  }}
-                                >
-                                  {g.name}
-                                  <Badge tone={g.grade ? "navy" : "neutral"}>{g.grade ?? "—"}</Badge>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </Card>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {visible.map((r) => (
+            <div key={r.id} className="card" style={{ margin: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, fontWeight: 700, color: "var(--daust-navy)" }}>{r.course} · §{r.sectionCode}</span>
+                <Badge tone={r.status === "approved" ? "success" : r.status === "submitted" ? "warning" : r.status === "returned" ? "error" : "neutral"}>
+                  {STATUS_LABEL[r.status] ?? r.status}
+                </Badge>
+                <span style={{ fontWeight: 600, fontSize: 14 }}>{r.term}</span>
+                <span style={{ flex: 1 }} />
+                <span className="muted" style={{ fontSize: 12.5 }}>{r.instructor ?? "—"} · {r.graded}/{r.students} graded</span>
+                {r.status === "submitted" && (
+                  <span style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => decide(r.id, "returned")}
+                      disabled={busy === r.id}
+                      style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 13px", borderRadius: 8, background: "#fff", color: "#a3291b", border: "1px solid #f1c9c1", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+                    >
+                      <Undo2 size={13} /> Return
+                    </button>
+                    <button
+                      onClick={() => decide(r.id, "approved")}
+                      disabled={busy === r.id}
+                      style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 13px", borderRadius: 8, background: "var(--success-500, #1f9d55)", color: "#fff", border: "none", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+                    >
+                      <Check size={13} /> Approve
+                    </button>
+                  </span>
+                )}
+              </div>
+              <div style={{ borderTop: "1px solid var(--divider)", marginTop: 12, paddingTop: 12 }}>
+                {r.grades.length === 0 ? (
+                  <span className="muted" style={{ fontSize: 12.5 }}>No students enrolled.</span>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {r.grades.map((g) => (
+                      <span key={g.name} style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "4px 6px 4px 12px", borderRadius: "var(--radius-pill)", border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12.5 }}>
+                        {g.name}
+                        <Badge tone={g.grade ? "navy" : "neutral"}>{g.grade ?? "—"}</Badge>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </>
   );

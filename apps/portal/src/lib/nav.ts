@@ -137,7 +137,7 @@ export const REGISTRAR_NAV: PortalNav = {
       { href: "/admin/grade-approvals", label: "Grade Approvals", icon: ClipboardCheck, badgeKey: "approvals" },
     ]),
     g("Administration", [
-      { href: "/admin/staff", label: "Faculty & Staff", icon: ShieldCheck },
+      { href: "/admin/staff", label: "Roles & Permissions", icon: ShieldCheck },
       { href: "/admin/settings", label: "Security & System", icon: Settings },
     ]),
     g("Communication", [{ href: "/admin/messages", label: "Messages", icon: Mail }]),
@@ -200,7 +200,7 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/admin/rules": { title: "Rule Engine — Prerequisites & Co-requisites", crumb: "Enrollment rule engine · Administration" },
   "/admin/grading-schemes": { title: "Grading Scales & Schemes", crumb: "Grade scheme configuration · Administration" },
   "/admin/grade-approvals": { title: "Grade Approvals", crumb: "Approve submitted grades · Administration" },
-  "/admin/staff": { title: "Faculty & Staff", crumb: "Staff directory & role assignment · Administration" },
+  "/admin/staff": { title: "Roles & Permissions", crumb: "Role-based access control · Administration" },
   "/admin/settings": { title: "Security & System", crumb: "System configuration · Administration" },
   "/admin/messages": { title: "Messages", crumb: "Broadcast & direct messaging · Administration" },
   // finance

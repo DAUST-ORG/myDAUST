@@ -86,10 +86,54 @@ const CurriculumInput = z.object({
     .max(200),
 });
 
+const nz = z.string().trim().max(160).nullish();
+const CreateStudentInput = z.object({
+  studentNo: z.string().trim().min(1).max(40),
+  firstName: z.string().trim().min(1).max(80),
+  lastName: z.string().trim().max(80).default(""),
+  email: z.string().trim().email().max(160),
+  dateOfBirth: z.string().min(8).nullish(),
+  programCode: z.string().trim().max(40).nullish(),
+  gender: nz, phone: nz, address: nz, city: nz, nationality: nz,
+  preferredName: nz, nationalId: nz, maritalStatus: nz, personalEmail: nz,
+  bloodType: nz, allergies: nz, insurance: nz, physician: nz,
+  guardianName: nz, guardianPhone: nz, emergencyName2: nz, emergencyPhone2: nz,
+  advisor: nz, cohort: nz, major: nz, minor: nz, admitTerm: nz, expectedGrad: nz,
+  enrollmentStatus: nz, catalogYear: nz,
+  yearLevel: z.number().int().min(1).max(8).nullish(),
+});
+
+const StudentDocumentInput = z.object({
+  slot: z.string().trim().min(1).max(40),
+  url: z.string().trim().min(1).max(500),
+  name: z.string().trim().max(200).nullish(),
+});
+
 @Controller("registrar")
 @Roles("admin", "registrar")
 export class RegistrarController {
   constructor(private readonly registrar: RegistrarService) {}
+
+  @Post("students")
+  createStudent(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.registrar.createStudent(user.personId, CreateStudentInput.parse(body));
+  }
+
+  @Get("students/:id/documents")
+  listDocuments(@Param("id") id: string) {
+    return this.registrar.listDocuments(id);
+  }
+
+  @Post("students/:id/documents")
+  addDocument(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+    const input = StudentDocumentInput.parse(body);
+    return this.registrar.addDocument(user.personId, id, input);
+  }
+
+  @Delete("student-documents/:documentId")
+  removeDocument(@CurrentUser() user: AuthUser, @Param("documentId") documentId: string) {
+    return this.registrar.removeDocument(user.personId, documentId);
+  }
 
   @Get("departments")
   departments() {

@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { type FeePlan, type StudentAccountRow, getCurrentTerm, getFeePlan, listStudentAccounts } from "@/lib/api";
-import { formatXof, formatXofCompact } from "@/lib/format";
+import { formatXof, formatXofAbbrev } from "@/lib/format";
 import { Avatar, Badge, Card, PageHeader, Stat } from "@/components/ui";
 
 /** Above this balance an account reads as overdue rather than merely due. */
@@ -48,7 +47,7 @@ export default function FinanceDashboard() {
           <div className="kpi-grid" style={{ marginBottom: 20 }}>
             <Stat
               label="Outstanding"
-              value={formatXofCompact(outstanding)}
+              value={formatXofAbbrev(outstanding)}
               sub="FCFA due"
               tone="var(--danger)"
             />
@@ -73,9 +72,8 @@ export default function FinanceDashboard() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {owing.map((r) => (
-                  <Link
+                  <div
                     key={r.id}
-                    href={`/admin/finance/students/${r.id}`}
                     className="sis-row"
                     style={{
                       display: "flex",
@@ -95,7 +93,7 @@ export default function FinanceDashboard() {
                     <Badge tone={r.balance >= OVERDUE_XOF ? "warning" : "navy"}>
                       {r.balance >= OVERDUE_XOF ? "Overdue" : "Due"}
                     </Badge>
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}

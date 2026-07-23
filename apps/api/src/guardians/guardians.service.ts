@@ -284,40 +284,54 @@ export class GuardiansService {
     if (password.length < 10) {
       throw new BadRequestException("Password must be at least 10 characters");
     }
-    const invite = await this.prisma.guardianInvite.findUnique({
-      where: { tokenHash: this.hashToken(token) },
+    const tokenHash = this.hashToken(token);
+    const valid = (inv: { usedAt: Date | null; expiresAt: Date } | null): boolean =>
+      !!inv && !inv.usedAt && inv.expiresAt.getTime() >= Date.now();
+
+    // Guardian invite first, then the student invite — one opaque token, one page.
+    const gInvite = await this.prisma.guardianInvite.findUnique({
+      where: { tokenHash },
       include: { guardian: true },
     });
-    // Same generic failure for unknown, used and expired tokens — no oracle.
-    if (!invite || invite.usedAt || invite.expiresAt.getTime() < Date.now()) {
-      throw new BadRequestException("That invitation link is invalid or has expired");
+    if (valid(gInvite)) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      await this.prisma.$transaction(async (tx) => {
+        await tx.person.update({ where: { id: gInvite!.guardianId }, data: { passwordHash } });
+        await tx.guardianInvite.update({ where: { id: gInvite!.id }, data: { usedAt: new Date() } });
+        // Any other outstanding invites for this guardian are now moot.
+        await tx.guardianInvite.updateMany({
+          where: { guardianId: gInvite!.guardianId, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+        await tx.auditLog.create({
+          data: { entity: "Person", entityId: gInvite!.guardianId, action: "guardian-password-set", actorId: gInvite!.guardianId },
+        });
+      });
+      return { ok: true, email: gInvite!.guardian.email };
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.person.update({
-        where: { id: invite.guardianId },
-        data: { passwordHash },
-      });
-      await tx.guardianInvite.update({
-        where: { id: invite.id },
-        data: { usedAt: new Date() },
-      });
-      // Any other outstanding invites for this guardian are now moot.
-      await tx.guardianInvite.updateMany({
-        where: { guardianId: invite.guardianId, usedAt: null },
-        data: { usedAt: new Date() },
-      });
-      await tx.auditLog.create({
-        data: {
-          entity: "Person",
-          entityId: invite.guardianId,
-          action: "guardian-password-set",
-          actorId: invite.guardianId,
-        },
-      });
+    const sInvite = await this.prisma.studentInvite.findUnique({
+      where: { tokenHash },
+      include: { person: true },
     });
-    return { ok: true, email: invite.guardian.email };
+    if (valid(sInvite)) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      await this.prisma.$transaction(async (tx) => {
+        await tx.person.update({ where: { id: sInvite!.studentPersonId }, data: { passwordHash } });
+        await tx.studentInvite.update({ where: { id: sInvite!.id }, data: { usedAt: new Date() } });
+        await tx.studentInvite.updateMany({
+          where: { studentPersonId: sInvite!.studentPersonId, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+        await tx.auditLog.create({
+          data: { entity: "Person", entityId: sInvite!.studentPersonId, action: "student-password-set", actorId: sInvite!.studentPersonId },
+        });
+      });
+      return { ok: true, email: sInvite!.person.email };
+    }
+
+    // Same generic failure for unknown, used and expired tokens — no oracle.
+    throw new BadRequestException("That invitation link is invalid or has expired");
   }
 
   // --- Parent-facing ------------------------------------------------------

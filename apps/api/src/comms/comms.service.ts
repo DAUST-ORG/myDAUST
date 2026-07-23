@@ -254,6 +254,16 @@ export class CommsService {
     return students.map((s) => s.personId);
   }
 
+  /** Pre-send recipient count for the compose chip; never throws (0 on empty/invalid). */
+  async previewAudience(audienceType: "individual" | "year" | "program" | "all", audienceValue?: string) {
+    try {
+      const ids = await this.resolveAudience(audienceType, audienceValue);
+      return { count: ids.length };
+    } catch {
+      return { count: 0 };
+    }
+  }
+
   /** Broadcasts the caller has sent, most recent first, for the "Sent messages" list. */
   async listBroadcasts(personId: string) {
     const rows = await this.prisma.broadcast.findMany({

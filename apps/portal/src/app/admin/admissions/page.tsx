@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Download, FilePlus2, Filter } from "lucide-react";
+import { FilePlus2 } from "lucide-react";
 import { type Admissions, getAdmissions, getAdminPrograms, setApplicantStage } from "@/lib/api";
 import { Avatar, Badge, type BadgeTone, Button, PageHeader, SearchInput, Select, SortTh, Stat, useSort } from "@/components/ui";
 import { ApplicationModal, type ProgramOption } from "./ApplicationModal";
@@ -44,8 +44,6 @@ export default function AdmissionsPage() {
   const [programOptions, setProgramOptions] = useState<ProgramOption[]>([]);
   const [q, setQ] = useState("");
   const [stageF, setStageF] = useState("all");
-  const [showFilters, setShowFilters] = useState(false);
-  const [progF, setProgF] = useState("all");
   const [adding, setAdding] = useState(false);
   const [advancing, setAdvancing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -74,7 +72,7 @@ export default function AdmissionsPage() {
     }
   }
 
-  const programs = useMemo(() => Array.from(new Set((d?.applicants ?? []).map((a) => a.program).filter((p) => p && p !== "—"))), [d]);
+  const progName = (code: string | null) => programOptions.find((p) => p.code === code)?.name ?? code ?? "—";
 
   const stats = useMemo(() => {
     const cnt = (st: string) => d?.funnel.find((f) => f.stage === st)?.count ?? 0;
@@ -97,7 +95,6 @@ export default function AdmissionsPage() {
     const base = (d?.applicants ?? []).filter(
       (a) =>
         (stageF === "all" || a.stage === stageF) &&
-        (progF === "all" || a.program === progF) &&
         (!needle || a.name.toLowerCase().includes(needle) || a.email.toLowerCase().includes(needle)),
     );
     return apply(base, {
@@ -108,19 +105,7 @@ export default function AdmissionsPage() {
       stage: (a) => STAGES.indexOf(a.stage),
       submitted: (a) => a.submittedAt,
     });
-  }, [d, q, stageF, progF, apply]);
-
-  function exportCsv() {
-    const header = ["Name", "Email", "Program", "Country", "BAC", "Fee paid", "Stage", "Submitted"];
-    const lines = rows.map((a) => [a.name, a.email, a.program, a.country ?? "", a.score ?? "", a.feePaid ? "yes" : "no", a.stage, a.submittedAt.slice(0, 10)]);
-    const csv = [header, ...lines].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "applicants.csv";
-    link.click();
-    URL.revokeObjectURL(url);
-  }
+  }, [d, q, stageF, apply]);
 
   if (!d) return <p className="muted">Loading…</p>;
 
@@ -160,15 +145,7 @@ export default function AdmissionsPage() {
         <div style={{ flex: "3 1 480px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <SearchInput value={q} onChange={setQ} placeholder="Filter applicants…" width={280} />
-            <button onClick={() => setShowFilters((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 7 }}><Filter size={15} /> Filters</button>
-            {showFilters && (
-              <>
-                <Select value={stageF} onChange={setStageF} options={[{ value: "all", label: "All stages" }, ...STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s]! }))]} />
-                <Select value={progF} onChange={setProgF} options={[{ value: "all", label: "All programs" }, ...programs.map((p) => ({ value: p, label: p }))]} />
-              </>
-            )}
-            <span style={{ flex: 1 }} />
-            <button onClick={exportCsv} style={{ display: "flex", alignItems: "center", gap: 7 }}><Download size={15} /> Export</button>
+            <Select value={stageF} onChange={setStageF} options={[{ value: "all", label: "All stages" }, ...STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s]! }))]} />
           </div>
 
           {err && <p className="card" style={{ margin: 0, color: "var(--danger)" }}>{err}</p>}
@@ -179,13 +156,9 @@ export default function AdmissionsPage() {
                 <thead>
                   <tr>
                     <SortTh label="Applicant" sortKey="name" sort={sort} onSort={toggle} />
-                    <SortTh label="Program" sortKey="program" sort={sort} onSort={toggle} />
-                    <SortTh label="Country" sortKey="country" sort={sort} onSort={toggle} />
-                    <SortTh label="BAC" sortKey="score" sort={sort} onSort={toggle} />
-                    <th>Fee</th>
+                    <SortTh label="Score" sortKey="score" sort={sort} onSort={toggle} />
                     <SortTh label="Stage" sortKey="stage" sort={sort} onSort={toggle} />
-                    <SortTh label="Submitted" sortKey="submitted" sort={sort} onSort={toggle} />
-                    <th>Actions</th>
+                    <th style={{ textAlign: "right" }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -196,35 +169,28 @@ export default function AdmissionsPage() {
                           <Avatar name={a.name} size={30} />
                           <div>
                             <div style={{ fontWeight: 600 }}>{a.name}</div>
-                            <div className="muted" style={{ fontSize: 11.5 }}>{a.email}</div>
+                            <div className="muted" style={{ fontSize: 11.5 }}>{progName(a.program)} · {a.submittedAt.slice(0, 10)}</div>
                           </div>
                         </div>
                       </td>
-                      <td><Badge tone="neutral">{a.program}</Badge></td>
-                      <td>{a.country ?? "—"}</td>
                       <td style={{ fontWeight: 700 }}>{a.score ?? "—"}</td>
-                      <td>{a.feePaid ? <Badge tone="success">Paid</Badge> : <Badge tone="warning">Due</Badge>}</td>
                       <td><Badge tone={STAGE_TONE[a.stage] ?? "neutral"}>{STAGE_LABEL[a.stage] ?? a.stage}</Badge></td>
-                      <td style={{ whiteSpace: "nowrap" }}>{a.submittedAt.slice(0, 10)}</td>
-                      <td onClick={(e) => e.stopPropagation()} style={{ cursor: "default" }}>
-                        <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                          {STAGE_ACTION[a.stage] && (
-                            <Button
-                              size="sm"
-                              variant={STAGE_ACTION[a.stage]!.variant}
-                              disabled={advancing === a.id}
-                              onClick={() => advance(a.id, STAGE_ACTION[a.stage]!.next)}
-                            >
-                              {advancing === a.id ? "Saving…" : STAGE_ACTION[a.stage]!.label}
-                            </Button>
-                          )}
-                          <ChevronRight size={16} color="var(--fg3)" />
-                        </span>
+                      <td onClick={(e) => e.stopPropagation()} style={{ cursor: "default", textAlign: "right" }}>
+                        {STAGE_ACTION[a.stage] && (
+                          <Button
+                            size="sm"
+                            variant={STAGE_ACTION[a.stage]!.variant}
+                            disabled={advancing === a.id}
+                            onClick={() => advance(a.id, STAGE_ACTION[a.stage]!.next)}
+                          >
+                            {advancing === a.id ? "Saving…" : STAGE_ACTION[a.stage]!.label}
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   ))}
                   {rows.length === 0 && (
-                    <tr><td colSpan={8} className="muted" style={{ textAlign: "center", padding: 32 }}>No applicants match.</td></tr>
+                    <tr><td colSpan={4} className="muted" style={{ textAlign: "center", padding: 32 }}>No applicants match.</td></tr>
                   )}
                 </tbody>
               </table>

@@ -55,6 +55,7 @@ export default function RuleEnginePage() {
     if (!editing || !draft) return;
     setBusy(true);
     setError(null);
+    // Two writes; report which step failed so a partial save is never silent.
     try {
       await setCourseRule(editing.courseId, {
         standingRequired: draft.standingRequired.trim() || null,
@@ -62,17 +63,29 @@ export default function RuleEnginePage() {
         capacity: draft.capacity.trim() === "" ? null : Number(draft.capacity),
         waitlistEnabled: draft.waitlistEnabled,
       });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save the rule settings.");
+      setBusy(false);
+      return;
+    }
+    try {
       await setCourseRequisites(editing.courseId, {
         prerequisites: draft.prerequisites.map((p) => ({ code: p.code, minGrade: p.minGrade || null })),
         corequisites: draft.corequisites,
       });
-      closeEditor();
-      load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save the rules.");
-    } finally {
+      setError(
+        e instanceof Error
+          ? `Rule settings saved, but prerequisites/corequisites did not: ${e.message}. Reopen and retry.`
+          : "Rule settings saved, but prerequisites/corequisites did not — reopen and retry.",
+      );
       setBusy(false);
+      load();
+      return;
     }
+    closeEditor();
+    load();
+    setBusy(false);
   }
 
   if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
@@ -83,7 +96,9 @@ export default function RuleEnginePage() {
   );
 
   const capacityInvalid =
-    draft !== null && draft.capacity.trim() !== "" && !/^\d{1,4}$/.test(draft.capacity.trim());
+    draft !== null &&
+    draft.capacity.trim() !== "" &&
+    (!/^\d{1,4}$/.test(draft.capacity.trim()) || Number(draft.capacity.trim()) > 1000);
 
   // Selectable codes are the other courses in the catalogue, minus this course and ones already picked.
   const allCodes = (rows ?? []).map((r) => r.code);

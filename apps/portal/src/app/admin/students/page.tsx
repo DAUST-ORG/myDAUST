@@ -2,10 +2,16 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Upload, UserPlus } from "lucide-react";
-import { type AdminPrograms, type AdminStudent, createStudent, getAdminPrograms, getAdminStudents } from "@/lib/api";
+import { Pencil, UserPlus, X } from "lucide-react";
+import {
+  type AdminPrograms,
+  type AdminStudent,
+  createRegistrarStudent,
+  getAdminPrograms,
+  getAdminStudents,
+} from "@/lib/api";
 import { formatXof } from "@/lib/format";
-import { Avatar, Badge, type BadgeTone, Field, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
+import { Avatar, Badge, type BadgeTone, Field, IconButton, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
 
 const STATUS_TONE: Record<string, BadgeTone> = { active: "success", probation: "warning" };
 const STATUS_LABEL: Record<string, string> = { active: "Active", probation: "Probation" };
@@ -16,18 +22,25 @@ function gpaColor(gpa: number): string {
   return "var(--fg1)";
 }
 
+interface CreatedNotice {
+  name: string;
+  studentNo: string;
+  email: string;
+}
+
 export default function AdminStudentsPage() {
   const router = useRouter();
   const [rows, setRows] = useState<AdminStudent[]>([]);
   const [programs, setPrograms] = useState<AdminPrograms["programs"]>([]);
   const [q, setQ] = useState("");
   const [prog, setProg] = useState("all");
-  const [enroll, setEnroll] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState<CreatedNotice | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { sort, toggle, apply } = useSort({ key: "name", dir: "asc" });
 
   function load() {
-    getAdminStudents().then(setRows).catch(() => {});
+    getAdminStudents().then(setRows).catch((e: Error) => setError(e.message));
   }
   useEffect(() => {
     load();
@@ -46,7 +59,6 @@ export default function AdminStudentsPage() {
       program: (s) => s.program,
       year: (s) => s.yearLevel ?? 0,
       gpa: (s) => s.gpa,
-      credits: (s) => s.completedCredits,
       balance: (s) => s.balance,
       status: (s) => s.status,
     });
@@ -61,16 +73,25 @@ export default function AdminStudentsPage() {
         title="Students"
         subtitle={`${rows.length.toLocaleString()} enrolled across ${programs.length} programs.`}
         actions={
-          <>
-            <button onClick={() => setImportOpen(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <Upload size={15} /> Import
-            </button>
-            <button className="primary" onClick={() => setEnroll(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <UserPlus size={15} /> Enroll student
-            </button>
-          </>
+          <button className="primary" onClick={() => setAdding(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <UserPlus size={15} /> Add student
+          </button>
         }
       />
+
+      {notice && (
+        <div
+          className="card"
+          style={{ marginBottom: 16, borderColor: "var(--success-500, #1f9d55)", display: "flex", alignItems: "flex-start", gap: 12 }}
+        >
+          <div style={{ flex: 1, fontSize: 13.5, lineHeight: 1.5 }}>
+            <strong>Account created for {notice.name} · ID {notice.studentNo}.</strong>
+            <div className="muted">A password-setup email has been sent to {notice.email} to complete registration on the platform.</div>
+          </div>
+          <IconButton label="Dismiss" onClick={() => setNotice(null)}><X size={15} /></IconButton>
+        </div>
+      )}
+      {error && <div className="card" style={{ marginBottom: 16, color: "var(--danger)" }}>Could not load students — {error}</div>}
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
         <SearchInput value={q} onChange={setQ} placeholder="Search by name or ID…" width={280} />
@@ -90,7 +111,6 @@ export default function AdminStudentsPage() {
                 <SortTh label="Program" sortKey="program" sort={sort} onSort={toggle} />
                 <SortTh label="Year" sortKey="year" sort={sort} onSort={toggle} />
                 <SortTh label="GPA" sortKey="gpa" sort={sort} onSort={toggle} />
-                <SortTh label="Credits" sortKey="credits" sort={sort} onSort={toggle} />
                 <SortTh label="Balance" sortKey="balance" sort={sort} onSort={toggle} align="right" />
                 <SortTh label="Status" sortKey="status" sort={sort} onSort={toggle} />
                 <th />
@@ -111,17 +131,18 @@ export default function AdminStudentsPage() {
                   <td><Badge tone="neutral">{s.program}</Badge></td>
                   <td>{s.yearLevel ? `Year ${s.yearLevel}` : "—"}</td>
                   <td><span style={{ fontWeight: 700, color: gpaColor(s.gpa) }}>{s.gpa > 0 ? s.gpa.toFixed(2) : "—"}</span></td>
-                  <td>{s.completedCredits}</td>
                   <td style={{ textAlign: "right", fontWeight: s.balance > 0 ? 600 : 400, color: s.balance > 0 ? "var(--danger)" : s.balance < 0 ? "var(--success)" : "var(--fg3)" }}>
                     {s.balance > 0 ? formatXof(s.balance) : s.balance < 0 ? `Credit ${formatXof(-s.balance)}` : "Cleared"}
                   </td>
                   <td><Badge tone={STATUS_TONE[s.status] ?? "neutral"}>{STATUS_LABEL[s.status] ?? s.status}</Badge></td>
-                  <td style={{ textAlign: "right" }}><ChevronRight size={16} color="var(--fg3)" /></td>
+                  <td style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                    <IconButton label="Open record" onClick={() => router.push(`/admin/students/${s.id}`)}><Pencil size={15} /></IconButton>
+                  </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 32 }}>No students match your search.</td>
+                  <td colSpan={7} className="muted" style={{ textAlign: "center", padding: 32 }}>No students match your search.</td>
                 </tr>
               )}
             </tbody>
@@ -129,48 +150,56 @@ export default function AdminStudentsPage() {
         </div>
       </div>
 
-      {enroll && (
-        <EnrollModal
+      {adding && (
+        <AddStudentModal
           programs={programs}
-          onClose={() => setEnroll(false)}
-          onCreated={(id) => {
-            setEnroll(false);
-            router.push(`/admin/students/${id}`);
+          onClose={() => setAdding(false)}
+          onCreated={(n) => {
+            setAdding(false);
+            setNotice(n);
+            load();
           }}
         />
       )}
-      {importOpen && <ImportModal onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />}
     </>
   );
 }
 
-function EnrollModal({ programs, onClose, onCreated }: { programs: AdminPrograms["programs"]; onClose: () => void; onCreated: (id: string) => void }) {
-  const [fullName, setFullName] = useState("");
-  const [dob, setDob] = useState("");
-  const [programCode, setProgramCode] = useState("");
+function AddStudentModal({
+  programs,
+  onClose,
+  onCreated,
+}: {
+  programs: AdminPrograms["programs"];
+  onClose: () => void;
+  onCreated: (notice: CreatedNotice) => void;
+}) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [studentNo, setStudentNo] = useState("");
   const [email, setEmail] = useState("");
-  const [billTuition, setBillTuition] = useState(true);
+  const [dob, setDob] = useState("");
+  const [programCode, setProgramCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function submit() {
     setErr(null);
-    if (!fullName.trim() || !dob) {
-      setErr("Full name and date of birth are required.");
+    if (!firstName.trim() || !studentNo.trim() || !email.trim()) {
+      setErr("Student ID, first name and email are required.");
       return;
     }
     setBusy(true);
     try {
-      const res = await createStudent({
-        fullName: fullName.trim(),
-        dateOfBirth: dob,
-        studentNo: studentNo.trim() || undefined,
-        email: email.trim() || undefined,
-        programCode: programCode || undefined,
-        billTuition,
+      const res = await createRegistrarStudent({
+        studentNo: studentNo.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim(),
+        dateOfBirth: dob || null,
+        programCode: programCode || null,
       });
-      onCreated(res.id);
+      onCreated({ name: `${firstName.trim()} ${lastName.trim()}`.trim(), studentNo: res.studentNo, email: res.email });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not create student.");
       setBusy(false);
@@ -181,120 +210,35 @@ function EnrollModal({ programs, onClose, onCreated }: { programs: AdminPrograms
     <Modal
       open
       onClose={onClose}
-      title="Enroll student"
-      width={480}
+      title="Add Student"
+      width={520}
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Enrolling…" : "Enroll student"}</button>
+          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create student"}</button>
         </>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
-        <Field label="Full name"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Fatou Diallo" /></Field>
-        <Field label="Date of birth"><input type="date" value={dob} onChange={(e) => setDob(e.target.value)} /></Field>
-        <Field label="Program" hint="Optional">
-          <Select value={programCode} onChange={setProgramCode} options={[{ value: "", label: "— None —" }, ...programs.map((p) => ({ value: p.code, label: p.name }))]} />
+        <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+          Assign a Student ID · account &amp; a password-setup email are created on save.
+        </p>
+        <Field label="Student ID" hint="Assigned by the Registrar">
+          <input value={studentNo} onChange={(e) => setStudentNo(e.target.value)} placeholder="e.g. DAUST-2026-0001" />
         </Field>
-        <Field label="Student ID" hint="Leave blank to auto-generate"><input value={studentNo} onChange={(e) => setStudentNo(e.target.value)} placeholder="DAUST-2026-0299" /></Field>
-        <Field label="Email" hint="Leave blank to synthesize"><input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="student@daust.edu" /></Field>
-        <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13.5, cursor: "pointer" }}>
-          <input type="checkbox" checked={billTuition} onChange={(e) => setBillTuition(e.target.checked)} style={{ width: 16, height: 16 }} />
-          Bill standard tuition (2,975,000 FCFA, 4 installments)
-        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="First name"><input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Fatou" /></Field>
+          <Field label="Last name"><input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Diallo" /></Field>
+        </div>
+        <Field label="Email"><input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="student@daust.edu" /></Field>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="Date of birth"><input type="date" value={dob} onChange={(e) => setDob(e.target.value)} /></Field>
+          <Field label="Program">
+            <Select value={programCode} onChange={setProgramCode} options={[{ value: "", label: "— None —" }, ...programs.map((p) => ({ value: p.code, label: p.name }))]} />
+          </Field>
+        </div>
       </div>
-    </Modal>
-  );
-}
-
-interface ImportRow {
-  fullName: string;
-  dateOfBirth: string;
-  studentNo?: string;
-  programCode?: string;
-}
-function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ ok: number; failed: string[] } | null>(null);
-
-  function parse(): ImportRow[] {
-    return text
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l && !/^full ?name/i.test(l))
-      .map((l) => {
-        const [fullName, dateOfBirth, studentNo, programCode] = l.split(",").map((c) => c.trim());
-        return { fullName: fullName ?? "", dateOfBirth: dateOfBirth ?? "", studentNo: studentNo || undefined, programCode: programCode || undefined };
-      });
-  }
-
-  async function run() {
-    const parsed = parse();
-    if (!parsed.length) return;
-    setBusy(true);
-    let ok = 0;
-    const failed: string[] = [];
-    for (const r of parsed) {
-      if (!r.fullName || !/^\d{4}-\d{2}-\d{2}$/.test(r.dateOfBirth)) {
-        failed.push(`${r.fullName || "(blank)"} — bad name/DOB`);
-        continue;
-      }
-      try {
-        await createStudent({ fullName: r.fullName, dateOfBirth: r.dateOfBirth, studentNo: r.studentNo, programCode: r.programCode, billTuition: true });
-        ok += 1;
-      } catch (e) {
-        failed.push(`${r.fullName} — ${e instanceof Error ? e.message : "failed"}`);
-      }
-    }
-    setResult({ ok, failed });
-    setBusy(false);
-  }
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Import students"
-      width={560}
-      footer={
-        result ? (
-          <button className="primary" onClick={onDone}>Done</button>
-        ) : (
-          <>
-            <button onClick={onClose}>Cancel</button>
-            <button className="primary" onClick={run} disabled={busy || !text.trim()}>{busy ? "Importing…" : "Import"}</button>
-          </>
-        )
-      }
-    >
-      {result ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div className="badge paid" style={{ padding: "8px 12px", width: "fit-content" }}>{result.ok} student{result.ok === 1 ? "" : "s"} imported</div>
-          {result.failed.length > 0 && (
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{result.failed.length} skipped</div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--fg3)" }}>
-                {result.failed.map((f, i) => <li key={i}>{f}</li>)}
-              </ul>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <p className="muted" style={{ fontSize: 13, margin: 0 }}>
-            One student per line as <code>Full name, YYYY-MM-DD, Student ID (optional), Program code (optional)</code>. Each is billed standard tuition.
-          </p>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={8}
-            placeholder={"Fatou Diallo, 2005-03-11, , CS\nMoussa Sow, 2004-11-02"}
-            style={{ width: "100%", fontFamily: "ui-monospace, monospace", fontSize: 13, padding: 12, borderRadius: 10, border: "1px solid var(--border)", resize: "vertical" }}
-          />
-        </div>
-      )}
     </Modal>
   );
 }

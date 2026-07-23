@@ -12,9 +12,10 @@ import { Stat } from "@/components/ui";
 export default function RegistrarDashboard() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [term, setTerm] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getAdminStats().then(setStats).catch(() => {});
+    getAdminStats().then(setStats).catch((e: Error) => setError(e.message));
     getCurrentTerm().then((t) => setTerm(t.name)).catch(() => {});
   }, []);
 
@@ -26,6 +27,12 @@ export default function RegistrarDashboard() {
       <p className="eyebrow">{term ? `Operations · ${term}` : "Operations"}</p>
       <h1 className="page-title">Registrar Dashboard</h1>
       <p className="muted" style={{ marginBottom: 22 }}>Enrollment and academic operations at a glance.</p>
+
+      {error && (
+        <div className="card" style={{ marginBottom: 18, color: "var(--danger)" }}>
+          Could not load dashboard figures — {error}
+        </div>
+      )}
 
       <div className="kpi-grid" style={{ marginBottom: 24 }}>
         <Stat label="Total enrollment" value={dash(stats?.totalStudents)} sub="active students" />
