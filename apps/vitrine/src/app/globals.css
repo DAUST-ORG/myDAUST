@@ -1,128 +1,143 @@
-@import url("https://fonts.googleapis.com/css2?family=Saira:wght@500;600;700;800&family=Montserrat:wght@400;500;600;700&display=swap");
+/* ============================================================
+   DAUST design system — ported from
+   design/DAUST website redesign/_ds/.../tokens/{colors,typography,effects}.css
+   Saira self-hosted from /fonts; Montserrat + IBM Plex Mono via Google Fonts.
+   ============================================================ */
 
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+@font-face {
+  font-family: 'Saira';
+  src: url('/fonts/Saira-VariableFont_wdth_wght.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-stretch: 50% 125%;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- colors ---------- */
 :root {
-  --navy: #153b6a;
-  --navy-deep: #0f2c50;
-  --navy-700: #1d4a82;
-  --orange: #ed8425;
-  --orange-600: #d6731a;
-  --steel: #9da6ae;
-  --subtle: #f5f7f9;
-  --border: #d7dee6;
-  --fg1: #141a21;
-  --fg2: #4d5965;
-  --fg3: #6c7884;
-  --on-navy-muted: #b9c4d4;
-  --display: "Saira", system-ui, sans-serif;
-  --body: "Montserrat", system-ui, sans-serif;
+  /* Brand core */
+  --daust-navy: #153b6a; --daust-navy-deep: #0f2c50; --daust-navy-700: #1d4a82;
+  --daust-orange: #ed8425; --daust-orange-600: #d6731a;
+  --daust-steel: #9da6ae; --daust-white: #ffffff;
+
+  /* Neutral ramp (cool, navy-tinted) */
+  --gray-50: #f5f7f9; --gray-100: #e9edf2; --gray-200: #d7dee6; --gray-300: #bcc6d1; --gray-400: #9da6ae;
+  --gray-500: #6c7884; --gray-600: #4d5965; --gray-700: #36414d; --gray-800: #232c36; --gray-900: #141a21;
+
+  /* Semantic surfaces */
+  --bg: #ffffff; --bg-subtle: #f5f7f9; --bg-tint: #eaf0f7; --bg-navy: var(--daust-navy);
+  --surface: #ffffff; --surface-2: #f5f7f9; --surface-sunk: #f5f7f9;
+  --border: #d7dee6; --border-strong: #bcc6d1; --divider: #e9edf2;
+
+  /* Foreground / text */
+  --fg1: #141a21; --fg2: #4d5965; --fg3: #6c7884; --fg-faint: #9da6ae;
+  --fg-on-navy: #ffffff; --fg-on-navy-muted: #b9c4d4;
+
+  /* Accent / CTA roles */
+  --accent: var(--daust-navy); --accent-hover: var(--daust-navy-700); --accent-bg: #eaf0f7; --accent-fg-on: #ffffff;
+  --cta: var(--daust-orange); --cta-hover: var(--daust-orange-600);
+  --focus-ring: 0 0 0 3px rgba(21,59,106,.28);
+
+  /* Status */
+  --success-500: #2e7d52; --success-400: #4caf7d;
+  --warning-500: #ed8425; --warning-400: #f0a05b;
+  --error-500: #c0392b; --error-400: #e06557;
+  --info-500: #1d4a82; --info-400: #5b89c0;
+
+  /* Brand gradients */
+  --grad-brand: linear-gradient(135deg,#153b6a 0%,#1d4a82 100%);
+  --grad-hero: linear-gradient(180deg,#ffffff 0%,#f5f7f9 100%);
+  --grad-dark-surface: linear-gradient(150deg,#0f2c50 0%,#153b6a 70%,#1d4a82 100%);
+
+  /* ---------- typography ---------- */
+  --font-display: 'Saira', system-ui, sans-serif;
+  --font-body: 'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --text-xs: .75rem; --text-sm: .875rem; --text-base: 1rem; --text-lg: 1.125rem; --text-xl: 1.375rem;
+  --text-2xl: 1.75rem; --text-3xl: 2.25rem; --text-4xl: 3rem; --text-5xl: 4rem; --text-6xl: 5.5rem;
+
+  --leading-tight: 1.05; --leading-snug: 1.2; --leading-normal: 1.55;
+  --tracking-wide: .04em; --tracking-wider: .12em;
+
+  --weight-regular: 400; --weight-medium: 500; --weight-semibold: 600; --weight-bold: 700; --weight-black: 800;
+
+  /* ---------- effects ---------- */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
+  --space-6: 32px; --space-7: 48px; --space-8: 64px; --space-9: 96px;
+
+  --radius-xs: 4px; --radius-sm: 6px; --radius-md: 8px; --radius-lg: 14px; --radius-xl: 22px; --radius-pill: 999px;
+
+  --shadow-xs: 0 1px 2px rgba(15,44,80,.06);
+  --shadow-sm: 0 1px 3px rgba(15,44,80,.08),0 1px 2px rgba(15,44,80,.06);
+  --shadow-md: 0 4px 14px rgba(15,44,80,.10),0 2px 4px rgba(15,44,80,.06);
+  --shadow-lg: 0 14px 40px rgba(15,44,80,.16);
+  --shadow-xl: 0 18px 50px rgba(15,44,80,.22);
+  --shadow-navy: 0 18px 50px rgba(15,44,80,.30);
+
+  --ease-standard: cubic-bezier(.2,.7,.3,1);
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --dur-fast: 130ms; --dur-base: 200ms; --dur-slow: 280ms;
 }
 
-* {
-  box-sizing: border-box;
+/* Dark tokens kept for parity with the design system (the public site renders light). */
+[data-theme="dark"], .dark {
+  --bg: #0c1f38; --bg-subtle: #0f2c50; --bg-tint: rgba(111,160,216,.14);
+  --surface: #13294a; --surface-2: #0f2c50;
+  --border: rgba(255,255,255,.12); --border-strong: rgba(255,255,255,.22); --divider: rgba(255,255,255,.08);
+  --fg1: #f5f7f9; --fg2: #c4cedb; --fg3: #97a6ba; --fg-faint: #6c7884;
+  --accent: #6fa0d8; --accent-hover: #8db6e4; --accent-bg: rgba(111,160,216,.16); --accent-fg-on: #0c1f38;
 }
-html,
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 body {
   margin: 0;
-  padding: 0;
-}
-body {
-  font-family: var(--body);
-  color: var(--fg1);
   background: #fff;
+  color: var(--fg1);
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
-a {
-  color: inherit;
-}
+h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); color: var(--fg1); margin: 0; }
+a { color: var(--daust-navy); text-decoration: none; }
+a:hover { color: var(--daust-orange); }
+button { font-family: var(--font-body); }
 
-.eyebrow {
-  font-family: var(--body);
-  font-weight: 700;
-  font-size: 13px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--orange);
-}
-.h2 {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: clamp(28px, 3.2vw, 42px);
-  line-height: 1.1;
-  margin: 14px 0 0;
-}
-.lead {
-  font-family: var(--body);
-  font-size: 16px;
-  line-height: 1.7;
-  color: var(--fg2);
-}
-.btn {
-  font-family: var(--body);
-  font-weight: 600;
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  text-decoration: none;
-  transition: transform 0.12s, background 0.15s;
-}
-.btn-primary {
-  background: var(--orange);
-  color: #fff;
-}
-.btn-primary:hover {
-  background: var(--orange-600);
-  transform: translateY(-1px);
-}
-.btn-outline-light {
-  background: transparent;
-  color: #fff;
-  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.5);
-}
-.btn-sm {
-  padding: 9px 18px;
-  font-size: 13.5px;
-}
-.btn-lg {
-  padding: 14px 26px;
-  font-size: 15px;
-}
-.tri-dash {
-  display: flex;
-  gap: 9px;
-}
-.tri-dash span {
-  display: block;
-  width: 36px;
-  height: 5px;
-  border-radius: 999px;
-}
+@keyframes daustPop { 0% { transform: scale(.96); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes daustDot { 0%, 60%, 100% { transform: translateY(0); opacity: .35; } 30% { transform: translateY(-4px); opacity: 1; } }
+@keyframes daustRise { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 
-/* ---------- Responsive (mobile-first fixes) ---------- */
-.vit-burger {
-  display: none;
-  background: transparent;
-  border: none;
-  color: #fff;
-  cursor: pointer;
-  padding: 8px;
-  margin-left: 4px;
+.tri-dash { display: flex; gap: 9px; }
+.tri-dash > span { display: block; width: 36px; height: 5px; border-radius: 999px; }
+.tri-dash > span:nth-child(1) { background: var(--daust-navy); }
+.tri-dash > span:nth-child(2) { background: var(--daust-orange); }
+.tri-dash > span:nth-child(3) { background: var(--daust-steel); }
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
+
+/* ---------- responsive (ported from the design's inline <style>) ---------- */
+@media (max-width: 1024px) {
+  .nav-desktop { display: none !important; }
+  .menu-btn { display: inline-flex !important; }
+  .util-bar { display: none !important; }
 }
-.vit-mobile-menu {
-  display: none;
+@media (max-width: 900px) {
+  .split { grid-template-columns: 1fr !important; }
+  .grid-4, .grid-3, .grid-2, .tbl-4, .tbl-3 { grid-template-columns: 1fr !important; }
+  .foot-grid { grid-template-columns: 1fr 1fr !important; }
+  .ai-panel { width: calc(100vw - 24px) !important; right: 12px !important; bottom: 12px !important; height: 70vh !important; }
+  .campus-mosaic { grid-template-columns: 1fr !important; grid-template-rows: auto !important; }
+  .campus-mosaic > div { grid-row: auto !important; height: 220px !important; }
 }
-@media (max-width: 940px) {
-  .vit-nav { display: none !important; }
-  .vit-burger { display: flex; align-items: center; margin-left: auto; }
-  .vit-apply { display: none !important; }
-  .vit-mobile-menu { display: block; background: var(--navy); }
-}
-@media (max-width: 720px) {
-  /* Overrides inline section padding: stylesheet !important beats style attributes. */
-  .v-section { padding: 56px 20px !important; }
-  .h2 { font-size: 26px !important; }
-  .lead { font-size: 15px !important; }
-  .eyebrow { font-size: 11px !important; letter-spacing: .1em !important; }
+@media (max-width: 1180px) { .hero-cap { display: none !important; } }
+@media (max-width: 1080px) {
+  .tbl-4 { grid-template-columns: 1fr 1fr !important; }
+  .grid-4 { grid-template-columns: repeat(2,1fr) !important; }
+  .grid-3, .tbl-3 { grid-template-columns: repeat(2,1fr) !important; }
+  .fac-detail { grid-template-columns: 1fr !important; }
 }
