@@ -87,7 +87,6 @@ export default function Site() {
 
   /* ---------------- HEADER ---------------- */
   const utilLink: React.CSSProperties = { fontFamily: "var(--font-body)", fontSize: 12, letterSpacing: ".03em", color: "var(--fg-on-navy-muted)", cursor: "pointer", background: "none", border: "none", padding: 0 };
-  const utilSiteLang = (on: boolean): React.CSSProperties => ({ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11.5, letterSpacing: ".06em", cursor: "pointer", padding: "2px 4px", background: "none", border: "none", color: on ? "#fff" : "var(--fg-on-navy-muted)", textDecoration: on ? "underline" : "none", textUnderlineOffset: "3px" });
   const hdrLang = (on: boolean): React.CSSProperties => ({ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12, letterSpacing: ".04em", cursor: "pointer", padding: "2px 4px", background: "none", border: "none", color: on ? "var(--daust-navy)" : "var(--fg3)" });
 
   const header = (
@@ -99,11 +98,6 @@ export default function Site() {
           <Hover as="button" onClick={() => go("research")} base={utilLink} hover={{ color: "#fff" }}>{tx.uResearch}</Hover>
           <Hover as="button" onClick={() => go("portal")} base={utilLink} hover={{ color: "#fff" }}>{tx.uPortal}</Hover>
           <Hover as="button" onClick={() => go("contact")} base={utilLink} hover={{ color: "#fff" }}>{tx.uContact}</Hover>
-          <div style={{ display: "flex", alignItems: "center", gap: 2, paddingLeft: 8, borderLeft: "1px solid rgba(255,255,255,.18)" }}>
-            <button onClick={() => setLang("en")} style={utilSiteLang(!fr)}>EN</button>
-            <span style={{ color: "rgba(255,255,255,.3)", fontSize: 11 }}>/</span>
-            <button onClick={() => setLang("fr")} style={utilSiteLang(fr)}>FR</button>
-          </div>
         </div>
       </div>
 
@@ -826,7 +820,7 @@ export default function Site() {
         </div>
       </footer>
 
-      <AiPanel open={aiOpen} onOpen={openAI} onClose={() => setAiOpen(false)} tx={tx} suggestions={c.suggestions} lang={lang} setLang={setLang} />
+      <AiPanel open={aiOpen} onOpen={openAI} onClose={() => setAiOpen(false)} tx={tx} suggestions={c.suggestions} lang={lang} />
       {applyOpen && <ApplyModal tx={tx} onClose={() => setApplyOpen(false)} onOpenAI={() => { setApplyOpen(false); setAiOpen(true); }} />}
     </div>
   );

@@ -7,10 +7,10 @@ import type { Content, Lang } from "@/lib/content";
 interface Msg { role: "user" | "assistant"; content: string; }
 
 export function AiPanel({
-  open, onOpen, onClose, tx, suggestions, lang, setLang,
+  open, onOpen, onClose, tx, suggestions, lang,
 }: {
   open: boolean; onOpen: () => void; onClose: () => void;
-  tx: Content["tx"]; suggestions: string[]; lang: Lang; setLang: (l: Lang) => void;
+  tx: Content["tx"]; suggestions: string[]; lang: Lang;
 }) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -38,12 +38,6 @@ export function AiPanel({
     );
   }
 
-  const langBtn = (on: boolean): React.CSSProperties => ({
-    fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12, border: "none", borderRadius: 2,
-    padding: "5px 11px", cursor: "pointer", background: on ? "#fff" : "transparent",
-    color: on ? "var(--daust-navy)" : "var(--fg-on-navy-muted)",
-  });
-
   return (
     <div className="ai-panel" style={{ position: "fixed", right: 24, bottom: 24, zIndex: 90, width: 400, height: 580, maxHeight: "calc(100vh - 48px)", display: "flex", flexDirection: "column", background: "#fff", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden", boxShadow: "0 30px 70px rgba(15,44,80,.4)", animation: "daustPop .2s cubic-bezier(.2,.7,.3,1) both" }}>
       <div style={{ background: "var(--daust-navy)", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
@@ -56,10 +50,6 @@ export function AiPanel({
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4caf7d" }} />
             {lang === "fr" ? "Bientôt · Admissions & programmes" : "Coming soon · Admissions & programs"}
           </div>
-        </div>
-        <div style={{ display: "flex", background: "rgba(255,255,255,.1)", borderRadius: 3, padding: 3 }}>
-          <button onClick={() => setLang("en")} style={langBtn(lang === "en")}>EN</button>
-          <button onClick={() => setLang("fr")} style={langBtn(lang === "fr")}>FR</button>
         </div>
         <button onClick={onClose} aria-label="Close" style={{ width: 34, height: 34, borderRadius: 3, background: "rgba(255,255,255,.1)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Icon name="x" size={18} />
