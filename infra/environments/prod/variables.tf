@@ -42,6 +42,13 @@ variable "tunnel_creds" {
   default   = "" # cloudflared tunnel credentials JSON; empty skips the tunnel service
 }
 
+variable "cloudflare_api_token" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Cloudflare API token with DNS:Edit on the daust.net zone. Empty = leave DNS unmanaged (records stay out-of-band). See dns.tf."
+}
+
 variable "tunnel_image" {
   type    = string
   default = "" # ECR image with baked ingress config (infra/tunnel)

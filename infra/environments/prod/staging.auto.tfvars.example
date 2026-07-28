@@ -4,4 +4,7 @@
 #   export TF_VAR_admin_cidr=<your-ip>/32
 #   export TF_VAR_api_image=961828155948.dkr.ecr.us-east-1.amazonaws.com/daust-api:<git-sha>
 #   export TF_VAR_portal_image=961828155948.dkr.ecr.us-east-1.amazonaws.com/daust-portal:<git-sha>
+# Optional — manage app-domain DNS on the daust.net Cloudflare zone (see dns.tf).
+# Leave unset to keep DNS out-of-band:
+#   export TF_VAR_cloudflare_api_token=<cloudflare token with DNS:Edit on daust.net>
 # (If you insist on a tfvars file, FIRST add `*.tfvars` + `!*.tfvars.example` to .gitignore.)
