@@ -18,7 +18,7 @@ const DEMO_ACCOUNTS = [
 ];
 const DEMO_PASSWORD = "daust-dev-2026";
 // One image serves every environment, so demo helpers are gated by hostname at runtime.
-const PROD_HOSTS = ["my.daust.net", "my-daust.azt.dev"];
+const PROD_HOSTS = ["my.daust.net", "mydaust.daust.net", "my-daust.azt.dev"];
 
 export default function LoginPage() {
   const router = useRouter();

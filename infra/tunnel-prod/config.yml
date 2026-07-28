@@ -3,6 +3,10 @@ credentials-file: /etc/cloudflared/creds.json
 ingress:
   - hostname: my.daust.net
     service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
+  # Primary app domain alias (kept alongside my.daust.net). Needs a proxied CNAME
+  # mydaust.daust.net -> <tunnel-id>.cfargotunnel.com in Cloudflare + a tunnel restart.
+  - hostname: mydaust.daust.net
+    service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
   # Transition alias until daust.net DNS is live everywhere.
   - hostname: my-daust.azt.dev
     service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
