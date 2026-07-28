@@ -22,6 +22,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'no lint yet'",
     "bootstrap:prod": "tsx prisma/bootstrap-prod.ts",
+    "accounts:prod": "tsx prisma/prod-accounts.ts",
     "import:students": "tsx prisma/import-students.ts",
     "attach-photos": "tsx prisma/attach-photos.ts",
     "load:sis-reference": "tsx prisma/load-sis-reference.ts"
