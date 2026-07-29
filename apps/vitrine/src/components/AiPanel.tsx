@@ -3,30 +3,38 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
 import type { Content, Lang } from "@/lib/content";
+import { answerQuestion, type KbEntry } from "@/lib/assistant";
 
 interface Msg { role: "user" | "assistant"; content: string; }
 
 export function AiPanel({
-  open, onOpen, onClose, tx, suggestions, lang,
+  open, onOpen, onClose, tx, suggestions, lang, kb, fallback,
 }: {
   open: boolean; onOpen: () => void; onClose: () => void;
-  tx: Content["tx"]; suggestions: string[]; lang: Lang;
+  tx: Content["tx"]; suggestions: string[]; lang: Lang; kb: KbEntry[]; fallback: string;
 }) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
+  const [typing, setTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, open]);
+  }, [messages, typing, open]);
 
   function send(text?: string) {
     const q = (text ?? input).trim();
     if (!q) return;
-    // Stub: the DAUST AI assistant has no production backend yet — reply with a coming-soon note.
-    setMessages((m) => [...m, { role: "user", content: q }, { role: "assistant", content: tx.aiComingSoon }]);
     setInput("");
+    setMessages((m) => [...m, { role: "user", content: q }]);
+    // Retrieval over the curated knowledge base — no backend, answers are vetted.
+    const answer = answerQuestion(q, kb, fallback);
+    setTyping(true);
+    window.setTimeout(() => {
+      setMessages((m) => [...m, { role: "assistant", content: answer }]);
+      setTyping(false);
+    }, 450);
   }
 
   if (!open) {
@@ -48,7 +56,7 @@ export function AiPanel({
           <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, color: "#fff", lineHeight: 1.1 }}>DAUST Assistant</div>
           <div style={{ fontFamily: "var(--font-body)", fontSize: 11.5, color: "var(--fg-on-navy-muted)", display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4caf7d" }} />
-            {lang === "fr" ? "Bientôt · Admissions & programmes" : "Coming soon · Admissions & programs"}
+            {lang === "fr" ? "En ligne · Admissions & programmes" : "Online · Admissions & programs"}
           </div>
         </div>
         <button onClick={onClose} aria-label="Close" style={{ width: 34, height: 34, borderRadius: 3, background: "rgba(255,255,255,.1)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -71,7 +79,8 @@ export function AiPanel({
             </div>
           </div>
         ) : (
-          messages.map((m, i) => {
+          <>
+            {messages.map((m, i) => {
             const isUser = m.role === "user";
             return (
               <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
@@ -80,7 +89,15 @@ export function AiPanel({
                 </div>
               </div>
             );
-          })
+            })}
+            {typing && (
+              <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 12 }}>
+                <div style={{ padding: "11px 15px", fontFamily: "var(--font-body)", fontSize: 16, color: "var(--fg3)", letterSpacing: 2, borderRadius: 6, borderTopLeftRadius: 0, background: "#fff", border: "1px solid var(--border)" }}>
+                  ···
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

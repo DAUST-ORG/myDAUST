@@ -820,7 +820,7 @@ export default function Site() {
         </div>
       </footer>
 
-      <AiPanel open={aiOpen} onOpen={openAI} onClose={() => setAiOpen(false)} tx={tx} suggestions={c.suggestions} lang={lang} />
+      <AiPanel open={aiOpen} onOpen={openAI} onClose={() => setAiOpen(false)} tx={tx} suggestions={c.suggestions} lang={lang} kb={c.chatKb} fallback={c.chatFallback} />
       {applyOpen && <ApplyModal tx={tx} onClose={() => setApplyOpen(false)} onOpenAI={() => { setApplyOpen(false); setAiOpen(true); }} />}
     </div>
   );

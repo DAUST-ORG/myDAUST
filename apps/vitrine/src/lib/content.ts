@@ -316,11 +316,112 @@ export function buildContent(lang: Lang) {
     { icon: "phone", label: T("Phone & WhatsApp", "Téléphone & WhatsApp"), value: "+221 77 488 25 15 · +221 78 128 44 58" },
   ];
 
+  // --- FAQ assistant knowledge base (grounded in the content above) ---
+  const progList = programs.map((p) => p.title).join(", ");
+  const chatKb: { patterns: string[]; answer: string }[] = [
+    {
+      patterns: ["program", "programs", "programme", "programmes", "major", "majors", "degree", "degrees", "filiere", "filieres", "cursus", "study", "etudes", "engineering", "ingenierie", "genie", "offer", "propose", "what can i study", "quels programmes"],
+      answer: T(
+        `DAUST offers four five-year engineering degrees: ${progList}. The first two years are an intensive PREPA foundation in science and engineering; after that you finish at DAUST or transfer abroad, including a 2+2 Bachelor in Mechanical Engineering with the University of Nebraska.`,
+        `DAUST propose quatre diplômes d’ingénierie de cinq ans : ${progList}. Les deux premières années forment un socle PREPA intensif en sciences et ingénierie ; ensuite vous terminez à DAUST ou partez à l’étranger, dont une licence 2+2 en génie mécanique avec l’Université du Nebraska.`,
+      ),
+    },
+    {
+      patterns: ["tuition", "cost", "costs", "price", "prices", "fee", "fees", "frais", "cout", "how much", "combien", "expensive", "cher", "pay", "payer", "budget"],
+      answer: T(
+        "Tuition is 2,975,000 FCFA per year (1,487,500 per semester). Housing (optional, furnished dorms) is 300,000–400,000 FCFA/semester and cafeteria 202,500–315,000/semester. One-time fees: 30,000 FCFA application + 10,000 FCFA insurance. Merit scholarships of 10–20% are available based on your Baccalauréat average.",
+        "Les frais de scolarité sont de 2 975 000 FCFA par an (1 487 500 par semestre). Le logement (optionnel, résidences meublées) coûte 300 000–400 000 FCFA/semestre et la restauration 202 500–315 000/semestre. Frais uniques : 30 000 FCFA de candidature + 10 000 FCFA d’assurance. Des bourses au mérite de 10 à 20 % sont possibles selon votre moyenne au Baccalauréat.",
+      ),
+    },
+    {
+      patterns: ["scholarship", "scholarships", "bourse", "bourses", "financial aid", "aid", "aide", "aides", "discount", "reduction", "merit", "merite", "grant"],
+      answer: T(
+        "DAUST offers merit scholarships based on your Baccalauréat average: 20% for an average of 15 and above, 15% for 13.5–14.9, and 10% for 12–13.4.",
+        "DAUST offre des bourses au mérite selon votre moyenne au Baccalauréat : 20 % pour une moyenne de 15 et plus, 15 % pour 13,5–14,9, et 10 % pour 12–13,4.",
+      ),
+    },
+    {
+      patterns: ["apply", "application", "admission", "admissions", "how do i apply", "how to apply", "postuler", "candidature", "candidater", "enroll", "enrol", "inscrire", "inscription", "register", "join", "rejoindre"],
+      answer: T(
+        "To apply: (1) submit the online application, (2) send your high-school diploma and 11th & 12th grade (Première & Terminale) transcripts to the Office of Admissions, (3) your academic foundation is assessed, and (4) pay the 30,000 FCFA fee to enroll for the September 2026 intake. No English is required to apply. Use the Apply button at the top of the page to start.",
+        "Pour postuler : (1) soumettez la candidature en ligne, (2) envoyez votre diplôme du secondaire et vos relevés de Première & Terminale au Bureau des admissions, (3) vos bases académiques sont évaluées, puis (4) payez les 30 000 FCFA pour vous inscrire à la rentrée de septembre 2026. Aucun anglais n’est requis pour postuler. Utilisez le bouton Postuler en haut de la page pour commencer.",
+      ),
+    },
+    {
+      patterns: ["english", "anglais", "language", "langue", "iep", "intensive english", "speak english", "parler anglais", "do i need english"],
+      answer: T(
+        "No — you don’t need to speak English to apply. After admission, non-English speakers join a one-semester Intensive English Program (IEP) to reach the level needed for DAUST courses.",
+        "Non — vous n’avez pas besoin de parler anglais pour postuler. Après admission, les non-anglophones suivent un programme d’anglais intensif (IEP) d’un semestre pour atteindre le niveau requis pour les cours de DAUST.",
+      ),
+    },
+    {
+      patterns: ["deadline", "deadlines", "when", "start", "starts", "intake", "rentree", "september", "septembre", "begin", "begins", "next intake", "date limite", "quand"],
+      answer: T(
+        "Admissions are open for the September 2026 intake. Apply online as early as possible — files are reviewed on a rolling basis, and places for the year are limited.",
+        "Les admissions sont ouvertes pour la rentrée de septembre 2026. Postulez en ligne le plus tôt possible — les dossiers sont examinés au fil de l’eau et les places pour l’année sont limitées.",
+      ),
+    },
+    {
+      patterns: ["recognized", "recognised", "recognition", "accredited", "accreditation", "anaq", "habilitation", "reconnue", "reconnu", "accreditee", "official", "diploma valid"],
+      answer: T(
+        "Yes — DAUST is nationally and internationally recognized, with accreditation (habilitation) from ANAQ-Sup, Senegal’s national quality-assurance authority for higher education.",
+        "Oui — DAUST est reconnue au niveau national et international, avec une accréditation (habilitation) de l’ANAQ-Sup, l’autorité nationale d’assurance qualité de l’enseignement supérieur au Sénégal.",
+      ),
+    },
+    {
+      patterns: ["transfer", "abroad", "etranger", "nebraska", "unl", "2+2", "exchange", "study abroad", "partir", "north america", "amerique"],
+      answer: T(
+        "Yes — after two years you can transfer to universities in North America and elsewhere, including a joint 2+2 Bachelor in Mechanical Engineering with the University of Nebraska (UNL).",
+        "Oui — après deux ans, vous pouvez rejoindre des universités en Amérique du Nord et ailleurs, dont une licence conjointe 2+2 en génie mécanique avec l’Université du Nebraska (UNL).",
+      ),
+    },
+    {
+      patterns: ["job", "jobs", "employment", "employed", "hire", "hired", "career", "careers", "emploi", "travail", "placement", "salary", "after graduating", "get a job", "debouches"],
+      answer: T(
+        "To date, 100% of DAUST graduates are fully employed, supported by a wide network of industry connections and an annual career fair.",
+        "À ce jour, 100 % des diplômés de DAUST sont pleinement employés, grâce à un large réseau de partenaires industriels et à un forum carrières annuel.",
+      ),
+    },
+    {
+      patterns: ["where", "location", "located", "campus", "somone", "thies", "senegal", "address", "adresse", "situe", "live", "living", "dorm", "dorms", "housing", "logement", "residence", "ou est"],
+      answer: T(
+        "DAUST’s campus is in Somone, in the Thiès region of Senegal. All incoming students live on campus in furnished dorms, with labs, a makerspace, an Office of Student Affairs, and student clubs.",
+        "Le campus de DAUST se trouve à Somone, dans la région de Thiès, au Sénégal. Tous les nouveaux étudiants vivent sur le campus dans des résidences meublées, avec laboratoires, makerspace, un Bureau de la vie étudiante et des clubs étudiants.",
+      ),
+    },
+    {
+      patterns: ["research", "recherche", "lab", "labs", "laboratoire", "laboratoires", "center", "centre", "centers", "centres", "robotics", "robotique", "artificial intelligence", "intelligence artificielle", "quantum", "space", "spatiale"],
+      answer: T(
+        "DAUST runs eight research centers spanning Smart Agriculture, Robotics & Autonomous Systems, Photonics & Quantum, Artificial Intelligence (DAIR), Global Health Technology, Advanced Energy & Materials, Nanotechnology, and a Space Technology Laboratory. Students take part from year one.",
+        "DAUST compte huit centres de recherche couvrant l’agriculture intelligente, la robotique & systèmes autonomes, la photonique & le quantique, l’intelligence artificielle (DAIR), les technologies de santé mondiale, l’énergie & matériaux avancés, la nanotechnologie et un laboratoire de technologie spatiale. Les étudiants y participent dès la première année.",
+      ),
+    },
+    {
+      patterns: ["contact", "email", "e-mail", "mail", "phone", "telephone", "whatsapp", "reach", "call", "joindre", "numero", "coordonnees"],
+      answer: T(
+        "You can reach the admissions team at admissions@daust.org or +221 77 488 25 15 / +221 78 128 44 58 (phone & WhatsApp). General enquiries: info@daust.org. The campus is in Somone, Thiès region, Senegal.",
+        "Vous pouvez contacter l’équipe des admissions à admissions@daust.org ou au +221 77 488 25 15 / +221 78 128 44 58 (téléphone & WhatsApp). Questions générales : info@daust.org. Le campus est à Somone, région de Thiès, Sénégal.",
+      ),
+    },
+    {
+      patterns: ["hi", "hey", "hello", "bonjour", "salut", "hola", "yo", "good morning", "good afternoon"],
+      answer: T(
+        "Hello! I can help with questions about DAUST’s engineering programs, admissions, tuition and scholarships, the Intensive English Program, or life on campus in Somone. What would you like to know?",
+        "Bonjour ! Je peux vous renseigner sur les programmes d’ingénierie de DAUST, les admissions, les frais et bourses, le programme d’anglais intensif, ou la vie sur le campus à Somone. Que souhaitez-vous savoir ?",
+      ),
+    },
+  ];
+  const chatFallback = T(
+    "I don’t have a direct answer to that one. For anything specific, email admissions@daust.org or call +221 77 488 25 15, or use the Apply button and our team will help you personally. You can also ask me about programs, admissions, tuition, scholarships, English requirements, or campus life.",
+    "Je n’ai pas de réponse directe à cette question. Pour tout point précis, écrivez à admissions@daust.org ou appelez le +221 77 488 25 15, ou utilisez le bouton Postuler et notre équipe vous aidera personnellement. Vous pouvez aussi me poser des questions sur les programmes, les admissions, les frais, les bourses, l’anglais ou la vie sur le campus.",
+  );
+
   return {
     fr, tx, nav, suggestions, footCols, heroStats, pillars, recognition, programs,
     impactStats, news, model, admSteps, scholarships, tuition, admReq, faq,
     researchAreas, directors, researchStats, faculty, ventureSteps, ventures,
     campusFeatures, aboutFacts, timeline, portalRoles, contactInfo,
+    chatKb, chatFallback,
   };
 }
 
