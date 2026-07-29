@@ -317,34 +317,34 @@ export function buildContent(lang: Lang) {
   ];
 
   // --- FAQ assistant knowledge base (grounded in the content above) ---
-  const progList = programs.map((p) => p.title).join(", ");
+  const progBullets = programs.map((p) => `• **${p.title}**`).join("\n");
   const chatKb: { patterns: string[]; answer: string }[] = [
     {
       patterns: ["program", "programs", "programme", "programmes", "major", "majors", "degree", "degrees", "filiere", "filieres", "cursus", "study", "etudes", "engineering", "ingenierie", "genie", "offer", "propose", "what can i study", "quels programmes"],
       answer: T(
-        `DAUST offers four five-year engineering degrees: ${progList}. The first two years are an intensive PREPA foundation in science and engineering; after that you finish at DAUST or transfer abroad, including a 2+2 Bachelor in Mechanical Engineering with the University of Nebraska.`,
-        `DAUST propose quatre diplômes d’ingénierie de cinq ans : ${progList}. Les deux premières années forment un socle PREPA intensif en sciences et ingénierie ; ensuite vous terminez à DAUST ou partez à l’étranger, dont une licence 2+2 en génie mécanique avec l’Université du Nebraska.`,
+        `DAUST offers four five-year engineering degrees:\n${progBullets}\n\nThe first two years are an intensive PREPA foundation in science and engineering. After that you finish at DAUST or transfer abroad — including a 2+2 Bachelor in Mechanical Engineering with the University of Nebraska.`,
+        `DAUST propose quatre diplômes d’ingénierie de cinq ans :\n${progBullets}\n\nLes deux premières années forment un socle PREPA intensif en sciences et ingénierie. Ensuite vous terminez à DAUST ou partez à l’étranger — dont une licence 2+2 en génie mécanique avec l’Université du Nebraska.`,
       ),
     },
     {
       patterns: ["tuition", "cost", "costs", "price", "prices", "fee", "fees", "frais", "cout", "how much", "combien", "expensive", "cher", "pay", "payer", "budget"],
       answer: T(
-        "Tuition is 2,975,000 FCFA per year (1,487,500 per semester). Housing (optional, furnished dorms) is 300,000–400,000 FCFA/semester and cafeteria 202,500–315,000/semester. One-time fees: 30,000 FCFA application + 10,000 FCFA insurance. Merit scholarships of 10–20% are available based on your Baccalauréat average.",
-        "Les frais de scolarité sont de 2 975 000 FCFA par an (1 487 500 par semestre). Le logement (optionnel, résidences meublées) coûte 300 000–400 000 FCFA/semestre et la restauration 202 500–315 000/semestre. Frais uniques : 30 000 FCFA de candidature + 10 000 FCFA d’assurance. Des bourses au mérite de 10 à 20 % sont possibles selon votre moyenne au Baccalauréat.",
+        "Here’s the cost breakdown:\n• **Tuition:** 2,975,000 FCFA/year (1,487,500/semester)\n• **Housing** (optional, furnished dorms): 300,000–400,000 FCFA/semester\n• **Cafeteria** (optional): 202,500–315,000 FCFA/semester\n• **One-time fees:** 30,000 application + 10,000 insurance\n\nMerit scholarships of **10–20%** are available based on your Baccalauréat average.",
+        "Voici le détail des frais :\n• **Scolarité :** 2 975 000 FCFA/an (1 487 500/semestre)\n• **Logement** (optionnel, résidences meublées) : 300 000–400 000 FCFA/semestre\n• **Restauration** (optionnelle) : 202 500–315 000 FCFA/semestre\n• **Frais uniques :** 30 000 candidature + 10 000 assurance\n\nDes bourses au mérite de **10 à 20 %** sont possibles selon votre moyenne au Baccalauréat.",
       ),
     },
     {
       patterns: ["scholarship", "scholarships", "bourse", "bourses", "financial aid", "aid", "aide", "aides", "discount", "reduction", "merit", "merite", "grant"],
       answer: T(
-        "DAUST offers merit scholarships based on your Baccalauréat average: 20% for an average of 15 and above, 15% for 13.5–14.9, and 10% for 12–13.4.",
-        "DAUST offre des bourses au mérite selon votre moyenne au Baccalauréat : 20 % pour une moyenne de 15 et plus, 15 % pour 13,5–14,9, et 10 % pour 12–13,4.",
+        "Merit scholarships are based on your Baccalauréat average:\n• **20%** — average of 15 and above\n• **15%** — average of 13.5–14.9\n• **10%** — average of 12–13.4",
+        "Les bourses au mérite dépendent de votre moyenne au Baccalauréat :\n• **20 %** — moyenne de 15 et plus\n• **15 %** — moyenne de 13,5–14,9\n• **10 %** — moyenne de 12–13,4",
       ),
     },
     {
       patterns: ["apply", "application", "admission", "admissions", "how do i apply", "how to apply", "postuler", "candidature", "candidater", "enroll", "enrol", "inscrire", "inscription", "register", "join", "rejoindre"],
       answer: T(
-        "To apply: (1) submit the online application, (2) send your high-school diploma and 11th & 12th grade (Première & Terminale) transcripts to the Office of Admissions, (3) your academic foundation is assessed, and (4) pay the 30,000 FCFA fee to enroll for the September 2026 intake. No English is required to apply. Use the Apply button at the top of the page to start.",
-        "Pour postuler : (1) soumettez la candidature en ligne, (2) envoyez votre diplôme du secondaire et vos relevés de Première & Terminale au Bureau des admissions, (3) vos bases académiques sont évaluées, puis (4) payez les 30 000 FCFA pour vous inscrire à la rentrée de septembre 2026. Aucun anglais n’est requis pour postuler. Utilisez le bouton Postuler en haut de la page pour commencer.",
+        "Applying takes four steps:\n• **1. Apply online** — submit the application to open your file\n• **2. Send documents** — your high-school diploma and 11th & 12th grade (Première & Terminale) transcripts\n• **3. Assessment** — your academic foundation is reviewed\n• **4. Enroll** — pay the 30,000 FCFA fee for the September 2026 intake\n\nNo English is required to apply — use the **Apply** button at the top of the page to start.",
+        "La candidature se fait en quatre étapes :\n• **1. Postuler en ligne** — soumettez la candidature pour ouvrir votre dossier\n• **2. Envoyer les documents** — diplôme du secondaire et relevés de Première & Terminale\n• **3. Évaluation** — vos bases académiques sont examinées\n• **4. Inscription** — payez les 30 000 FCFA pour la rentrée de septembre 2026\n\nAucun anglais n’est requis pour postuler — utilisez le bouton **Postuler** en haut de la page pour commencer.",
       ),
     },
     {
@@ -392,15 +392,15 @@ export function buildContent(lang: Lang) {
     {
       patterns: ["research", "recherche", "lab", "labs", "laboratoire", "laboratoires", "center", "centre", "centers", "centres", "robotics", "robotique", "artificial intelligence", "intelligence artificielle", "quantum", "space", "spatiale"],
       answer: T(
-        "DAUST runs eight research centers spanning Smart Agriculture, Robotics & Autonomous Systems, Photonics & Quantum, Artificial Intelligence (DAIR), Global Health Technology, Advanced Energy & Materials, Nanotechnology, and a Space Technology Laboratory. Students take part from year one.",
-        "DAUST compte huit centres de recherche couvrant l’agriculture intelligente, la robotique & systèmes autonomes, la photonique & le quantique, l’intelligence artificielle (DAIR), les technologies de santé mondiale, l’énergie & matériaux avancés, la nanotechnologie et un laboratoire de technologie spatiale. Les étudiants y participent dès la première année.",
+        "DAUST runs eight research centers, and students take part from year one:\n• Center of Smart Agriculture\n• Robotics & Autonomous Systems\n• Photonics & Quantum Technologies\n• Artificial Intelligence (DAIR)\n• Global Health Technology\n• Advanced Energy & Materials\n• Nanotechnology Institute\n• Space Technology Laboratory",
+        "DAUST compte huit centres de recherche, et les étudiants y participent dès la première année :\n• Centre d’agriculture intelligente\n• Robotique & systèmes autonomes\n• Photonique & technologies quantiques\n• Intelligence artificielle (DAIR)\n• Technologies de santé mondiale\n• Énergie & matériaux avancés\n• Institut de nanotechnologie\n• Laboratoire de technologie spatiale",
       ),
     },
     {
       patterns: ["contact", "email", "e-mail", "mail", "phone", "telephone", "whatsapp", "reach", "call", "joindre", "numero", "coordonnees"],
       answer: T(
-        "You can reach the admissions team at admissions@daust.org or +221 77 488 25 15 / +221 78 128 44 58 (phone & WhatsApp). General enquiries: info@daust.org. The campus is in Somone, Thiès region, Senegal.",
-        "Vous pouvez contacter l’équipe des admissions à admissions@daust.org ou au +221 77 488 25 15 / +221 78 128 44 58 (téléphone & WhatsApp). Questions générales : info@daust.org. Le campus est à Somone, région de Thiès, Sénégal.",
+        "Here’s how to reach us:\n• **Admissions:** admissions@daust.org\n• **Phone / WhatsApp:** +221 77 488 25 15 · +221 78 128 44 58\n• **General:** info@daust.org\n• **Campus:** Somone, Thiès region, Senegal",
+        "Voici comment nous contacter :\n• **Admissions :** admissions@daust.org\n• **Téléphone / WhatsApp :** +221 77 488 25 15 · +221 78 128 44 58\n• **Général :** info@daust.org\n• **Campus :** Somone, région de Thiès, Sénégal",
       ),
     },
     {

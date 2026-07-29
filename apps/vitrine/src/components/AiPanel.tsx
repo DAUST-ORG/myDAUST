@@ -7,6 +7,50 @@ import { answerQuestion, type KbEntry } from "@/lib/assistant";
 
 interface Msg { role: "user" | "assistant"; content: string; }
 
+/** Inline **bold** within a line. */
+function inline(text: string, keyBase: string): React.ReactNode[] {
+  return text
+    .split(/(\*\*[^*]+\*\*)/g)
+    .filter(Boolean)
+    .map((seg, i) =>
+      seg.startsWith("**") && seg.endsWith("**") ? (
+        <strong key={keyBase + i}>{seg.slice(2, -2)}</strong>
+      ) : (
+        <span key={keyBase + i}>{seg}</span>
+      ),
+    );
+}
+
+/** Render an answer string with paragraphs, bullet lists (lines starting with "• "), and **bold**. */
+function renderRich(text: string): React.ReactNode {
+  const blocks: React.ReactNode[] = [];
+  let bullets: string[] = [];
+  const flush = () => {
+    if (!bullets.length) return;
+    const items = bullets;
+    const idx = blocks.length;
+    bullets = [];
+    blocks.push(
+      <ul key={`ul${idx}`} style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+        {items.map((b, i) => (
+          <li key={i}>{inline(b, `li${idx}-${i}-`)}</li>
+        ))}
+      </ul>,
+    );
+  };
+  for (const raw of text.split("\n")) {
+    const t = raw.trim();
+    if (t.startsWith("• ") || t.startsWith("- ")) {
+      bullets.push(t.slice(2));
+      continue;
+    }
+    flush();
+    if (t) blocks.push(<p key={`p${blocks.length}`} style={{ margin: 0 }}>{inline(t, `p${blocks.length}-`)}</p>);
+  }
+  flush();
+  return <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{blocks}</div>;
+}
+
 export function AiPanel({
   open, onOpen, onClose, tx, suggestions, lang, kb, fallback,
 }: {
@@ -84,8 +128,8 @@ export function AiPanel({
             const isUser = m.role === "user";
             return (
               <div key={i} style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 12 }}>
-                <div style={{ maxWidth: "84%", padding: "11px 15px", fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap", borderRadius: 6, background: isUser ? "var(--daust-navy)" : "#fff", color: isUser ? "#fff" : "var(--fg1)", border: isUser ? "none" : "1px solid var(--border)", borderTopRightRadius: isUser ? 0 : 6, borderTopLeftRadius: isUser ? 6 : 0 }}>
-                  {m.content}
+                <div style={{ maxWidth: "84%", padding: "11px 15px", fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.55, whiteSpace: isUser ? "pre-wrap" : "normal", borderRadius: 6, background: isUser ? "var(--daust-navy)" : "#fff", color: isUser ? "#fff" : "var(--fg1)", border: isUser ? "none" : "1px solid var(--border)", borderTopRightRadius: isUser ? 0 : 6, borderTopLeftRadius: isUser ? 6 : 0 }}>
+                  {isUser ? m.content : renderRich(m.content)}
                 </div>
               </div>
             );
