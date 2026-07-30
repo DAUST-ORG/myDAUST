@@ -2,6 +2,10 @@ import type { ApplicationInput, ContactInput, SiteOverrides } from "@mydaust/sha
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+/** Uploaded assets (/uploads/*) are served by the API, not the static site — resolve them. */
+export const assetUrl = (u?: string): string | undefined =>
+  u && u.startsWith("/uploads") ? `${API_URL}${u}` : u;
+
 /** The CMS override doc the live site serves. Returns null on any failure (site falls back to defaults). */
 export async function getPublishedContent(): Promise<SiteOverrides | null> {
   try {

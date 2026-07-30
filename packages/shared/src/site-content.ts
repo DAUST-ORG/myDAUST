@@ -12,6 +12,8 @@ export type PageKey =
 export interface FacultyMember {
   id: string; slot: string; initials: string; name: string; title: string;
   dept: string; interests: string[]; bio: string; scholar: string;
+  /** Optional uploaded photo; falls back to the initials monogram when absent. */
+  image?: string;
 }
 
 export function buildContent(lang: Lang) {
@@ -564,6 +566,12 @@ function isSafeImageUrl(v: string): boolean {
   return /^\/[^/]/.test(v) || /^https?:\/\//i.test(v);
 }
 
+/** Safe href/image value, else "" — blocks javascript:/data: and other schemes. */
+function safeUrl(v: string | undefined): string {
+  return typeof v === "string" && isSafeImageUrl(v) ? v.slice(0, 300) : "";
+}
+const bi = (b: { en?: string; fr?: string } | undefined) => ({ en: (b?.en ?? "").slice(0, 4000), fr: (b?.fr ?? "").slice(0, 4000) });
+
 /**
  * Drop anything a CMS write must never persist: text keys outside the editable
  * allowlist (blocks injecting into href/scholar/icon leaves), unknown image slots
@@ -581,10 +589,25 @@ export function sanitizeSiteOverrides(raw: SiteOverrides): SiteOverrides {
     if (k in DEFAULT_IMAGES && typeof v === "string" && isSafeImageUrl(v)) images[k] = v;
   }
   const allowedHidden = new Set<string>(HIDEABLE_SECTIONS);
+  const col = raw.collections ?? {};
+  const collections: SiteOverrides["collections"] = {};
+  if (col.ventures) {
+    collections.ventures = col.ventures.slice(0, 50).map((v) => ({
+      name: (v.name ?? "").slice(0, 120), href: safeUrl(v.href), tag: bi(v.tag), desc: bi(v.desc), cta: bi(v.cta),
+    }));
+  }
+  if (col.faculty) {
+    collections.faculty = col.faculty.slice(0, 100).map((f) => ({
+      name: (f.name ?? "").slice(0, 120), initials: (f.initials ?? "").slice(0, 4),
+      image: safeUrl(f.image), scholar: safeUrl(f.scholar),
+      title: bi(f.title), dept: bi(f.dept), bio: bi(f.bio), interests: bi(f.interests),
+    }));
+  }
   return {
     text: { en: pickText(raw.text?.en ?? {}), fr: pickText(raw.text?.fr ?? {}) },
     images,
     hidden: [...new Set((raw.hidden ?? []).filter((k) => allowedHidden.has(k)))],
+    collections,
   };
 }
 
@@ -599,11 +622,70 @@ export function buildSiteContent(lang: Lang, overrides?: SiteOverrides): Content
       setAtPath(content as unknown as Record<string, unknown>, path, value);
     }
     for (const [key, value] of Object.entries(clean.images)) images[key] = value;
+    if (clean.collections?.ventures) {
+      content.ventures = clean.collections.ventures.map((v) => ({
+        tag: v.tag[lang], name: v.name, desc: v.desc[lang], href: v.href, cta: v.cta[lang],
+      }));
+    }
+    if (clean.collections?.faculty) {
+      content.faculty = clean.collections.faculty.map((f, i) => ({
+        id: `fac-${i}`, slot: `fac-${i}`, initials: f.initials, name: f.name,
+        title: f.title[lang], dept: f.dept[lang], bio: f.bio[lang], scholar: f.scholar,
+        interests: f.interests[lang].split(",").map((s) => s.trim()).filter(Boolean),
+        image: f.image || undefined,
+      }));
+    }
   }
   return { ...content, images };
 }
 
+/** Bilingual defaults for the CMS collection editor to prefill from. */
+export function defaultCollections(): { ventures: VentureItem[]; faculty: FacultyItem[] } {
+  const en = buildContent("en");
+  const fr = buildContent("fr");
+  const ventures = en.ventures.map((v, i) => ({
+    name: v.name, href: v.href,
+    tag: { en: v.tag, fr: fr.ventures[i]!.tag },
+    desc: { en: v.desc, fr: fr.ventures[i]!.desc },
+    cta: { en: v.cta, fr: fr.ventures[i]!.cta },
+  }));
+  const faculty = en.faculty.map((f, i) => ({
+    name: f.name, initials: f.initials, image: f.image ?? "", scholar: f.scholar,
+    title: { en: f.title, fr: fr.faculty[i]!.title },
+    dept: { en: f.dept, fr: fr.faculty[i]!.dept },
+    bio: { en: f.bio, fr: fr.faculty[i]!.bio },
+    interests: { en: f.interests.join(", "), fr: fr.faculty[i]!.interests.join(", ") },
+  }));
+  return { ventures, faculty };
+}
+
 // --- Override contract (stored as JSON in SiteContent.draftJson / publishedJson) ---
+
+const Bi = z.object({ en: z.string().max(4000), fr: z.string().max(4000) });
+export type Bi = z.infer<typeof Bi>;
+
+/** An authored "startups & partners" card (Innovation page). */
+export const VentureItemInput = z.object({
+  name: z.string().max(120),
+  href: z.string().max(300),
+  tag: Bi,
+  desc: Bi,
+  cta: Bi,
+});
+export type VentureItem = z.infer<typeof VentureItemInput>;
+
+/** An authored faculty member (Faculty page), with an optional uploaded photo. */
+export const FacultyItemInput = z.object({
+  name: z.string().max(120),
+  initials: z.string().max(4),
+  image: z.string().max(300),
+  scholar: z.string().max(300),
+  title: Bi,
+  dept: Bi,
+  bio: Bi,
+  interests: Bi, // comma-separated per language
+});
+export type FacultyItem = z.infer<typeof FacultyItemInput>;
 
 export const SiteOverridesInput = z.object({
   text: z.object({
@@ -612,10 +694,17 @@ export const SiteOverridesInput = z.object({
   }),
   images: z.record(z.string(), z.string()),
   hidden: z.array(z.string()),
+  // Authored collections replace the built-in list for that key when present.
+  collections: z
+    .object({
+      ventures: z.array(VentureItemInput).max(50).optional(),
+      faculty: z.array(FacultyItemInput).max(100).optional(),
+    })
+    .optional(),
 });
 export type SiteOverrides = z.infer<typeof SiteOverridesInput>;
 
-export const EMPTY_SITE_OVERRIDES: SiteOverrides = { text: { en: {}, fr: {} }, images: {}, hidden: [] };
+export const EMPTY_SITE_OVERRIDES: SiteOverrides = { text: { en: {}, fr: {} }, images: {}, hidden: [], collections: {} };
 
 /** Reshape a flat image map into the structured IMG object the vitrine renders from. */
 export function siteImgMap(images: Record<string, string>) {

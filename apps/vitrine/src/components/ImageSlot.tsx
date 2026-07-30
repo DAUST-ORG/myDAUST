@@ -4,6 +4,8 @@
  * placeholder with the subject labeled (never a broken/empty image) — used where no
  * photo fits yet (e.g. individual faculty portraits fall back to a monogram).
  */
+import { assetUrl } from "@/lib/api";
+
 export function ImageSlot({
   label,
   mono,
@@ -23,7 +25,7 @@ export function ImageSlot({
     return (
       // eslint-disable-next-line @next/next/no-img-element -- static export, plain img by design
       <img
-        src={src}
+        src={assetUrl(src)}
         alt={label}
         loading="lazy"
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}

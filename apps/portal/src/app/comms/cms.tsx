@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Rocket, Save, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, Eye, Plus, RotateCcw, Rocket, Save, Trash2, Upload } from "lucide-react";
 import {
   buildContent,
   DEFAULT_IMAGES,
+  defaultCollections,
   EMPTY_SITE_OVERRIDES,
+  type FacultyItem,
   flattenSiteText,
   SITE_IMAGE_SLOTS,
   SITE_SECTION_LABELS,
   type SiteOverrides,
+  type VentureItem,
 } from "@mydaust/shared";
 import { getSiteDraft, publishSite, previewSite, saveSiteDraft, uploadFile, fileUrl } from "@/lib/api";
 import { Button, Card, Input, SearchInput, Toggle } from "@/components/ui";
@@ -24,6 +27,7 @@ function normalize(o: Partial<SiteOverrides> | null | undefined): SiteOverrides 
     text: { en: { ...(o?.text?.en ?? {}) }, fr: { ...(o?.text?.fr ?? {}) } },
     images: { ...(o?.images ?? {}) },
     hidden: [...(o?.hidden ?? [])],
+    collections: { ...(o?.collections ?? {}) },
   };
 }
 
@@ -341,5 +345,134 @@ export function SectionToggles({ draft }: { draft: Draft }) {
         ))}
       </div>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Collection editors: startups (ventures) and faculty (with photo upload).
+// ---------------------------------------------------------------------------
+
+const taStyle: React.CSSProperties = {
+  width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border)",
+  background: "var(--surface)", color: "var(--fg1)", fontSize: 13.5, fontFamily: "var(--font-body)", resize: "vertical", lineHeight: 1.5,
+};
+const enLabel: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, color: "var(--fg3)", marginBottom: 4 };
+
+function BiInput({ label, value, onChange, multiline }: { label: string; value: { en: string; fr: string }; onChange: (v: { en: string; fr: string }) => void; multiline?: boolean }) {
+  const render = (v: string, on: (s: string) => void) =>
+    multiline ? <textarea value={v} onChange={(e) => on(e.target.value)} rows={3} style={taStyle} /> : <Input value={v} onChange={on} />;
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>{label}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div><div style={enLabel}>EN</div>{render(value.en, (s) => onChange({ ...value, en: s }))}</div>
+        <div><div style={enLabel}>FR</div>{render(value.fr, (s) => onChange({ ...value, fr: s }))}</div>
+      </div>
+    </div>
+  );
+}
+
+function ItemFrame({ title, index, total, onUp, onDown, onRemove, children }: { title: string; index: number; total: number; onUp: () => void; onDown: () => void; onRemove: () => void; children: React.ReactNode }) {
+  const iconBtn: React.CSSProperties = { display: "inline-flex", padding: 6, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", cursor: "pointer", color: "var(--fg2)" };
+  return (
+    <Card>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <strong style={{ fontSize: 13.5 }}>{title || "Untitled"}</strong>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <button title="Move up" style={iconBtn} onClick={onUp} disabled={index === 0}><ArrowUp size={14} /></button>
+          <button title="Move down" style={iconBtn} onClick={onDown} disabled={index === total - 1}><ArrowDown size={14} /></button>
+          <button title="Remove" style={{ ...iconBtn, color: "var(--error-500)" }} onClick={onRemove}><Trash2 size={14} /></button>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{children}</div>
+    </Card>
+  );
+}
+
+function CollectionToolbar({ label, onAdd, overridden, onReset }: { label: string; onAdd: () => void; overridden: boolean; onReset: () => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <Button variant="secondary" icon={<Plus size={15} />} onClick={onAdd}>{label}</Button>
+      {overridden && <Button variant="ghost" icon={<RotateCcw size={14} />} onClick={onReset}>Reset to defaults</Button>}
+    </div>
+  );
+}
+
+export function VenturesEditor({ draft }: { draft: Draft }) {
+  const { ov, setOv, loaded } = draft;
+  const items = (ov.collections?.ventures ?? defaultCollections().ventures) as VentureItem[];
+  const overridden = ov.collections?.ventures !== undefined;
+  const set = (next: VentureItem[]) => setOv((prev) => ({ ...prev, collections: { ...(prev.collections ?? {}), ventures: next } }));
+  const reset = () => setOv((prev) => { const c = { ...(prev.collections ?? {}) }; delete c.ventures; return { ...prev, collections: c }; });
+  const update = (i: number, patch: Partial<VentureItem>) => set(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= items.length) return; const a = [...items]; [a[i], a[j]] = [a[j]!, a[i]!]; set(a); };
+  const add = () => set([...items, { name: "New startup", href: "https://", tag: { en: "", fr: "" }, desc: { en: "", fr: "" }, cta: { en: "Learn more →", fr: "En savoir plus →" } }]);
+
+  if (!loaded) return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <CollectionToolbar label="Add startup" onAdd={add} overridden={overridden} onReset={reset} />
+      {items.map((it, i) => (
+        <ItemFrame key={i} title={it.name} index={i} total={items.length} onUp={() => move(i, -1)} onDown={() => move(i, 1)} onRemove={() => set(items.filter((_, idx) => idx !== i))}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Name</div><Input value={it.name} onChange={(v) => update(i, { name: v })} /></div>
+            <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Link (URL)</div><Input value={it.href} onChange={(v) => update(i, { href: v })} /></div>
+          </div>
+          <BiInput label="Tag" value={it.tag} onChange={(v) => update(i, { tag: v })} />
+          <BiInput label="Description" value={it.desc} onChange={(v) => update(i, { desc: v })} multiline />
+          <BiInput label="Link label" value={it.cta} onChange={(v) => update(i, { cta: v })} />
+        </ItemFrame>
+      ))}
+    </div>
+  );
+}
+
+export function FacultyEditor({ draft }: { draft: Draft }) {
+  const { ov, setOv, loaded } = draft;
+  const [uploading, setUploading] = useState<number | null>(null);
+  const items = (ov.collections?.faculty ?? defaultCollections().faculty) as FacultyItem[];
+  const overridden = ov.collections?.faculty !== undefined;
+  const set = (next: FacultyItem[]) => setOv((prev) => ({ ...prev, collections: { ...(prev.collections ?? {}), faculty: next } }));
+  const reset = () => setOv((prev) => { const c = { ...(prev.collections ?? {}) }; delete c.faculty; return { ...prev, collections: c }; });
+  const update = (i: number, patch: Partial<FacultyItem>) => set(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= items.length) return; const a = [...items]; [a[i], a[j]] = [a[j]!, a[i]!]; set(a); };
+  const add = () => set([...items, { name: "New faculty member", initials: "NN", image: "", scholar: "", title: { en: "", fr: "" }, dept: { en: "", fr: "" }, bio: { en: "", fr: "" }, interests: { en: "", fr: "" } }]);
+
+  async function onPhoto(i: number, file: File | undefined) {
+    if (!file) return;
+    setUploading(i);
+    try { const { url } = await uploadFile(file); update(i, { image: url }); } catch { /* surfaced by PublishBar on save */ } finally { setUploading(null); }
+  }
+
+  if (!loaded) return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <CollectionToolbar label="Add faculty" onAdd={add} overridden={overridden} onReset={reset} />
+      {items.map((it, i) => (
+        <ItemFrame key={i} title={it.name} index={i} total={items.length} onUp={() => move(i, -1)} onDown={() => move(i, 1)} onRemove={() => set(items.filter((_, idx) => idx !== i))}>
+          <div style={{ display: "flex", gap: 14 }}>
+            <div style={{ width: 96, flexShrink: 0 }}>
+              {it.image
+                ? // eslint-disable-next-line @next/next/no-img-element
+                  <img src={fileUrl(it.image)} alt={it.name} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }} />
+                : <div style={{ width: 96, height: 96, borderRadius: "var(--radius-md)", border: "1px solid var(--border)", background: "var(--daust-navy)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800 }}>{it.initials}</div>}
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "var(--daust-navy)", cursor: "pointer", marginTop: 8 }}>
+                <Upload size={13} />{uploading === i ? "Uploading…" : "Photo"}
+                <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPhoto(i, e.target.files?.[0])} disabled={uploading !== null} />
+              </label>
+            </div>
+            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 120px", gap: 12 }}>
+              <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Name</div><Input value={it.name} onChange={(v) => update(i, { name: v })} /></div>
+              <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Initials</div><Input value={it.initials} onChange={(v) => update(i, { initials: v })} /></div>
+            </div>
+          </div>
+          <BiInput label="Title" value={it.title} onChange={(v) => update(i, { title: v })} />
+          <BiInput label="Department" value={it.dept} onChange={(v) => update(i, { dept: v })} />
+          <BiInput label="Research interests (comma-separated)" value={it.interests} onChange={(v) => update(i, { interests: v })} />
+          <BiInput label="Bio" value={it.bio} onChange={(v) => update(i, { bio: v })} multiline />
+          <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Publications / profile link (URL)</div><Input value={it.scholar} onChange={(v) => update(i, { scholar: v })} /></div>
+        </ItemFrame>
+      ))}
+    </div>
   );
 }

@@ -503,7 +503,7 @@ export default function Site() {
         </Hover>
         <div className="fac-detail split" style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 56, alignItems: "start", marginTop: 32 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ position: "relative", height: 480, minWidth: 0 }}><ImageSlot label={facultySel.name} mono={facultySel.initials} /></div>
+            <div style={{ position: "relative", height: 480, minWidth: 0 }}><ImageSlot label={facultySel.name} mono={facultySel.initials} src={facultySel.image} /></div>
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, borderTop: "2px solid var(--daust-navy)", paddingTop: 20 }}>
@@ -534,7 +534,7 @@ export default function Site() {
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)" }}>
             {c.faculty.map((f) => (
               <Hover key={f.id} onClick={() => { setFacultyId(f.id); if (typeof window !== "undefined") window.scrollTo({ top: 0 }); }} base={{ background: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", minWidth: 0 }} hover={{ background: "var(--bg-subtle)" }}>
-                <div style={{ position: "relative", height: 300, minWidth: 0 }}><ImageSlot label={f.name} mono={f.initials} /></div>
+                <div style={{ position: "relative", height: 300, minWidth: 0 }}><ImageSlot label={f.name} mono={f.initials} src={f.image} /></div>
                 <div style={{ padding: "24px 26px 28px" }}>
                   <div style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{f.dept}</div>
                   <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 21, color: "var(--fg1)", margin: "12px 0 0", letterSpacing: "-.01em" }}>{f.name}</h3>
