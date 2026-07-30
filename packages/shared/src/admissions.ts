@@ -3,15 +3,36 @@ import { z } from "zod";
 export const ApplicationTrack = z.enum(["first-year", "transfer"]);
 export type ApplicationTrack = z.infer<typeof ApplicationTrack>;
 
-/** Public Apply form (anonymous — no auth). */
+/**
+ * Public Apply form (anonymous — no auth). Name + email are the only required fields;
+ * the multi-step public workflow fills the rest, feeding the same Applicant pipeline the
+ * registrar reads. The server always forces stage "submitted" — none of these can set it.
+ */
 export const ApplicationInput = z.object({
   firstName: z.string().min(1).max(80),
   lastName: z.string().min(1).max(80),
   email: z.string().email(),
-  programCode: z.string().max(20).optional(),
+  programCode: z.string().max(20).nullish(),
   track: ApplicationTrack.default("first-year"),
+  // `score` is the 0–20 entrance/BAC score (drives the merit award); `bacScore` kept for back-compat.
+  score: z.number().min(0).max(20).nullish(),
   bacScore: z.number().min(0).max(20).optional(),
-  country: z.string().max(80).optional(),
+  country: z.string().max(80).nullish(),
+  phone: z.string().max(40).nullish(),
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  gender: z.string().max(20).nullish(),
+  nationality: z.string().max(80).nullish(),
+  city: z.string().max(80).nullish(),
+  origin: z.enum(["high-school", "transfer"]).nullish(),
+  school: z.string().max(160).nullish(),
+  priorGpa: z.string().max(40).nullish(),
+  parentName: z.string().max(120).nullish(),
+  parentPhone: z.string().max(40).nullish(),
+  parentEmail: z.string().email().nullish(),
+  allergies: z.string().max(300).nullish(),
+  source: z.string().max(80).nullish(),
+  essay: z.string().max(4000).nullish(),
+  term: z.string().max(40).nullish(),
 });
 export type ApplicationInput = z.infer<typeof ApplicationInput>;
 

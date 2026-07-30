@@ -34,6 +34,7 @@ export function buildContent(lang: Lang) {
     spotBody: T("Across eight interdisciplinary centers under SIRDIC — from Smart Agriculture and DAIR (AI) to Photonics & Quantum and the Space Technology Lab — DAUST students and faculty build technology with measurable impact, starting in their first year.", "À travers huit centres interdisciplinaires sous SIRDIC — de l’Agriculture intelligente et DAIR (IA) à la Photonique & Quantique et au Laboratoire de technologie spatiale — étudiants et enseignants de DAUST développent des technologies à impact mesurable, dès la première année."),
     exploreResearch: T("Explore research →", "Découvrir la recherche →"),
     newsKicker: T("News & Stories", "Actualités & Récits"), newsAll: T("All news →", "Toutes les actualités →"),
+    newsTitle: T("News & Stories", "Actualités & Récits"),
     lifeKicker: T("Life @ DAUST", "La vie @ DAUST"),
     ctaTitle: T("Your engineering journey starts in Somone.", "Votre parcours d’ingénieur commence à Somone."),
     askOurAI: T("Ask our AI", "Demander à notre IA"),

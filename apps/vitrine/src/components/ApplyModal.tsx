@@ -1,108 +1,362 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Icon } from "./icons";
-import { submitApplication } from "@/lib/api";
-import type { Content } from "@/lib/content";
+import { feeCheckout, submitApplication } from "@/lib/api";
+import type { ApplyResult } from "@/lib/api";
+import type { Content, Lang } from "@/lib/content";
 
-const PROGRAMS: { label: string; code: string }[] = [
-  { label: "Computer Science", code: "BSCS" },
-  { label: "Mechanical Engineering", code: "BSME" },
-  { label: "Electrical Engineering", code: "BSEE" },
-  { label: "Chemical Engineering", code: "BSCHE" },
-  { label: "Intensive English Program", code: "IEP" },
+const PROGRAMS: { code: string; en: string; fr: string }[] = [
+  { code: "BSCS", en: "Computer Science", fr: "Informatique" },
+  { code: "BSME", en: "Mechanical Engineering", fr: "Génie mécanique" },
+  { code: "BSEE", en: "Electrical Engineering", fr: "Génie électrique" },
+  { code: "BSCHE", en: "Chemical Engineering", fr: "Génie chimique" },
+  { code: "IEP", en: "Intensive English Program", fr: "Programme d’anglais intensif" },
 ];
+const TERMS = ["Fall 2026", "Spring 2027", "Fall 2027"];
 
 const field: React.CSSProperties = {
   width: "100%", border: "1px solid var(--border)", borderRadius: 4,
   padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 14, outline: "none",
 };
-const label: React.CSSProperties = {
+const labelSt: React.CSSProperties = {
   fontFamily: "var(--font-body)", fontSize: 12, fontWeight: 700, letterSpacing: ".04em",
   textTransform: "uppercase", color: "var(--fg2)", display: "block", marginBottom: 6,
 };
 
-export function ApplyModal({ tx, onClose, onOpenAI }: { tx: Content["tx"]; onClose: () => void; onOpenAI: () => void }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [program, setProgram] = useState(PROGRAMS[0]!.code);
+interface FormState {
+  programCode: string; term: string; origin: "" | "high-school" | "transfer";
+  firstName: string; lastName: string; email: string; phone: string;
+  dateOfBirth: string; gender: string; nationality: string; city: string; country: string;
+  score: string; priorGpa: string; school: string;
+  parentName: string; parentPhone: string; parentEmail: string;
+  allergies: string; source: string; essay: string;
+}
+
+const EMPTY: FormState = {
+  programCode: "", term: "", origin: "",
+  firstName: "", lastName: "", email: "", phone: "",
+  dateOfBirth: "", gender: "", nationality: "", city: "", country: "",
+  score: "", priorGpa: "", school: "",
+  parentName: "", parentPhone: "", parentEmail: "",
+  allergies: "", source: "", essay: "",
+};
+
+export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"]; lang: Lang; onClose: () => void; onOpenAI: () => void }) {
+  const fr = lang === "fr";
+  const t = (en: string, frr: string) => (fr ? frr : en);
+
+  const [f, setF] = useState<FormState>(EMPTY);
+  const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
+  const [result, setResult] = useState<ApplyResult | null>(null);
+  const [feeBusy, setFeeBusy] = useState(false);
+  const [feeNote, setFeeNote] = useState<string | null>(null);
+
+  const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
+
+  const genderOpts = [t("Female", "Femme"), t("Male", "Homme"), t("Other", "Autre")];
+  const sourceOpts = [
+    t("Website", "Site web"), t("Social media", "Réseaux sociaux"), t("School counselor", "Conseiller scolaire"),
+    t("Alumni referral", "Recommandation d’un ancien"), t("DAUST open day", "Journée portes ouvertes DAUST"),
+    t("Friend / family", "Ami / famille"), t("Other", "Autre"),
+  ];
+
+  const steps = useMemo(() => [
+    t("Program", "Programme"),
+    t("Personal", "Personnel"),
+    t("Academic", "Parcours"),
+    t("Guardian", "Tuteur"),
+    t("Details", "Détails"),
+    t("Review", "Récapitulatif"),
+  ], [fr]);
+
+  const schoolLabel = f.origin === "transfer" ? t("Previous university", "Université précédente") : t("High school name", "Nom du lycée");
+
+  function next() {
+    setErr(null);
+    if (step === 1 && (!f.firstName.trim() || !f.lastName.trim() || !f.email.trim())) {
+      setErr(t("First name, last name and email are required.", "Prénom, nom et e-mail sont obligatoires."));
+      return;
+    }
+    setStep((s) => Math.min(s + 1, steps.length - 1));
+  }
+  function back() { setErr(null); setStep((s) => Math.max(s - 1, 0)); }
 
   async function submit() {
-    setBusy(true);
     setErr(null);
-    const trimmed = name.trim();
-    const sp = trimmed.indexOf(" ");
-    const firstName = sp === -1 ? trimmed : trimmed.slice(0, sp);
-    const lastName = sp === -1 ? trimmed : trimmed.slice(sp + 1);
+    if (!f.firstName.trim() || !f.lastName.trim() || !f.email.trim()) {
+      setErr(t("First name, last name and email are required.", "Prénom, nom et e-mail sont obligatoires."));
+      setStep(1);
+      return;
+    }
+    setBusy(true);
+    const nn = (v: string) => (v.trim() === "" ? undefined : v.trim());
     try {
-      await submitApplication({
-        firstName: firstName || trimmed,
-        lastName: lastName || firstName || trimmed,
-        email: email.trim(),
-        programCode: program,
-        track: "first-year",
+      const res = await submitApplication({
+        firstName: f.firstName.trim(),
+        lastName: f.lastName.trim(),
+        email: f.email.trim(),
+        track: f.origin === "transfer" ? "transfer" : "first-year",
+        programCode: nn(f.programCode),
+        term: nn(f.term),
+        origin: f.origin === "" ? undefined : f.origin,
+        phone: nn(f.phone),
+        dateOfBirth: nn(f.dateOfBirth),
+        gender: nn(f.gender),
+        nationality: nn(f.nationality),
+        city: nn(f.city),
+        country: nn(f.country),
+        score: f.score.trim() === "" ? undefined : Number(f.score),
+        priorGpa: nn(f.priorGpa),
+        school: nn(f.school),
+        parentName: nn(f.parentName),
+        parentPhone: nn(f.parentPhone),
+        parentEmail: nn(f.parentEmail),
+        allergies: nn(f.allergies),
+        source: nn(f.source),
+        essay: nn(f.essay),
       });
-      setSent(true);
+      setResult(res);
     } catch (e) {
       const msg = (e as Error).message;
-      setErr(msg.includes("400") ? "Please enter your full name and a valid email." : msg);
+      setErr(msg.includes("400") ? t("Please check your details and try again.", "Veuillez vérifier vos informations et réessayer.") : msg);
     } finally {
       setBusy(false);
     }
   }
 
+  async function payFee() {
+    if (!result) return;
+    setFeeBusy(true);
+    setFeeNote(null);
+    try {
+      const { redirectUrl } = await feeCheckout(result.id);
+      window.location.href = redirectUrl;
+    } catch {
+      setFeeNote(t(
+        "Online payment isn’t available right now — you can pay the application fee at the Office of Admissions.",
+        "Le paiement en ligne n’est pas disponible pour le moment — vous pouvez régler les frais de dossier au Bureau des admissions.",
+      ));
+      setFeeBusy(false);
+    }
+  }
+
+  const ghostBtn: React.CSSProperties = {
+    fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em",
+    textTransform: "uppercase", border: "1.5px solid var(--border)", borderRadius: 4,
+    padding: "13px 24px", background: "#fff", color: "var(--daust-navy)", cursor: "pointer",
+  };
+  const solidBtn: React.CSSProperties = {
+    fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".05em",
+    textTransform: "uppercase", border: "none", borderRadius: 4, padding: "13px 28px",
+    background: "var(--daust-orange)", color: "#fff", cursor: "pointer",
+  };
+
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(15,44,80,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 520, background: "#fff", borderRadius: 6, overflow: "hidden", boxShadow: "0 30px 70px rgba(15,44,80,.4)", animation: "daustPop .2s cubic-bezier(.2,.7,.3,1) both" }}>
-        <div style={{ background: "var(--daust-navy)", padding: "24px 28px", position: "relative" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 640, maxHeight: "calc(100vh - 48px)", display: "flex", flexDirection: "column", background: "#fff", borderRadius: 6, overflow: "hidden", boxShadow: "0 30px 70px rgba(15,44,80,.4)", animation: "daustPop .2s cubic-bezier(.2,.7,.3,1) both" }}>
+        {/* header */}
+        <div style={{ background: "var(--daust-navy)", padding: "22px 28px", position: "relative", flexShrink: 0 }}>
           <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{tx.applyKicker}</span>
-          <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 24, color: "#fff", margin: "8px 0 0" }}>{tx.applyTitle}</h3>
+          <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 23, color: "#fff", margin: "8px 0 0" }}>{tx.applyTitle}</h3>
           <button onClick={onClose} aria-label="Close" style={{ position: "absolute", right: 18, top: 18, width: 34, height: 34, borderRadius: 3, background: "rgba(255,255,255,.12)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Icon name="x" size={18} />
           </button>
         </div>
 
-        {sent ? (
-          <div style={{ padding: "44px 28px", textAlign: "center" }}>
+        {result ? (
+          <div style={{ padding: "44px 28px", textAlign: "center", overflowY: "auto" }}>
             <div style={{ width: 66, height: 66, borderRadius: 3, background: "rgba(46,125,82,.12)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
               <Icon name="check" size={34} color="#2e7d52" />
             </div>
             <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "20px 0 0" }}>{tx.thankTitle}</h3>
-            <p style={{ fontFamily: "var(--font-body)", fontSize: 15, lineHeight: 1.6, color: "var(--fg2)", margin: "10px auto 0", maxWidth: 360 }}>{tx.thankBody}</p>
-            <button onClick={onClose} style={{ marginTop: 24, fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".05em", textTransform: "uppercase", border: "none", borderRadius: 3, padding: "13px 30px", background: "var(--daust-navy)", color: "#fff", cursor: "pointer" }}>{tx.done}</button>
+            <p style={{ fontFamily: "var(--font-body)", fontSize: 15, lineHeight: 1.6, color: "var(--fg2)", margin: "10px auto 0", maxWidth: 400 }}>{tx.thankBody}</p>
+            {result.scholarship.pct > 0 && (
+              <div style={{ margin: "18px auto 0", maxWidth: 420, background: "var(--accent-bg)", border: "1px solid var(--border)", borderRadius: 6, padding: "14px 16px", fontFamily: "var(--font-body)", fontSize: 13.5, lineHeight: 1.55, color: "var(--fg1)" }}>
+                {t("Based on your reported score, you may qualify for a ", "Selon la note indiquée, vous pourriez bénéficier d’une ")}
+                <strong>{result.scholarship.pct}% {t("merit scholarship", "bourse au mérite")}</strong> ({result.scholarship.band}).
+              </div>
+            )}
+            {feeNote && <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--fg2)", margin: "16px auto 0", maxWidth: 400 }}>{feeNote}</p>}
+            <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginTop: 26 }}>
+              <button onClick={payFee} disabled={feeBusy} style={{ ...solidBtn, opacity: feeBusy ? 0.7 : 1 }}>
+                {feeBusy ? "…" : t("Pay application fee (30,000 FCFA)", "Payer les frais (30 000 FCFA)")}
+              </button>
+              <button onClick={onClose} style={ghostBtn}>{tx.done}</button>
+            </div>
           </div>
         ) : (
-          <div style={{ padding: "26px 28px 28px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div>
-                <label style={label}>{tx.applyName}</label>
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder={tx.namePh} style={field} />
-              </div>
-              <div>
-                <label style={label}>{tx.applyEmail}</label>
-                <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@email.com" style={field} />
-              </div>
-              <div>
-                <label style={label}>{tx.applyProgram}</label>
-                <select value={program} onChange={(e) => setProgram(e.target.value)} style={{ ...field, background: "#fff", color: "var(--fg1)" }}>
-                  {PROGRAMS.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
-                </select>
-              </div>
+          <>
+            {/* stepper */}
+            <div style={{ display: "flex", gap: 6, padding: "16px 28px 0", flexShrink: 0 }}>
+              {steps.map((s, i) => (
+                <div key={s} style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ height: 4, borderRadius: 2, background: i <= step ? "var(--daust-orange)" : "var(--border)" }} />
+                  <span style={{ fontFamily: "var(--font-body)", fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: i === step ? "var(--daust-navy)" : "var(--fg3)" }}>{s}</span>
+                </div>
+              ))}
             </div>
-            {err && <div style={{ color: "var(--error-500)", fontSize: 13, marginTop: 12 }}>{err}</div>}
-            <button onClick={submit} disabled={busy} style={{ width: "100%", marginTop: 22, fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 13, letterSpacing: ".05em", textTransform: "uppercase", border: "none", borderRadius: 4, padding: 15, background: "var(--daust-orange)", color: "#fff", cursor: busy ? "default" : "pointer", opacity: busy ? 0.75 : 1 }}>
-              {busy ? "…" : tx.applySubmit}
-            </button>
-            <p style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "var(--fg3)", textAlign: "center", margin: "14px 0 0" }}>
-              {tx.applyQ}{" "}
-              <button onClick={onOpenAI} style={{ color: "var(--daust-navy)", fontWeight: 600, cursor: "pointer", background: "none", border: "none", padding: 0, fontSize: 12 }}>{tx.applyAI}</button>
-            </p>
-          </div>
+
+            <div style={{ padding: "22px 28px", overflowY: "auto", flex: 1 }}>
+              {step === 0 && (
+                <Grid>
+                  <F label={t("Program of choice", "Programme choisi")}>
+                    <select value={f.programCode} onChange={(e) => set("programCode", e.target.value)} style={{ ...field, background: "#fff" }}>
+                      <option value="">{t("— Select a program —", "— Choisir un programme —")}</option>
+                      {PROGRAMS.map((p) => <option key={p.code} value={p.code}>{fr ? p.fr : p.en}</option>)}
+                    </select>
+                  </F>
+                  <Row>
+                    <F label={t("Intake term", "Session d’entrée")}>
+                      <select value={f.term} onChange={(e) => set("term", e.target.value)} style={{ ...field, background: "#fff" }}>
+                        <option value="">—</option>
+                        {TERMS.map((tm) => <option key={tm} value={tm}>{tm}</option>)}
+                      </select>
+                    </F>
+                    <F label={t("Applying from", "Vous candidatez depuis")}>
+                      <select value={f.origin} onChange={(e) => set("origin", e.target.value as FormState["origin"])} style={{ ...field, background: "#fff" }}>
+                        <option value="">—</option>
+                        <option value="high-school">{t("High school", "Lycée")}</option>
+                        <option value="transfer">{t("University transfer", "Transfert universitaire")}</option>
+                      </select>
+                    </F>
+                  </Row>
+                </Grid>
+              )}
+
+              {step === 1 && (
+                <Grid>
+                  <Row>
+                    <F label={t("First name*", "Prénom*")}><input value={f.firstName} onChange={(e) => set("firstName", e.target.value)} style={field} /></F>
+                    <F label={t("Last name*", "Nom*")}><input value={f.lastName} onChange={(e) => set("lastName", e.target.value)} style={field} /></F>
+                  </Row>
+                  <Row>
+                    <F label={t("Email*", "E-mail*")}><input type="email" value={f.email} onChange={(e) => set("email", e.target.value)} placeholder="you@email.com" style={field} /></F>
+                    <F label={t("Phone", "Téléphone")}><input value={f.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+221 …" style={field} /></F>
+                  </Row>
+                  <Row>
+                    <F label={t("Date of birth", "Date de naissance")}><input type="date" value={f.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} style={field} /></F>
+                    <F label={t("Gender", "Genre")}>
+                      <select value={f.gender} onChange={(e) => set("gender", e.target.value)} style={{ ...field, background: "#fff" }}>
+                        <option value="">—</option>
+                        {genderOpts.map((g) => <option key={g} value={g}>{g}</option>)}
+                      </select>
+                    </F>
+                  </Row>
+                  <Row>
+                    <F label={t("Nationality", "Nationalité")}><input value={f.nationality} onChange={(e) => set("nationality", e.target.value)} style={field} /></F>
+                    <F label={t("City of residence", "Ville de résidence")}><input value={f.city} onChange={(e) => set("city", e.target.value)} style={field} /></F>
+                  </Row>
+                  <F label={t("Country", "Pays")}><input value={f.country} onChange={(e) => set("country", e.target.value)} style={field} /></F>
+                </Grid>
+              )}
+
+              {step === 2 && (
+                <Grid>
+                  <Row>
+                    <F label={t("Entrance / BAC score", "Note BAC / d’entrée")} hint={t("0–20, optional", "0–20, facultatif")}>
+                      <input type="number" min={0} max={20} step="0.01" value={f.score} onChange={(e) => set("score", e.target.value)} style={field} />
+                    </F>
+                    <F label={t("GPA / average", "Moyenne")} hint="e.g. 17/20">
+                      <input value={f.priorGpa} onChange={(e) => set("priorGpa", e.target.value)} style={field} />
+                    </F>
+                  </Row>
+                  <F label={schoolLabel}><input value={f.school} onChange={(e) => set("school", e.target.value)} style={field} /></F>
+                </Grid>
+              )}
+
+              {step === 3 && (
+                <Grid>
+                  <Row>
+                    <F label={t("Guardian name", "Nom du tuteur")}><input value={f.parentName} onChange={(e) => set("parentName", e.target.value)} style={field} /></F>
+                    <F label={t("Guardian phone", "Téléphone du tuteur")}><input value={f.parentPhone} onChange={(e) => set("parentPhone", e.target.value)} style={field} /></F>
+                  </Row>
+                  <F label={t("Guardian email", "E-mail du tuteur")}><input type="email" value={f.parentEmail} onChange={(e) => set("parentEmail", e.target.value)} style={field} /></F>
+                </Grid>
+              )}
+
+              {step === 4 && (
+                <Grid>
+                  <Row>
+                    <F label={t("Allergies / medical", "Allergies / médical")}><input value={f.allergies} onChange={(e) => set("allergies", e.target.value)} style={field} /></F>
+                    <F label={t("How did you hear about DAUST?", "Comment avez-vous connu DAUST ?")}>
+                      <select value={f.source} onChange={(e) => set("source", e.target.value)} style={{ ...field, background: "#fff" }}>
+                        <option value="">—</option>
+                        {sourceOpts.map((o) => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    </F>
+                  </Row>
+                  <F label={t("Statement of purpose", "Lettre de motivation")}>
+                    <textarea rows={4} value={f.essay} onChange={(e) => set("essay", e.target.value)} style={{ ...field, resize: "vertical", lineHeight: 1.5 }} />
+                  </F>
+                </Grid>
+              )}
+
+              {step === 5 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--fg2)", margin: "0 0 12px" }}>
+                    {t("Review your application before submitting.", "Vérifiez votre candidature avant de l’envoyer.")}
+                  </p>
+                  <Review label={t("Name", "Nom")} value={`${f.firstName} ${f.lastName}`.trim()} />
+                  <Review label={t("Email", "E-mail")} value={f.email} />
+                  <Review label={t("Program", "Programme")} value={PROGRAMS.find((p) => p.code === f.programCode) ? (fr ? PROGRAMS.find((p) => p.code === f.programCode)!.fr : PROGRAMS.find((p) => p.code === f.programCode)!.en) : "—"} />
+                  <Review label={t("Intake", "Session")} value={f.term || "—"} />
+                  <Review label={t("Phone", "Téléphone")} value={f.phone || "—"} />
+                  <Review label={t("Score", "Note")} value={f.score || "—"} />
+                  <Review label={t("Guardian", "Tuteur")} value={f.parentName || "—"} />
+                </div>
+              )}
+
+              {err && <div style={{ color: "var(--error-500)", fontSize: 13, marginTop: 14 }}>{err}</div>}
+            </div>
+
+            {/* footer nav */}
+            <div style={{ padding: "16px 28px", borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexShrink: 0 }}>
+              <button onClick={step === 0 ? onClose : back} style={ghostBtn}>
+                {step === 0 ? t("Cancel", "Annuler") : t("Back", "Retour")}
+              </button>
+              {step < steps.length - 1 ? (
+                <button onClick={next} style={solidBtn}>{t("Continue", "Continuer")} →</button>
+              ) : (
+                <button onClick={submit} disabled={busy} style={{ ...solidBtn, opacity: busy ? 0.7 : 1 }}>
+                  {busy ? "…" : tx.applySubmit}
+                </button>
+              )}
+            </div>
+            {step <= 1 && (
+              <p style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "var(--fg3)", textAlign: "center", margin: 0, padding: "0 28px 16px" }}>
+                {tx.applyQ}{" "}
+                <button onClick={onOpenAI} style={{ color: "var(--daust-navy)", fontWeight: 600, cursor: "pointer", background: "none", border: "none", padding: 0, fontSize: 12 }}>{tx.applyAI}</button>
+              </p>
+            )}
+          </>
         )}
       </div>
+    </div>
+  );
+}
+
+function Grid({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>{children}</div>;
+}
+function Row({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>{children}</div>;
+}
+function F({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label style={labelSt}>{label}{hint && <span style={{ textTransform: "none", fontWeight: 400, color: "var(--fg3)", marginLeft: 6 }}>({hint})</span>}</label>
+      {children}
+    </div>
+  );
+}
+function Review({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "10px 0", borderBottom: "1px solid var(--divider)" }}>
+      <span style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--fg3)" }}>{label}</span>
+      <span style={{ fontFamily: "var(--font-body)", fontSize: 13.5, fontWeight: 600, color: "var(--fg1)", textAlign: "right" }}>{value || "—"}</span>
     </div>
   );
 }

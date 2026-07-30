@@ -65,19 +65,19 @@ export class AdmissionsService {
 
   /** Anonymous public application: persist applicant + send confirmation email. */
   async apply(input: ApplicationInput) {
+    // The public workflow sends `score`; older clients sent `bacScore`. Either drives the merit award.
+    const score = input.score ?? input.bacScore ?? null;
     const applicant = await this.prisma.applicant.create({
       data: {
+        ...this.applicantData({ ...input, score }),
         firstName: input.firstName,
         lastName: input.lastName,
         email: input.email,
-        programCode: input.programCode ?? null,
-        country: input.country ?? null,
-        score: input.bacScore ?? null,
         stage: "submitted",
       },
     });
 
-    const award = await this.appConfig.awardFor(input.bacScore);
+    const award = await this.appConfig.awardFor(score);
     const appFee = await this.appConfig.applicationFee();
     const scholarshipLine =
       award.pct > 0

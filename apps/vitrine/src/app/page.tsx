@@ -179,18 +179,28 @@ export default function Site() {
         </div>
       </section>
 
-      {/* why */}
+      {/* news */}
       <section style={{ background: "#fff" }}>
         <div style={{ ...WRAP, padding: "72px 40px 104px" }}>
-          <SectionHead num="01" label={tx.whyKicker} />
-          <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,3.8vw,50px)", lineHeight: 1.02, letterSpacing: "-.01em", color: "var(--fg1)", margin: "26px 0 0", maxWidth: 820 }}>{tx.whyTitle}</h2>
-          <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 0, marginTop: 56, borderTop: "1px solid var(--border)" }}>
-            {c.pillars.map((p) => (
-              <div key={p.title} style={{ padding: "32px 28px 32px 0", borderBottom: "1px solid var(--border)" }}>
-                <Icon name={p.icon} size={26} color="var(--daust-navy)" />
-                <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 21, color: "var(--fg1)", margin: "18px 0 0" }}>{p.title}</h3>
-                <p style={{ fontFamily: "var(--font-body)", fontSize: 14.5, lineHeight: 1.65, color: "var(--fg2)", margin: "10px 0 0" }}>{p.desc}</p>
-              </div>
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+            <div>
+              <SectionHead num="01" label={tx.newsKicker} />
+              <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,3.8vw,50px)", lineHeight: 1.02, letterSpacing: "-.01em", color: "var(--fg1)", margin: "26px 0 0" }}>{tx.newsTitle}</h2>
+            </div>
+            <a href="https://daust.org/dnews" target="_blank" rel="noopener" style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--daust-navy)", borderBottom: "2px solid var(--daust-orange)", paddingBottom: 4 }}>{tx.newsAll}</a>
+          </div>
+          <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36, marginTop: 52 }}>
+            {c.news.map((n, i) => (
+              <a key={n.slot} href={n.href} target="_blank" rel="noopener" style={{ display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
+                <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={n.title} src={IMG.news[i % IMG.news.length]} /></div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
+                  <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span>
+                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} />
+                  <span style={{ fontFamily: "var(--font-body)", fontSize: 12.5, color: "var(--fg3)" }}>{n.date}</span>
+                </div>
+                <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "12px 0 0", lineHeight: 1.2 }}>{n.title}</h3>
+                <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "12px 0 0" }}>{n.excerpt}</p>
+              </a>
             ))}
           </div>
         </div>
@@ -263,28 +273,18 @@ export default function Site() {
         </div>
       </section>
 
-      {/* news */}
+      {/* why */}
       <section style={{ background: "#fff" }}>
         <div style={{ ...WRAP, padding: "104px 40px" }}>
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-            <div>
-              <SectionHead num="03" label={tx.newsKicker} />
-              <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,3.8vw,50px)", lineHeight: 1.02, letterSpacing: "-.01em", color: "var(--fg1)", margin: "26px 0 0" }}>{tx.lifeKicker}</h2>
-            </div>
-            <a href="https://daust.org/dnews" target="_blank" rel="noopener" style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--daust-navy)", borderBottom: "2px solid var(--daust-orange)", paddingBottom: 4 }}>{tx.newsAll}</a>
-          </div>
-          <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36, marginTop: 52 }}>
-            {c.news.map((n, i) => (
-              <a key={n.slot} href={n.href} target="_blank" rel="noopener" style={{ display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
-                <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={n.title} src={IMG.news[i % IMG.news.length]} /></div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
-                  <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span>
-                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} />
-                  <span style={{ fontFamily: "var(--font-body)", fontSize: 12.5, color: "var(--fg3)" }}>{n.date}</span>
-                </div>
-                <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "12px 0 0", lineHeight: 1.2 }}>{n.title}</h3>
-                <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "12px 0 0" }}>{n.excerpt}</p>
-              </a>
+          <SectionHead num="03" label={tx.whyKicker} />
+          <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,3.8vw,50px)", lineHeight: 1.02, letterSpacing: "-.01em", color: "var(--fg1)", margin: "26px 0 0", maxWidth: 820 }}>{tx.whyTitle}</h2>
+          <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 0, marginTop: 56, borderTop: "1px solid var(--border)" }}>
+            {c.pillars.map((p) => (
+              <div key={p.title} style={{ padding: "32px 28px 32px 0", borderBottom: "1px solid var(--border)" }}>
+                <Icon name={p.icon} size={26} color="var(--daust-navy)" />
+                <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 21, color: "var(--fg1)", margin: "18px 0 0" }}>{p.title}</h3>
+                <p style={{ fontFamily: "var(--font-body)", fontSize: 14.5, lineHeight: 1.65, color: "var(--fg2)", margin: "10px 0 0" }}>{p.desc}</p>
+              </div>
             ))}
           </div>
         </div>
@@ -821,7 +821,7 @@ export default function Site() {
       </footer>
 
       <AiPanel open={aiOpen} onOpen={openAI} onClose={() => setAiOpen(false)} tx={tx} suggestions={c.suggestions} lang={lang} kb={c.chatKb} fallback={c.chatFallback} />
-      {applyOpen && <ApplyModal tx={tx} onClose={() => setApplyOpen(false)} onOpenAI={() => { setApplyOpen(false); setAiOpen(true); }} />}
+      {applyOpen && <ApplyModal tx={tx} lang={lang} onClose={() => setApplyOpen(false)} onOpenAI={() => { setApplyOpen(false); setAiOpen(true); }} />}
     </div>
   );
 }
