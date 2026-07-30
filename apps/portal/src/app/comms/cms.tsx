@@ -40,6 +40,17 @@ function vitrineOrigin(): string {
   return "https://daust.net";
 }
 
+/**
+ * Resolve an image path for preview in the CMS. Uploaded assets (/uploads/*) are
+ * API-served (same origin as the portal → fileUrl); the built-in defaults
+ * (/images, /logos) live on the static vitrine, not the portal.
+ */
+function previewSrc(url: string): string {
+  if (!url) return url;
+  if (url.startsWith("/images") || url.startsWith("/logos")) return `${vitrineOrigin()}${url}`;
+  return fileUrl(url);
+}
+
 // --- Shared draft state: load, edit, save, preview, publish ---
 export function useDraft() {
   const [ov, setOvState] = useState<SiteOverrides>(EMPTY_SITE_OVERRIDES);
@@ -293,7 +304,7 @@ export function MediaEditor({ draft }: { draft: Draft }) {
               {label} {overridden && <span style={{ color: "var(--daust-orange)", fontSize: 10.5, fontWeight: 700 }}>· CUSTOM</span>}
             </div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={fileUrl(current)} alt={label} style={{ width: "100%", height: 130, objectFit: "cover", borderRadius: "var(--radius-md)", border: "1px solid var(--border)", background: "var(--surface-2)" }} />
+            <img src={previewSrc(current)} alt={label} style={{ width: "100%", height: 130, objectFit: "cover", borderRadius: "var(--radius-md)", border: "1px solid var(--border)", background: "var(--surface-2)" }} />
             <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
               <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--daust-navy)", cursor: "pointer" }}>
                 <Upload size={14} />
@@ -454,7 +465,7 @@ export function FacultyEditor({ draft }: { draft: Draft }) {
             <div style={{ width: 96, flexShrink: 0 }}>
               {it.image
                 ? // eslint-disable-next-line @next/next/no-img-element
-                  <img src={fileUrl(it.image)} alt={it.name} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }} />
+                  <img src={previewSrc(it.image)} alt={it.name} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }} />
                 : <div style={{ width: 96, height: 96, borderRadius: "var(--radius-md)", border: "1px solid var(--border)", background: "var(--daust-navy)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800 }}>{it.initials}</div>}
               <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "var(--daust-navy)", cursor: "pointer", marginTop: 8 }}>
                 <Upload size={13} />{uploading === i ? "Uploading…" : "Photo"}
