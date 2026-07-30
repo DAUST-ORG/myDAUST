@@ -87,7 +87,8 @@ export default function Site() {
 
   /* ---------------- HEADER ---------------- */
   const utilLink: React.CSSProperties = { fontFamily: "var(--font-body)", fontSize: 12, letterSpacing: ".03em", color: "var(--fg-on-navy-muted)", cursor: "pointer", background: "none", border: "none", padding: 0 };
-  const hdrLang = (on: boolean): React.CSSProperties => ({ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12, letterSpacing: ".04em", cursor: "pointer", padding: "2px 4px", background: "none", border: "none", color: on ? "var(--daust-navy)" : "var(--fg3)" });
+  // Language toggle lives on the navy utility bar, so it uses on-navy colors.
+  const hdrLang = (on: boolean): React.CSSProperties => ({ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12, letterSpacing: ".04em", cursor: "pointer", padding: "2px 4px", background: "none", border: "none", color: on ? "#fff" : "var(--fg-on-navy-muted)" });
 
   const header = (
     <>
@@ -98,6 +99,14 @@ export default function Site() {
           <Hover as="button" onClick={() => go("research")} base={utilLink} hover={{ color: "#fff" }}>{tx.uResearch}</Hover>
           <Hover as="button" onClick={() => go("portal")} base={utilLink} hover={{ color: "#fff" }}>{tx.uPortal}</Hover>
           <Hover as="button" onClick={() => go("contact")} base={utilLink} hover={{ color: "#fff" }}>{tx.uContact}</Hover>
+          <Hover as="button" onClick={openAI} base={{ ...utilLink, display: "inline-flex", alignItems: "center", gap: 6 }} hover={{ color: "#fff" }}>
+            <Icon name="sparkles" size={14} color="var(--daust-orange)" />{tx.askAI}
+          </Hover>
+          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <button onClick={() => setLang("en")} style={hdrLang(!fr)}>EN</button>
+            <span style={{ color: "var(--fg-on-navy-muted)", fontSize: 11 }}>/</span>
+            <button onClick={() => setLang("fr")} style={hdrLang(fr)}>FR</button>
+          </div>
         </div>
       </div>
 
@@ -115,14 +124,6 @@ export default function Site() {
             ))}
           </nav>
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 2, paddingRight: 4 }}>
-              <button onClick={() => setLang("en")} style={hdrLang(!fr)}>EN</button>
-              <span style={{ color: "var(--border-strong)", fontSize: 11 }}>/</span>
-              <button onClick={() => setLang("fr")} style={hdrLang(fr)}>FR</button>
-            </div>
-            <Hover as="button" onClick={openAI} base={{ display: "inline-flex", alignItems: "center", gap: 7, fontFamily: "var(--font-body)", fontWeight: 600, fontSize: 13.5, color: "var(--daust-navy)", background: "transparent", border: "none", cursor: "pointer", whiteSpace: "nowrap" }} hover={{ color: "var(--daust-orange)" }}>
-              <Icon name="sparkles" size={16} color="var(--daust-orange)" />{tx.askAI}
-            </Hover>
             <Hover as="button" onClick={openApply} base={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".05em", textTransform: "uppercase", border: "none", borderRadius: 3, padding: "12px 22px", background: "var(--daust-navy)", color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }} hover={{ background: "var(--daust-orange)" }}>{tx.apply}</Hover>
             <button className="menu-btn" onClick={() => setMenuOpen((v) => !v)} aria-label="Menu" style={{ display: "none", alignItems: "center", justifyContent: "center", width: 40, height: 40, border: "1px solid var(--border)", borderRadius: 3, background: "#fff", color: "var(--daust-navy)", cursor: "pointer" }}>
               <Icon name="menu" size={20} />
