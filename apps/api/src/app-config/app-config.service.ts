@@ -39,6 +39,11 @@ export class AppConfigService {
     return this.prisma.feeItem.findMany({ orderBy: { sortOrder: "asc" } });
   }
 
+  /** Public: the real SIS programs, so the vitrine apply form offers exactly what exists. */
+  async programs(): Promise<{ code: string; name: string }[]> {
+    return this.prisma.program.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } });
+  }
+
   async scholarships(): Promise<(ScholarshipTierDef & { id: string })[]> {
     await this.ensureSeeded();
     const rows = await this.prisma.scholarshipTier.findMany({ orderBy: { minScore: "desc" } });

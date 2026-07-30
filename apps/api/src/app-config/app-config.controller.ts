@@ -21,6 +21,12 @@ export class AppConfigController {
     return this.config.scholarships();
   }
 
+  @Public()
+  @Get("programs")
+  programs() {
+    return this.config.programs();
+  }
+
   // Director-level writes (admin), every change audit-logged.
   @Patch("fees/:key")
   @Roles("admin")

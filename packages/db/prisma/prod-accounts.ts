@@ -7,7 +7,7 @@ import bcrypt from "bcryptjs";
 //
 // Run (one per account you want; omit an env var to skip that account):
 //   ADMIN_PASSWORD=... REGISTRAR_PASSWORD=... BURSAR_PASSWORD=... \
-//   HR_PASSWORD=... IT_PASSWORD=... \
+//   HR_PASSWORD=... IT_PASSWORD=... COMMS_PASSWORD=... \
 //   pnpm --filter @mydaust/db run accounts:prod
 //
 // On prod this runs as a one-off ECS task on the api image (same pattern as the
@@ -22,6 +22,7 @@ const ACCOUNTS = [
   { email: "bursar@daust.edu", roles: ["bursar"], firstName: "DAUST", lastName: "Bursar", env: "BURSAR_PASSWORD" },
   { email: "hr@daust.edu", roles: ["hr"], firstName: "DAUST", lastName: "HR", env: "HR_PASSWORD" },
   { email: "it@daust.edu", roles: ["it_admin"], firstName: "DAUST", lastName: "IT", env: "IT_PASSWORD" },
+  { email: "comms@daust.edu", roles: ["communications"], firstName: "DAUST", lastName: "Communications", env: "COMMS_PASSWORD" },
 ] as const;
 
 async function main() {

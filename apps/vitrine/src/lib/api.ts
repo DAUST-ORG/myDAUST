@@ -39,6 +39,18 @@ export async function submitApplication(input: ApplicationInput): Promise<ApplyR
   return res.json() as Promise<ApplyResult>;
 }
 
+/** The real SIS programs for the apply form (so a choice always resolves). Null on failure → static fallback. */
+export async function getPrograms(): Promise<{ code: string; name: string }[] | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/config/programs`);
+    if (!res.ok) return null;
+    const list = (await res.json()) as { code: string; name: string }[];
+    return list.length ? list : null;
+  } catch {
+    return null;
+  }
+}
+
 /** PayTech checkout for the 30k FCFA application fee. */
 export async function feeCheckout(applicantId: string): Promise<{ redirectUrl: string }> {
   const res = await fetch(`${API_URL}/api/applications/${applicantId}/fee-checkout`, { method: "POST" });

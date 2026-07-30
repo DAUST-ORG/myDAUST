@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "./icons";
-import { feeCheckout, submitApplication } from "@/lib/api";
+import { feeCheckout, getPrograms, submitApplication } from "@/lib/api";
 import type { ApplyResult } from "@/lib/api";
 import type { Content, Lang } from "@/lib/content";
 
@@ -53,6 +53,15 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
   const [result, setResult] = useState<ApplyResult | null>(null);
   const [feeBusy, setFeeBusy] = useState(false);
   const [feeNote, setFeeNote] = useState<string | null>(null);
+  // Programs come from the real SIS so a choice always resolves; static list is the offline fallback.
+  const [programList, setProgramList] = useState<{ code: string; label: string }[]>(
+    PROGRAMS.map((p) => ({ code: p.code, label: fr ? p.fr : p.en })),
+  );
+  useEffect(() => {
+    getPrograms().then((real) => {
+      if (real) setProgramList(real.map((p) => ({ code: p.code, label: p.name })));
+    });
+  }, []);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
 
@@ -205,7 +214,7 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
                   <F label={t("Program of choice", "Programme choisi")}>
                     <select value={f.programCode} onChange={(e) => set("programCode", e.target.value)} style={{ ...field, background: "#fff" }}>
                       <option value="">{t("— Select a program —", "— Choisir un programme —")}</option>
-                      {PROGRAMS.map((p) => <option key={p.code} value={p.code}>{fr ? p.fr : p.en}</option>)}
+                      {programList.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
                     </select>
                   </F>
                   <Row>
@@ -301,7 +310,7 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
                   </p>
                   <Review label={t("Name", "Nom")} value={`${f.firstName} ${f.lastName}`.trim()} />
                   <Review label={t("Email", "E-mail")} value={f.email} />
-                  <Review label={t("Program", "Programme")} value={PROGRAMS.find((p) => p.code === f.programCode) ? (fr ? PROGRAMS.find((p) => p.code === f.programCode)!.fr : PROGRAMS.find((p) => p.code === f.programCode)!.en) : "—"} />
+                  <Review label={t("Program", "Programme")} value={programList.find((p) => p.code === f.programCode)?.label ?? "—"} />
                   <Review label={t("Intake", "Session")} value={f.term || "—"} />
                   <Review label={t("Phone", "Téléphone")} value={f.phone || "—"} />
                   <Review label={t("Score", "Note")} value={f.score || "—"} />
