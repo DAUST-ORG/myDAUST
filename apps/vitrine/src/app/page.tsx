@@ -8,7 +8,7 @@ import { ImageSlot } from "@/components/ImageSlot";
 import { AiPanel } from "@/components/AiPanel";
 import { ApplyModal } from "@/components/ApplyModal";
 import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type SiteOverrides } from "@/lib/content";
-import { getPreviewContent, getPublishedContent } from "@/lib/api";
+import { getPreviewContent, getPublishedContent, submitContact } from "@/lib/api";
 
 const WRAP: React.CSSProperties = { maxWidth: 1240, margin: "0 auto", padding: "0 40px" };
 
@@ -55,6 +55,11 @@ export default function Site() {
   const [aiOpen, setAiOpen] = useState(false);
   const [portalMsg, setPortalMsg] = useState(false);
   const [contactSent, setContactSent] = useState(false);
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactMessage, setContactMessage] = useState("");
+  const [contactBusy, setContactBusy] = useState(false);
+  const [contactErr, setContactErr] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<SiteOverrides | null>(null);
 
   // Pull the CMS content once. `?preview=<token>` renders the pending draft (token from the CMS).
@@ -78,6 +83,23 @@ export default function Site() {
   }
   const openApply = () => { setApplyOpen(true); setMenuOpen(false); };
   const openAI = () => { setAiOpen(true); setMenuOpen(false); };
+
+  async function submitContactForm() {
+    setContactErr(null);
+    if (!contactName.trim() || !contactEmail.trim() || !contactMessage.trim()) {
+      setContactErr(fr ? "Veuillez remplir tous les champs." : "Please fill in all fields.");
+      return;
+    }
+    setContactBusy(true);
+    try {
+      await submitContact({ name: contactName.trim(), email: contactEmail.trim(), message: contactMessage.trim() });
+      setContactSent(true);
+    } catch {
+      setContactErr(fr ? "Envoi impossible. Veuillez réessayer." : "Could not send. Please try again.");
+    } finally {
+      setContactBusy(false);
+    }
+  }
 
   const facultySel = c.faculty.find((f) => f.id === facultyId) ?? null;
 
@@ -727,18 +749,19 @@ export default function Site() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   <div>
                     <label style={{ fontFamily: "var(--font-body)", fontSize: 12, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--fg2)", display: "block", marginBottom: 6 }}>{tx.nameLabel}</label>
-                    <input placeholder={tx.namePh} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 4, padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 14, outline: "none" }} />
+                    <input value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder={tx.namePh} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 4, padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 14, outline: "none" }} />
                   </div>
                   <div>
                     <label style={{ fontFamily: "var(--font-body)", fontSize: 12, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--fg2)", display: "block", marginBottom: 6 }}>{tx.emailLabel}</label>
-                    <input placeholder="you@email.com" style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 4, padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 14, outline: "none" }} />
+                    <input value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} type="email" placeholder="you@email.com" style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 4, padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 14, outline: "none" }} />
                   </div>
                   <div>
                     <label style={{ fontFamily: "var(--font-body)", fontSize: 12, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--fg2)", display: "block", marginBottom: 6 }}>{tx.messageLabel}</label>
-                    <textarea rows={5} placeholder={tx.messagePh} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 4, padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 14, outline: "none", resize: "vertical", lineHeight: 1.5 }} />
+                    <textarea value={contactMessage} onChange={(e) => setContactMessage(e.target.value)} rows={5} placeholder={tx.messagePh} style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 4, padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 14, outline: "none", resize: "vertical", lineHeight: 1.5 }} />
                   </div>
                 </div>
-                <Hover as="button" onClick={() => setContactSent(true)} base={{ ...primaryBtn, width: "100%", marginTop: 20, borderRadius: 4, padding: 15 }} hover={{ background: "var(--daust-navy)" }}>{tx.sendBtn}</Hover>
+                {contactErr && <div style={{ color: "var(--error-500)", fontSize: 13, marginTop: 12 }}>{contactErr}</div>}
+                <Hover as="button" onClick={submitContactForm} base={{ ...primaryBtn, width: "100%", marginTop: 20, borderRadius: 4, padding: 15, opacity: contactBusy ? 0.7 : 1 }} hover={{ background: "var(--daust-navy)" }}>{contactBusy ? "…" : tx.sendBtn}</Hover>
               </div>
             )}
           </div>

@@ -169,6 +169,7 @@ export const COMMS_NAV: PortalNav = {
       { href: "/comms/media", label: "Images", icon: ImageIcon },
       { href: "/comms/assistant", label: "AI Assistant", icon: MessageSquare },
     ]),
+    g("Inbox", [{ href: "/comms/messages", label: "Messages", icon: Mail }]),
   ],
 };
 
@@ -229,6 +230,7 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/comms/site": { title: "Content Editor", crumb: "Edit site text · Communications" },
   "/comms/media": { title: "Images", crumb: "Site imagery · Communications" },
   "/comms/assistant": { title: "AI Assistant", crumb: "Chatbot trigger words & answers · Communications" },
+  "/comms/messages": { title: "Messages", crumb: "Contact-form inbox · Communications" },
   // faculty
   "/faculty": { title: "Dashboard", crumb: "Teaching overview · {term}" },
   "/faculty/grades": { title: "Grade Entry", crumb: "Final grade submission" },

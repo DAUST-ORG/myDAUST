@@ -86,6 +86,18 @@ export const publishSite = () =>
   request<{ ok: boolean; publishedAt: string | null }>("/content/publish", { method: "POST" });
 export const previewSite = () => request<{ token: string }>("/content/preview", { method: "POST" });
 
+export interface ContactMessage {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  read: boolean;
+  createdAt: string;
+}
+export const getContactMessages = () => request<ContactMessage[]>("/contact");
+export const markContactRead = (id: string, read: boolean) =>
+  request<ContactMessage>(`/contact/${id}/read`, { method: "PATCH", body: JSON.stringify({ read }) });
+
 // --- Auth ---
 export interface Me {
   personId: string;

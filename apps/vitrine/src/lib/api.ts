@@ -1,4 +1,4 @@
-import type { ApplicationInput, SiteOverrides } from "@mydaust/shared";
+import type { ApplicationInput, ContactInput, SiteOverrides } from "@mydaust/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -49,6 +49,16 @@ export async function getPrograms(): Promise<{ code: string; name: string }[] | 
   } catch {
     return null;
   }
+}
+
+/** "Contact us" submission → stored in the CMS inbox. */
+export async function submitContact(input: ContactInput): Promise<void> {
+  const res = await fetch(`${API_URL}/api/contact`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
 }
 
 /** PayTech checkout for the 30k FCFA application fee. */

@@ -355,6 +355,18 @@ model SiteContent {
   publishedAt   DateTime?
 }
 
+// "Contact us" submissions from the public site, read in the CMS inbox.
+model ContactMessage {
+  id        String   @id @default(uuid())
+  name      String
+  email     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model Applicant {
   id          String   @id @default(uuid())
   firstName   String
