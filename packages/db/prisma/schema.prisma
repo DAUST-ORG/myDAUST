@@ -339,6 +339,22 @@ model AuditLog {
   @@index([createdAt])
 }
 
+// Public marketing-site content managed by the site CMS (communications role).
+// Singleton row (key = "site"). Holds the CMS override document in two states:
+// draftJson (work in progress) and publishedJson (what the live vitrine serves).
+model SiteContent {
+  id            String    @id @default(uuid())
+  key           String    @unique
+  draftJson     Json
+  publishedJson Json?
+  // Capability token for cross-domain draft preview (rotated on each Preview request).
+  previewToken  String?
+  updatedById   String?
+  updatedAt     DateTime  @updatedAt
+  publishedById String?
+  publishedAt   DateTime?
+}
+
 model Applicant {
   id          String   @id @default(uuid())
   firstName   String

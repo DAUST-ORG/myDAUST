@@ -10,6 +10,7 @@ import { HrModule } from "./hr/hr.module.js";
 import { MailModule } from "./mail/mail.module.js";
 import { CommsModule } from "./comms/comms.module.js";
 import { ConfigModule } from "./config/config.module.js";
+import { ContentModule } from "./content/content.module.js";
 import { FinanceModule } from "./finance/finance.module.js";
 import { GuardiansModule } from "./guardians/guardians.module.js";
 import { HealthController } from "./health.controller.js";
@@ -32,6 +33,7 @@ import { UploadsModule } from "./uploads/uploads.module.js";
     RegistrarModule,
     AcademicsModule,
     CommsModule,
+    ContentModule,
     CampusModule,
     AdmissionsModule,
     DiningModule,

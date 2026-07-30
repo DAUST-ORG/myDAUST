@@ -13,11 +13,14 @@ import {
   GitBranch,
   GraduationCap,
   HeartPulse,
+  Image as ImageIcon,
   LayoutDashboard,
+  LayoutTemplate,
   ListChecks,
   type LucideIcon,
   Mail,
   Megaphone,
+  MessageSquare,
   Network,
   Receipt,
   Scale,
@@ -156,6 +159,19 @@ export const FINANCE_NAV: PortalNav = {
   ],
 };
 
+export const COMMS_NAV: PortalNav = {
+  label: "Communications",
+  meta: "Communications · Website",
+  groups: [
+    g("Overview", [{ href: "/comms", label: "Dashboard", icon: LayoutDashboard }]),
+    g("Public website", [
+      { href: "/comms/site", label: "Content Editor", icon: LayoutTemplate },
+      { href: "/comms/media", label: "Images", icon: ImageIcon },
+      { href: "/comms/assistant", label: "AI Assistant", icon: MessageSquare },
+    ]),
+  ],
+};
+
 /** Portal registry, keyed so a server layout can name one without importing icons. */
 export const PORTALS = {
   student: STUDENT_NAV,
@@ -163,6 +179,7 @@ export const PORTALS = {
   faculty: FACULTY_NAV,
   registrar: REGISTRAR_NAV,
   finance: FINANCE_NAV,
+  comms: COMMS_NAV,
 } as const;
 export type PortalKey = keyof typeof PORTALS;
 
@@ -207,6 +224,11 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/finance": { title: "Dashboard", crumb: "Receivables overview · {term} · Finance" },
   "/finance/fee-schedule": { title: "Tuition & Fees", crumb: "Fee structure & payment plan · Finance" },
   "/finance/accounts": { title: "Student Accounts", crumb: "Student billing accounts · Finance" },
+  // communications (site CMS)
+  "/comms": { title: "Dashboard", crumb: "Public website · Communications" },
+  "/comms/site": { title: "Content Editor", crumb: "Edit site text · Communications" },
+  "/comms/media": { title: "Images", crumb: "Site imagery · Communications" },
+  "/comms/assistant": { title: "AI Assistant", crumb: "Chatbot trigger words & answers · Communications" },
   // faculty
   "/faculty": { title: "Dashboard", crumb: "Teaching overview · {term}" },
   "/faculty/grades": { title: "Grade Entry", crumb: "Final grade submission" },
@@ -230,6 +252,7 @@ export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
   { role: "registrar", portal: "registrar", home: "/admin" },
   { role: "bursar", portal: "finance", home: "/finance" },
   { role: "faculty", portal: "faculty", home: "/faculty" },
+  { role: "communications", portal: "comms", home: "/comms" },
   { role: "student", portal: "student", home: "/student" },
   { role: "parent", portal: "parent", home: "/parent" },
 ];

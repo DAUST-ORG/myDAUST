@@ -1,6 +1,28 @@
-import type { ApplicationInput } from "@mydaust/shared";
+import type { ApplicationInput, SiteOverrides } from "@mydaust/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+/** The CMS override doc the live site serves. Returns null on any failure (site falls back to defaults). */
+export async function getPublishedContent(): Promise<SiteOverrides | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/content/published`);
+    if (!res.ok) return null;
+    return (await res.json()) as SiteOverrides;
+  } catch {
+    return null;
+  }
+}
+
+/** Preview mode: the pending draft, fetched by capability token (works cross-domain, no cookie). */
+export async function getPreviewContent(token: string): Promise<SiteOverrides | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/content/preview/${encodeURIComponent(token)}`);
+    if (!res.ok) return null;
+    return (await res.json()) as SiteOverrides;
+  } catch {
+    return null;
+  }
+}
 
 export interface ApplyResult {
   id: string;

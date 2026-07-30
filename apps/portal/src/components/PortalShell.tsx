@@ -28,6 +28,7 @@ const VIEW_AS_ALL: (ViewAsOption & { roles: string[] })[] = [
   { key: "faculty", label: "faculty", href: "/faculty", roles: ["faculty"] },
   { key: "registrar", label: "registrar", href: "/admin", roles: ["registrar", "admin"] },
   { key: "finance", label: "finance", href: "/finance", roles: ["bursar"] },
+  { key: "comms", label: "website", href: "/comms", roles: ["communications", "admin"] },
   { key: "parent", label: "parent", href: "/parent", roles: ["parent"] },
 ];
 

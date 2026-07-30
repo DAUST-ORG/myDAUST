@@ -7,6 +7,8 @@ export const APP_ROLES = [
   "bursar",
   "hr",
   "it_admin",
+  // Manages the public marketing site content (the site CMS). No SIS data access.
+  "communications",
   "admin",
 ] as const;
 

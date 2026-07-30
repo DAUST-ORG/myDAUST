@@ -76,6 +76,16 @@ export async function uploadFile(file: File): Promise<UploadResult> {
   return res.json() as Promise<UploadResult>;
 }
 
+// --- Site CMS (communications role) ---
+import type { SiteOverrides } from "@mydaust/shared";
+export const getSiteDraft = () =>
+  request<{ overrides: SiteOverrides; updatedAt: string | null; publishedAt: string | null }>("/content/draft");
+export const saveSiteDraft = (overrides: SiteOverrides) =>
+  request<{ ok: boolean; updatedAt: string }>("/content/draft", { method: "PUT", body: JSON.stringify(overrides) });
+export const publishSite = () =>
+  request<{ ok: boolean; publishedAt: string | null }>("/content/publish", { method: "POST" });
+export const previewSite = () => request<{ token: string }>("/content/preview", { method: "POST" });
+
 // --- Auth ---
 export interface Me {
   personId: string;

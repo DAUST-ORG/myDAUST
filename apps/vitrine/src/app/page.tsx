@@ -1,30 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Icon } from "@/components/icons";
 import { Hover } from "@/components/Hover";
 import { ImageSlot } from "@/components/ImageSlot";
 import { AiPanel } from "@/components/AiPanel";
 import { ApplyModal } from "@/components/ApplyModal";
-import { buildContent, type Lang, type PageKey } from "@/lib/content";
+import { buildSiteContent, siteImgMap, type Lang, type PageKey, type SiteOverrides } from "@/lib/content";
+import { getPreviewContent, getPublishedContent } from "@/lib/api";
 
 const WRAP: React.CSSProperties = { maxWidth: 1240, margin: "0 auto", padding: "0 40px" };
-
-// Official DAUST photography (sourced from daust.org) wired into the design's image slots.
-const IMG = {
-  hero: "/images/campus.jpg",
-  researchFeature: "/images/labs.jpg",
-  researchHero: "/images/research-drone.jpg",
-  campus: "/images/students-impact.jpg",
-  aerial: "/images/campus.jpg",
-  lab: "/images/labs.jpg",
-  students: "/images/iep.jpg",
-  event: "/images/event-impact.jpg",
-  dorms: "/images/bcie.jpg",
-  news: ["/images/news1.jpg", "/images/event-impact.jpg", "/images/news2.jpg"],
-  programs: ["/images/labs.jpg", "/images/research-drone.jpg", "/images/graduation.jpg", "/images/iep.jpg"],
-};
 
 /* ---- shared bits ---- */
 function Dash({ label, onDark }: { label: string; onDark?: boolean }) {
@@ -69,9 +55,18 @@ export default function Site() {
   const [aiOpen, setAiOpen] = useState(false);
   const [portalMsg, setPortalMsg] = useState(false);
   const [contactSent, setContactSent] = useState(false);
+  const [overrides, setOverrides] = useState<SiteOverrides | null>(null);
 
-  const c = buildContent(lang);
+  // Pull the CMS content once. `?preview=<token>` renders the pending draft (token from the CMS).
+  useEffect(() => {
+    const token = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("preview") : null;
+    (token ? getPreviewContent(token) : getPublishedContent()).then((o) => o && setOverrides(o));
+  }, []);
+
+  const c = buildSiteContent(lang, overrides ?? undefined);
   const { tx } = c;
+  const IMG = siteImgMap(c.images);
+  const hidden = new Set(overrides?.hidden ?? []);
   const fr = lang === "fr";
 
   function go(p: PageKey) {
@@ -166,7 +161,7 @@ export default function Site() {
       </section>
 
       {/* recognition */}
-      <section style={{ background: "#fff", borderBottom: "1px solid var(--border)" }}>
+      <section data-sec="recognition" style={{ background: "#fff", borderBottom: "1px solid var(--border)" }}>
         <div style={{ ...WRAP, display: "grid", gridTemplateColumns: "auto repeat(4,1fr)", alignItems: "stretch" }}>
           <div style={{ display: "flex", alignItems: "center", padding: "24px 28px 24px 0" }}>
             <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11.5, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--fg3)", lineHeight: 1.5 }}>{tx.recTitle}</span>
@@ -181,7 +176,7 @@ export default function Site() {
       </section>
 
       {/* news */}
-      <section style={{ background: "#fff" }}>
+      <section data-sec="news" style={{ background: "#fff" }}>
         <div style={{ ...WRAP, padding: "72px 40px 104px" }}>
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
             <div>
@@ -208,7 +203,7 @@ export default function Site() {
       </section>
 
       {/* hero stats */}
-      <section style={{ background: "var(--daust-navy)" }}>
+      <section data-sec="heroStats" style={{ background: "var(--daust-navy)" }}>
         <div className="grid-4" style={{ ...WRAP, display: "grid", gridTemplateColumns: "repeat(4,1fr)" }}>
           {c.heroStats.map((s) => (
             <div key={s.label} style={{ padding: "56px 32px", borderLeft: "1px solid rgba(255,255,255,.14)" }}>
@@ -220,7 +215,7 @@ export default function Site() {
       </section>
 
       {/* programs */}
-      <section style={{ background: "#fff" }}>
+      <section data-sec="programs" style={{ background: "#fff" }}>
         <div style={{ ...WRAP, padding: "104px 40px" }}>
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
             <div>
@@ -246,7 +241,7 @@ export default function Site() {
       </section>
 
       {/* impact */}
-      <section style={{ background: "var(--daust-navy-deep)", position: "relative", overflow: "hidden" }}>
+      <section data-sec="impact" style={{ background: "var(--daust-navy-deep)", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.04) 1px,transparent 1px)", backgroundSize: "22px 22px" }} />
         <div style={{ position: "relative", ...WRAP, padding: "96px 40px" }}>
           <SectionHead label="DAUST Impact" accent="orange" onDark />
@@ -262,7 +257,7 @@ export default function Site() {
       </section>
 
       {/* spotlight */}
-      <section style={{ background: "var(--bg-subtle)", borderTop: "1px solid var(--border)" }}>
+      <section data-sec="spotlight" style={{ background: "var(--bg-subtle)", borderTop: "1px solid var(--border)" }}>
         <div className="split" style={{ maxWidth: 1240, margin: "0 auto", padding: 0, display: "grid", gridTemplateColumns: "1fr 1fr", alignItems: "stretch" }}>
           <div style={{ position: "relative", minHeight: 520, minWidth: 0 }}><ImageSlot label={fr ? "Recherche / laboratoire" : "Research / lab feature"} src={IMG.researchFeature} /></div>
           <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", padding: "88px 64px", minWidth: 0 }}>
@@ -275,7 +270,7 @@ export default function Site() {
       </section>
 
       {/* why */}
-      <section style={{ background: "#fff" }}>
+      <section data-sec="why" style={{ background: "#fff" }}>
         <div style={{ ...WRAP, padding: "104px 40px" }}>
           <SectionHead num="03" label={tx.whyKicker} />
           <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,3.8vw,50px)", lineHeight: 1.02, letterSpacing: "-.01em", color: "var(--fg1)", margin: "26px 0 0", maxWidth: 820 }}>{tx.whyTitle}</h2>
@@ -764,6 +759,9 @@ export default function Site() {
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#fff" }}>
+      {hidden.size > 0 && (
+        <style>{[...hidden].map((k) => `[data-sec="${k}"]{display:none!important}`).join("")}</style>
+      )}
       {header}
       <main style={{ flex: 1 }}>
         {views[page]}
