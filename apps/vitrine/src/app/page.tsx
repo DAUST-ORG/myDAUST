@@ -7,7 +7,7 @@ import { Hover } from "@/components/Hover";
 import { ImageSlot } from "@/components/ImageSlot";
 import { AiPanel } from "@/components/AiPanel";
 import { ApplyModal } from "@/components/ApplyModal";
-import { buildSiteContent, siteImgMap, type Lang, type PageKey, type SiteOverrides } from "@/lib/content";
+import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type SiteOverrides } from "@/lib/content";
 import { getPreviewContent, getPublishedContent } from "@/lib/api";
 
 const WRAP: React.CSSProperties = { maxWidth: 1240, margin: "0 auto", padding: "0 40px" };
@@ -66,7 +66,8 @@ export default function Site() {
   const c = buildSiteContent(lang, overrides ?? undefined);
   const { tx } = c;
   const IMG = siteImgMap(c.images);
-  const hidden = new Set(overrides?.hidden ?? []);
+  // Only known section keys may reach the <style> selector (prevents CSS injection).
+  const hidden = new Set((overrides?.hidden ?? []).filter((k) => (HIDEABLE_SECTIONS as readonly string[]).includes(k)));
   const fr = lang === "fr";
 
   function go(p: PageKey) {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { EMPTY_SITE_OVERRIDES, type SiteOverrides } from "@mydaust/shared";
+import { EMPTY_SITE_OVERRIDES, sanitizeSiteOverrides, type SiteOverrides } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 const KEY = "site";
@@ -30,7 +30,9 @@ export class ContentService {
     };
   }
 
-  async saveDraft(overrides: SiteOverrides, actorId: string) {
+  async saveDraft(input: SiteOverrides, actorId: string) {
+    // Strip anything outside the editable allowlist before it is ever persisted.
+    const overrides = sanitizeSiteOverrides(input);
     const row = await this.prisma.siteContent.upsert({
       where: { key: KEY },
       create: { key: KEY, draftJson: overrides, updatedById: actorId },

@@ -549,18 +549,56 @@ function setAtPath(root: Record<string, unknown>, path: string, value: string) {
   }
 }
 
+/** Homepage sections the CMS may show/hide (also the only valid `hidden` values). */
+export const HIDEABLE_SECTIONS = ["recognition", "news", "heroStats", "programs", "impact", "spotlight", "why"] as const;
+
+/** The exact set of override paths the CMS is allowed to edit (excludes routes/urls/icons). */
+let _editablePaths: Set<string> | null = null;
+export function editablePaths(): Set<string> {
+  if (!_editablePaths) _editablePaths = new Set(Object.keys(flattenSiteText(buildContent("en"))));
+  return _editablePaths;
+}
+
+/** A value safe to place in an image slot: a relative /uploads path or an http(s) URL. */
+function isSafeImageUrl(v: string): boolean {
+  return /^\/[^/]/.test(v) || /^https?:\/\//i.test(v);
+}
+
+/**
+ * Drop anything a CMS write must never persist: text keys outside the editable
+ * allowlist (blocks injecting into href/scholar/icon leaves), unknown image slots
+ * or unsafe image URLs (blocks javascript: etc.), and unknown hidden section keys.
+ */
+export function sanitizeSiteOverrides(raw: SiteOverrides): SiteOverrides {
+  const editable = editablePaths();
+  const pickText = (m: Record<string, string>) => {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(m ?? {})) if (editable.has(k) && typeof v === "string") out[k] = v;
+    return out;
+  };
+  const images: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw.images ?? {})) {
+    if (k in DEFAULT_IMAGES && typeof v === "string" && isSafeImageUrl(v)) images[k] = v;
+  }
+  const allowedHidden = new Set<string>(HIDEABLE_SECTIONS);
+  return {
+    text: { en: pickText(raw.text?.en ?? {}), fr: pickText(raw.text?.fr ?? {}) },
+    images,
+    hidden: [...new Set((raw.hidden ?? []).filter((k) => allowedHidden.has(k)))],
+  };
+}
+
 /** Build localized content and apply the store's text + image overrides for that language. */
 export function buildSiteContent(lang: Lang, overrides?: SiteOverrides): Content & { images: Record<string, string> } {
   const content = buildContent(lang);
   const images = { ...DEFAULT_IMAGES };
   if (overrides) {
-    const text = overrides.text?.[lang] ?? {};
-    for (const [path, value] of Object.entries(text)) {
-      if (typeof value === "string") setAtPath(content as unknown as Record<string, unknown>, path, value);
+    // Apply the same allowlist at render time — the store is not the only trust boundary.
+    const clean = sanitizeSiteOverrides(overrides);
+    for (const [path, value] of Object.entries(clean.text[lang])) {
+      setAtPath(content as unknown as Record<string, unknown>, path, value);
     }
-    for (const [key, value] of Object.entries(overrides.images ?? {})) {
-      if (typeof value === "string" && value) images[key] = value;
-    }
+    for (const [key, value] of Object.entries(clean.images)) images[key] = value;
   }
   return { ...content, images };
 }
