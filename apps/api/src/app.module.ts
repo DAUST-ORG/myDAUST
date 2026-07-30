@@ -12,6 +12,7 @@ import { CommsModule } from "./comms/comms.module.js";
 import { ConfigModule } from "./config/config.module.js";
 import { ContactModule } from "./contact/contact.module.js";
 import { ContentModule } from "./content/content.module.js";
+import { NewsModule } from "./news/news.module.js";
 import { FinanceModule } from "./finance/finance.module.js";
 import { GuardiansModule } from "./guardians/guardians.module.js";
 import { HealthController } from "./health.controller.js";
@@ -36,6 +37,7 @@ import { UploadsModule } from "./uploads/uploads.module.js";
     CommsModule,
     ContentModule,
     ContactModule,
+    NewsModule,
     CampusModule,
     AdmissionsModule,
     DiningModule,

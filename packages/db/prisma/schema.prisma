@@ -355,6 +355,27 @@ model SiteContent {
   publishedAt   DateTime?
 }
 
+// CMS-authored news articles, published to the public site's News section + article pages.
+model NewsArticle {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  titleEn   String
+  titleFr   String
+  excerptEn String
+  excerptFr String
+  bodyEn    String
+  bodyFr    String
+  imageUrl  String?
+  tag       String?
+  date      String
+  published Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([published, sortOrder])
+}
+
 // "Contact us" submissions from the public site, read in the CMS inbox.
 model ContactMessage {
   id        String   @id @default(uuid())

@@ -1,4 +1,4 @@
-import type { ApplicationInput, ContactInput, SiteOverrides } from "@mydaust/shared";
+import type { ApplicationInput, ContactInput, PublicNewsArticle, PublicNewsArticleFull, SiteOverrides } from "@mydaust/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -50,6 +50,28 @@ export async function getPrograms(): Promise<{ code: string; name: string }[] | 
     if (!res.ok) return null;
     const list = (await res.json()) as { code: string; name: string }[];
     return list.length ? list : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Published news articles for the News section (empty on failure → default cards). */
+export async function getNews(): Promise<PublicNewsArticle[]> {
+  try {
+    const res = await fetch(`${API_URL}/api/news`);
+    if (!res.ok) return [];
+    return (await res.json()) as PublicNewsArticle[];
+  } catch {
+    return [];
+  }
+}
+
+/** One published article (with body) for the article view. */
+export async function getNewsArticle(slug: string): Promise<PublicNewsArticleFull | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/news/article/${encodeURIComponent(slug)}`);
+    if (!res.ok) return null;
+    return (await res.json()) as PublicNewsArticleFull;
   } catch {
     return null;
   }

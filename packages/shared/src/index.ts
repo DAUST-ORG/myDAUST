@@ -8,3 +8,4 @@ export * from "./admissions.js";
 export * from "./dining.js";
 export * from "./site-content.js";
 export * from "./contact.js";
+export * from "./news.js";

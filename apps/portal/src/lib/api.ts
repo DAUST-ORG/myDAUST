@@ -98,6 +98,20 @@ export const getContactMessages = () => request<ContactMessage[]>("/contact");
 export const markContactRead = (id: string, read: boolean) =>
   request<ContactMessage>(`/contact/${id}/read`, { method: "PATCH", body: JSON.stringify({ read }) });
 
+import type { NewsArticleInput } from "@mydaust/shared";
+export interface AdminNewsArticle {
+  id: string; slug: string;
+  titleEn: string; titleFr: string;
+  excerptEn: string; excerptFr: string;
+  bodyEn: string; bodyFr: string;
+  imageUrl: string | null; tag: string | null;
+  date: string; published: boolean; sortOrder: number;
+}
+export const getNewsAdmin = () => request<AdminNewsArticle[]>("/news/admin");
+export const createNews = (input: NewsArticleInput) => request<AdminNewsArticle>("/news", { method: "POST", body: JSON.stringify(input) });
+export const updateNews = (id: string, input: NewsArticleInput) => request<AdminNewsArticle>(`/news/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+export const deleteNews = (id: string) => request<{ ok: boolean }>(`/news/${id}`, { method: "DELETE" });
+
 // --- Auth ---
 export interface Me {
   personId: string;

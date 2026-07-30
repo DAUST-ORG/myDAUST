@@ -7,8 +7,8 @@ import { Hover } from "@/components/Hover";
 import { ImageSlot } from "@/components/ImageSlot";
 import { AiPanel } from "@/components/AiPanel";
 import { ApplyModal } from "@/components/ApplyModal";
-import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type SiteOverrides } from "@/lib/content";
-import { getPreviewContent, getPublishedContent, submitContact } from "@/lib/api";
+import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type PublicNewsArticle, type PublicNewsArticleFull, type SiteOverrides } from "@/lib/content";
+import { assetUrl, getNews, getNewsArticle, getPreviewContent, getPublishedContent, submitContact } from "@/lib/api";
 
 const WRAP: React.CSSProperties = { maxWidth: 1240, margin: "0 auto", padding: "0 40px" };
 
@@ -61,11 +61,22 @@ export default function Site() {
   const [contactBusy, setContactBusy] = useState(false);
   const [contactErr, setContactErr] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<SiteOverrides | null>(null);
+  const [newsList, setNewsList] = useState<PublicNewsArticle[]>([]);
+  const [articleSlug, setArticleSlug] = useState<string | null>(null);
+  const [article, setArticle] = useState<PublicNewsArticleFull | null>(null);
 
   // Pull the CMS content once. `?preview=<token>` renders the pending draft (token from the CMS).
   useEffect(() => {
     const token = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("preview") : null;
     (token ? getPreviewContent(token) : getPublishedContent()).then((o) => o && setOverrides(o));
+  }, []);
+
+  // Load published news; open a deep-linked article (?article=<slug>) on first load.
+  useEffect(() => {
+    getNews().then(setNewsList);
+    const slug = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("article") : null;
+    if (slug) openArticle(slug);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const c = buildSiteContent(lang, overrides ?? undefined);
@@ -79,6 +90,9 @@ export default function Site() {
     setPage(p);
     setMenuOpen(false);
     setFacultyId(null);
+    setArticleSlug(null);
+    setArticle(null);
+    setArticleQuery(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   }
   const openApply = () => { setApplyOpen(true); setMenuOpen(false); };
@@ -99,6 +113,26 @@ export default function Site() {
     } finally {
       setContactBusy(false);
     }
+  }
+
+  function setArticleQuery(slug: string | null) {
+    if (typeof window === "undefined") return;
+    const u = new URL(window.location.href);
+    if (slug) u.searchParams.set("article", slug);
+    else u.searchParams.delete("article");
+    window.history.replaceState({}, "", u);
+  }
+  function openArticle(slug: string) {
+    setArticleSlug(slug);
+    setArticle(null);
+    setArticleQuery(slug);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+    getNewsArticle(slug).then((a) => (a ? setArticle(a) : closeArticle()));
+  }
+  function closeArticle() {
+    setArticleSlug(null);
+    setArticle(null);
+    setArticleQuery(null);
   }
 
   const facultySel = c.faculty.find((f) => f.id === facultyId) ?? null;
@@ -209,18 +243,30 @@ export default function Site() {
             <a href="https://daust.org/dnews" target="_blank" rel="noopener" style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--daust-navy)", borderBottom: "2px solid var(--daust-orange)", paddingBottom: 4 }}>{tx.newsAll}</a>
           </div>
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36, marginTop: 52 }}>
-            {c.news.map((n, i) => (
-              <a key={n.slot} href={n.href} target="_blank" rel="noopener" style={{ display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
-                <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={n.title} src={IMG.news[i % IMG.news.length]} /></div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
-                  <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span>
-                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} />
-                  <span style={{ fontFamily: "var(--font-body)", fontSize: 12.5, color: "var(--fg3)" }}>{n.date}</span>
-                </div>
-                <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "12px 0 0", lineHeight: 1.2 }}>{n.title}</h3>
-                <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "12px 0 0" }}>{n.excerpt}</p>
-              </a>
-            ))}
+            {newsList.length > 0
+              ? newsList.map((n) => (
+                <button key={n.id} onClick={() => openArticle(n.slug)} style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
+                  <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={fr ? n.titleFr : n.titleEn} src={n.imageUrl ?? undefined} /></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
+                    {n.tag && <><span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span><span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} /></>}
+                    <span style={{ fontFamily: "var(--font-body)", fontSize: 12.5, color: "var(--fg3)" }}>{n.date}</span>
+                  </div>
+                  <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "12px 0 0", lineHeight: 1.2 }}>{fr ? n.titleFr : n.titleEn}</h3>
+                  <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "12px 0 0" }}>{fr ? n.excerptFr : n.excerptEn}</p>
+                </button>
+              ))
+              : c.news.map((n, i) => (
+                <a key={n.slot} href={n.href} target="_blank" rel="noopener" style={{ display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
+                  <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={n.title} src={IMG.news[i % IMG.news.length]} /></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
+                    <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span>
+                    <span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} />
+                    <span style={{ fontFamily: "var(--font-body)", fontSize: 12.5, color: "var(--fg3)" }}>{n.date}</span>
+                  </div>
+                  <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "12px 0 0", lineHeight: 1.2 }}>{n.title}</h3>
+                  <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "12px 0 0" }}>{n.excerpt}</p>
+                </a>
+              ))}
           </div>
         </div>
       </section>
@@ -772,6 +818,40 @@ export default function Site() {
 
   const views: Record<PageKey, React.ReactNode> = { home, academics, admissions, research, faculty, innovation, campus, about, portal, contact };
 
+  /* ---------------- NEWS ARTICLE ---------------- */
+  const articleView = (
+    <>
+      <div style={{ background: "#fff", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ ...WRAP, padding: "40px 40px 0" }}>
+          <Hover as="button" onClick={closeArticle} base={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--daust-navy)", background: "none", border: "none", cursor: "pointer", padding: 0 }} hover={{ color: "var(--daust-orange)" }}>
+            <Icon name="arrow-left" size={18} />{tx.newsAll}
+          </Hover>
+        </div>
+      </div>
+      {article ? (
+        <article style={{ background: "#fff" }}>
+          <div style={{ maxWidth: 860, margin: "0 auto", padding: "32px 40px 88px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              {article.tag && <><span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{article.tag}</span><span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} /></>}
+              <span style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--fg3)" }}>{article.date}</span>
+            </div>
+            <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,4.4vw,52px)", lineHeight: 1.04, letterSpacing: "-.015em", color: "var(--fg1)", margin: "16px 0 0" }}>{fr ? article.titleFr : article.titleEn}</h1>
+            {article.imageUrl && (
+              <div style={{ position: "relative", height: "clamp(240px,38vw,460px)", margin: "28px 0 8px", overflow: "hidden", borderRadius: 4 }}>
+                <ImageSlot label={fr ? article.titleFr : article.titleEn} src={article.imageUrl} />
+              </div>
+            )}
+            {(fr ? article.bodyFr : article.bodyEn).split(/\n{2,}/).map((para, i) => (
+              <p key={i} style={{ fontFamily: "var(--font-body)", fontSize: 16.5, lineHeight: 1.75, color: "var(--fg2)", margin: "20px 0 0", whiteSpace: "pre-wrap" }}>{para}</p>
+            ))}
+          </div>
+        </article>
+      ) : (
+        <div style={{ padding: 80, textAlign: "center", color: "var(--fg3)", fontFamily: "var(--font-body)" }}>{fr ? "Chargement…" : "Loading…"}</div>
+      )}
+    </>
+  );
+
   /* ---------------- SOCIAL / FOOTER ---------------- */
   const social = [
     { title: "X / Twitter", href: "https://twitter.com/daustofficial", path: "M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" },
@@ -788,7 +868,7 @@ export default function Site() {
       )}
       {header}
       <main style={{ flex: 1 }}>
-        {views[page]}
+        {articleSlug ? articleView : views[page]}
 
         {/* CTA band */}
         <section style={{ background: "var(--daust-navy)", position: "relative", overflow: "hidden" }}>

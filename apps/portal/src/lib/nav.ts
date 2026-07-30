@@ -22,6 +22,7 @@ import {
   Megaphone,
   MessageSquare,
   Network,
+  Newspaper,
   Receipt,
   Rocket,
   Scale,
@@ -168,6 +169,7 @@ export const COMMS_NAV: PortalNav = {
     g("Public website", [
       { href: "/comms/site", label: "Content Editor", icon: LayoutTemplate },
       { href: "/comms/media", label: "Images", icon: ImageIcon },
+      { href: "/comms/news", label: "News", icon: Newspaper },
       { href: "/comms/startups", label: "Startups", icon: Rocket },
       { href: "/comms/faculty", label: "Faculty", icon: Users },
       { href: "/comms/assistant", label: "AI Assistant", icon: MessageSquare },
@@ -232,6 +234,7 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/comms": { title: "Dashboard", crumb: "Public website · Communications" },
   "/comms/site": { title: "Content Editor", crumb: "Edit site text · Communications" },
   "/comms/media": { title: "Images", crumb: "Site imagery · Communications" },
+  "/comms/news": { title: "News", crumb: "News articles · Communications" },
   "/comms/startups": { title: "Startups", crumb: "Innovation ventures & partners · Communications" },
   "/comms/faculty": { title: "Faculty", crumb: "Faculty profiles & photos · Communications" },
   "/comms/assistant": { title: "AI Assistant", crumb: "Chatbot trigger words & answers · Communications" },
