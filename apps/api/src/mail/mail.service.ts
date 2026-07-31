@@ -14,7 +14,7 @@ export interface MailMessage {
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private readonly apiKey = process.env.RESEND_API_KEY;
-  private readonly from = process.env.MAIL_FROM ?? "myDAUST <no-reply@daust.org>";
+  private readonly from = process.env.MAIL_FROM ?? "myDAUST <no-reply@updates.daust.net>";
 
   async send(msg: MailMessage): Promise<{ sent: boolean; id?: string }> {
     if (!this.apiKey) {

@@ -159,7 +159,7 @@ module "api_service" {
     { name = "PAYTECH_IPN_URL", value = "${local.public_url}/api/finance/webhook/paytech" },
     { name = "PAYTECH_SUCCESS_URL", value = "${local.public_url}/student/billing" },
     { name = "PAYTECH_CANCEL_URL", value = "${local.public_url}/student/billing" },
-    { name = "MAIL_FROM", value = "myDAUST <no-reply@daust.org>" },
+    { name = "MAIL_FROM", value = "myDAUST <no-reply@updates.daust.net>" },
   ]
 
   secrets = concat(
