@@ -150,6 +150,8 @@ model Person {
   guardianInvites GuardianInvite[]  @relation("GuardianInvites")
   studentInvites  StudentInvite[]   @relation("StudentInvites")
   broadcasts      Broadcast[]       @relation("BroadcastSender")
+  // Public website profile for faculty (see FacultyProfile).
+  facultyProfile  FacultyProfile?
 }
 
 model Student {
@@ -209,6 +211,27 @@ model Student {
   roommateProfile RoommateProfile?
   documents   StudentDocument[]
   createdAt   DateTime     @default(now())
+}
+
+/// A faculty member's public-website profile. Only people whose roles include
+/// "faculty" get one; `publicProfile` gates whether they appear on the site.
+model FacultyProfile {
+  id        String   @id @default(uuid())
+  personId  String   @unique
+  person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  // Professional profile (displayed on the public Faculty page).
+  title     String? // e.g. "Associate Professor of Mechanical Engineering"
+  dept      String? // department / research center
+  bio       String? // short paragraph
+  interests String[] @default([]) // research interests
+  scholar   String? // publications / research profile link
+  photoUrl  String? // roster photo, resolved to an absolute URL (/uploads/...)
+  // Site visibility — toggled from the comms Faculty manager.
+  publicProfile Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([publicProfile])
 }
 
 model Term {

@@ -39,6 +39,11 @@ interface StaffSpec {
 
 const STAFF: StaffSpec[] = [
   { id: "usr_faculty", email: "amadou.ba@daust.edu", firstName: "Amadou", lastName: "Ba", roles: ["faculty"] },
+  { id: "usr_fac_ndoye", email: "awa.ndoye@daust.edu", firstName: "Awa", lastName: "Ndoye", roles: ["faculty"] },
+  { id: "usr_fac_sarr", email: "ibrahima.sarr@daust.edu", firstName: "Ibrahima", lastName: "Sarr", roles: ["faculty"] },
+  { id: "usr_fac_cisse", email: "mariama.cisse@daust.edu", firstName: "Mariama", lastName: "Cissé", roles: ["faculty"] },
+  { id: "usr_fac_diop", email: "ousmane.diop@daust.edu", firstName: "Ousmane", lastName: "Diop", roles: ["faculty"] },
+  { id: "usr_fac_ndiaye", email: "fatou.ndiaye@daust.edu", firstName: "Fatou", lastName: "Ndiaye", roles: ["faculty"] },
   { id: "usr_registrar", email: "registrar@daust.edu", firstName: "Fatou", lastName: "Sow", roles: ["registrar"] },
   { id: "usr_bursar", email: "bursar@daust.edu", firstName: "Mariama", lastName: "Ndiaye", roles: ["bursar"] },
   { id: "usr_hr", email: "hr@daust.edu", firstName: "Ousmane", lastName: "Fall", roles: ["hr"] },
@@ -110,6 +115,87 @@ async function seedStaff(passwordHash: string) {
     });
   }
   console.log(`Seeded ${STAFF.length} staff users across roles.`);
+}
+
+// Public-site profiles for the seeded faculty. Photos are added later from the comms
+// Faculty manager (photoUrl stays null → the site shows the initials monogram).
+const FACULTY_PROFILES: { id: string; title: string; dept: string; bio: string; interests: string[]; scholar: string }[] = [
+  {
+    id: "usr_faculty",
+    title: "Associate Professor of Mechanical Engineering",
+    dept: "Mechanical Engineering",
+    bio: "Dr. Amadou Ba leads the Advanced Energy center at DAUST. His research spans renewable energy systems, energy storage and grid modernization, with a focus on affordable, reliable clean energy for African contexts.",
+    interests: ["Renewable energy", "Energy storage", "Grid modernization"],
+    scholar: "https://scholar.google.com/",
+  },
+  {
+    id: "usr_fac_ndoye",
+    title: "Professor of Mathematics",
+    dept: "Mathematical Sciences",
+    bio: "Prof. Awa Ndoye researches numerical methods and applied mathematics, supporting DAUST's five-year engineering curriculum with a strong foundation in mathematical modelling.",
+    interests: ["Numerical analysis", "Mathematical modelling", "Optimization"],
+    scholar: "https://scholar.google.com/",
+  },
+  {
+    id: "usr_fac_sarr",
+    title: "Associate Professor of Computer Engineering",
+    dept: "Computer & Electrical Engineering",
+    bio: "Dr. Ibrahima Sarr works on autonomous systems, deep learning and robotic perception — building AI designed for real-world, resource-aware deployment across Africa.",
+    interests: ["Autonomous systems", "Deep learning", "Robotic perception"],
+    scholar: "https://scholar.google.com/",
+  },
+  {
+    id: "usr_fac_cisse",
+    title: "Assistant Professor of Mechanical Engineering",
+    dept: "Mechanical Engineering",
+    bio: "Dr. Mariama Cissé studies fluid dynamics and experimental mechanics, applying engineering principles to problems in energy, health and the environment.",
+    interests: ["Fluid dynamics", "Experimental mechanics", "Sustainable design"],
+    scholar: "https://scholar.google.com/",
+  },
+  {
+    id: "usr_fac_diop",
+    title: "Assistant Professor of Electrical Engineering",
+    dept: "Electrical Engineering",
+    bio: "Dr. Ousmane Diop develops microfluidic platforms and biosensors aimed at precision medicine and affordable diagnostics for African clinics.",
+    interests: ["Microfluidics", "Biosensors", "Biomedical instrumentation"],
+    scholar: "https://scholar.google.com/",
+  },
+  {
+    id: "usr_fac_ndiaye",
+    title: "Assistant Professor of Bioengineering",
+    dept: "Bioengineering",
+    bio: "Dr. Fatou Ndiaye researches microbial systems and engineered biomaterials at the interface of medical science and engineering.",
+    interests: ["Microbial systems", "Biomaterials", "Point-of-care devices"],
+    scholar: "https://scholar.google.com/",
+  },
+];
+
+/** Faculty public-site profiles. Most are toggled public; one stays private to demo the toggle. */
+async function seedFacultyProfiles() {
+  const madePublic = new Set(FACULTY_PROFILES.slice(0, -1).map((p) => p.id));
+  for (const p of FACULTY_PROFILES) {
+    await prisma.facultyProfile.upsert({
+      where: { personId: p.id },
+      update: {
+        title: p.title,
+        dept: p.dept,
+        bio: p.bio,
+        interests: p.interests,
+        scholar: p.scholar,
+        publicProfile: madePublic.has(p.id),
+      },
+      create: {
+        personId: p.id,
+        title: p.title,
+        dept: p.dept,
+        bio: p.bio,
+        interests: p.interests,
+        scholar: p.scholar,
+        publicProfile: madePublic.has(p.id),
+      },
+    });
+  }
+  console.log(`Seeded ${FACULTY_PROFILES.length} faculty profiles (${madePublic.size} public, 1 private).`);
 }
 
 async function seedStudents(passwordHash: string) {
@@ -659,6 +745,7 @@ async function main() {
   const passwordHash = await bcrypt.hash(DEV_PASSWORD, 10);
   await seedCostCenters();
   await seedStaff(passwordHash);
+  await seedFacultyProfiles();
   await seedStudents(passwordHash);
   await seedAcademics();
   await seedGrades();

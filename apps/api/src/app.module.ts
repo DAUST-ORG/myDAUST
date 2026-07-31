@@ -6,6 +6,7 @@ import { AppConfigModule } from "./app-config/app-config.module.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { CampusModule } from "./campus/campus.module.js";
 import { DiningModule } from "./dining/dining.module.js";
+import { FacultyModule } from "./faculty/faculty.module.js";
 import { HrModule } from "./hr/hr.module.js";
 import { MailModule } from "./mail/mail.module.js";
 import { CommsModule } from "./comms/comms.module.js";
@@ -41,6 +42,7 @@ import { UploadsModule } from "./uploads/uploads.module.js";
     CampusModule,
     AdmissionsModule,
     DiningModule,
+    FacultyModule,
     HrModule,
     UploadsModule,
   ],
