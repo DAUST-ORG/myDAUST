@@ -1,13 +1,5 @@
-"use client";
-
-import { FacultyEditor, PublishBar, useDraft } from "../cms";
+import FacultyManager from "./FacultyManager";
 
 export default function FacultyPage() {
-  const draft = useDraft();
-  return (
-    <div>
-      <PublishBar draft={draft} />
-      <FacultyEditor draft={draft} />
-    </div>
-  );
+  return <FacultyManager />;
 }

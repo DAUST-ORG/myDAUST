@@ -7,7 +7,6 @@ import {
   DEFAULT_IMAGES,
   defaultCollections,
   EMPTY_SITE_OVERRIDES,
-  type FacultyItem,
   flattenSiteText,
   SITE_IMAGE_SLOTS,
   SITE_SECTION_LABELS,
@@ -432,56 +431,6 @@ export function VenturesEditor({ draft }: { draft: Draft }) {
           <BiInput label="Tag" value={it.tag} onChange={(v) => update(i, { tag: v })} />
           <BiInput label="Description" value={it.desc} onChange={(v) => update(i, { desc: v })} multiline />
           <BiInput label="Link label" value={it.cta} onChange={(v) => update(i, { cta: v })} />
-        </ItemFrame>
-      ))}
-    </div>
-  );
-}
-
-export function FacultyEditor({ draft }: { draft: Draft }) {
-  const { ov, setOv, loaded } = draft;
-  const [uploading, setUploading] = useState<number | null>(null);
-  const items = (ov.collections?.faculty ?? defaultCollections().faculty) as FacultyItem[];
-  const overridden = ov.collections?.faculty !== undefined;
-  const set = (next: FacultyItem[]) => setOv((prev) => ({ ...prev, collections: { ...(prev.collections ?? {}), faculty: next } }));
-  const reset = () => setOv((prev) => { const c = { ...(prev.collections ?? {}) }; delete c.faculty; return { ...prev, collections: c }; });
-  const update = (i: number, patch: Partial<FacultyItem>) => set(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
-  const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= items.length) return; const a = [...items]; [a[i], a[j]] = [a[j]!, a[i]!]; set(a); };
-  const add = () => set([...items, { name: "New faculty member", initials: "NN", image: "", scholar: "", title: { en: "", fr: "" }, dept: { en: "", fr: "" }, bio: { en: "", fr: "" }, interests: { en: "", fr: "" } }]);
-
-  async function onPhoto(i: number, file: File | undefined) {
-    if (!file) return;
-    setUploading(i);
-    try { const { url } = await uploadFile(file); update(i, { image: url }); } catch { /* surfaced by PublishBar on save */ } finally { setUploading(null); }
-  }
-
-  if (!loaded) return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <CollectionToolbar label="Add faculty" onAdd={add} overridden={overridden} onReset={reset} />
-      {items.map((it, i) => (
-        <ItemFrame key={i} title={it.name} index={i} total={items.length} onUp={() => move(i, -1)} onDown={() => move(i, 1)} onRemove={() => set(items.filter((_, idx) => idx !== i))}>
-          <div style={{ display: "flex", gap: 14 }}>
-            <div style={{ width: 96, flexShrink: 0 }}>
-              {it.image
-                ? // eslint-disable-next-line @next/next/no-img-element
-                  <img src={previewSrc(it.image)} alt={it.name} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }} />
-                : <div style={{ width: 96, height: 96, borderRadius: "var(--radius-md)", border: "1px solid var(--border)", background: "var(--daust-navy)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800 }}>{it.initials}</div>}
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "var(--daust-navy)", cursor: "pointer", marginTop: 8 }}>
-                <Upload size={13} />{uploading === i ? "Uploading…" : "Photo"}
-                <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPhoto(i, e.target.files?.[0])} disabled={uploading !== null} />
-              </label>
-            </div>
-            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 120px", gap: 12 }}>
-              <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Name</div><Input value={it.name} onChange={(v) => update(i, { name: v })} /></div>
-              <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Initials</div><Input value={it.initials} onChange={(v) => update(i, { initials: v })} /></div>
-            </div>
-          </div>
-          <BiInput label="Title" value={it.title} onChange={(v) => update(i, { title: v })} />
-          <BiInput label="Department" value={it.dept} onChange={(v) => update(i, { dept: v })} />
-          <BiInput label="Research interests (comma-separated)" value={it.interests} onChange={(v) => update(i, { interests: v })} />
-          <BiInput label="Bio" value={it.bio} onChange={(v) => update(i, { bio: v })} multiline />
-          <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Publications / profile link (URL)</div><Input value={it.scholar} onChange={(v) => update(i, { scholar: v })} /></div>
         </ItemFrame>
       ))}
     </div>

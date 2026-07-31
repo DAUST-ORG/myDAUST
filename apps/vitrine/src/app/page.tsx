@@ -7,8 +7,8 @@ import { Hover } from "@/components/Hover";
 import { ImageSlot } from "@/components/ImageSlot";
 import { AiPanel } from "@/components/AiPanel";
 import { ApplyModal } from "@/components/ApplyModal";
-import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type PublicNewsArticle, type PublicNewsArticleFull, type SiteOverrides } from "@/lib/content";
-import { assetUrl, getNews, getNewsArticle, getPreviewContent, getPublishedContent, submitContact } from "@/lib/api";
+import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type PublicFacultyMember, type PublicNewsArticle, type PublicNewsArticleFull, type SiteOverrides } from "@/lib/content";
+import { assetUrl, getNews, getNewsArticle, getPreviewContent, getPublicFaculty, getPublishedContent, submitContact } from "@/lib/api";
 
 const WRAP: React.CSSProperties = { maxWidth: 1240, margin: "0 auto", padding: "0 40px" };
 
@@ -64,6 +64,7 @@ export default function Site() {
   const [newsList, setNewsList] = useState<PublicNewsArticle[]>([]);
   const [articleSlug, setArticleSlug] = useState<string | null>(null);
   const [article, setArticle] = useState<PublicNewsArticleFull | null>(null);
+  const [publicFaculty, setPublicFaculty] = useState<PublicFacultyMember[]>([]);
 
   // Pull the CMS content once. `?preview=<token>` renders the pending draft (token from the CMS).
   useEffect(() => {
@@ -77,6 +78,12 @@ export default function Site() {
     const slug = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("article") : null;
     if (slug) openArticle(slug);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Professors toggled public on the platform drive the Faculty page; fall back to the
+  // built-in list when none are public yet (or the API is unreachable).
+  useEffect(() => {
+    getPublicFaculty().then(setPublicFaculty);
   }, []);
 
   const c = buildSiteContent(lang, overrides ?? undefined);
@@ -135,7 +142,23 @@ export default function Site() {
     setArticleQuery(null);
   }
 
-  const facultySel = c.faculty.find((f) => f.id === facultyId) ?? null;
+  // Faculty page source: platform professors toggled public; built-in list is the fallback.
+  const facultyList =
+    publicFaculty.length > 0
+      ? publicFaculty.map((f) => ({
+          id: f.id,
+          slot: f.id,
+          initials: f.initials,
+          name: f.name,
+          title: f.title ?? "",
+          dept: f.dept ?? "",
+          bio: f.bio ?? "",
+          interests: f.interests,
+          scholar: f.scholar ?? "",
+          image: f.photo ? assetUrl(f.photo) : undefined,
+        }))
+      : c.faculty;
+  const facultySel = facultyList.find((f) => f.id === facultyId) ?? null;
 
   /* ---------------- HEADER ---------------- */
   const utilLink: React.CSSProperties = { fontFamily: "var(--font-body)", fontSize: 12, letterSpacing: ".03em", color: "var(--fg-on-navy-muted)", cursor: "pointer", background: "none", border: "none", padding: 0 };
@@ -578,7 +601,7 @@ export default function Site() {
       <section style={{ background: "#fff" }}>
         <div style={{ ...WRAP, padding: "72px 40px" }}>
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)" }}>
-            {c.faculty.map((f) => (
+            {facultyList.map((f) => (
               <Hover key={f.id} onClick={() => { setFacultyId(f.id); if (typeof window !== "undefined") window.scrollTo({ top: 0 }); }} base={{ background: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", minWidth: 0 }} hover={{ background: "var(--bg-subtle)" }}>
                 <div style={{ position: "relative", height: 300, minWidth: 0 }}><ImageSlot label={f.name} mono={f.initials} src={f.image} /></div>
                 <div style={{ padding: "24px 26px 28px" }}>

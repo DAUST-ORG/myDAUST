@@ -1,4 +1,4 @@
-import type { ApplicationInput, ContactInput, PublicNewsArticle, PublicNewsArticleFull, SiteOverrides } from "@mydaust/shared";
+import type { ApplicationInput, ContactInput, PublicFacultyMember, PublicNewsArticle, PublicNewsArticleFull, SiteOverrides } from "@mydaust/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -85,6 +85,17 @@ export async function submitContact(input: ContactInput): Promise<void> {
     body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+}
+
+/** Professors toggled public on the site (empty on failure → the vitrine falls back to defaults). */
+export async function getPublicFaculty(): Promise<PublicFacultyMember[]> {
+  try {
+    const res = await fetch(`${API_URL}/api/faculty/public`);
+    if (!res.ok) return [];
+    return (await res.json()) as PublicFacultyMember[];
+  } catch {
+    return [];
+  }
 }
 
 /** PayTech checkout for the 30k FCFA application fee. */
