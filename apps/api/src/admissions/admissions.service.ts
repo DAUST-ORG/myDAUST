@@ -105,7 +105,7 @@ export class AdmissionsService {
       if (recipients.length) {
         const portal = process.env.PORTAL_ORIGIN ?? "http://localhost:3000";
         await this.mail.send({
-          to: recipients.join(", "),
+          to: recipients,
           subject: `New application — ${input.firstName} ${input.lastName}`,
           html: `
             <p>A new application was submitted.</p>

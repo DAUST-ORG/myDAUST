@@ -1,7 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 
 export interface MailMessage {
-  to: string;
+  /** One address, or several — Resend requires an array for multiple, not a comma-joined string. */
+  to: string | string[];
   subject: string;
   html: string;
 }
@@ -17,8 +18,9 @@ export class MailService {
   private readonly from = process.env.MAIL_FROM ?? "myDAUST <no-reply@updates.daust.net>";
 
   async send(msg: MailMessage): Promise<{ sent: boolean; id?: string }> {
+    const toLabel = Array.isArray(msg.to) ? msg.to.join(", ") : msg.to;
     if (!this.apiKey) {
-      this.logger.log(`[dev-mail] to=${msg.to} subject="${msg.subject}" (no RESEND_API_KEY — not sent)`);
+      this.logger.log(`[dev-mail] to=${toLabel} subject="${msg.subject}" (no RESEND_API_KEY — not sent)`);
       return { sent: false };
     }
     const res = await fetch("https://api.resend.com/emails", {
