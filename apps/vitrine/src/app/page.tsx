@@ -170,7 +170,7 @@ export default function Site() {
       {/* utility bar */}
       <div className="util-bar" style={{ background: "var(--daust-navy-deep)", color: "#fff" }}>
         <div style={{ maxWidth: 1240, margin: "0 auto", padding: "0 40px", height: 34, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 26 }}>
-          <Hover as="a" href="https://daust.org/dnews" target="_blank" rel="noopener" base={utilLink} hover={{ color: "#fff" }}>{tx.uNews}</Hover>
+          <Hover as="button" onClick={() => go("news")} base={{ ...utilLink, display: "inline-flex", alignItems: "center", gap: 6 }} hover={{ color: "#fff" }}>{tx.uNews}</Hover>
           <Hover as="button" onClick={() => go("research")} base={utilLink} hover={{ color: "#fff" }}>{tx.uResearch}</Hover>
           <Hover as="button" onClick={() => go("portal")} base={utilLink} hover={{ color: "#fff" }}>{tx.uPortal}</Hover>
           <Hover as="button" onClick={() => go("contact")} base={utilLink} hover={{ color: "#fff" }}>{tx.uContact}</Hover>
@@ -263,7 +263,7 @@ export default function Site() {
               <SectionHead num="01" label={tx.newsKicker} />
               <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,3.8vw,50px)", lineHeight: 1.02, letterSpacing: "-.01em", color: "var(--fg1)", margin: "26px 0 0" }}>{tx.newsTitle}</h2>
             </div>
-            <a href="https://daust.org/dnews" target="_blank" rel="noopener" style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--daust-navy)", borderBottom: "2px solid var(--daust-orange)", paddingBottom: 4 }}>{tx.newsAll}</a>
+            <button onClick={() => go("news")} style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--daust-navy)", background: "none", border: "none", paddingBottom: 4, borderBottom: "2px solid var(--daust-orange)", cursor: "pointer" }}>{tx.newsAll}</button>
           </div>
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36, marginTop: 52 }}>
             {newsList.length > 0
@@ -279,7 +279,7 @@ export default function Site() {
                 </button>
               ))
               : c.news.map((n, i) => (
-                <a key={n.slot} href={n.href} target="_blank" rel="noopener" style={{ display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
+                <button key={n.slot} onClick={() => go("news")} style={{ display: "flex", flexDirection: "column", color: "inherit", minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer" }}>
                   <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={n.title} src={IMG.news[i % IMG.news.length]} /></div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
                     <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span>
@@ -288,7 +288,7 @@ export default function Site() {
                   </div>
                   <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "12px 0 0", lineHeight: 1.2 }}>{n.title}</h3>
                   <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "12px 0 0" }}>{n.excerpt}</p>
-                </a>
+                </button>
               ))}
           </div>
         </div>
@@ -839,7 +839,35 @@ export default function Site() {
     </>
   );
 
-  const views: Record<PageKey, React.ReactNode> = { home, academics, admissions, research, faculty, innovation, campus, about, portal, contact };
+  /* ---------------- NEWS ---------------- */
+  const newsView = (
+    <>
+      <PageHero kicker={tx.newsKicker} title={tx.newsTitle} sub={tx.newsSub} />
+      <section style={{ background: "#fff" }}>
+        <div style={{ ...WRAP, padding: "72px 40px 104px" }}>
+          {newsList.length > 0 ? (
+            <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36 }}>
+              {newsList.map((n) => (
+                <button key={n.id} onClick={() => openArticle(n.slug)} style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
+                  <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={fr ? n.titleFr : n.titleEn} src={n.imageUrl ?? undefined} /></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
+                    {n.tag && <><span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span><span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} /></>}
+                    <span style={{ fontFamily: "var(--font-body)", fontSize: 12.5, color: "var(--fg3)" }}>{n.date}</span>
+                  </div>
+                  <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "12px 0 0", lineHeight: 1.2 }}>{fr ? n.titleFr : n.titleEn}</h3>
+                  <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "12px 0 0" }}>{fr ? n.excerptFr : n.excerptEn}</p>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ textAlign: "center", padding: "64px 0", color: "var(--fg3)", fontFamily: "var(--font-body)", fontSize: 15.5 }}>{tx.newsEmpty}</div>
+          )}
+        </div>
+      </section>
+    </>
+  );
+
+  const views: Record<PageKey, React.ReactNode> = { home, academics, admissions, research, faculty, innovation, campus, about, portal, contact, news: newsView };
 
   /* ---------------- NEWS ARTICLE ---------------- */
   const articleView = (

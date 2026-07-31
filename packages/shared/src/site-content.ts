@@ -7,7 +7,8 @@ import { z } from "zod";
 export type Lang = "en" | "fr";
 export type PageKey =
   | "home" | "academics" | "admissions" | "research"
-  | "faculty" | "innovation" | "campus" | "about" | "portal" | "contact";
+  | "faculty" | "innovation" | "campus" | "about" | "portal" | "contact"
+  | "news";
 
 export interface FacultyMember {
   id: string; slot: string; initials: string; name: string; title: string;
@@ -39,6 +40,8 @@ export function buildContent(lang: Lang) {
     exploreResearch: T("Explore research →", "Découvrir la recherche →"),
     newsKicker: T("News & Stories", "Actualités & Récits"), newsAll: T("All news →", "Toutes les actualités →"),
     newsTitle: T("News & Stories", "Actualités & Récits"),
+    newsSub: T("Stories from the DAUST community — research, campus life, and milestones.", "Des histoires de la communauté DAUST — recherche, vie de campus et jalons."),
+    newsEmpty: T("More news stories are on the way. Check back soon.", "De nouvelles actualités arrivent bientôt. Revenez vite !"),
     lifeKicker: T("Life @ DAUST", "La vie @ DAUST"),
     ctaTitle: T("Your engineering journey starts in Somone.", "Votre parcours d’ingénieur commence à Somone."),
     askOurAI: T("Ask our AI", "Demander à notre IA"),
