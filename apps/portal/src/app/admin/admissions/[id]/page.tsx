@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, BadgeCheck, Check, CheckCircle2, Clock, Flag, Gift, GraduationCap, MapPin, Pencil, Target, UserCheck, X } from "lucide-react";
-import { type ApplicantDetail, createRegistrarStudent, getApplicant, getAdminPrograms, setApplicantStage } from "@/lib/api";
+import { type ApplicantDetail, createRegistrarStudent, getApplicant, getAdminPrograms, type ProvisionedLogin, provisionStudentLogin, setApplicantStage } from "@/lib/api";
 import { formatXof } from "@/lib/format";
 import { Avatar, Badge, type BadgeTone, Field, Modal, Tabs } from "@/components/ui";
 import { ApplicationModal, type ProgramOption } from "../ApplicationModal";
@@ -237,6 +237,7 @@ function EnrollFromApplicant({ applicant, onClose, onEnrolled }: { applicant: Ap
   const [dob, setDob] = useState(applicant.dateOfBirth ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [cred, setCred] = useState<ProvisionedLogin | null>(null);
 
   async function submit() {
     setErr(null);
@@ -254,11 +255,29 @@ function EnrollFromApplicant({ applicant, onClose, onEnrolled }: { applicant: Ap
         dateOfBirth: dob || null,
         programCode: applicant.programCode ?? null,
       });
-      onEnrolled(res.id);
+      // Provision a working login (temp password shown once) so the student can sign in.
+      const c = await provisionStudentLogin(res.id);
+      setCred(c);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not enroll.");
       setBusy(false);
     }
+  }
+
+  if (cred) {
+    return (
+      <Modal open onClose={() => onEnrolled(cred.studentId)} title="Student enrolled" width={460}
+        footer={<button className="primary" onClick={() => onEnrolled(cred.studentId)}>Open student record</button>}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="badge overdue" style={{ padding: "8px 12px", fontSize: 12.5 }}>
+            Copy this now — the temporary password is shown once and is never emailed or stored. The student changes it on first login.
+          </div>
+          <Field label="Name"><div>{cred.name}</div></Field>
+          <Field label="Email (login)"><div style={{ fontFamily: "ui-monospace, monospace" }}>{cred.email}</div></Field>
+          <Field label="Temporary password"><div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16 }}>{cred.tempPassword}</div></Field>
+        </div>
+      </Modal>
+    );
   }
 
   return (
@@ -267,7 +286,7 @@ function EnrollFromApplicant({ applicant, onClose, onEnrolled }: { applicant: Ap
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
         <p className="muted" style={{ fontSize: 13, margin: 0 }}>
-          Create a student record + account for <strong>{applicant.name}</strong> ({applicant.program ?? "no program"}). A password-setup email is sent on save; billing is handled separately by the Bursar.
+          Create a student record + login for <strong>{applicant.name}</strong> ({applicant.program ?? "no program"}). A temporary password is shown on save; billing is handled separately by the Bursar.
         </p>
         <Field label="Student ID" hint="Assigned by the Registrar"><input value={studentNo} onChange={(e) => setStudentNo(e.target.value)} placeholder="e.g. DAUST-2026-0001" /></Field>
         <Field label="Date of birth" hint="The payment-portal second factor"><input type="date" value={dob} onChange={(e) => setDob(e.target.value)} /></Field>

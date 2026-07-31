@@ -137,6 +137,8 @@ model Person {
   roles     String[]   @default([])
   // bcrypt hash; null until a password is set.
   passwordHash String?
+  // Set when a temp password was assigned; forces a change on next login.
+  mustChangePassword Boolean @default(false)
   createdAt DateTime   @default(now())
   student   Student?
   taughtSections Section[] @relation("Instructor")
@@ -374,6 +376,13 @@ model NewsArticle {
   updatedAt DateTime @updatedAt
 
   @@index([published, sortOrder])
+}
+
+// Generic admin-editable settings (key -> JSON). E.g. application_notification_recipients.
+model AppSetting {
+  key       String   @id
+  valueJson Json
+  updatedAt DateTime @updatedAt
 }
 
 // "Contact us" submissions from the public site, read in the CMS inbox.

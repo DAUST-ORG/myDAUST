@@ -5,6 +5,10 @@ import { MailService } from "../mail/mail.service.js";
 import { AppConfigService } from "../app-config/app-config.service.js";
 import { PAYMENT_PROVIDER, type PaymentProvider } from "../finance/payment-provider.js";
 
+/** Escape user-supplied text before embedding it in email HTML (applications are anonymous/public). */
+const esc = (s: unknown): string =>
+  String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
 /** Optional applicant columns the registrar form captures beyond name + email. */
 export interface ApplicantFields {
   programCode?: string | null;
@@ -88,12 +92,35 @@ export class AdmissionsService {
       to: input.email,
       subject: "Your DAUST application has been received",
       html: `
-        <h2>Thank you, ${input.firstName}!</h2>
+        <h2>Thank you, ${esc(input.firstName)}!</h2>
         <p>We've received your application to DAUST for the September 2026 intake.</p>
         ${scholarshipLine}
         <p>Next step: submit your documents and the ${appFee.toLocaleString("en-US")} FCFA application fee. Our admissions team will be in touch.</p>
         <p>— Office of Admissions, DAUST</p>`,
     });
+
+    // Notify the configured staff list. Never let a mail failure 500 a public submission.
+    try {
+      const recipients = await this.appConfig.applicationNotificationRecipients();
+      if (recipients.length) {
+        const portal = process.env.PORTAL_ORIGIN ?? "http://localhost:3000";
+        await this.mail.send({
+          to: recipients.join(", "),
+          subject: `New application — ${input.firstName} ${input.lastName}`,
+          html: `
+            <p>A new application was submitted.</p>
+            <ul>
+              <li><strong>Name:</strong> ${esc(input.firstName)} ${esc(input.lastName)}</li>
+              <li><strong>Email:</strong> ${esc(input.email)}</li>
+              <li><strong>Program:</strong> ${esc(input.programCode ?? "—")}</li>
+              <li><strong>Score:</strong> ${esc(score ?? "—")}</li>
+            </ul>
+            <p><a href="${portal}/admin/admissions/${applicant.id}">Review in the registrar dashboard</a></p>`,
+        });
+      }
+    } catch (e) {
+      this.logger.warn(`application notification email failed: ${String(e)}`);
+    }
 
     return { id: applicant.id, scholarship: award };
   }

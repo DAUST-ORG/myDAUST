@@ -2,16 +2,19 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, UserPlus, X } from "lucide-react";
+import { KeyRound, Pencil, UserPlus, X } from "lucide-react";
 import {
   type AdminPrograms,
   type AdminStudent,
   createRegistrarStudent,
   getAdminPrograms,
   getAdminStudents,
+  type ProvisionedLogin,
+  provisionAllStudentLogins,
+  provisionStudentLogin,
 } from "@/lib/api";
 import { formatXof } from "@/lib/format";
-import { Avatar, Badge, type BadgeTone, Field, IconButton, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
+import { Avatar, Badge, type BadgeTone, Button, Field, IconButton, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
 
 const STATUS_TONE: Record<string, BadgeTone> = { active: "success", probation: "warning" };
 const STATUS_LABEL: Record<string, string> = { active: "Active", probation: "Probation" };
@@ -37,7 +40,39 @@ export default function AdminStudentsPage() {
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<CreatedNotice | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [creds, setCreds] = useState<ProvisionedLogin[] | null>(null);
+  const [provisioning, setProvisioning] = useState<string | null>(null);
   const { sort, toggle, apply } = useSort({ key: "name", dir: "asc" });
+
+  async function provisionOne(id: string) {
+    setProvisioning(id);
+    setError(null);
+    try {
+      const c = await provisionStudentLogin(id);
+      setCreds([c]);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not provision login.");
+    } finally {
+      setProvisioning(null);
+    }
+  }
+
+  async function provisionAll() {
+    setProvisioning("all");
+    setError(null);
+    try {
+      const res = await provisionAllStudentLogins();
+      setCreds(res.credentials);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not provision logins.");
+    } finally {
+      setProvisioning(null);
+    }
+  }
+
+  const missingLogins = rows.filter((s) => !s.hasLogin).length;
 
   function load() {
     getAdminStudents().then(setRows).catch((e: Error) => setError(e.message));
@@ -73,9 +108,16 @@ export default function AdminStudentsPage() {
         title="Students"
         subtitle={`${rows.length.toLocaleString()} enrolled across ${programs.length} programs.`}
         actions={
-          <button className="primary" onClick={() => setAdding(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            <UserPlus size={15} /> Add student
-          </button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {missingLogins > 0 && (
+              <Button variant="secondary" icon={<KeyRound size={15} />} onClick={provisionAll} disabled={provisioning !== null}>
+                {provisioning === "all" ? "Generating…" : `Generate ${missingLogins} logins`}
+              </Button>
+            )}
+            <button className="primary" onClick={() => setAdding(true)} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <UserPlus size={15} /> Add student
+            </button>
+          </div>
         }
       />
 
@@ -113,6 +155,7 @@ export default function AdminStudentsPage() {
                 <SortTh label="GPA" sortKey="gpa" sort={sort} onSort={toggle} />
                 <SortTh label="Balance" sortKey="balance" sort={sort} onSort={toggle} align="right" />
                 <SortTh label="Status" sortKey="status" sort={sort} onSort={toggle} />
+                <th style={{ textAlign: "left" }}>Login</th>
                 <th />
               </tr>
             </thead>
@@ -135,6 +178,23 @@ export default function AdminStudentsPage() {
                     {s.balance > 0 ? formatXof(s.balance) : s.balance < 0 ? `Credit ${formatXof(-s.balance)}` : "Cleared"}
                   </td>
                   <td><Badge tone={STATUS_TONE[s.status] ?? "neutral"}>{STATUS_LABEL[s.status] ?? s.status}</Badge></td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    {!s.hasLogin ? (
+                      <button className="link-btn" onClick={() => provisionOne(s.id)} disabled={provisioning !== null} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--daust-navy)", background: "none", border: "none", cursor: "pointer" }}>
+                        <KeyRound size={13} /> {provisioning === s.id ? "…" : "Generate login"}
+                      </button>
+                    ) : s.mustChangePassword ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Badge tone="warning">Must change</Badge>
+                        <button className="link-btn" onClick={() => provisionOne(s.id)} disabled={provisioning !== null} style={{ fontSize: 12, color: "var(--fg3)", background: "none", border: "none", cursor: "pointer" }}>Reset</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Badge tone="success">Active</Badge>
+                        <button className="link-btn" onClick={() => provisionOne(s.id)} disabled={provisioning !== null} style={{ fontSize: 12, color: "var(--fg3)", background: "none", border: "none", cursor: "pointer" }}>Reset</button>
+                      </div>
+                    )}
+                  </td>
                   <td style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
                     <IconButton label="Open record" onClick={() => router.push(`/admin/students/${s.id}`)}><Pencil size={15} /></IconButton>
                   </td>
@@ -142,7 +202,7 @@ export default function AdminStudentsPage() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted" style={{ textAlign: "center", padding: 32 }}>No students match your search.</td>
+                  <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 32 }}>No students match your search.</td>
                 </tr>
               )}
             </tbody>
@@ -161,7 +221,59 @@ export default function AdminStudentsPage() {
           }}
         />
       )}
+
+      {creds && <CredentialsModal creds={creds} onClose={() => setCreds(null)} />}
     </>
+  );
+}
+
+function CredentialsModal({ creds, onClose }: { creds: ProvisionedLogin[]; onClose: () => void }) {
+  const bulk = creds.length > 1;
+  function downloadCsv() {
+    const header = "studentNo,name,email,tempPassword";
+    const body = creds.map((c) => [c.studentNo, c.name, c.email, c.tempPassword].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([`${header}\n${body}\n`], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `daust-logins-${creds.length}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={bulk ? `${creds.length} logins generated` : "Login generated"}
+      width={bulk ? 640 : 460}
+      footer={
+        <>
+          {bulk && <button onClick={downloadCsv}>Download CSV</button>}
+          <button className="primary" onClick={onClose}>Done</button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="badge overdue" style={{ padding: "8px 12px", fontSize: 12.5 }}>
+          Copy these now — passwords are shown once and are never stored or emailed. Each student must change it on first login.
+        </div>
+        {bulk ? (
+          <div style={{ maxHeight: 340, overflowY: "auto", fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>
+            {creds.map((c) => (
+              <div key={c.studentId} style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 1fr", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--divider)" }}>
+                <span>{c.studentNo}</span><span>{c.email}</span><strong>{c.tempPassword}</strong>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 14 }}>
+            <Field label="Name"><div>{creds[0]!.name}</div></Field>
+            <Field label="Email (login)"><div style={{ fontFamily: "ui-monospace, monospace" }}>{creds[0]!.email}</div></Field>
+            <Field label="Temporary password"><div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16 }}>{creds[0]!.tempPassword}</div></Field>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 

@@ -74,6 +74,12 @@ export const UpdateFeeInput = z.object({
 });
 export type UpdateFeeInput = z.infer<typeof UpdateFeeInput>;
 
+/** Who gets emailed when a new application is submitted (editable in the registrar dashboard). */
+export const NotificationRecipientsInput = z.object({
+  recipients: z.array(z.string().email()).max(50),
+});
+export type NotificationRecipientsInput = z.infer<typeof NotificationRecipientsInput>;
+
 export const ScholarshipTierInput = z.object({
   minScore: z.number().min(0).max(20),
   pct: z.number().int().min(1).max(100),

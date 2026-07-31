@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { AppShell, type ViewAsOption } from "./AppShell";
 import { getMe, type Me } from "@/lib/api";
 import { PORTALS, type PortalKey } from "@/lib/nav";
@@ -44,10 +45,17 @@ export function PortalShell({
 }) {
   const nav = PORTALS[portal];
   const [me, setMe] = useState<Me | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     getMe().then(setMe).catch(() => {});
   }, []);
+
+  // A temp-password account must change it before using the app.
+  useEffect(() => {
+    if (me?.mustChangePassword && pathname !== "/change-password") router.replace("/change-password");
+  }, [me, pathname, router]);
 
   // The design gives the switcher to the registrar/admin console only.
   const isAdmin = me?.roles.includes("admin") ?? false;

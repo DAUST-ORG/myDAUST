@@ -1190,6 +1190,8 @@ export class AcademicsService {
         completedCredits,
         balance: s.invoices.reduce((b, i) => b + (i.totalAmount - i.amountPaid), 0),
         status: gpa > 0 && gpa < 2 ? "probation" : "active",
+        hasLogin: !!s.person.passwordHash,
+        mustChangePassword: s.person.mustChangePassword,
       };
     });
   }

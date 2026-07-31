@@ -38,6 +38,11 @@ export default function LoginPage() {
     setError(null);
     try {
       const me = await login(email.trim(), password);
+      // Force a password change on first login (temp password) before entering the app.
+      if (me.mustChangePassword) {
+        router.push("/change-password");
+        return;
+      }
       // Single source of truth for role -> portal (src/lib/nav.ts), so the landing
       // page and the sidebar can never disagree about which portal a role owns.
       router.push(portalForRoles(me.roles).home);

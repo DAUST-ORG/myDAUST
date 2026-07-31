@@ -119,6 +119,18 @@ export class RegistrarController {
     return this.registrar.createStudent(user.personId, CreateStudentInput.parse(body));
   }
 
+  /** Provision (or reset) one student's login; returns the temp password once. */
+  @Post("students/:id/provision-login")
+  provisionLogin(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.registrar.provisionLogin(user.personId, id);
+  }
+
+  /** Bulk-provision logins for every student without one; returns the credentials list once. */
+  @Post("students/provision-logins")
+  provisionLogins(@CurrentUser() user: AuthUser) {
+    return this.registrar.provisionAllMissing(user.personId);
+  }
+
   @Get("students/:id/documents")
   listDocuments(@Param("id") id: string) {
     return this.registrar.listDocuments(id);

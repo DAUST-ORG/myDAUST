@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
-import { ScholarshipTierInput, UpdateFeeInput } from "@mydaust/shared";
+import { NotificationRecipientsInput, ScholarshipTierInput, UpdateFeeInput } from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Public, Roles } from "../auth/decorators.js";
 import { AppConfigService } from "./app-config.service.js";
@@ -50,5 +50,19 @@ export class AppConfigController {
   @Roles("admin")
   deleteTier(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.config.deleteTier(id, user.personId);
+  }
+
+  // New-application notification recipients (registrar dashboard).
+  @Get("notification-recipients")
+  @Roles("admin", "registrar")
+  async notificationRecipients() {
+    return { recipients: await this.config.applicationNotificationRecipients() };
+  }
+
+  @Patch("notification-recipients")
+  @Roles("admin", "registrar")
+  setNotificationRecipients(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const { recipients } = NotificationRecipientsInput.parse(body);
+    return this.config.setNotificationRecipients(recipients, user.personId);
   }
 }

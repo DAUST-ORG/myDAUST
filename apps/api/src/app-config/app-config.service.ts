@@ -44,6 +44,28 @@ export class AppConfigService {
     return this.prisma.program.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } });
   }
 
+  // --- New-application notification recipients (AppSetting singleton) ---
+  private static readonly NOTIFY_KEY = "application_notification_recipients";
+  private static readonly DEFAULT_RECIPIENTS = ["sndao@daust.org"];
+
+  async applicationNotificationRecipients(): Promise<string[]> {
+    const row = await this.prisma.appSetting.findUnique({ where: { key: AppConfigService.NOTIFY_KEY } });
+    const val = row?.valueJson as { recipients?: string[] } | null | undefined;
+    return val?.recipients?.length ? val.recipients : AppConfigService.DEFAULT_RECIPIENTS;
+  }
+
+  async setNotificationRecipients(recipients: string[], actorId: string) {
+    await this.prisma.appSetting.upsert({
+      where: { key: AppConfigService.NOTIFY_KEY },
+      create: { key: AppConfigService.NOTIFY_KEY, valueJson: { recipients } },
+      update: { valueJson: { recipients } },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "AppSetting", entityId: AppConfigService.NOTIFY_KEY, action: "notification-recipients-updated", actorId, data: { count: recipients.length } },
+    });
+    return { recipients };
+  }
+
   async scholarships(): Promise<(ScholarshipTierDef & { id: string })[]> {
     await this.ensureSeeded();
     const rows = await this.prisma.scholarshipTier.findMany({ orderBy: { minScore: "desc" } });

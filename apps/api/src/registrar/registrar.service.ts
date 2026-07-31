@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import bcrypt from "bcryptjs";
 import type { Prisma } from "@mydaust/db";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
@@ -174,6 +175,78 @@ export class RegistrarService {
       `,
     });
     return { expiresAt, link };
+  }
+
+  // --- Login provisioning (@mydaust.com identity + temp password) ---------
+
+  private mydaustLocal(first: string, last: string): string {
+    const clean = (s: string) =>
+      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "");
+    const f = clean(first) || "student";
+    const l = clean(last);
+    return l ? `${f}.${l}` : f;
+  }
+
+  /** A free @mydaust.com address, suffixing .2/.3… against the Person.email unique constraint. */
+  private async allocMydaustEmail(first: string, last: string): Promise<string> {
+    const base = this.mydaustLocal(first, last);
+    let candidate = `${base}@mydaust.com`;
+    let n = 1;
+    while (await this.prisma.person.findUnique({ where: { email: candidate } })) {
+      n += 1;
+      candidate = `${base}.${n}@mydaust.com`;
+    }
+    return candidate;
+  }
+
+  /** Readable temp password (no ambiguous chars); shown once to the registrar, never stored plaintext. */
+  private randomTempPassword(): string {
+    const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    const bytes = randomBytes(14);
+    let out = "";
+    for (let i = 0; i < 14; i += 1) out += alphabet[bytes[i]! % alphabet.length];
+    return out;
+  }
+
+  /**
+   * Give a student a working login: ensure an @mydaust.com identity (preserving the
+   * prior email as personalEmail), set a random temp password + force-change flag.
+   * Returns the temp password ONCE — never logged or audited.
+   */
+  async provisionLogin(actorId: string, studentId: string) {
+    const student = await this.prisma.student.findUnique({ where: { id: studentId }, include: { person: true } });
+    if (!student) throw new NotFoundException("Student not found");
+    const person = student.person;
+    let email = person.email;
+
+    if (!email.toLowerCase().endsWith("@mydaust.com")) {
+      if (!student.personalEmail) {
+        await this.prisma.student.update({ where: { id: studentId }, data: { personalEmail: email } });
+      }
+      email = await this.allocMydaustEmail(person.firstName, person.lastName);
+    }
+
+    const tempPassword = this.randomTempPassword();
+    await this.prisma.person.update({
+      where: { id: person.id },
+      data: { email, passwordHash: await bcrypt.hash(tempPassword, 10), mustChangePassword: true },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "Person", entityId: person.id, action: "login-provisioned", actorId },
+    });
+    return { studentId, studentNo: student.studentNo, name: `${person.firstName} ${person.lastName}`, email, tempPassword };
+  }
+
+  /** Bulk-provision every student that has no password yet (onboards the imported cohort). */
+  async provisionAllMissing(actorId: string) {
+    const students = await this.prisma.student.findMany({
+      where: { person: { passwordHash: null } },
+      select: { id: true },
+      orderBy: { studentNo: "asc" },
+    });
+    const credentials = [];
+    for (const s of students) credentials.push(await this.provisionLogin(actorId, s.id));
+    return { count: credentials.length, credentials };
   }
 
   // --- Student documents (design's "Documents on file") -------------------

@@ -11,8 +11,10 @@ import {
   getCurrentTerm,
   getFeeConfig,
   getMe,
+  getNotificationRecipients,
   getScholarshipConfig,
   getUsers,
+  updateNotificationRecipients,
   updateFeeItem,
   updateScholarshipTier,
   updateUserRoles,
@@ -39,6 +41,7 @@ export default function SettingsPage() {
   // registrar views this page read-only, and must not fetch the admin users list
   // (that endpoint 403s for them).
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isRegistrar, setIsRegistrar] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState<string[]>([]);
   const [note, setNote] = useState<string | null>(null);
@@ -50,6 +53,7 @@ export default function SettingsPage() {
         setMyId(m.personId);
         const admin = m.roles.includes("admin");
         setIsAdmin(admin);
+        setIsRegistrar(m.roles.includes("registrar"));
         if (admin) getUsers().then(setUsers).catch(() => {});
       })
       .catch(() => {});
@@ -94,6 +98,7 @@ export default function SettingsPage() {
 
       <FeesEditor editable={isAdmin} />
       <TiersEditor editable={isAdmin} />
+      <RecipientsEditor editable={isAdmin || isRegistrar} />
 
       {isAdmin && (
       <div className="card">
@@ -317,4 +322,66 @@ function TiersEditor({ editable }: { editable: boolean }) {
 // tr fragments need a keyed wrapper when reused; render children directly.
 function TrKeyed({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
+}
+
+// New-application email notifications: who gets emailed when an application is submitted.
+function RecipientsEditor({ editable }: { editable: boolean }) {
+  const [recipients, setRecipients] = useState<string[]>([]);
+  const [add, setAdd] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    getNotificationRecipients().then((r) => setRecipients(r.recipients)).catch(() => {});
+  }, []);
+
+  async function save(next: string[]) {
+    setErr(null);
+    try {
+      const r = await updateNotificationRecipients(next);
+      setRecipients(r.recipients);
+      setNote("Saved");
+      setTimeout(() => setNote(null), 1500);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save");
+    }
+  }
+
+  function addOne() {
+    const email = add.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setErr("Enter a valid email."); return; }
+    if (recipients.includes(email)) { setAdd(""); return; }
+    setAdd("");
+    save([...recipients, email]);
+  }
+
+  return (
+    <div className="card">
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <p className="h1" style={{ fontSize: 16, flex: 1 }}>New-application notifications</p>
+        {note && <span className="muted" style={{ fontSize: 13 }}>{note}</span>}
+      </div>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+        These addresses are emailed whenever a prospective student submits an application.
+      </p>
+      {err && <div className="badge overdue" style={{ padding: "6px 10px", marginBottom: 10 }}>{err}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {recipients.map((r) => (
+          <div key={r} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ flex: 1, fontFamily: "ui-monospace, monospace", fontSize: 13.5 }}>{r}</span>
+            {editable && (
+              <button className="link-btn" style={{ fontSize: 12.5, color: "var(--danger)", background: "none", border: "none", cursor: "pointer" }} onClick={() => save(recipients.filter((x) => x !== r))}>Remove</button>
+            )}
+          </div>
+        ))}
+        {recipients.length === 0 && <span className="muted" style={{ fontSize: 13 }}>No recipients yet.</span>}
+      </div>
+      {editable && (
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <input value={add} onChange={(e) => setAdd(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addOne(); }} placeholder="name@daust.org" style={{ flex: 1 }} />
+          <button className="primary" onClick={addOne}>Add</button>
+        </div>
+      )}
+    </div>
+  );
 }

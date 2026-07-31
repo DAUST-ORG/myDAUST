@@ -34,7 +34,11 @@ export default function StudentProfile() {
 
   return (
     <>
-      <PageHeader title="My Profile" subtitle="Student record" />
+      <PageHeader
+        title="My Profile"
+        subtitle="Student record"
+        actions={<a href="/change-password" style={{ textDecoration: "none", fontFamily: "var(--font-body)", fontWeight: 600, fontSize: 13, color: "var(--daust-navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-pill)", padding: "9px 16px" }}>Change password</a>}
+      />
 
       <div
         style={{

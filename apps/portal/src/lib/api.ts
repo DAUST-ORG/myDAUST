@@ -119,7 +119,10 @@ export interface Me {
   studentId?: string;
   email: string;
   name: string;
+  mustChangePassword?: boolean;
 }
+export const changePassword = (currentPassword: string, newPassword: string) =>
+  request<{ ok: boolean }>("/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) });
 export const login = (email: string, password: string) =>
   request<Me>("/auth/login", {
     method: "POST",
@@ -497,7 +500,20 @@ export interface AdminStudent {
   completedCredits: number;
   balance: number;
   status: string;
+  hasLogin: boolean;
+  mustChangePassword: boolean;
 }
+export interface ProvisionedLogin {
+  studentId: string;
+  studentNo: string;
+  name: string;
+  email: string;
+  tempPassword: string;
+}
+export const provisionStudentLogin = (id: string) =>
+  request<ProvisionedLogin>(`/registrar/students/${id}/provision-login`, { method: "POST" });
+export const provisionAllStudentLogins = () =>
+  request<{ count: number; credentials: ProvisionedLogin[] }>("/registrar/students/provision-logins", { method: "POST" });
 export interface ProgramRow {
   code: string;
   name: string;
@@ -1280,6 +1296,10 @@ export const updateScholarshipTier = (id: string, body: { minScore: number; pct:
   request(`/config/scholarships/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 export const deleteScholarshipTier = (id: string) =>
   request(`/config/scholarships/${id}`, { method: "DELETE" });
+
+export const getNotificationRecipients = () => request<{ recipients: string[] }>("/config/notification-recipients");
+export const updateNotificationRecipients = (recipients: string[]) =>
+  request<{ recipients: string[] }>("/config/notification-recipients", { method: "PATCH", body: JSON.stringify({ recipients }) });
 
 export interface AppUser { id: string; name: string; email: string; roles: string[] }
 export const updateUserRoles = (personId: string, roles: string[]) =>
