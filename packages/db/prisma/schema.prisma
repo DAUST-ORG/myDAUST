@@ -391,6 +391,8 @@ model NewsArticle {
   bodyEn    String
   bodyFr    String
   imageUrl  String?
+  // Optional outbound link — when set, the card opens this instead of the in-app article.
+  externalUrl String?
   tag       String?
   date      String
   published Boolean  @default(false)

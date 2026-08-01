@@ -10,6 +10,8 @@ export const NewsArticleInput = z.object({
   bodyEn: z.string().max(20000),
   bodyFr: z.string().max(20000),
   imageUrl: z.string().max(300).nullish(),
+  // Optional outbound link — when set, the card opens this instead of the in-app article.
+  externalUrl: z.string().max(300).nullish(),
   tag: z.string().max(60).nullish(),
   date: z.string().max(40),
   published: z.boolean(),
@@ -26,6 +28,7 @@ export interface PublicNewsArticle {
   excerptEn: string;
   excerptFr: string;
   imageUrl: string | null;
+  externalUrl: string | null;
   tag: string | null;
   date: string;
 }

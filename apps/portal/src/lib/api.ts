@@ -104,7 +104,7 @@ export interface AdminNewsArticle {
   titleEn: string; titleFr: string;
   excerptEn: string; excerptFr: string;
   bodyEn: string; bodyFr: string;
-  imageUrl: string | null; tag: string | null;
+  imageUrl: string | null; externalUrl: string | null; tag: string | null;
   date: string; published: boolean; sortOrder: number;
 }
 export const getNewsAdmin = () => request<AdminNewsArticle[]>("/news/admin");

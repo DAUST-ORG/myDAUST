@@ -573,6 +573,20 @@ function isSafeImageUrl(v: string): boolean {
 function safeUrl(v: string | undefined): string {
   return typeof v === "string" && isSafeImageUrl(v) ? v.slice(0, 300) : "";
 }
+
+/**
+ * Safe outbound link. Accepts http(s) URLs as-is, normalizes a scheme-less host
+ * (e.g. "caytu.ai", "www.solarbox.energy/") to https://, and returns "" for
+ * anything else — so javascript:/data:/mailto: are still rejected.
+ */
+export function safeLink(v: string | undefined): string {
+  if (typeof v !== "string") return "";
+  const s = v.trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s.slice(0, 300);
+  if (/^[\w-]+(\.[\w-]+)+([/?#].*)?$/.test(s)) return `https://${s}`.slice(0, 300);
+  return "";
+}
 const bi = (b: { en?: string; fr?: string } | undefined) => ({ en: (b?.en ?? "").slice(0, 4000), fr: (b?.fr ?? "").slice(0, 4000) });
 
 /**
@@ -596,14 +610,19 @@ export function sanitizeSiteOverrides(raw: SiteOverrides): SiteOverrides {
   const collections: SiteOverrides["collections"] = {};
   if (col.ventures) {
     collections.ventures = col.ventures.slice(0, 50).map((v) => ({
-      name: (v.name ?? "").slice(0, 120), href: safeUrl(v.href), tag: bi(v.tag), desc: bi(v.desc), cta: bi(v.cta),
+      name: (v.name ?? "").slice(0, 120), href: safeLink(v.href), tag: bi(v.tag), desc: bi(v.desc), cta: bi(v.cta),
     }));
   }
   if (col.faculty) {
     collections.faculty = col.faculty.slice(0, 100).map((f) => ({
       name: (f.name ?? "").slice(0, 120), initials: (f.initials ?? "").slice(0, 4),
-      image: safeUrl(f.image), scholar: safeUrl(f.scholar),
+      image: safeUrl(f.image), scholar: safeLink(f.scholar),
       title: bi(f.title), dept: bi(f.dept), bio: bi(f.bio), interests: bi(f.interests),
+    }));
+  }
+  if (col.directors) {
+    collections.directors = col.directors.slice(0, 50).map((d) => ({
+      name: (d.name ?? "").slice(0, 120), initials: (d.initials ?? "").slice(0, 4), role: bi(d.role),
     }));
   }
   return {
@@ -638,14 +657,23 @@ export function buildSiteContent(lang: Lang, overrides?: SiteOverrides): Content
         image: f.image || undefined,
       }));
     }
+    if (clean.collections?.directors) {
+      content.directors = clean.collections.directors.map((d) => ({
+        name: d.name, role: d.role[lang], initials: d.initials,
+      }));
+    }
   }
   return { ...content, images };
 }
 
 /** Bilingual defaults for the CMS collection editor to prefill from. */
-export function defaultCollections(): { ventures: VentureItem[]; faculty: FacultyItem[] } {
+export function defaultCollections(): { ventures: VentureItem[]; faculty: FacultyItem[]; directors: DirectorItem[] } {
   const en = buildContent("en");
   const fr = buildContent("fr");
+  const directors = en.directors.map((d, i) => ({
+    name: d.name, initials: d.initials,
+    role: { en: d.role, fr: fr.directors[i]!.role },
+  }));
   const ventures = en.ventures.map((v, i) => ({
     name: v.name, href: v.href,
     tag: { en: v.tag, fr: fr.ventures[i]!.tag },
@@ -659,7 +687,7 @@ export function defaultCollections(): { ventures: VentureItem[]; faculty: Facult
     bio: { en: f.bio, fr: fr.faculty[i]!.bio },
     interests: { en: f.interests.join(", "), fr: fr.faculty[i]!.interests.join(", ") },
   }));
-  return { ventures, faculty };
+  return { ventures, faculty, directors };
 }
 
 // --- Override contract (stored as JSON in SiteContent.draftJson / publishedJson) ---
@@ -690,6 +718,14 @@ export const FacultyItemInput = z.object({
 });
 export type FacultyItem = z.infer<typeof FacultyItemInput>;
 
+/** An authored center director (Research page): name + initials + localized role. */
+export const DirectorItemInput = z.object({
+  name: z.string().max(120),
+  initials: z.string().max(4),
+  role: Bi,
+});
+export type DirectorItem = z.infer<typeof DirectorItemInput>;
+
 export const SiteOverridesInput = z.object({
   text: z.object({
     en: z.record(z.string(), z.string()),
@@ -702,6 +738,7 @@ export const SiteOverridesInput = z.object({
     .object({
       ventures: z.array(VentureItemInput).max(50).optional(),
       faculty: z.array(FacultyItemInput).max(100).optional(),
+      directors: z.array(DirectorItemInput).max(50).optional(),
     })
     .optional(),
 });

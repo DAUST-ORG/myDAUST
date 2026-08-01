@@ -19,20 +19,20 @@ interface Form {
   titleEn: string; titleFr: string;
   excerptEn: string; excerptFr: string;
   bodyEn: string; bodyFr: string;
-  imageUrl: string; tag: string; date: string;
+  imageUrl: string; externalUrl: string; tag: string; date: string;
   published: boolean; sortOrder: number;
 }
 
 const BLANK: Form = {
   slug: "", titleEn: "", titleFr: "", excerptEn: "", excerptFr: "",
-  bodyEn: "", bodyFr: "", imageUrl: "", tag: "", date: "", published: false, sortOrder: 0,
+  bodyEn: "", bodyFr: "", imageUrl: "", externalUrl: "", tag: "", date: "", published: false, sortOrder: 0,
 };
 
 function fromArticle(a: AdminNewsArticle): Form {
   return {
     id: a.id, slug: a.slug, titleEn: a.titleEn, titleFr: a.titleFr,
     excerptEn: a.excerptEn, excerptFr: a.excerptFr, bodyEn: a.bodyEn, bodyFr: a.bodyFr,
-    imageUrl: a.imageUrl ?? "", tag: a.tag ?? "", date: a.date, published: a.published, sortOrder: a.sortOrder,
+    imageUrl: a.imageUrl ?? "", externalUrl: a.externalUrl ?? "", tag: a.tag ?? "", date: a.date, published: a.published, sortOrder: a.sortOrder,
   };
 }
 
@@ -64,7 +64,7 @@ export default function NewsPage() {
       titleEn: form.titleEn, titleFr: form.titleFr,
       excerptEn: form.excerptEn, excerptFr: form.excerptFr,
       bodyEn: form.bodyEn, bodyFr: form.bodyFr,
-      imageUrl: form.imageUrl || null, tag: form.tag || null,
+      imageUrl: form.imageUrl || null, externalUrl: form.externalUrl || null, tag: form.tag || null,
       date: form.date, published: form.published, sortOrder: form.sortOrder,
     };
     try {
@@ -118,6 +118,10 @@ export default function NewsPage() {
             <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Date (as shown)</div><Input value={form.date} onChange={(v) => set("date", v)} /></div>
             <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Tag (optional)</div><Input value={form.tag} onChange={(v) => set("tag", v)} /></div>
             <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Order</div><Input value={String(form.sortOrder)} onChange={(v) => set("sortOrder", Number(v) || 0)} /></div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>External link (optional) — if set, the card opens this instead of an on-site article</div>
+            <Input value={form.externalUrl} onChange={(v) => set("externalUrl", v)} />
           </div>
           <div>
             <div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Cover image</div>

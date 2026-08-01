@@ -1,4 +1,5 @@
 import {
+  Award,
   BookMarked,
   BookOpen,
   Building,
@@ -172,6 +173,7 @@ export const COMMS_NAV: PortalNav = {
       { href: "/comms/news", label: "News", icon: Newspaper },
       { href: "/comms/startups", label: "Startups", icon: Rocket },
       { href: "/comms/faculty", label: "Faculty", icon: Users },
+      { href: "/comms/directors", label: "Center Directors", icon: Award },
       { href: "/comms/assistant", label: "AI Assistant", icon: MessageSquare },
     ]),
     g("Inbox", [{ href: "/comms/messages", label: "Messages", icon: Mail }]),
@@ -237,6 +239,7 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/comms/news": { title: "News", crumb: "News articles · Communications" },
   "/comms/startups": { title: "Startups", crumb: "Innovation ventures & partners · Communications" },
   "/comms/faculty": { title: "Faculty", crumb: "Faculty profiles & photos · Communications" },
+  "/comms/directors": { title: "Center Directors", crumb: "Research center directors · Communications" },
   "/comms/assistant": { title: "AI Assistant", crumb: "Chatbot trigger words & answers · Communications" },
   "/comms/messages": { title: "Messages", crumb: "Contact-form inbox · Communications" },
   // faculty

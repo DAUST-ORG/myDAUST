@@ -141,6 +141,13 @@ export default function Site() {
     setArticle(null);
     setArticleQuery(null);
   }
+  function openNews(n: PublicNewsArticle) {
+    if (n.externalUrl) {
+      if (typeof window !== "undefined") window.open(n.externalUrl, "_blank", "noopener");
+      return;
+    }
+    openArticle(n.slug);
+  }
 
   // Faculty page source: platform professors toggled public; built-in list is the fallback.
   const facultyList =
@@ -268,7 +275,7 @@ export default function Site() {
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36, marginTop: 52 }}>
             {newsList.length > 0
               ? newsList.map((n) => (
-                <button key={n.id} onClick={() => openArticle(n.slug)} style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
+                <button key={n.id} onClick={() => openNews(n)} style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
                   <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={fr ? n.titleFr : n.titleEn} src={n.imageUrl ?? undefined} /></div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
                     {n.tag && <><span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span><span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} /></>}
@@ -848,7 +855,7 @@ export default function Site() {
           {newsList.length > 0 ? (
             <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36 }}>
               {newsList.map((n) => (
-                <button key={n.id} onClick={() => openArticle(n.slug)} style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
+                <button key={n.id} onClick={() => openNews(n)} style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
                   <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={fr ? n.titleFr : n.titleEn} src={n.imageUrl ?? undefined} /></div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
                     {n.tag && <><span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span><span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} /></>}

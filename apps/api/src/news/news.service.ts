@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { type NewsArticleInput, slugify } from "@mydaust/shared";
+import { type NewsArticleInput, safeLink, slugify } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 const PUBLIC_SELECT = {
   id: true, slug: true, titleEn: true, titleFr: true,
-  excerptEn: true, excerptFr: true, imageUrl: true, tag: true, date: true,
+  excerptEn: true, excerptFr: true, imageUrl: true, externalUrl: true, tag: true, date: true,
 } as const;
 
 @Injectable()
@@ -72,7 +72,7 @@ export class NewsService {
       titleEn: input.titleEn, titleFr: input.titleFr,
       excerptEn: input.excerptEn, excerptFr: input.excerptFr,
       bodyEn: input.bodyEn, bodyFr: input.bodyFr,
-      imageUrl: input.imageUrl ?? null, tag: input.tag ?? null,
+      imageUrl: input.imageUrl ?? null, externalUrl: input.externalUrl ? safeLink(input.externalUrl) || null : null, tag: input.tag ?? null,
       date: input.date, published: input.published, sortOrder: input.sortOrder ?? 0,
     };
   }

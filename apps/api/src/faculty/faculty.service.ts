@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { type FacultyProfileInput } from "@mydaust/shared";
+import { type FacultyProfileInput, safeLink } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
+
+/** Uploaded photo path (/uploads/...) or an http(s) URL; anything else → null. */
+const safePhoto = (v: string | null | undefined): string | null =>
+  typeof v === "string" && (/^\/[^/]/.test(v) || /^https?:\/\//i.test(v)) ? v.slice(0, 300) : null;
 
 /** Faculty list source: platform people holding the "faculty" role. */
 function facultyWhere() {
@@ -85,16 +89,16 @@ export class FacultyService {
           dept: input.dept ?? null,
           bio: input.bio ?? null,
           interests: input.interests,
-          scholar: input.scholar ?? null,
-          photoUrl: input.photoUrl ?? null,
+          scholar: safeLink(input.scholar ?? undefined) || null,
+          photoUrl: safePhoto(input.photoUrl),
         },
         update: {
           title: input.title ?? null,
           dept: input.dept ?? null,
           bio: input.bio ?? null,
           interests: input.interests,
-          scholar: input.scholar ?? null,
-          photoUrl: input.photoUrl ?? null,
+          scholar: safeLink(input.scholar ?? undefined) || null,
+          photoUrl: safePhoto(input.photoUrl),
         },
       }),
     ]);

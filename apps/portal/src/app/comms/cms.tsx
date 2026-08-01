@@ -6,6 +6,7 @@ import {
   buildContent,
   DEFAULT_IMAGES,
   defaultCollections,
+  type DirectorItem,
   EMPTY_SITE_OVERRIDES,
   flattenSiteText,
   SITE_IMAGE_SLOTS,
@@ -431,6 +432,33 @@ export function VenturesEditor({ draft }: { draft: Draft }) {
           <BiInput label="Tag" value={it.tag} onChange={(v) => update(i, { tag: v })} />
           <BiInput label="Description" value={it.desc} onChange={(v) => update(i, { desc: v })} multiline />
           <BiInput label="Link label" value={it.cta} onChange={(v) => update(i, { cta: v })} />
+        </ItemFrame>
+      ))}
+    </div>
+  );
+}
+
+export function DirectorsEditor({ draft }: { draft: Draft }) {
+  const { ov, setOv, loaded } = draft;
+  const items = (ov.collections?.directors ?? defaultCollections().directors) as DirectorItem[];
+  const overridden = ov.collections?.directors !== undefined;
+  const set = (next: DirectorItem[]) => setOv((prev) => ({ ...prev, collections: { ...(prev.collections ?? {}), directors: next } }));
+  const reset = () => setOv((prev) => { const c = { ...(prev.collections ?? {}) }; delete c.directors; return { ...prev, collections: c }; });
+  const update = (i: number, patch: Partial<DirectorItem>) => set(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= items.length) return; const a = [...items]; [a[i], a[j]] = [a[j]!, a[i]!]; set(a); };
+  const add = () => set([...items, { name: "New director", initials: "", role: { en: "", fr: "" } }]);
+
+  if (!loaded) return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <CollectionToolbar label="Add director" onAdd={add} overridden={overridden} onReset={reset} />
+      {items.map((it, i) => (
+        <ItemFrame key={i} title={it.name} index={i} total={items.length} onUp={() => move(i, -1)} onDown={() => move(i, 1)} onRemove={() => set(items.filter((_, idx) => idx !== i))}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 12 }}>
+            <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Name</div><Input value={it.name} onChange={(v) => update(i, { name: v })} /></div>
+            <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Initials</div><Input value={it.initials} onChange={(v) => update(i, { initials: v })} /></div>
+          </div>
+          <BiInput label="Role / title" value={it.role} onChange={(v) => update(i, { role: v })} />
         </ItemFrame>
       ))}
     </div>
