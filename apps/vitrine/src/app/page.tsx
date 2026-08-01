@@ -7,7 +7,7 @@ import { Hover } from "@/components/Hover";
 import { ImageSlot } from "@/components/ImageSlot";
 import { AiPanel } from "@/components/AiPanel";
 import { ApplyModal } from "@/components/ApplyModal";
-import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type PublicFacultyMember, type PublicNewsArticle, type PublicNewsArticleFull, type SiteOverrides } from "@/lib/content";
+import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type PublicFacultyMember, type PublicNewsArticle, type PublicNewsArticleFull, type SiteOverrides, slugify } from "@/lib/content";
 import { assetUrl, getNews, getNewsArticle, getPreviewContent, getPublicFaculty, getPublishedContent, submitContact } from "@/lib/api";
 
 const WRAP: React.CSSProperties = { maxWidth: 1240, margin: "0 auto", padding: "0 40px" };
@@ -83,7 +83,14 @@ export default function Site() {
   // Professors toggled public on the platform drive the Faculty page; fall back to the
   // built-in list when none are public yet (or the API is unreachable).
   useEffect(() => {
-    getPublicFaculty().then(setPublicFaculty);
+    getPublicFaculty().then((fac) => {
+      setPublicFaculty(fac);
+      // Open a deep-linked professor (?faculty=<slug>) once the roster is loaded.
+      const slug = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("faculty") : null;
+      if (!slug) return;
+      const match = fac.find((f) => slugify(f.name) === slug);
+      if (match) { setPage("faculty"); setFacultyId(match.id); }
+    });
   }, []);
 
   const c = buildSiteContent(lang, overrides ?? undefined);
@@ -97,6 +104,7 @@ export default function Site() {
     setPage(p);
     setMenuOpen(false);
     setFacultyId(null);
+    setFacultyQuery(null);
     setArticleSlug(null);
     setArticle(null);
     setArticleQuery(null);
@@ -147,6 +155,26 @@ export default function Site() {
       return;
     }
     openArticle(n.slug);
+  }
+
+  // Per-professor deep link. The static host can't serve arbitrary paths, so the
+  // shareable URL is a root query (?faculty=<slug>), mirroring the news pattern.
+  function setFacultyQuery(slug: string | null) {
+    if (typeof window === "undefined") return;
+    const u = new URL(window.location.href);
+    if (slug) u.searchParams.set("faculty", slug);
+    else u.searchParams.delete("faculty");
+    window.history.replaceState({}, "", u);
+  }
+  function openFacultyMember(f: { id: string; name: string }) {
+    setPage("faculty");
+    setFacultyId(f.id);
+    setFacultyQuery(slugify(f.name));
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  }
+  function closeFacultyMember() {
+    setFacultyId(null);
+    setFacultyQuery(null);
   }
 
   // Faculty page source: platform professors toggled public; built-in list is the fallback.
@@ -574,7 +602,7 @@ export default function Site() {
   const faculty = facultySel ? (
     <section style={{ background: "#fff" }}>
       <div style={{ ...WRAP, padding: "48px 40px 88px" }}>
-        <Hover as="button" onClick={() => setFacultyId(null)} base={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--daust-navy)", background: "none", border: "none", cursor: "pointer", padding: 0 }} hover={{ color: "var(--daust-orange)" }}>
+        <Hover as="button" onClick={closeFacultyMember} base={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--daust-navy)", background: "none", border: "none", cursor: "pointer", padding: 0 }} hover={{ color: "var(--daust-orange)" }}>
           <Icon name="arrow-left" size={18} />{tx.facAll}
         </Hover>
         <div className="fac-detail split" style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 56, alignItems: "start", marginTop: 32 }}>
@@ -609,7 +637,7 @@ export default function Site() {
         <div style={{ ...WRAP, padding: "72px 40px" }}>
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)" }}>
             {facultyList.map((f) => (
-              <Hover key={f.id} onClick={() => { setFacultyId(f.id); if (typeof window !== "undefined") window.scrollTo({ top: 0 }); }} base={{ background: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", minWidth: 0 }} hover={{ background: "var(--bg-subtle)" }}>
+              <Hover key={f.id} onClick={() => openFacultyMember(f)} base={{ background: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", minWidth: 0 }} hover={{ background: "var(--bg-subtle)" }}>
                 <div style={{ position: "relative", height: 300, minWidth: 0 }}><ImageSlot label={f.name} mono={f.initials} src={f.image} /></div>
                 <div style={{ padding: "24px 26px 28px" }}>
                   <div style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{f.dept}</div>

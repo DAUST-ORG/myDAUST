@@ -1,16 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Globe, Pencil, Upload } from "lucide-react";
+import { Check, Copy, ExternalLink, Globe, Pencil, Plus, Upload, UserPlus } from "lucide-react";
 import type { AdminFacultyItem } from "@mydaust/shared";
+import { slugify } from "@mydaust/shared";
 import {
+  type CreatedFaculty,
+  type StaffMember,
+  createFaculty,
   fileUrl,
   getFacultyList,
+  getStaff,
   setFacultyVisibility,
   updateFacultyProfile,
   uploadFile,
 } from "@/lib/api";
-import { Badge, Button, Card, Input, Toggle } from "@/components/ui";
+import { Badge, Button, Card, Field, Input, Modal, Toggle } from "@/components/ui";
 
 interface Form {
   firstName: string;
@@ -27,6 +32,20 @@ const taStyle: React.CSSProperties = {
   width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border)",
   background: "var(--surface)", color: "var(--fg1)", fontSize: 13.5, fontFamily: "var(--font-body)", resize: "vertical", lineHeight: 1.5,
 };
+
+/** The public site origin, so the "View public page" link points at the right host. */
+function vitrineOrigin(): string {
+  if (typeof window === "undefined") return "";
+  const h = window.location.host;
+  if (h.startsWith("localhost")) return "http://localhost:3001";
+  if (h.includes("azt.dev")) return "https://daust.azt.dev";
+  return "https://daust.net";
+}
+
+function publicFacultyUrl(a: AdminFacultyItem): string {
+  // The public site is a static export; deep links ride a root query param.
+  return `${vitrineOrigin()}/?faculty=${slugify(`${a.firstName} ${a.lastName}`)}`;
+}
 
 function toForm(a: AdminFacultyItem): Form {
   const p = a.profile;
@@ -46,8 +65,9 @@ function fieldLabel(text: string) {
   return <div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>{text}</div>;
 }
 
-export default function FacultyManager() {
+export default function DirectoryManager() {
   const [list, setList] = useState<AdminFacultyItem[] | null>(null);
+  const [staff, setStaff] = useState<StaffMember[] | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [busy, setBusy] = useState(false);
@@ -55,7 +75,13 @@ export default function FacultyManager() {
   const [toggling, setToggling] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const load = () => getFacultyList().then(setList).catch((e) => setErr(e instanceof Error ? e.message : "Failed to load faculty."));
+  const [addOpen, setAddOpen] = useState(false);
+  const [creds, setCreds] = useState<(CreatedFaculty & { name: string }) | null>(null);
+
+  const load = () =>
+    Promise.all([getFacultyList(), getStaff()])
+      .then(([f, s]) => { setList(f); setStaff(s); })
+      .catch((e) => setErr(e instanceof Error ? e.message : "Failed to load directory."));
   useEffect(() => { load(); }, []);
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
@@ -122,20 +148,31 @@ export default function FacultyManager() {
   if (err && !list) return <Card><div style={{ color: "var(--error-500)" }}>{err}</div></Card>;
   if (!list) return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
 
+  const otherStaff = (staff ?? []).filter((s) => s.kind !== "faculty");
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <Card>
-        <div style={{ fontSize: 13.5, color: "var(--fg2)", lineHeight: 1.6 }}>
-          Every professor with a <strong>faculty</strong> role on the platform appears here automatically.
-          Use the toggle to show or hide them on the public site, and edit their profile (including their photo).
-          <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--fg3)" }}>
-            {list.filter((a) => a.publicProfile).length} of {list.length} visible on the site.
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+          <div style={{ flex: 1, fontSize: 13.5, color: "var(--fg2)", lineHeight: 1.6 }}>
+            The directory is the single source for who appears on the public site. Add faculty here, edit
+            their public profile and photo, and use the toggle to publish or unpublish them. Published
+            professors get a shareable page at <code>/directory/faculty/…</code>.
+            <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--fg3)" }}>
+              {list.filter((a) => a.publicProfile).length} of {list.length} faculty visible on the site.
+            </div>
           </div>
+          <Button variant="primary" icon={<UserPlus size={15} />} onClick={() => { setErr(null); setAddOpen(true); }}>
+            Add faculty
+          </Button>
         </div>
       </Card>
+
       {err && <div style={{ color: "var(--error-500)", fontSize: 13 }}>{err}</div>}
+
+      <SectionLabel>Faculty</SectionLabel>
       {list.length === 0 && (
-        <Card><div style={{ color: "var(--fg3)", padding: "20px 0", textAlign: "center" }}>No faculty accounts yet. The public Faculty page falls back to its built-in list until someone is toggled on.</div></Card>
+        <Card><div style={{ color: "var(--fg3)", padding: "20px 0", textAlign: "center" }}>No faculty yet. Use “Add faculty” to create the first record. The public Faculty page falls back to its built-in list until someone is toggled on.</div></Card>
       )}
       {list.map((a) => {
         const isEditing = editId === a.id;
@@ -153,6 +190,12 @@ export default function FacultyManager() {
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     <strong style={{ fontSize: 14.5 }}>{a.firstName} {a.lastName}</strong>
                     {a.publicProfile ? <Badge tone="success">Public</Badge> : <Badge tone="neutral">Private</Badge>}
+                    {a.publicProfile && (
+                      <a href={publicFacultyUrl(a)} target="_blank" rel="noopener noreferrer"
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--daust-navy)", fontWeight: 600 }}>
+                        <ExternalLink size={12} /> View public page
+                      </a>
+                    )}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--fg3)", marginTop: 2 }}>{a.email}</div>
                   {a.profile && <div style={{ fontSize: 12.5, color: "var(--fg2)", marginTop: 4 }}>{[a.profile.title, a.profile.dept].filter(Boolean).join(" · ") || "—"}</div>}
@@ -163,7 +206,7 @@ export default function FacultyManager() {
                   onChange={(v) => toggleVisible(a, v)}
                   label={toggling === a.id ? "Saving…" : "Public on site"}
                 />
-                <Button variant="secondary" size="sm" icon={isEditing ? <ChevronDown size={14} /> : <Pencil size={14} />} onClick={() => openEditor(a)}>Edit</Button>
+                <Button variant="secondary" size="sm" icon={<Pencil size={14} />} onClick={() => openEditor(a)}>Edit</Button>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -229,13 +272,141 @@ export default function FacultyManager() {
                 <div style={{ display: "flex", gap: 10 }}>
                   <Button variant="primary" icon={<Check size={15} />} onClick={save} disabled={busy}>{busy ? "Saving…" : "Save profile"}</Button>
                   <Button variant="secondary" onClick={() => { setEditId(null); setForm(null); setErr(null); }}>Cancel</Button>
-                  <Button variant="ghost" icon={<ChevronRight size={14} />} onClick={() => { setEditId(null); setForm(null); setErr(null); }}>Close</Button>
                 </div>
               </div>
             )}
           </Card>
         );
       })}
+
+      <SectionLabel>Staff & administration</SectionLabel>
+      <Card>
+        <div style={{ fontSize: 12.5, color: "var(--fg3)", marginBottom: 10 }}>
+          Non-teaching accounts. Manage their roles under Roles &amp; Permissions; they do not appear on the public site.
+        </div>
+        {otherStaff.length === 0 ? (
+          <div style={{ color: "var(--fg3)", padding: "8px 0" }}>No staff accounts.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {otherStaff.map((s) => (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderTop: "1px solid var(--border)" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ fontSize: 13.5 }}>{s.name}</strong>
+                  <div style={{ fontSize: 12, color: "var(--fg3)" }}>{s.email}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {s.roles.map((r) => <Badge key={r} tone="neutral">{r}</Badge>)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <AddFacultyModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCreated={(c) => { setAddOpen(false); if (c.tempPassword) setCreds(c); load(); }}
+      />
+      {creds && <CredentialsModal creds={creds} onClose={() => setCreds(null)} />}
     </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--fg3)", marginTop: 6 }}>{children}</div>;
+}
+
+function AddFacultyModal({
+  open, onClose, onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (c: CreatedFaculty & { name: string }) => void;
+}) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [provisionLogin, setProvisionLogin] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) { setFirstName(""); setLastName(""); setEmail(""); setProvisionLogin(true); setErr(null); }
+  }, [open]);
+
+  async function submit() {
+    if (!firstName.trim() || !lastName.trim() || !email.trim()) { setErr("First name, last name and email are required."); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      const c = await createFaculty({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), provisionLogin });
+      onCreated({ ...c, name: `${firstName.trim()} ${lastName.trim()}` });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not create faculty member.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Add faculty member"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="primary" icon={<Plus size={15} />} onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create"}</Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {err && <div style={{ color: "var(--error-500)", fontSize: 13 }}>{err}</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="First name"><Input value={firstName} onChange={setFirstName} /></Field>
+          <Field label="Last name"><Input value={lastName} onChange={setLastName} /></Field>
+        </div>
+        <Field label="Email" hint="Their institutional email — becomes the sign-in identity.">
+          <Input value={email} onChange={setEmail} placeholder="name@daust.org" />
+        </Field>
+        <Toggle
+          checked={provisionLogin}
+          onChange={setProvisionLogin}
+          label="Create a login now (a temporary password is shown once)"
+        />
+        <div style={{ fontSize: 12, color: "var(--fg3)", lineHeight: 1.5 }}>
+          You can fill in the public profile (title, bio, photo) and publish them after creating the record.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function CredentialsModal({ creds, onClose }: { creds: CreatedFaculty & { name: string }; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard?.writeText(`${creds.email}\n${creds.tempPassword ?? ""}`).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Login created"
+      footer={<Button variant="primary" onClick={onClose}>Done</Button>}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ fontSize: 13, color: "var(--fg2)", lineHeight: 1.5 }}>
+          Give <strong>{creds.name}</strong> these credentials now — the password is shown once, never stored or
+          emailed, and must be changed on first login.
+        </div>
+        <Field label="Email"><div style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}>{creds.email}</div></Field>
+        <Field label="Temporary password"><div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16 }}>{creds.tempPassword}</div></Field>
+        <Button variant="secondary" icon={<Copy size={14} />} onClick={copy}>{copied ? "Copied" : "Copy email + password"}</Button>
+      </div>
+    </Modal>
   );
 }

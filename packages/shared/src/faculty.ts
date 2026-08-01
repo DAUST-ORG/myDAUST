@@ -16,6 +16,15 @@ export const FacultyProfileInput = z.object({
 });
 export type FacultyProfileInput = z.infer<typeof FacultyProfileInput>;
 
+/** Registrar creates a faculty member: a Person with the faculty role, optionally with a login. */
+export const FacultyCreateInput = z.object({
+  firstName: z.string().trim().min(1).max(120),
+  lastName: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(160),
+  provisionLogin: z.boolean().optional(),
+});
+export type FacultyCreateInput = z.infer<typeof FacultyCreateInput>;
+
 /** The public shape the vitrine renders (profile merged with the Person name). */
 export interface PublicFacultyMember {
   id: string; // person id — stable across profile edits

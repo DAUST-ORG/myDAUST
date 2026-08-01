@@ -113,12 +113,15 @@ export const updateNews = (id: string, input: NewsArticleInput) => request<Admin
 export const deleteNews = (id: string) => request<{ ok: boolean }>(`/news/${id}`, { method: "DELETE" });
 
 // --- Faculty profiles (public-site manager, communications/admin role) ---
-import type { AdminFacultyItem, FacultyProfileInput } from "@mydaust/shared";
+import type { AdminFacultyItem, FacultyCreateInput, FacultyProfileInput } from "@mydaust/shared";
 export const getFacultyList = () => request<AdminFacultyItem[]>("/faculty");
 export const updateFacultyProfile = (id: string, input: FacultyProfileInput) =>
   request<{ ok: boolean }>(`/faculty/${id}/profile`, { method: "PUT", body: JSON.stringify(input) });
 export const setFacultyVisibility = (id: string, visible: boolean) =>
   request<{ ok: boolean }>(`/faculty/${id}/visibility`, { method: "PUT", body: JSON.stringify({ visible }) });
+export interface CreatedFaculty { id: string; email: string; tempPassword: string | null }
+export const createFaculty = (input: FacultyCreateInput) =>
+  request<CreatedFaculty>("/faculty", { method: "POST", body: JSON.stringify(input) });
 
 
 // --- Auth ---

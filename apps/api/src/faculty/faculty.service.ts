@@ -1,5 +1,7 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { type FacultyProfileInput, safeLink } from "@mydaust/shared";
+import { randomBytes } from "node:crypto";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import bcrypt from "bcryptjs";
+import { type FacultyCreateInput, type FacultyProfileInput, safeLink } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 /** Uploaded photo path (/uploads/...) or an http(s) URL; anything else → null. */
@@ -63,6 +65,45 @@ export class FacultyService {
           }
         : null,
     }));
+  }
+
+  /** Readable temp password (no ambiguous chars); shown once to the registrar, never stored plaintext. */
+  private randomTempPassword(): string {
+    const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    const bytes = randomBytes(14);
+    let out = "";
+    for (let i = 0; i < 14; i += 1) out += alphabet[bytes[i]! % alphabet.length];
+    return out;
+  }
+
+  /**
+   * Registrar: create a faculty member (Person with the faculty role) and an empty,
+   * not-yet-public profile. Optionally provisions a login with a random temp password
+   * (force-change on first sign-in) returned ONCE — never logged or audited.
+   */
+  async createFaculty(input: FacultyCreateInput, actorId: string) {
+    const email = input.email.trim().toLowerCase();
+    if (await this.prisma.person.findUnique({ where: { email } })) {
+      throw new BadRequestException(`Email ${email} is already in use`);
+    }
+    const tempPassword = input.provisionLogin ? this.randomTempPassword() : null;
+    const person = await this.prisma.person.create({
+      data: {
+        email,
+        firstName: input.firstName.trim(),
+        lastName: input.lastName.trim(),
+        kind: "faculty",
+        roles: ["faculty"],
+        ...(tempPassword
+          ? { passwordHash: await bcrypt.hash(tempPassword, 10), mustChangePassword: true }
+          : {}),
+        facultyProfile: { create: { publicProfile: false } },
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "Person", entityId: person.id, action: "faculty-created", actorId, data: { email } },
+    });
+    return { id: person.id, email, tempPassword };
   }
 
   private async mustFaculty(personId: string) {
