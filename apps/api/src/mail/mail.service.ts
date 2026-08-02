@@ -3,6 +3,7 @@ import { Injectable, Logger } from "@nestjs/common";
 export interface MailMessage {
   /** One address, or several — Resend requires an array for multiple, not a comma-joined string. */
   to: string | string[];
+  cc?: string | string[];
   bcc?: string | string[];
   subject: string;
   html: string;
@@ -27,7 +28,7 @@ export class MailService {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: this.from, to: msg.to, bcc: msg.bcc, subject: msg.subject, html: msg.html }),
+      body: JSON.stringify({ from: this.from, to: msg.to, cc: msg.cc, bcc: msg.bcc, subject: msg.subject, html: msg.html }),
     });
     if (!res.ok) {
       this.logger.error(`Resend send failed (${res.status}): ${await res.text()}`);

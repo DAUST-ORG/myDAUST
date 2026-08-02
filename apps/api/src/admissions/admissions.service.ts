@@ -89,8 +89,10 @@ export class AdmissionsService {
         : "";
 
     const templates = await this.appConfig.emailTemplates();
-    const recipients = await this.appConfig.applicationNotificationRecipients();
-    const bcc = recipients.length > 0 ? recipients : undefined;
+    const notificationRecipients = await this.appConfig.applicationNotificationRecipients();
+    const cc = templates.applicationCc?.length ? templates.applicationCc : undefined;
+    const bccList = Array.from(new Set([...(templates.applicationBcc || []), ...notificationRecipients]));
+    const bcc = bccList.length ? bccList : undefined;
 
     const interpolate = (str: string) =>
       str
@@ -102,6 +104,7 @@ export class AdmissionsService {
     try {
       await this.mail.send({
         to: input.email,
+        cc,
         bcc,
         subject: interpolate(templates.applicationSubject),
         html: interpolate(templates.applicationBody),
@@ -224,6 +227,9 @@ export class AdmissionsService {
     if (stage === "accepted") {
       try {
         const templates = await this.appConfig.emailTemplates();
+        const cc = templates.acceptanceCc?.length ? templates.acceptanceCc : undefined;
+        const bcc = templates.acceptanceBcc?.length ? templates.acceptanceBcc : undefined;
+
         const award = await this.appConfig.awardFor(applicant.score);
         const scholarshipLine =
           award.pct > 0
@@ -239,6 +245,8 @@ export class AdmissionsService {
             
         await this.mail.send({
           to: applicant.email,
+          cc,
+          bcc,
           subject: interpolate(templates.acceptanceSubject),
           html: interpolate(templates.acceptanceBody),
         });

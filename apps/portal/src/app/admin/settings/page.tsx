@@ -389,20 +389,51 @@ function RecipientsEditor({ editable }: { editable: boolean }) {
   );
 }
 
+const toArray = (str: string) => str.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+const toStr = (arr?: string[]) => (arr || []).join(", ");
+
 function EmailTemplatesEditor({ editable }: { editable: boolean }) {
   const [templates, setTemplates] = useState({
     applicationSubject: "", applicationBody: "",
-    acceptanceSubject: "", acceptanceBody: ""
+    applicationCc: [] as string[], applicationBcc: [] as string[],
+    acceptanceSubject: "", acceptanceBody: "",
+    acceptanceCc: [] as string[], acceptanceBcc: [] as string[],
   });
+  const [appCc, setAppCc] = useState("");
+  const [appBcc, setAppBcc] = useState("");
+  const [accCc, setAccCc] = useState("");
+  const [accBcc, setAccBcc] = useState("");
   const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
-    getEmailTemplates().then(setTemplates).catch(() => {});
+    getEmailTemplates().then((res) => {
+      setTemplates({
+        applicationSubject: res.applicationSubject || "",
+        applicationBody: res.applicationBody || "",
+        applicationCc: res.applicationCc || [],
+        applicationBcc: res.applicationBcc || [],
+        acceptanceSubject: res.acceptanceSubject || "",
+        acceptanceBody: res.acceptanceBody || "",
+        acceptanceCc: res.acceptanceCc || [],
+        acceptanceBcc: res.acceptanceBcc || [],
+      });
+      setAppCc(toStr(res.applicationCc));
+      setAppBcc(toStr(res.applicationBcc));
+      setAccCc(toStr(res.acceptanceCc));
+      setAccBcc(toStr(res.acceptanceBcc));
+    }).catch(() => {});
   }, []);
 
   async function save() {
     try {
-      await updateEmailTemplates(templates);
+      const payload = {
+        ...templates,
+        applicationCc: toArray(appCc),
+        applicationBcc: toArray(appBcc),
+        acceptanceCc: toArray(accCc),
+        acceptanceBcc: toArray(accBcc),
+      };
+      await updateEmailTemplates(payload);
       setNote("Saved");
       setTimeout(() => setNote(null), 1500);
     } catch (e) {
@@ -413,7 +444,7 @@ function EmailTemplatesEditor({ editable }: { editable: boolean }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <p className="h1" style={{ fontSize: 16, flex: 1 }}>Email Templates</p>
+        <p className="h1" style={{ fontSize: 16, flex: 1 }}>Email Templates & Recipient Routing</p>
         {note && <span className="muted" style={{ fontSize: 13 }}>{note}</span>}
         {editable && <button className="primary" onClick={save} style={{ fontSize: 12 }}>Save Templates</button>}
       </div>
@@ -431,6 +462,28 @@ function EmailTemplatesEditor({ editable }: { editable: boolean }) {
             style={{ width: "100%", marginBottom: 8 }} 
             placeholder="Subject" 
           />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, display: "block", marginBottom: 2 }}>CC (comma-separated)</label>
+              <input 
+                value={appCc} 
+                onChange={(e) => setAppCc(e.target.value)} 
+                disabled={!editable} 
+                style={{ width: "100%", fontSize: 13 }} 
+                placeholder="admin@daust.edu" 
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, display: "block", marginBottom: 2 }}>BCC (comma-separated)</label>
+              <input 
+                value={appBcc} 
+                onChange={(e) => setAppBcc(e.target.value)} 
+                disabled={!editable} 
+                style={{ width: "100%", fontSize: 13 }} 
+                placeholder="admissions@daust.edu" 
+              />
+            </div>
+          </div>
           <textarea 
             value={templates.applicationBody} 
             onChange={(e) => setTemplates({ ...templates, applicationBody: e.target.value })} 
@@ -441,7 +494,7 @@ function EmailTemplatesEditor({ editable }: { editable: boolean }) {
         </div>
       </div>
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 20 }}>
         <strong>Application Accepted Email</strong>
         <div style={{ marginTop: 8 }}>
           <input 
@@ -451,6 +504,28 @@ function EmailTemplatesEditor({ editable }: { editable: boolean }) {
             style={{ width: "100%", marginBottom: 8 }} 
             placeholder="Subject" 
           />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, display: "block", marginBottom: 2 }}>CC (comma-separated)</label>
+              <input 
+                value={accCc} 
+                onChange={(e) => setAccCc(e.target.value)} 
+                disabled={!editable} 
+                style={{ width: "100%", fontSize: 13 }} 
+                placeholder="admin@daust.edu" 
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, display: "block", marginBottom: 2 }}>BCC (comma-separated)</label>
+              <input 
+                value={accBcc} 
+                onChange={(e) => setAccBcc(e.target.value)} 
+                disabled={!editable} 
+                style={{ width: "100%", fontSize: 13 }} 
+                placeholder="admissions@daust.edu" 
+              />
+            </div>
+          </div>
           <textarea 
             value={templates.acceptanceBody} 
             onChange={(e) => setTemplates({ ...templates, acceptanceBody: e.target.value })} 
