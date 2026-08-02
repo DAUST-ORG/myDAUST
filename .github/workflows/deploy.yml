@@ -70,7 +70,7 @@ jobs:
 
       - name: Build and push images
         run: |
-          TAG="${GITHUB_SHA::7}-${github.ref_name}"
+          TAG="${GITHUB_SHA::7}-${GITHUB_REF_NAME}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           # Images are environment-agnostic (api reads config from Secrets Manager at runtime;
           # portal is built with a relative NEXT_PUBLIC_API_URL for both envs), so a tag already
