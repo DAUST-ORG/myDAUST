@@ -23,6 +23,7 @@ const ACCOUNTS = [
   { email: "hr@daust.edu", roles: ["hr"], firstName: "DAUST", lastName: "HR", env: "HR_PASSWORD" },
   { email: "it@daust.edu", roles: ["it_admin"], firstName: "DAUST", lastName: "IT", env: "IT_PASSWORD" },
   { email: "comms@daust.edu", roles: ["communications"], firstName: "DAUST", lastName: "Communications", env: "COMMS_PASSWORD" },
+  { email: "faculty@daust.edu", roles: ["faculty"], firstName: "DAUST", lastName: "Faculty", env: "FACULTY_PASSWORD" },
 ] as const;
 
 async function main() {
