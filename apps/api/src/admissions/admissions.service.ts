@@ -89,10 +89,8 @@ export class AdmissionsService {
         : "";
 
     const templates = await this.appConfig.emailTemplates();
-    const notificationRecipients = await this.appConfig.applicationNotificationRecipients();
     const cc = templates.applicationCc?.length ? templates.applicationCc : undefined;
-    const bccList = Array.from(new Set([...(templates.applicationBcc || []), ...notificationRecipients]));
-    const bcc = bccList.length ? bccList : undefined;
+    const bcc = templates.applicationBcc?.length ? templates.applicationBcc : undefined;
 
     const interpolate = (str: string) =>
       str
