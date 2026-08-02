@@ -83,12 +83,12 @@ export type NotificationRecipientsInput = z.infer<typeof NotificationRecipientsI
 export const EmailTemplatesInput = z.object({
   applicationSubject: z.string().min(1).max(200),
   applicationBody: z.string().min(1).max(10000),
-  applicationCc: z.array(z.string()).optional().default(["admin@daust.edu"]),
-  applicationBcc: z.array(z.string()).optional().default(["admissions@daust.edu"]),
+  applicationCc: z.array(z.string()).optional().default(["admissions@daust.org"]),
+  applicationBcc: z.array(z.string()).optional().default(["sndao@daust.org"]),
   acceptanceSubject: z.string().min(1).max(200),
   acceptanceBody: z.string().min(1).max(10000),
-  acceptanceCc: z.array(z.string()).optional().default(["admin@daust.edu"]),
-  acceptanceBcc: z.array(z.string()).optional().default(["admissions@daust.edu"]),
+  acceptanceCc: z.array(z.string()).optional().default(["admissions@daust.org"]),
+  acceptanceBcc: z.array(z.string()).optional().default(["sndao@daust.org"]),
 });
 export type EmailTemplatesInput = z.infer<typeof EmailTemplatesInput>;
 
@@ -99,16 +99,16 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplatesInput = {
 {{scholarshipLine}}
 <p>Next step: submit your documents and the {{appFee}} FCFA application fee. Our admissions team will be in touch.</p>
 <p>— Office of Admissions, DAUST</p>`,
-  applicationCc: ["admin@daust.edu"],
-  applicationBcc: ["admissions@daust.edu"],
+  applicationCc: ["admissions@daust.org"],
+  applicationBcc: ["sndao@daust.org"],
   acceptanceSubject: "Congratulations! You have been accepted to DAUST",
   acceptanceBody: `<h2>Congratulations, {{firstName}} {{lastName}}!</h2>
 <p>We are thrilled to offer you admission to DAUST for the September 2026 intake.</p>
 {{scholarshipLine}}
 <p>Please log in to your portal to review your offer and next steps.</p>
 <p>— Office of Admissions, DAUST</p>`,
-  acceptanceCc: ["admin@daust.edu"],
-  acceptanceBcc: ["admissions@daust.edu"],
+  acceptanceCc: ["admissions@daust.org"],
+  acceptanceBcc: ["sndao@daust.org"],
 };
 
 export const ScholarshipTierInput = z.object({

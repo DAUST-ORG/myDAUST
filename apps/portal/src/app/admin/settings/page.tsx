@@ -470,7 +470,7 @@ function EmailTemplatesEditor({ editable }: { editable: boolean }) {
                 onChange={(e) => setAppCc(e.target.value)} 
                 disabled={!editable} 
                 style={{ width: "100%", fontSize: 13 }} 
-                placeholder="admin@daust.edu" 
+                placeholder="admissions@daust.org" 
               />
             </div>
             <div>
@@ -480,7 +480,7 @@ function EmailTemplatesEditor({ editable }: { editable: boolean }) {
                 onChange={(e) => setAppBcc(e.target.value)} 
                 disabled={!editable} 
                 style={{ width: "100%", fontSize: 13 }} 
-                placeholder="admissions@daust.edu" 
+                placeholder="sndao@daust.org" 
               />
             </div>
           </div>
@@ -512,7 +512,7 @@ function EmailTemplatesEditor({ editable }: { editable: boolean }) {
                 onChange={(e) => setAccCc(e.target.value)} 
                 disabled={!editable} 
                 style={{ width: "100%", fontSize: 13 }} 
-                placeholder="admin@daust.edu" 
+                placeholder="admissions@daust.org" 
               />
             </div>
             <div>
@@ -522,7 +522,7 @@ function EmailTemplatesEditor({ editable }: { editable: boolean }) {
                 onChange={(e) => setAccBcc(e.target.value)} 
                 disabled={!editable} 
                 style={{ width: "100%", fontSize: 13 }} 
-                placeholder="admissions@daust.edu" 
+                placeholder="sndao@daust.org" 
               />
             </div>
           </div>
