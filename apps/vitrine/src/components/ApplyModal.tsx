@@ -13,7 +13,7 @@ const PROGRAMS: { code: string; en: string; fr: string }[] = [
   { code: "BSCHE", en: "Chemical Engineering", fr: "Génie chimique" },
   { code: "IEP", en: "Intensive English Program", fr: "Programme d’anglais intensif" },
 ];
-const TERMS = ["Fall 2026", "Spring 2027", "Fall 2027"];
+const TERMS = ["Fall 2026"];
 
 const field: React.CSSProperties = {
   width: "100%", border: "1px solid var(--border)", borderRadius: 4,
@@ -65,7 +65,10 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((p) => ({ ...p, [k]: v }));
 
-  const genderOpts = [t("Female", "Femme"), t("Male", "Homme"), t("Other", "Autre")];
+  const genderOpts = [
+    { value: "Female", label: t("Female", "Femme") },
+    { value: "Male", label: t("Male", "Homme") }
+  ];
   const sourceOpts = [
     t("Website", "Site web"), t("Social media", "Réseaux sociaux"), t("School counselor", "Conseiller scolaire"),
     t("Alumni referral", "Recommandation d’un ancien"), t("DAUST open day", "Journée portes ouvertes DAUST"),
@@ -109,11 +112,11 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
         email: f.email.trim(),
         track: f.origin === "transfer" ? "transfer" : "first-year",
         programCode: nn(f.programCode),
-        term: nn(f.term),
+        term: nn(f.term) as "Fall 2026" | undefined,
         origin: f.origin === "" ? undefined : f.origin,
         phone: nn(f.phone),
         dateOfBirth: nn(f.dateOfBirth),
-        gender: nn(f.gender),
+        gender: nn(f.gender) as "Male" | "Female" | "Homme" | "Femme" | undefined,
         nationality: nn(f.nationality),
         city: nn(f.city),
         country: nn(f.country),
@@ -250,7 +253,7 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
                     <F label={t("Gender", "Genre")}>
                       <select value={f.gender} onChange={(e) => set("gender", e.target.value)} style={{ ...field, background: "#fff" }}>
                         <option value="">—</option>
-                        {genderOpts.map((g) => <option key={g} value={g}>{g}</option>)}
+                        {genderOpts.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
                       </select>
                     </F>
                   </Row>

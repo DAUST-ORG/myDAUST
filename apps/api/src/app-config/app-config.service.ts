@@ -6,6 +6,8 @@ import {
   type UpdateFeeInput,
   type ScholarshipTierInput,
   scholarshipForBac,
+  type EmailTemplatesInput,
+  DEFAULT_EMAIL_TEMPLATES,
 } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 
@@ -64,6 +66,27 @@ export class AppConfigService {
       data: { entity: "AppSetting", entityId: AppConfigService.NOTIFY_KEY, action: "notification-recipients-updated", actorId, data: { count: recipients.length } },
     });
     return { recipients };
+  }
+
+  // --- Email Templates (AppSetting singleton) ---
+  private static readonly EMAIL_TEMPLATES_KEY = "email_templates";
+
+  async emailTemplates(): Promise<EmailTemplatesInput> {
+    const row = await this.prisma.appSetting.findUnique({ where: { key: AppConfigService.EMAIL_TEMPLATES_KEY } });
+    const val = row?.valueJson as Partial<EmailTemplatesInput> | null | undefined;
+    return { ...DEFAULT_EMAIL_TEMPLATES, ...val };
+  }
+
+  async setEmailTemplates(templates: EmailTemplatesInput, actorId: string) {
+    await this.prisma.appSetting.upsert({
+      where: { key: AppConfigService.EMAIL_TEMPLATES_KEY },
+      create: { key: AppConfigService.EMAIL_TEMPLATES_KEY, valueJson: templates },
+      update: { valueJson: templates },
+    });
+    await this.prisma.auditLog.create({
+      data: { entity: "AppSetting", entityId: AppConfigService.EMAIL_TEMPLATES_KEY, action: "email-templates-updated", actorId, data: templates },
+    });
+    return templates;
   }
 
   async scholarships(): Promise<(ScholarshipTierDef & { id: string })[]> {

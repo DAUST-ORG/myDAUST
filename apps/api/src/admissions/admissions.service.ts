@@ -88,38 +88,26 @@ export class AdmissionsService {
         ? `<p>Based on your reported BAC, you may qualify for a <strong>${award.pct}% merit scholarship</strong> (${award.band}).</p>`
         : "";
 
-    await this.mail.send({
-      to: input.email,
-      subject: "Your DAUST application has been received",
-      html: `
-        <h2>Thank you, ${esc(input.firstName)}!</h2>
-        <p>We've received your application to DAUST for the September 2026 intake.</p>
-        ${scholarshipLine}
-        <p>Next step: submit your documents and the ${appFee.toLocaleString("en-US")} FCFA application fee. Our admissions team will be in touch.</p>
-        <p>— Office of Admissions, DAUST</p>`,
-    });
+    const templates = await this.appConfig.emailTemplates();
+    const recipients = await this.appConfig.applicationNotificationRecipients();
+    const bcc = recipients.length > 0 ? recipients : undefined;
 
-    // Notify the configured staff list. Never let a mail failure 500 a public submission.
+    const interpolate = (str: string) =>
+      str
+        .replace(/\{\{firstName\}\}/g, esc(input.firstName))
+        .replace(/\{\{lastName\}\}/g, esc(input.lastName))
+        .replace(/\{\{scholarshipLine\}\}/g, scholarshipLine)
+        .replace(/\{\{appFee\}\}/g, appFee.toLocaleString("en-US"));
+
     try {
-      const recipients = await this.appConfig.applicationNotificationRecipients();
-      if (recipients.length) {
-        const portal = process.env.PORTAL_ORIGIN ?? "http://localhost:3000";
-        await this.mail.send({
-          to: recipients,
-          subject: `New application — ${input.firstName} ${input.lastName}`,
-          html: `
-            <p>A new application was submitted.</p>
-            <ul>
-              <li><strong>Name:</strong> ${esc(input.firstName)} ${esc(input.lastName)}</li>
-              <li><strong>Email:</strong> ${esc(input.email)}</li>
-              <li><strong>Program:</strong> ${esc(input.programCode ?? "—")}</li>
-              <li><strong>Score:</strong> ${esc(score ?? "—")}</li>
-            </ul>
-            <p><a href="${portal}/admin/admissions/${applicant.id}">Review in the registrar dashboard</a></p>`,
-        });
-      }
+      await this.mail.send({
+        to: input.email,
+        bcc,
+        subject: interpolate(templates.applicationSubject),
+        html: interpolate(templates.applicationBody),
+      });
     } catch (e) {
-      this.logger.warn(`application notification email failed: ${String(e)}`);
+      this.logger.warn(`application email failed: ${String(e)}`);
     }
 
     return { id: applicant.id, scholarship: award };
@@ -232,6 +220,33 @@ export class AdmissionsService {
     await this.prisma.auditLog.create({
       data: { entity: "Applicant", entityId: id, action: `applicant-stage-${stage}`, actorId },
     });
+
+    if (stage === "accepted") {
+      try {
+        const templates = await this.appConfig.emailTemplates();
+        const award = await this.appConfig.awardFor(applicant.score);
+        const scholarshipLine =
+          award.pct > 0
+            ? `<p>Based on your reported BAC, you may qualify for a <strong>${award.pct}% merit scholarship</strong> (${award.band}).</p>`
+            : "";
+        
+        const interpolate = (str: string) =>
+          str
+            .replace(/\{\{firstName\}\}/g, esc(applicant.firstName))
+            .replace(/\{\{lastName\}\}/g, esc(applicant.lastName))
+            .replace(/\{\{scholarshipLine\}\}/g, scholarshipLine)
+            .replace(/\{\{appFee\}\}/g, "");
+            
+        await this.mail.send({
+          to: applicant.email,
+          subject: interpolate(templates.acceptanceSubject),
+          html: interpolate(templates.acceptanceBody),
+        });
+      } catch (e) {
+        this.logger.warn(`acceptance email failed: ${String(e)}`);
+      }
+    }
+
     return updated;
   }
 }

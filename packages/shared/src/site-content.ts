@@ -113,7 +113,7 @@ export function buildContent(lang: Lang) {
     applySubmit: T("Submit application →", "Soumettre la candidature →"),
     applyQ: T("Questions?", "Questions ?"), applyAI: T("Ask our AI assistant", "Demander à notre assistant IA"),
     thankTitle: T("Thank you!", "Merci !"),
-    thankBody: T("Your interest has been received. Our admissions team will reach out with next steps for the September 2026 intake.", "Votre intérêt a bien été reçu. Notre équipe des admissions vous contactera pour la suite concernant la rentrée de septembre 2026."),
+    thankBody: T("Your DAUST application for admission has been received. Our admissions team will reach out with next steps for the September 2026 intake.", "Votre candidature d'admission à DAUST a bien été reçue. Notre équipe des admissions vous contactera pour la suite concernant la rentrée de septembre 2026."),
     done: T("Done", "Terminé"),
     footTagline: T("Dakar American University of Science & Technology — educating Africa’s future world-class engineers, scientists and innovators. Somone, Thiès, Senegal.", "Dakar American University of Science & Technology — former les futurs ingénieurs, scientifiques et innovateurs de classe mondiale de l’Afrique. Somone, Thiès, Sénégal."),
     footRights: T("© DAUST 2026. All Rights Reserved.", "© DAUST 2026. Tous droits réservés."),

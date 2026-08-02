@@ -11,6 +11,7 @@ import {
   updateNews,
   uploadFile,
 } from "@/lib/api";
+import { RichTextEditor } from "@/components/RichTextEditor";
 import { Badge, Button, Card, Input, Toggle } from "@/components/ui";
 
 interface Form {
@@ -113,7 +114,19 @@ export default function NewsPage() {
           {err && <div style={{ color: "var(--error-500)", fontSize: 13 }}>{err}</div>}
           {Bi("Title", "titleEn", "titleFr")}
           {Bi("Excerpt (shown on the card)", "excerptEn", "excerptFr", true)}
-          {Bi("Body", "bodyEn", "bodyFr", true)}
+          <div>
+            <div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Body (Rich Text)</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--fg3)", marginBottom: 4 }}>EN</div>
+                <RichTextEditor value={form.bodyEn} onChange={(v) => set("bodyEn", v)} placeholder="Write English article body..." />
+              </div>
+              <div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--fg3)", marginBottom: 4 }}>FR</div>
+                <RichTextEditor value={form.bodyFr} onChange={(v) => set("bodyFr", v)} placeholder="Écrire le corps de l'article en français..." />
+              </div>
+            </div>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Date (as shown)</div><Input value={form.date} onChange={(v) => set("date", v)} /></div>
             <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Tag (optional)</div><Input value={form.tag} onChange={(v) => set("tag", v)} /></div>

@@ -927,9 +927,27 @@ export default function Site() {
                 <ImageSlot label={fr ? article.titleFr : article.titleEn} src={article.imageUrl} />
               </div>
             )}
-            {(fr ? article.bodyFr : article.bodyEn).split(/\n{2,}/).map((para, i) => (
-              <p key={i} style={{ fontFamily: "var(--font-body)", fontSize: 16.5, lineHeight: 1.75, color: "var(--fg2)", margin: "20px 0 0", whiteSpace: "pre-wrap" }}>{para}</p>
-            ))}
+            {(() => {
+              const body = fr ? article.bodyFr : article.bodyEn;
+              const isHtml = /<[a-z][\s\S]*>/i.test(body);
+              if (isHtml) {
+                return (
+                  <div
+                    dangerouslySetInnerHTML={{ __html: body }}
+                    style={{
+                      fontFamily: "var(--font-body)",
+                      fontSize: 16.5,
+                      lineHeight: 1.75,
+                      color: "var(--fg2)",
+                      margin: "20px 0 0",
+                    }}
+                  />
+                );
+              }
+              return body.split(/\n{2,}/).map((para, i) => (
+                <p key={i} style={{ fontFamily: "var(--font-body)", fontSize: 16.5, lineHeight: 1.75, color: "var(--fg2)", margin: "20px 0 0", whiteSpace: "pre-wrap" }}>{para}</p>
+              ));
+            })()}
           </div>
         </article>
       ) : (

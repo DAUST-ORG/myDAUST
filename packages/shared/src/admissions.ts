@@ -20,7 +20,7 @@ export const ApplicationInput = z.object({
   country: z.string().max(80).nullish(),
   phone: z.string().max(40).nullish(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
-  gender: z.string().max(20).nullish(),
+  gender: z.enum(["Male", "Female", "Homme", "Femme"]).nullish(),
   nationality: z.string().max(80).nullish(),
   city: z.string().max(80).nullish(),
   origin: z.enum(["high-school", "transfer"]).nullish(),
@@ -32,7 +32,7 @@ export const ApplicationInput = z.object({
   allergies: z.string().max(300).nullish(),
   source: z.string().max(80).nullish(),
   essay: z.string().max(4000).nullish(),
-  term: z.string().max(40).nullish(),
+  term: z.literal("Fall 2026").nullish(),
 });
 export type ApplicationInput = z.infer<typeof ApplicationInput>;
 
@@ -79,6 +79,29 @@ export const NotificationRecipientsInput = z.object({
   recipients: z.array(z.string().email()).max(50),
 });
 export type NotificationRecipientsInput = z.infer<typeof NotificationRecipientsInput>;
+
+export const EmailTemplatesInput = z.object({
+  applicationSubject: z.string().min(1).max(200),
+  applicationBody: z.string().min(1).max(10000),
+  acceptanceSubject: z.string().min(1).max(200),
+  acceptanceBody: z.string().min(1).max(10000),
+});
+export type EmailTemplatesInput = z.infer<typeof EmailTemplatesInput>;
+
+export const DEFAULT_EMAIL_TEMPLATES: EmailTemplatesInput = {
+  applicationSubject: "Your DAUST application has been received",
+  applicationBody: `<h2>Thank you, {{firstName}}!</h2>
+<p>We've received your application to DAUST for the September 2026 intake.</p>
+{{scholarshipLine}}
+<p>Next step: submit your documents and the {{appFee}} FCFA application fee. Our admissions team will be in touch.</p>
+<p>— Office of Admissions, DAUST</p>`,
+  acceptanceSubject: "Congratulations! You have been accepted to DAUST",
+  acceptanceBody: `<h2>Congratulations, {{firstName}} {{lastName}}!</h2>
+<p>We are thrilled to offer you admission to DAUST for the September 2026 intake.</p>
+{{scholarshipLine}}
+<p>Please log in to your portal to review your offer and next steps.</p>
+<p>— Office of Admissions, DAUST</p>`,
+};
 
 export const ScholarshipTierInput = z.object({
   minScore: z.number().min(0).max(20),

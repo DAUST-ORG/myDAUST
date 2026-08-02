@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
-import { NotificationRecipientsInput, ScholarshipTierInput, UpdateFeeInput } from "@mydaust/shared";
+import { NotificationRecipientsInput, ScholarshipTierInput, UpdateFeeInput, EmailTemplatesInput } from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Public, Roles } from "../auth/decorators.js";
 import { AppConfigService } from "./app-config.service.js";
@@ -64,5 +64,18 @@ export class AppConfigController {
   setNotificationRecipients(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const { recipients } = NotificationRecipientsInput.parse(body);
     return this.config.setNotificationRecipients(recipients, user.personId);
+  }
+
+  @Get("email-templates")
+  @Roles("admin", "registrar")
+  emailTemplates() {
+    return this.config.emailTemplates();
+  }
+
+  @Patch("email-templates")
+  @Roles("admin", "registrar")
+  setEmailTemplates(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const templates = EmailTemplatesInput.parse(body);
+    return this.config.setEmailTemplates(templates, user.personId);
   }
 }

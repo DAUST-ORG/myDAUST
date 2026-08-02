@@ -1313,6 +1313,11 @@ export const getNotificationRecipients = () => request<{ recipients: string[] }>
 export const updateNotificationRecipients = (recipients: string[]) =>
   request<{ recipients: string[] }>("/config/notification-recipients", { method: "PATCH", body: JSON.stringify({ recipients }) });
 
+import type { EmailTemplatesInput } from "@mydaust/shared";
+export const getEmailTemplates = () => request<EmailTemplatesInput>("/config/email-templates");
+export const updateEmailTemplates = (templates: EmailTemplatesInput) =>
+  request<EmailTemplatesInput>("/config/email-templates", { method: "PATCH", body: JSON.stringify(templates) });
+
 export interface AppUser { id: string; name: string; email: string; roles: string[] }
 export const updateUserRoles = (personId: string, roles: string[]) =>
   request(`/users/${personId}/roles`, { method: "PATCH", body: JSON.stringify({ roles }) });

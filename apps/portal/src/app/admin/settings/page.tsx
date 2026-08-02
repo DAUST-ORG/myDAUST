@@ -18,6 +18,8 @@ import {
   updateFeeItem,
   updateScholarshipTier,
   updateUserRoles,
+  getEmailTemplates,
+  updateEmailTemplates,
 } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
@@ -99,6 +101,7 @@ export default function SettingsPage() {
       <FeesEditor editable={isAdmin} />
       <TiersEditor editable={isAdmin} />
       <RecipientsEditor editable={isAdmin || isRegistrar} />
+      <EmailTemplatesEditor editable={isAdmin || isRegistrar} />
 
       {isAdmin && (
       <div className="card">
@@ -382,6 +385,81 @@ function RecipientsEditor({ editable }: { editable: boolean }) {
           <button className="primary" onClick={addOne}>Add</button>
         </div>
       )}
+    </div>
+  );
+}
+
+function EmailTemplatesEditor({ editable }: { editable: boolean }) {
+  const [templates, setTemplates] = useState({
+    applicationSubject: "", applicationBody: "",
+    acceptanceSubject: "", acceptanceBody: ""
+  });
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    getEmailTemplates().then(setTemplates).catch(() => {});
+  }, []);
+
+  async function save() {
+    try {
+      await updateEmailTemplates(templates);
+      setNote("Saved");
+      setTimeout(() => setNote(null), 1500);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Could not save");
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <p className="h1" style={{ fontSize: 16, flex: 1 }}>Email Templates</p>
+        {note && <span className="muted" style={{ fontSize: 13 }}>{note}</span>}
+        {editable && <button className="primary" onClick={save} style={{ fontSize: 12 }}>Save Templates</button>}
+      </div>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+        Available variables: {"{{firstName}}"}, {"{{lastName}}"}, {"{{scholarshipLine}}"}, {"{{appFee}}"}
+      </p>
+
+      <div style={{ marginTop: 16 }}>
+        <strong>Application Submitted Email</strong>
+        <div style={{ marginTop: 8 }}>
+          <input 
+            value={templates.applicationSubject} 
+            onChange={(e) => setTemplates({ ...templates, applicationSubject: e.target.value })} 
+            disabled={!editable} 
+            style={{ width: "100%", marginBottom: 8 }} 
+            placeholder="Subject" 
+          />
+          <textarea 
+            value={templates.applicationBody} 
+            onChange={(e) => setTemplates({ ...templates, applicationBody: e.target.value })} 
+            disabled={!editable} 
+            style={{ width: "100%", height: 120, fontFamily: "monospace" }} 
+            placeholder="HTML Body" 
+          />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <strong>Application Accepted Email</strong>
+        <div style={{ marginTop: 8 }}>
+          <input 
+            value={templates.acceptanceSubject} 
+            onChange={(e) => setTemplates({ ...templates, acceptanceSubject: e.target.value })} 
+            disabled={!editable} 
+            style={{ width: "100%", marginBottom: 8 }} 
+            placeholder="Subject" 
+          />
+          <textarea 
+            value={templates.acceptanceBody} 
+            onChange={(e) => setTemplates({ ...templates, acceptanceBody: e.target.value })} 
+            disabled={!editable} 
+            style={{ width: "100%", height: 120, fontFamily: "monospace" }} 
+            placeholder="HTML Body" 
+          />
+        </div>
+      </div>
     </div>
   );
 }
