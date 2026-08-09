@@ -5,15 +5,20 @@ import {
   AlertTriangle,
   Check,
   Copy,
+  Download,
   ExternalLink,
   Globe,
+  KeyRound,
   Pencil,
   Plus,
   Trash2,
   Upload,
   UserPlus,
 } from "lucide-react";
-import type { AdminFacultyItem } from "@mydaust/shared";
+import type {
+  AdminFacultyItem,
+  FacultyProvisionedLogin,
+} from "@mydaust/shared";
 import { slugify } from "@mydaust/shared";
 import {
   type CreatedFaculty,
@@ -23,6 +28,8 @@ import {
   fileUrl,
   getFacultyList,
   getStaff,
+  provisionAllFacultyLogins,
+  provisionFacultyLogin,
   setFacultyVisibility,
   updateFacultyProfile,
   uploadFile,
@@ -111,12 +118,11 @@ export default function DirectoryManager() {
     null,
   );
   const [deleting, setDeleting] = useState(false);
+  const [provisioning, setProvisioning] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const [addOpen, setAddOpen] = useState(false);
-  const [creds, setCreds] = useState<
-    (CreatedFaculty & { name: string }) | null
-  >(null);
+  const [creds, setCreds] = useState<FacultyProvisionedLogin[] | null>(null);
 
   const load = () =>
     Promise.all([getFacultyList(), getStaff()])
@@ -225,6 +231,34 @@ export default function DirectoryManager() {
     }
   }
 
+  async function provisionOne(id: string) {
+    setProvisioning(id);
+    setErr(null);
+    try {
+      const credential = await provisionFacultyLogin(id);
+      setCreds([credential]);
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not provision login.");
+    } finally {
+      setProvisioning(null);
+    }
+  }
+
+  async function provisionAll() {
+    setProvisioning("all");
+    setErr(null);
+    try {
+      const result = await provisionAllFacultyLogins();
+      if (result.credentials.length > 0) setCreds(result.credentials);
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not provision logins.");
+    } finally {
+      setProvisioning(null);
+    }
+  }
+
   if (err && !list)
     return (
       <Card>
@@ -235,11 +269,19 @@ export default function DirectoryManager() {
     return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
 
   const otherStaff = (staff ?? []).filter((s) => s.kind !== "faculty");
+  const missingLogins = list.filter((a) => !a.hasLogin).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <Card>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 14,
+            flexWrap: "wrap",
+          }}
+        >
           <div
             style={{
               flex: 1,
@@ -254,19 +296,35 @@ export default function DirectoryManager() {
             shareable page at <code>/directory/faculty/…</code>.
             <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--fg3)" }}>
               {list.filter((a) => a.publicProfile).length} of {list.length}{" "}
-              faculty visible on the site.
+              faculty visible on the site · {list.length - missingLogins} login
+              {list.length - missingLogins === 1 ? "" : "s"} active
+              {missingLogins > 0 ? ` · ${missingLogins} need setup` : ""}.
             </div>
           </div>
-          <Button
-            variant="primary"
-            icon={<UserPlus size={15} />}
-            onClick={() => {
-              setErr(null);
-              setAddOpen(true);
-            }}
-          >
-            Add faculty
-          </Button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {missingLogins > 0 && (
+              <Button
+                variant="secondary"
+                icon={<KeyRound size={15} />}
+                onClick={provisionAll}
+                disabled={provisioning !== null}
+              >
+                {provisioning === "all"
+                  ? "Generating…"
+                  : `Generate ${missingLogins} login${missingLogins === 1 ? "" : "s"}`}
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              icon={<UserPlus size={15} />}
+              onClick={() => {
+                setErr(null);
+                setAddOpen(true);
+              }}
+            >
+              Add faculty
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -295,7 +353,14 @@ export default function DirectoryManager() {
         return (
           <Card key={a.id}>
             {!isEditing ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  flexWrap: "wrap",
+                }}
+              >
                 <div
                   style={{
                     width: 44,
@@ -345,6 +410,13 @@ export default function DirectoryManager() {
                     ) : (
                       <Badge tone="neutral">Private</Badge>
                     )}
+                    {!a.hasLogin ? (
+                      <Badge tone="neutral">No login</Badge>
+                    ) : a.mustChangePassword ? (
+                      <Badge tone="warning">Must change password</Badge>
+                    ) : (
+                      <Badge tone="success">Login active</Badge>
+                    )}
                     {a.publicProfile && (
                       <a
                         href={publicFacultyUrl(a)}
@@ -382,20 +454,43 @@ export default function DirectoryManager() {
                     </div>
                   )}
                 </div>
-                <Toggle
-                  checked={a.publicProfile}
-                  disabled={toggling === a.id}
-                  onChange={(v) => toggleVisible(a, v)}
-                  label={toggling === a.id ? "Saving…" : "Public on site"}
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={<Pencil size={14} />}
-                  onClick={() => openEditor(a)}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
                 >
-                  Edit
-                </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<KeyRound size={14} />}
+                    onClick={() => provisionOne(a.id)}
+                    disabled={provisioning !== null}
+                  >
+                    {provisioning === a.id
+                      ? "Generating…"
+                      : a.hasLogin
+                        ? "Reset password"
+                        : "Generate login"}
+                  </Button>
+                  <Toggle
+                    checked={a.publicProfile}
+                    disabled={toggling === a.id}
+                    onChange={(v) => toggleVisible(a, v)}
+                    label={toggling === a.id ? "Saving…" : "Public on site"}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Pencil size={14} />}
+                    onClick={() => openEditor(a)}
+                  >
+                    Edit
+                  </Button>
+                </div>
               </div>
             ) : (
               <div
@@ -681,7 +776,16 @@ export default function DirectoryManager() {
         onClose={() => setAddOpen(false)}
         onCreated={(c) => {
           setAddOpen(false);
-          if (c.tempPassword) setCreds(c);
+          if (c.tempPassword) {
+            setCreds([
+              {
+                facultyId: c.id,
+                name: c.name,
+                email: c.email,
+                tempPassword: c.tempPassword,
+              },
+            ]);
+          }
           load();
         }}
       />
@@ -864,54 +968,138 @@ function CredentialsModal({
   creds,
   onClose,
 }: {
-  creds: CreatedFaculty & { name: string };
+  creds: FacultyProvisionedLogin[];
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const bulk = creds.length > 1;
+
   function copy() {
+    const credential = creds[0];
+    if (!credential) return;
     navigator.clipboard
-      ?.writeText(`${creds.email}\n${creds.tempPassword ?? ""}`)
+      ?.writeText(`${credential.email}\n${credential.tempPassword}`)
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       });
   }
+
+  function downloadCsv() {
+    const header = "name,email,tempPassword";
+    const body = creds
+      .map((credential) =>
+        [credential.name, credential.email, credential.tempPassword]
+          .map((value) => `"${value.replace(/"/g, '""')}"`)
+          .join(","),
+      )
+      .join("\n");
+    const blob = new Blob([`${header}\n${body}\n`], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `daust-faculty-logins-${creds.length}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <Modal
       open
       onClose={onClose}
-      title="Login created"
+      title={bulk ? `${creds.length} logins generated` : "Login generated"}
+      width={bulk ? 640 : 460}
       footer={
-        <Button variant="primary" onClick={onClose}>
-          Done
-        </Button>
+        <>
+          {bulk && (
+            <Button
+              variant="secondary"
+              icon={<Download size={14} />}
+              onClick={downloadCsv}
+            >
+              Download CSV
+            </Button>
+          )}
+          <Button variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        </>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ fontSize: 13, color: "var(--fg2)", lineHeight: 1.5 }}>
-          Give <strong>{creds.name}</strong> these credentials now — the
-          password is shown once, never stored or emailed, and must be changed
-          on first login.
+        <div
+          style={{
+            padding: "9px 12px",
+            borderRadius: "var(--radius-md)",
+            background: "var(--warning-50, #fff7e8)",
+            color: "var(--fg2)",
+            fontSize: 12.5,
+            lineHeight: 1.5,
+          }}
+        >
+          Copy these credentials now. Passwords are shown once, are never stored
+          or emailed, and must be changed on first login.
         </div>
-        <Field label="Email">
-          <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}>
-            {creds.email}
-          </div>
-        </Field>
-        <Field label="Temporary password">
+        {bulk ? (
           <div
             style={{
+              maxHeight: 340,
+              overflowY: "auto",
+              overflowX: "auto",
               fontFamily: "ui-monospace, monospace",
-              fontWeight: 700,
-              fontSize: 16,
+              fontSize: 12.5,
             }}
           >
-            {creds.tempPassword}
+            {creds.map((credential) => (
+              <div
+                key={credential.facultyId}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1.3fr 1fr",
+                  minWidth: 520,
+                  gap: 8,
+                  padding: "7px 0",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <span>{credential.name}</span>
+                <span>{credential.email}</span>
+                <strong>{credential.tempPassword}</strong>
+              </div>
+            ))}
           </div>
-        </Field>
-        <Button variant="secondary" icon={<Copy size={14} />} onClick={copy}>
-          {copied ? "Copied" : "Copy email + password"}
-        </Button>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Field label="Name">
+              <div>{creds[0]!.name}</div>
+            </Field>
+            <Field label="Email (login)">
+              <div
+                style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}
+              >
+                {creds[0]!.email}
+              </div>
+            </Field>
+            <Field label="Temporary password">
+              <div
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 700,
+                  fontSize: 16,
+                }}
+              >
+                {creds[0]!.tempPassword}
+              </div>
+            </Field>
+            <Button
+              variant="secondary"
+              icon={<Copy size={14} />}
+              onClick={copy}
+            >
+              {copied ? "Copied" : "Copy email + password"}
+            </Button>
+          </div>
+        )}
       </div>
     </Modal>
   );

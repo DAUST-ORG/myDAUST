@@ -40,6 +40,20 @@ export class FacultyController {
     );
   }
 
+  /** Generate logins for every faculty member who does not have one yet. */
+  @Post("provision-logins")
+  @Roles("registrar", "admin")
+  provisionLogins(@CurrentUser() user: AuthUser) {
+    return this.faculty.provisionAllMissing(user.personId);
+  }
+
+  /** Generate or reset one faculty login, returning the password once. */
+  @Post(":id/provision-login")
+  @Roles("registrar", "admin")
+  provisionLogin(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.faculty.provisionLogin(user.personId, id);
+  }
+
   @Put(":id/profile")
   @Roles("registrar", "admin")
   update(

@@ -164,8 +164,10 @@ export const deleteNews = (id: string) =>
 import type {
   AdminFacultyItem,
   FacultyCreateInput,
+  FacultyProvisionedLogin,
   FacultyProfileInput,
 } from "@mydaust/shared";
+export type { FacultyProvisionedLogin } from "@mydaust/shared";
 export const getFacultyList = () => request<AdminFacultyItem[]>("/faculty");
 export const updateFacultyProfile = (id: string, input: FacultyProfileInput) =>
   request<{ ok: boolean }>(`/faculty/${id}/profile`, {
@@ -189,6 +191,15 @@ export const createFaculty = (input: FacultyCreateInput) =>
     method: "POST",
     body: JSON.stringify(input),
   });
+export const provisionFacultyLogin = (id: string) =>
+  request<FacultyProvisionedLogin>(`/faculty/${id}/provision-login`, {
+    method: "POST",
+  });
+export const provisionAllFacultyLogins = () =>
+  request<{ count: number; credentials: FacultyProvisionedLogin[] }>(
+    "/faculty/provision-logins",
+    { method: "POST" },
+  );
 
 // --- Auth ---
 export interface Me {

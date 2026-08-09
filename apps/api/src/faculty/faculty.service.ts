@@ -69,6 +69,8 @@ export class FacultyService {
       email: p.email,
       firstName: p.firstName,
       lastName: p.lastName,
+      hasLogin: p.passwordHash !== null,
+      mustChangePassword: p.mustChangePassword,
       publicProfile: p.facultyProfile?.publicProfile ?? false,
       assignedSectionCount: p._count.taughtSections,
       profile: p.facultyProfile
@@ -141,6 +143,51 @@ export class FacultyService {
     });
     if (!person) throw new NotFoundException("Faculty member not found");
     return person;
+  }
+
+  /**
+   * Give a faculty member a working login, or reset an existing one. Their
+   * directory email remains the sign-in identity. The plaintext password is
+   * returned once and is never included in the audit event.
+   */
+  async provisionLogin(actorId: string, personId: string) {
+    const person = await this.mustFaculty(personId);
+    const tempPassword = this.randomTempPassword();
+    await this.prisma.person.update({
+      where: { id: person.id },
+      data: {
+        passwordHash: await bcrypt.hash(tempPassword, 10),
+        mustChangePassword: true,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Person",
+        entityId: person.id,
+        action: "login-provisioned",
+        actorId,
+      },
+    });
+    return {
+      facultyId: person.id,
+      name: `${person.firstName} ${person.lastName}`.trim(),
+      email: person.email,
+      tempPassword,
+    };
+  }
+
+  /** Bulk-provision only faculty who do not yet have a password. */
+  async provisionAllMissing(actorId: string) {
+    const people = await this.prisma.person.findMany({
+      where: { ...facultyWhere(), passwordHash: null },
+      select: { id: true },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    });
+    const credentials = [];
+    for (const person of people) {
+      credentials.push(await this.provisionLogin(actorId, person.id));
+    }
+    return { count: credentials.length, credentials };
   }
 
   /** Comms: edit the name + profile fields (upserting the profile row). */

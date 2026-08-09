@@ -45,6 +45,8 @@ export interface AdminFacultyItem {
   email: string;
   firstName: string;
   lastName: string;
+  hasLogin: boolean;
+  mustChangePassword: boolean;
   publicProfile: boolean;
   assignedSectionCount: number;
   profile: {
@@ -55,4 +57,12 @@ export interface AdminFacultyItem {
     scholar: string | null;
     photoUrl: string | null;
   } | null;
+}
+
+/** One-time credentials returned when a registrar provisions a faculty login. */
+export interface FacultyProvisionedLogin {
+  facultyId: string;
+  name: string;
+  email: string;
+  tempPassword: string;
 }
