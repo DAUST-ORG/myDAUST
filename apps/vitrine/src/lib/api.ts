@@ -105,6 +105,59 @@ export async function feeCheckout(applicantId: string): Promise<{ redirectUrl: s
   return res.json() as Promise<{ redirectUrl: string }>;
 }
 
+// --- PI-SPI (BCEAO instant payment) for the application fee ---
+export interface PiSpiAliasLookup { alias: string; name: string; country: string | null }
+export interface PiSpiRequest {
+  txId: string;
+  status: "initiated" | "sent" | "settled" | "cancelled" | "rejected" | "expired";
+  statusReason: string | null;
+  payerName: string | null;
+  amountXof: number;
+  settledAmountXof: number | null;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+/** Whether the instant-payment rail is live; false hides the option entirely. */
+export async function piSpiEnabled(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/api/finance/pi-spi/config`);
+    if (!res.ok) return false;
+    return ((await res.json()) as { enabled?: boolean }).enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve an alias to its owner so the applicant confirms who is being billed. */
+export async function verifyPiSpiAlias(alias: string): Promise<PiSpiAliasLookup> {
+  const res = await fetch(`${API_URL}/api/finance/pi-spi/verify-alias`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ alias }),
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json() as Promise<PiSpiAliasLookup>;
+}
+
+export async function feePiSpi(applicantId: string, alias: string): Promise<PiSpiRequest> {
+  const res = await fetch(`${API_URL}/api/applications/${applicantId}/fee-pi-spi`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ alias }),
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json() as Promise<PiSpiRequest>;
+}
+
+export async function feePiSpiStatus(applicantId: string, txId: string): Promise<PiSpiRequest> {
+  const res = await fetch(
+    `${API_URL}/api/applications/${applicantId}/fee-pi-spi/${encodeURIComponent(txId)}`,
+  );
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json() as Promise<PiSpiRequest>;
+}
+
 // --- Public director-configured money settings (fallbacks live in @mydaust/shared) ---
 export interface PublicFee {
   key: string;

@@ -1,11 +1,19 @@
-import { Body, Controller, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { ApplicationInput } from "@mydaust/shared";
+import { z } from "zod";
 import { Public } from "../auth/decorators.js";
+import { BillThrottleGuard } from "../finance/bill-throttle.guard.js";
+import { FinanceService } from "../finance/finance.service.js";
 import { AdmissionsService } from "./admissions.service.js";
+
+const FeePiSpiInput = z.object({ alias: z.string().trim().uuid() });
 
 @Controller("applications")
 export class AdmissionsController {
-  constructor(private readonly admissions: AdmissionsService) {}
+  constructor(
+    private readonly admissions: AdmissionsService,
+    private readonly finance: FinanceService,
+  ) {}
 
   /** Public anonymous application submission from the vitrine Apply flow. */
   @Public()
@@ -20,5 +28,22 @@ export class AdmissionsController {
   @Post(":id/fee-checkout")
   feeCheckout(@Param("id") id: string) {
     return this.admissions.feeCheckout(id);
+  }
+
+  /** Public: pay the application fee over PI-SPI instead of the hosted checkout. */
+  @Public()
+  @Post(":id/fee-pi-spi")
+  @UseGuards(BillThrottleGuard)
+  async feePiSpi(@Param("id") id: string, @Body() body: unknown) {
+    const { alias } = FeePiSpiInput.parse(body);
+    const fee = await this.admissions.applicationFeeXof();
+    return this.finance.submitApplicantPiSpi(id, alias, fee);
+  }
+
+  @Public()
+  @Get(":id/fee-pi-spi/:txId")
+  @UseGuards(BillThrottleGuard)
+  feePiSpiStatus(@Param("id") id: string, @Param("txId") txId: string) {
+    return this.finance.getApplicantPiSpiStatus(id, txId);
   }
 }

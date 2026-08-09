@@ -7,18 +7,38 @@ import { PaymentsController } from "./payments.controller.js";
 import { PublicBillingController } from "./public-billing.controller.js";
 import { PAYMENT_PROVIDER } from "./payment-provider.js";
 import { PaytechProvider } from "./paytech.provider.js";
+import { PiSpiProvider } from "./pi-spi.provider.js";
+import {
+  REQUEST_TO_PAY_PROVIDERS,
+  RequestToPayRegistry,
+} from "./request-to-pay.provider.js";
+import { WireProofStorage } from "./wire-proof.storage.js";
 
 @Module({
-  controllers: [PaymentsController, AdminFinanceController, PublicBillingController],
+  controllers: [
+    PaymentsController,
+    AdminFinanceController,
+    PublicBillingController,
+  ],
   providers: [
     FinanceService,
     FinanceTasks,
     BillThrottleGuard,
+    WireProofStorage,
     { provide: PAYMENT_PROVIDER, useClass: PaytechProvider },
+    // Request-to-pay rails are registered separately from the redirect-checkout seam so
+    // PayTech's call sites stay untouched. Settlement resolves the rail by
+    // Payment.provider, which is what lets a second rail slot in later.
+    PiSpiProvider,
+    {
+      provide: REQUEST_TO_PAY_PROVIDERS,
+      useFactory: (piSpi: PiSpiProvider) => new RequestToPayRegistry([piSpi]),
+      inject: [PiSpiProvider],
+    },
   ],
   // Dining orders and application fees ride the same PayTech rail.
   // FinanceService is exported so the parent portal reads a child's account
   // through the same code the bursar uses — one source of truth for money.
-  exports: [PAYMENT_PROVIDER, FinanceService],
+  exports: [PAYMENT_PROVIDER, REQUEST_TO_PAY_PROVIDERS, FinanceService],
 })
 export class FinanceModule {}

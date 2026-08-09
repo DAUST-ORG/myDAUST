@@ -1,6 +1,23 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  StreamableFile,
+} from "@nestjs/common";
 import { z } from "zod";
-import { CreateExpenseInput, CreatePaymentPlanInput, SetBudgetInput } from "@mydaust/shared";
+import {
+  CreateExpenseInput,
+  CreatePaymentPlanInput,
+  SetBudgetInput,
+  WireApprovalInput,
+  WirePaymentConfig,
+} from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { FinanceService } from "./finance.service.js";
@@ -76,6 +93,24 @@ const UpdatePlanInput = z.object({
     .min(1)
     .max(24),
 });
+const ReplacePlanInput = z.object({
+  installments: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64).optional(),
+        sequence: z.number().int().positive(),
+        dueDate: z.string().min(8).max(40),
+        amountDue: z.number().int().min(0).max(100_000_000),
+        label: z.string().max(80).nullish(),
+      }),
+    )
+    .min(1)
+    .max(24),
+});
+const RejectWireInput = z.object({
+  reason: z.string().trim().min(1).max(1000),
+});
+const WireStatusInput = z.enum(["submitted", "approved", "rejected"]);
 
 @Controller("finance/admin")
 @Roles("bursar", "admin")
@@ -85,6 +120,58 @@ export class AdminFinanceController {
   @Get("summary")
   summary() {
     return this.finance.getCollectionSummary();
+  }
+
+  @Get("wire-config")
+  wireConfig() {
+    return this.finance.getWirePaymentConfig();
+  }
+
+  @Patch("wire-config")
+  updateWireConfig(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.finance.updateWirePaymentConfig(
+      WirePaymentConfig.parse(body),
+      user.personId,
+    );
+  }
+
+  @Get("wire-transfers")
+  wireTransfers(@Query("status") status?: string) {
+    return this.finance.listWireTransfers(
+      status ? WireStatusInput.parse(status) : undefined,
+    );
+  }
+
+  @Get("wire-transfers/:id/proof")
+  async wireProof(@Param("id") id: string) {
+    const proof = await this.finance.getWireProof(id);
+    return new StreamableFile(proof.data, {
+      type: proof.mimeType,
+      disposition: `inline; filename="${proof.fileName}"`,
+    });
+  }
+
+  @Post("wire-transfers/:id/approve")
+  approveWire(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.finance.approveWireTransfer(
+      id,
+      WireApprovalInput.parse(body),
+      user,
+    );
+  }
+
+  @Post("wire-transfers/:id/reject")
+  rejectWire(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = RejectWireInput.parse(body);
+    return this.finance.rejectWireTransfer(id, input.reason, user);
   }
 
   @Get("links")
@@ -134,7 +221,11 @@ export class AdminFinanceController {
   }
 
   @Post("payments/:id/refund")
-  refund(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: { reason?: string }) {
+  refund(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: { reason?: string },
+  ) {
     return this.finance.refundPayment(id, body?.reason, user.personId);
   }
 
@@ -154,7 +245,10 @@ export class AdminFinanceController {
 
   @Post("students")
   createStudent(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    return this.finance.createStudent(user.personId, CreateStudentInput.parse(body));
+    return this.finance.createStudent(
+      user.personId,
+      CreateStudentInput.parse(body),
+    );
   }
 
   @Post("charges")
@@ -163,7 +257,10 @@ export class AdminFinanceController {
   }
 
   @Delete("charges/:invoiceId")
-  removeCharge(@CurrentUser() user: AuthUser, @Param("invoiceId") invoiceId: string) {
+  removeCharge(
+    @CurrentUser() user: AuthUser,
+    @Param("invoiceId") invoiceId: string,
+  ) {
     return this.finance.removeCharge(user.personId, invoiceId);
   }
 
@@ -173,13 +270,24 @@ export class AdminFinanceController {
   }
 
   @Patch("fee-plan/:id")
-  updateFeePlanRow(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
-    return this.finance.updateFeePlanRow(user.personId, id, UpdateFeePlanRowInput.parse(body));
+  updateFeePlanRow(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.finance.updateFeePlanRow(
+      user.personId,
+      id,
+      UpdateFeePlanRowInput.parse(body),
+    );
   }
 
   @Post("discounts")
   applyDiscount(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    return this.finance.applyDiscount(user.personId, ApplyDiscountInput.parse(body));
+    return this.finance.applyDiscount(
+      user.personId,
+      ApplyDiscountInput.parse(body),
+    );
   }
 
   @Post("plans")
@@ -195,12 +303,32 @@ export class AdminFinanceController {
     @Body() body: unknown,
   ) {
     const input = UpdatePlanInput.parse(body);
-    return this.finance.updatePaymentPlan(user.personId, invoiceId, input.installments);
+    return this.finance.updatePaymentPlan(
+      user.personId,
+      invoiceId,
+      input.installments,
+    );
+  }
+
+  @Put("plans/:invoiceId")
+  replacePlan(
+    @CurrentUser() user: AuthUser,
+    @Param("invoiceId") invoiceId: string,
+    @Body() body: unknown,
+  ) {
+    const input = ReplacePlanInput.parse(body);
+    return this.finance.replacePaymentPlan(
+      user.personId,
+      invoiceId,
+      input.installments,
+    );
   }
 
   @Post("reconcile")
   reconcile() {
-    return this.finance.listStalePendingPayments(60).then((stale) => ({ stale }));
+    return this.finance
+      .listStalePendingPayments(60)
+      .then((stale) => ({ stale }));
   }
 
   @Post("payments/:id/confirm")
@@ -230,12 +358,23 @@ export class AdminFinanceController {
 
   @Post("expenses")
   createExpense(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    return this.finance.createExpense(CreateExpenseInput.parse(body), user.personId);
+    return this.finance.createExpense(
+      CreateExpenseInput.parse(body),
+      user.personId,
+    );
   }
 
   @Patch("expenses/:id")
-  updateExpense(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
-    return this.finance.updateExpense(id, CreateExpenseInput.partial().parse(body), user.personId);
+  updateExpense(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.finance.updateExpense(
+      id,
+      CreateExpenseInput.partial().parse(body),
+      user.personId,
+    );
   }
 
   @Delete("expenses/:id")

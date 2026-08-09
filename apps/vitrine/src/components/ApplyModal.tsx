@@ -2,7 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "./icons";
-import { feeCheckout, getPrograms, submitApplication } from "@/lib/api";
+import {
+  feeCheckout,
+  feePiSpi,
+  feePiSpiStatus,
+  getPrograms,
+  piSpiEnabled as loadPiSpiEnabled,
+  type PiSpiRequest,
+  submitApplication,
+  verifyPiSpiAlias,
+} from "@/lib/api";
 import type { ApplyResult } from "@/lib/api";
 import type { Content, Lang } from "@/lib/content";
 
@@ -53,6 +62,14 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
   const [result, setResult] = useState<ApplyResult | null>(null);
   const [feeBusy, setFeeBusy] = useState(false);
   const [feeNote, setFeeNote] = useState<string | null>(null);
+  // Instant payment (PI-SPI): a request pushed to the applicant's own bank app.
+  const [piOn, setPiOn] = useState(false);
+  const [piOpen, setPiOpen] = useState(false);
+  const [piAlias, setPiAlias] = useState("");
+  const [piPayer, setPiPayer] = useState<string | null>(null);
+  const [piReq, setPiReq] = useState<PiSpiRequest | null>(null);
+  const [piBusy, setPiBusy] = useState<"verify" | "send" | null>(null);
+  const [piErr, setPiErr] = useState<string | null>(null);
   // Programs come from the real SIS so a choice always resolves; static list is the offline fallback.
   const [programList, setProgramList] = useState<{ code: string; label: string }[]>(
     PROGRAMS.map((p) => ({ code: p.code, label: fr ? p.fr : p.en })),
@@ -139,6 +156,51 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
     }
   }
 
+  useEffect(() => {
+    loadPiSpiEnabled().then(setPiOn).catch(() => setPiOn(false));
+  }, []);
+
+  // Poll while the applicant approves the request in their banking app.
+  useEffect(() => {
+    if (!result || !piReq) return;
+    if (piReq.status !== "sent" && piReq.status !== "initiated") return;
+    const id = setInterval(() => {
+      feePiSpiStatus(result.id, piReq.txId).then(setPiReq).catch(() => {});
+    }, 4000);
+    return () => clearInterval(id);
+  }, [result, piReq]);
+
+  async function verifyAlias() {
+    const value = piAlias.trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+      setPiErr(t("That does not look like a PI alias.", "Cet alias PI semble invalide."));
+      return;
+    }
+    setPiBusy("verify");
+    setPiErr(null);
+    try {
+      setPiPayer((await verifyPiSpiAlias(value)).name);
+    } catch {
+      setPiPayer(null);
+      setPiErr(t("We could not find that alias.", "Alias introuvable."));
+    } finally {
+      setPiBusy(null);
+    }
+  }
+
+  async function sendPiRequest() {
+    if (!result) return;
+    setPiBusy("send");
+    setPiErr(null);
+    try {
+      setPiReq(await feePiSpi(result.id, piAlias.trim()));
+    } catch {
+      setPiErr(t("Could not send the request.", "Envoi impossible."));
+    } finally {
+      setPiBusy(null);
+    }
+  }
+
   async function payFee() {
     if (!result) return;
     setFeeBusy(true);
@@ -192,10 +254,64 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
               </div>
             )}
             {feeNote && <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--fg2)", margin: "16px auto 0", maxWidth: 400 }}>{feeNote}</p>}
+            {piReq && piReq.status === "settled" ? (
+              <div style={{ margin: "20px auto 0", maxWidth: 420, background: "rgba(46,125,82,.10)", border: "1px solid rgba(46,125,82,.35)", borderRadius: 6, padding: "14px 16px", fontFamily: "var(--font-body)", fontSize: 13.5, color: "#1d6b34" }}>
+                <strong>{t("Application fee received", "Frais de dossier reçus")}</strong>
+                <div style={{ marginTop: 4 }}>{t("Thank you — your payment has been recorded.", "Merci — votre paiement a été enregistré.")}</div>
+              </div>
+            ) : piReq && (piReq.status === "sent" || piReq.status === "initiated") ? (
+              <div style={{ margin: "20px auto 0", maxWidth: 420, background: "#fff7e8", border: "1px solid #f1d3a7", borderRadius: 6, padding: "14px 16px", fontFamily: "var(--font-body)", fontSize: 13.5, color: "#8a5319" }}>
+                <strong>{t("Waiting for your approval", "En attente de votre validation")}</strong>
+                <div style={{ marginTop: 4, lineHeight: 1.5 }}>
+                  {t("Open your banking app and approve the request. This page updates by itself.", "Ouvrez votre application bancaire et validez la demande. Cette page se met à jour automatiquement.")}
+                </div>
+              </div>
+            ) : piOpen ? (
+              <div style={{ margin: "20px auto 0", maxWidth: 420, border: "1px solid var(--border)", borderRadius: 6, padding: "16px", textAlign: "left" }}>
+                <div style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 13.5, color: "var(--fg1)" }}>
+                  {t("Instant payment", "Paiement instantané")}
+                </div>
+                <div style={{ fontFamily: "var(--font-body)", fontSize: 12.5, color: "var(--fg2)", marginTop: 4, lineHeight: 1.5 }}>
+                  {t("Enter your PI alias. We send a request you approve in your own bank app.", "Saisissez votre alias PI. Nous envoyons une demande que vous validez dans votre application bancaire.")}
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <input
+                    value={piAlias}
+                    onChange={(e) => { setPiAlias(e.target.value); setPiPayer(null); }}
+                    placeholder="550e8400-e29b-41d4-a716-446655440000"
+                    spellCheck={false}
+                    style={{ flex: 1, minWidth: 0, padding: "9px 11px", border: "1.5px solid var(--border)", borderRadius: 4, fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}
+                  />
+                  <button onClick={verifyAlias} disabled={piBusy !== null} style={{ ...ghostBtn, padding: "9px 16px", whiteSpace: "nowrap" }}>
+                    {piBusy === "verify" ? "…" : t("Verify", "Vérifier")}
+                  </button>
+                </div>
+                {piPayer && (
+                  <div style={{ marginTop: 8, fontFamily: "var(--font-body)", fontSize: 13, color: "#1d6b34" }}>
+                    ✓ <strong>{piPayer}</strong>
+                  </div>
+                )}
+                {piErr && <div style={{ marginTop: 8, fontFamily: "var(--font-body)", fontSize: 12.5, color: "#b3261e" }}>{piErr}</div>}
+                <button
+                  onClick={sendPiRequest}
+                  disabled={!piPayer || piBusy !== null}
+                  style={{ ...solidBtn, width: "100%", marginTop: 12, opacity: piPayer && piBusy === null ? 1 : 0.55, cursor: piPayer ? "pointer" : "not-allowed" }}
+                >
+                  {piBusy === "send" ? "…" : t("Send payment request", "Envoyer la demande")}
+                </button>
+              </div>
+            ) : null}
             <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginTop: 26 }}>
-              <button onClick={payFee} disabled={feeBusy} style={{ ...solidBtn, opacity: feeBusy ? 0.7 : 1 }}>
-                {feeBusy ? "…" : t("Pay application fee (30,000 FCFA)", "Payer les frais (30 000 FCFA)")}
-              </button>
+              {!piReq && (
+                <button onClick={payFee} disabled={feeBusy} style={{ ...solidBtn, opacity: feeBusy ? 0.7 : 1 }}>
+                  {feeBusy ? "…" : t("Pay application fee (30,000 FCFA)", "Payer les frais (30 000 FCFA)")}
+                </button>
+              )}
+              {piOn && !piOpen && !piReq && (
+                <button onClick={() => setPiOpen(true)} style={ghostBtn}>
+                  {t("Pay instantly (PI-SPI)", "Payer instantanément (PI-SPI)")}
+                </button>
+              )}
               <button onClick={onClose} style={ghostBtn}>{tx.done}</button>
             </div>
           </div>

@@ -46,6 +46,11 @@ export class AdmissionsService {
    * PayTech checkout for the 30k FCFA application fee. Anonymous (the applicant id is the
    * capability); the verified IPN (ref APPFEE-<id>) flips feePaid — never this endpoint.
    */
+  /** Current application fee in XOF, for alternative rails that bill it themselves. */
+  applicationFeeXof(): Promise<number> {
+    return this.appConfig.applicationFee();
+  }
+
   async feeCheckout(applicantId: string) {
     const applicant = await this.prisma.applicant.findUnique({ where: { id: applicantId } });
     if (!applicant) throw new NotFoundException("Application not found");

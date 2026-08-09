@@ -114,8 +114,20 @@ module "alb" {
 locals {
   alb_url      = "http://${module.alb.alb_dns_name}"
   public_url   = "https://daust-staging.azt.dev" # Cloudflare tunnel hostname (zone azt.dev)
-  vitrine_url  = "https://daust.azt.dev"          # vitrine static site, same tunnel
+  vitrine_url  = "https://daust.azt.dev"         # vitrine static site, same tunnel
   database_url = "postgresql://mydaust:${random_password.db.result}@${module.rds.address}:5432/mydaust?schema=public"
+}
+
+module "wire_proofs" {
+  source      = "../../modules/private-bucket"
+  bucket_name = "daust-staging-wire-proofs-961828155948"
+  tags        = { DataClassification = "financial-confidential" }
+}
+
+module "media" {
+  source      = "../../modules/private-bucket"
+  bucket_name = "daust-staging-media-961828155948"
+  tags        = { DataClassification = "public-site-media" }
 }
 
 module "secrets" {
@@ -155,6 +167,9 @@ module "api_service" {
     { name = "COOKIE_SECURE", value = "true" },
     { name = "PORTAL_ORIGIN", value = local.public_url },
     { name = "VITRINE_ORIGIN", value = local.vitrine_url },
+    { name = "PAYMENT_ORIGIN", value = local.public_url },
+    { name = "WIRE_PROOFS_BUCKET", value = module.wire_proofs.name },
+    { name = "MEDIA_BUCKET", value = module.media.name },
     { name = "PAYTECH_ENV", value = "test" },
     { name = "PAYTECH_IPN_URL", value = "${local.public_url}/api/finance/webhook/paytech" },
     { name = "PAYTECH_SUCCESS_URL", value = "${local.public_url}/student/billing" },
@@ -173,6 +188,31 @@ module "api_service" {
   )
 
   secret_arns = values(module.secrets.arns)
+  task_policy_json = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${module.wire_proofs.arn}/wire-proofs/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${module.media.arn}/uploads/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = module.media.arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["uploads/*"]
+          }
+        }
+      }
+    ]
+  })
 }
 
 module "portal_service" {

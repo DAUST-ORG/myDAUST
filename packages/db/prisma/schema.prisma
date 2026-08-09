@@ -23,6 +23,21 @@ enum PaymentMethod {
   wave
   orange_money
   card
+  wire
+  // BCEAO instant-payment rail. Unlike the PayTech-backed methods above it is
+  // request-to-pay: the payer approves in their own banking app, so settlement is
+  // asynchronous rather than a redirect return.
+  pi_spi
+}
+
+/** Lifecycle of a PI-SPI request-to-pay ("demande de paiement"). */
+enum PiSpiRequestStatus {
+  initiated
+  sent
+  settled
+  cancelled
+  rejected
+  expired
 }
 
 enum PaymentStatus {
@@ -31,6 +46,12 @@ enum PaymentStatus {
   failed
   cancelled
   refunded
+}
+
+enum WireTransferStatus {
+  submitted
+  approved
+  rejected
 }
 
 enum InstallmentStatus {
@@ -152,6 +173,8 @@ model Person {
   broadcasts      Broadcast[]       @relation("BroadcastSender")
   // Public website profile for faculty (see FacultyProfile).
   facultyProfile  FacultyProfile?
+  wireTransfersSubmitted WireTransferSubmission[] @relation("WireTransferSubmitter")
+  wireTransfersReviewed  WireTransferSubmission[] @relation("WireTransferReviewer")
 }
 
 model Student {
@@ -183,6 +206,9 @@ model Student {
   nationalId       String?
   maritalStatus    String?
   personalEmail    String? // non-institutional address
+  // Saved PI-SPI payment alias, so a returning payer does not retype it. Always
+  // overridable at pay time; never used without the payer confirming the resolved name.
+  piSpiAlias       String?
   language         String? // preferred language, e.g. "French"
   bloodType        String?
   allergies        String?
@@ -203,6 +229,8 @@ model Student {
   guardians        GuardianStudent[]
   invoices    Invoice[]
   payments    Payment[]
+  wireTransfers WireTransferSubmission[]
+  piSpiRequests PiSpiRequest[]
   enrollments Enrollment[]
   mealPlan    MealPlan?
   diningOrders DiningOrder[]
@@ -271,6 +299,8 @@ model Invoice {
   costCenter     CostCenter    @relation(fields: [costCenterCode], references: [code])
   plan           PaymentPlan?
   payments       Payment[]
+  wireTransfers  WireTransferSubmission[]
+  piSpiRequests  PiSpiRequest[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -320,11 +350,96 @@ model Payment {
   providerRef String              @unique
   ipnPayload  Json?
   allocations PaymentAllocation[]
+  wireTransfer WireTransferSubmission?
+  piSpiRequest PiSpiRequest?
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
 
   @@index([invoiceId])
   @@index([status])
+}
+
+/**
+ * A PI-SPI request-to-pay we pushed at a payer's alias.
+ *
+ * Mirrors WireTransferSubmission's polymorphic target (invoice | payment link | applicant
+ * fee). `txId` is our own reference and `end2endId` is the rail-wide one carried on
+ * webhooks — both are unique so a replayed notification can never settle twice.
+ */
+model PiSpiRequest {
+  id            String             @id @default(uuid())
+  txId          String             @unique
+  end2endId     String?            @unique
+  status        PiSpiRequestStatus @default(initiated)
+  statusReason  String?
+  source        String             // student_portal | public_bill | payment_link | application_fee
+  payerAlias    String
+  payerName     String?
+  payerCountry  String?
+  amountXof     Int
+  settledAmountXof Int?
+  motif         String
+  studentId     String?
+  student       Student?           @relation(fields: [studentId], references: [id])
+  invoiceId     String?
+  invoice       Invoice?           @relation(fields: [invoiceId], references: [id])
+  paymentId     String?            @unique
+  payment       Payment?           @relation(fields: [paymentId], references: [id])
+  paymentLinkId String?
+  paymentLink   PaymentLink?       @relation(fields: [paymentLinkId], references: [id])
+  applicantId   String?
+  applicant     Applicant?         @relation(fields: [applicantId], references: [id])
+  expiresAt     DateTime?
+  settledAt     DateTime?
+  lastCheckedAt DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([status, createdAt])
+  @@index([studentId])
+  @@index([invoiceId])
+  @@index([paymentLinkId])
+  @@index([applicantId])
+}
+
+model WireTransferSubmission {
+  id                 String             @id @default(uuid())
+  status             WireTransferStatus @default(submitted)
+  source             String             // student_portal | public_bill | payment_link
+  studentId          String?
+  student            Student?           @relation(fields: [studentId], references: [id])
+  invoiceId          String?
+  invoice            Invoice?           @relation(fields: [invoiceId], references: [id])
+  paymentId          String?            @unique
+  payment            Payment?           @relation(fields: [paymentId], references: [id])
+  paymentLinkId      String?
+  paymentLink        PaymentLink?        @relation(fields: [paymentLinkId], references: [id])
+  submittedAmountXof Int
+  confirmedAmountXof Int?
+  contactEmail       String
+  submittedById      String?
+  submittedBy        Person?            @relation("WireTransferSubmitter", fields: [submittedById], references: [id])
+  submittedByEmail   String?
+  proofObjectKey     String
+  proofFileName      String
+  proofMimeType      String
+  proofSize          Int
+  bankSnapshot       Json
+  bankReference      String?
+  confirmationNote   String?
+  reviewedById       String?
+  reviewedBy         Person?            @relation("WireTransferReviewer", fields: [reviewedById], references: [id])
+  reviewedByName     String?
+  reviewedByEmail    String?
+  reviewedAt         DateTime?
+  rejectionReason    String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([status, createdAt])
+  @@index([studentId])
+  @@index([invoiceId])
+  @@index([paymentLinkId])
 }
 
 model PaymentAllocation {
@@ -452,6 +567,7 @@ model Applicant {
   source      String? // how they heard about DAUST
   essay       String?
   term        String? // intake term, e.g. "Fall 2026"
+  piSpiRequests PiSpiRequest[]
   createdAt   DateTime @default(now())
 
   @@index([stage])
@@ -1103,6 +1219,8 @@ model PaymentLink {
   paidAt         DateTime?
   createdById    String?
   createdAt      DateTime  @default(now())
+  wireTransfers  WireTransferSubmission[]
+  piSpiRequests  PiSpiRequest[]
 
   @@index([status])
 }

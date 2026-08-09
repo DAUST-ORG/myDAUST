@@ -60,6 +60,13 @@ resource "aws_iam_role" "task" {
   assume_role_policy = data.aws_iam_policy_document.assume.json
 }
 
+resource "aws_iam_role_policy" "task" {
+  count  = var.task_policy_json == "" ? 0 : 1
+  name   = "daust-${var.env}-${var.name}-task"
+  role   = aws_iam_role.task.id
+  policy = var.task_policy_json
+}
+
 resource "aws_ecs_task_definition" "this" {
   family                   = "daust-${var.env}-${var.name}"
   requires_compatibilities = ["FARGATE"]
