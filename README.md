@@ -1,8 +1,8 @@
 # myDAUST
 
-Campus platform for DAUST. Monorepo (pnpm + Turborepo). Full plan: see the approved build plan in `~/.claude/plans/`; open work is tracked in `TODO.md`.
+Campus platform for DAUST. Monorepo (pnpm + Turborepo). See [`docs/production-status.md`](docs/production-status.md) for the current production handoff and [`TODO.md`](TODO.md) for the broader backlog.
 
-Current state — **Phases 1–5 built and verified locally** (deploy/Track B not started):
+Current state — **core portals and AWS production infrastructure are live**; Phases 1–5 are implemented, and recent academics, payment, and media work is summarized in the production status document.
 
 - **Payments (P1)** — PayTech (Wave / Orange Money / card), signature-verified idempotent IPN, payment plans/installments, reconciliation cron, collections dashboard, receipts (email), refunds, A/R aging, 8 canned reports, director money-in/out by cost center.
 - **Academics (P2)** — course catalog, seat-locked enrollment (concurrency-safe), prerequisites, faculty gradebook/attendance/assignments + submission grading, insights (grade distribution, at-risk), advising, schedule grids, GPA ring, printable transcript & enrollment verification, messaging/inbox, events, library.
@@ -10,7 +10,7 @@ Current state — **Phases 1–5 built and verified locally** (deploy/Track B no
 - **Dining + Student Affairs (P4)** — student dining pass (signed QR), weekend orders, meal plans; scanner station + orders kanban + menus + settlement console; housing assignment, roommate matching (weighted heuristic), conduct SLA workflow, clubs, co-curricular budget.
 - **Innovation + HR-lite + Student ID (P5)** — 7-phase project tracker (student roadmap/tasks/submissions + admin review queue/grading); faculty payslips (derived from salary records), leave, room booking; student ID card with campus QR.
 
-**Not yet built:** AWS/OpenTofu infra, CI/CD, Sentry/PostHog, Google OIDC, the Phase-6 AI upgrades, and the test suite — see `TODO.md`.
+**Current priorities:** deploy and smoke-test the local faculty-management/schedule/gradebook fixes, resolve the duplicate Moussa Thiao identity and Fall 2026 instructor gaps, configure wire transfers, backfill missing legacy media, and turn the substantial local worktree into reviewed, reproducible commits. Longer-term integration and product gaps remain in `TODO.md`.
 
 ## Layout
 
@@ -51,11 +51,13 @@ pnpm --filter @mydaust/vitrine dev
 Open http://localhost:3000/login (portal) and http://localhost:3001 (public site).
 
 ### Real payments
+
 Set `PAYTECH_API_KEY`, `PAYTECH_API_SECRET` (sandbox), and `PAYTECH_IPN_URL` /
 `PAYTECH_SUCCESS_URL` / `PAYTECH_CANCEL_URL` in a gitignored `.env`. For local IPN delivery,
 expose the api with a tunnel: `cloudflared tunnel --url http://localhost:4000`.
 
 ### Transactional email
+
 Optional: set `RESEND_API_KEY` (+ `MAIL_FROM`) to send real email; without it, emails are
 logged to the api console (`[dev-mail]`).
 

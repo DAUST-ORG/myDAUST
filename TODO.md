@@ -1,6 +1,8 @@
 # myDAUST — Remaining Work
 
-Synthesized 2026-06-28 from a full 9-agent completion audit of the codebase vs the approved build plan and all 7 design prototypes. **Phases 1–5 are built and verified locally** (86 deliverables confirmed with evidence; all live endpoint checks 200/201). What follows is everything that is *not* done, ordered by how much it matters.
+> Current operational status, recent production data changes, and immediate handoff actions are maintained in [`docs/production-status.md`](docs/production-status.md). This file retains the broader historical product audit and should not be used alone to infer deployment state.
+
+Synthesized 2026-06-28 from a full 9-agent completion audit of the codebase vs the approved build plan and all 7 design prototypes. **Phases 1–5 are built and verified locally** (86 deliverables confirmed with evidence; all live endpoint checks 200/201). What follows is everything that is _not_ done, ordered by how much it matters.
 
 Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 design-parity gap · ⚪ decision needed
 
@@ -21,16 +23,16 @@ endpoint or field. Each names what is required.
 - [ ] 🟡 **Student record + documents** — the design's ~35-field record and 6 PDF document slots are unbacked. There is also **no student invite flow** (only `GuardianInvite`), so any "password-setup email sent" copy on the students screen would be untrue today.
 - [ ] 🟡 **Invoices have no human-readable number** — the finance Billings tab shows a truncated uuid where the design shows `BILL-2026-001`. Needs a nullable `Invoice.number` plus a generator.
 - [ ] 🟡 Smaller CRUD gaps: department delete, parent edit/delete (and expose guardian `id`), calendar event `PATCH`/`DELETE` + term status.
-- [ ] 🟡 **Unbacked student screens** — dining swipe balance/history, housing move-in checklist, profile documents tab, schedule .ics export. Each needs a model or endpoint that does not exist.
-- [ ] ⚪ **"View as" is portal-scoped, not impersonation** — it lists only the portals the admin's own roles grant, because student/faculty/parent endpoints are scoped to *your own* record. A true "view as this student" needs a session subject + audit trail. Decide whether to build it.
+- [ ] 🟡 **Unbacked student screens** — dining swipe balance/history, housing move-in checklist, and profile documents tab. Each needs a model or endpoint that does not exist. Weekly student/faculty schedules and `.ics` export are implemented locally as of 2026-08-07 and await deployment verification.
+- [ ] ⚪ **"View as" is portal-scoped, not impersonation** — it lists only the portals the admin's own roles grant, because student/faculty/parent endpoints are scoped to _your own_ record. A true "view as this student" needs a session subject + audit trail. Decide whether to build it.
 - [ ] ⚪ **Kept but unreachable from the new nav:** `student/documents` (transcript + enrollment verification — the only working transcript output), `student/assignments` (linked from the dashboard To-do), `student/id` (signed QR campus pass). Decide whether to relocate them into the design's screens or retire them.
 - [ ] 🔴 **Staging carries no demo parent** until one is provisioned through the registrar flow; the seeded `parent@daust.edu` exists locally only.
 
 ## 1 · Correctness & hygiene — ✅ FIXED 2026-06-28 (fix-pack, all verified live)
 
-- [ ] 🔴 **`apps/api/uploads/` is committed to git** — *the one remaining item; user action (git is user-managed):* add `apps/api/uploads/` to `.gitignore` and run `git rm --cached "apps/api/uploads/c2a5d2cd-10ef-4f42-8674-957764b172e2.txt"`.
+- [ ] 🔴 **`apps/api/uploads/` is committed to git** — _the one remaining item; user action (git is user-managed):_ add `apps/api/uploads/` to `.gitignore` and run `git rm --cached "apps/api/uploads/c2a5d2cd-10ef-4f42-8674-957764b172e2.txt"`.
 - [x] ~~Reconciliation cancels instead of polling~~ → reconciliation is now **non-destructive**: it surfaces stale pendings for bursar review; new audited `confirm` (settles allocations like an IPN) and `cancel` actions in the collections UI. Poll-PayTech upgrade still blocked on PayTech exposing a status API.
-- [ ] 🔴 **PayTech key rotation** — *user action:* rotate in the PayTech dashboard, update `.env`.
+- [ ] 🔴 **PayTech key rotation** — _user action:_ rotate in the PayTech dashboard, update `.env`.
 - [x] ~~No add/drop window~~ → `Term.addDeadline`/`dropDeadline` added, enforced in enroll/drop (verified 400s past deadline); registrar `admin-drop` bypasses with audit.
 - [x] ~~No test suite~~ → **Vitest stood up: 31 tests** (shared: scholarship tiers, XOF splits, zod input refines · api: PayTech HMAC verify incl. forged/tampered, campus pass sign/verify, computeGpa, zod filter 400+delegation). Integration tests (seat-lock, IPN idempotency vs DB) still open — next tier.
 - [x] ~~Dining settlement display-only~~ → director overview now aggregates paid dining orders into **3600** and paid application fees into **4200** (verified live: 3600=1,000 / 4200=30,000 after signed IPNs).
@@ -38,6 +40,10 @@ endpoint or field. Each names what is required.
 - [x] ~~Expenses create+list only~~ → PATCH/DELETE endpoints + edit/delete UI, audit-logged.
 
 ## 2 · Missing write-paths & role surfaces — ✅ FIXED 2026-06-28 (all verified live)
+
+- [x] **Faculty record correction tools (local, 2026-08-07)** — Registrar Directory can edit faculty identity/profile fields and permanently delete only unused records; assignment and retained-activity guards prevent orphaned history.
+- [x] **Faculty weekly schedule (local, 2026-08-07)** — active-term calendar added to faculty navigation; shared with the student view and exportable as `.ics`.
+- [x] **Continuous-assessment roster rows (local, 2026-08-07)** — new gradebook items create scoreable rows transactionally, and existing items backfill missing rows when opened.
 
 - [x] **Announcement compose** — `POST /comms/announcements` (admin/registrar/bursar/SA/HR/faculty) + composer UI on `/admin/announcements`; student compose correctly 403.
 - [x] **Role management** — `PATCH /users/:id/roles` (it_admin/admin), APP_ROLES-validated, **audit-logged**, self-edit lockout guard (400); role-editor UI in admin Settings.
@@ -63,6 +69,7 @@ endpoint or field. Each names what is required.
 ## 4 · Track D design fidelity (SWEPT 2026-07-04 — shell rebuild + 6-agent parallel build; all typechecks green, endpoints + key screens live-verified)
 
 **Shell (all portals)**
+
 - [x] Functional global search — Topbar.tsx: ⌘K / "/" focus, nav destinations + role-scoped data (admin→students, faculty→classes, student→courses), Enter opens top hit
 - [x] Dark mode — `:root[data-theme="dark"]` token overrides + hardcoded-white sweep to `var(--surface)` + Moon/Sun toggle in topbar (localStorage `daust-theme`)
 - [x] Announcements bell + panel (unread dot vs localStorage last-seen, latest 6, view-all link) — full Notification model still Track P
@@ -72,11 +79,13 @@ endpoint or field. Each names what is required.
 - [ ] 🟡 "Viewing as" impersonation (true view-as-another-role for admins; portal switcher only covers own roles)
 
 **Dashboards**
+
 - [x] KPI sparklines (Sparkline.tsx on admin tuition/money-out tiles) + expense-share Donut.tsx; KPI overflow fixed with formatXofCompact
 - [x] Student dashboard: Today timeline (client-side from enrollments), ID preview card, Action items (unpaid installments + unsubmitted assignments)
 - [x] Grades page term filter
 
 **Per portal**
+
 - [x] Faculty: Materials tab (kind chips, publish toggles, upload + add-by-title), Posts tab (compose + pinned list), gradebook CSV export, dining page (+faculty role on /dining/menu), documents page, profile page — office-hours model still open (advising slots static)
 - [x] Dining: student Home hub tab (next meal, plan chip, today's scans via GET /dining/my/today), dish image thumbnails + imageUrl endpoints, scanner manual override (audited POST /dining/scan/override), console Students + Reports tabs (derived aggregates)
 - [x] Student Affairs: international onboarding checklists (OnboardingCase + task toggle), events board (Event extended: organizer/attendees/budget/status), study-abroad seats (AbroadProgram), maintenance triage (MaintenanceTicket)
@@ -127,6 +136,7 @@ endpoint or field. Each names what is required.
 - [ ] ⚪ When to split a dedicated `admin` app (plan open item; not needed yet)
 
 ---
+
 **Done & verified (for reference):** payments/IPN/plans/reconciliation/receipts/refunds/aging/reports/director-cockpit · seat-locked academics with gradebook→GPA loop, assignments, insights, advising · messaging, events, library, uploads, email seam, printable documents · vitrine + anonymous Apply + BAC scholarships · dining pass/QR/scanner/kanban/menus · housing/roommate/conduct/clubs/budget · innovation 7-phase tracker + review queue · HR payslips (personId-joined)/leave/booking · student ID + QR · security fixes (Zod 400 filter, payslip IDOR).
 
 ## SIS redesign — shipped 2026-07-20
@@ -155,5 +165,5 @@ Open items left by that work:
 - **Waitlists.** `CourseRule.waitlistEnabled` is stored and displayed; no
   waitlist behaviour is implemented at enrolment.
 - **Orphaned-but-live pages.** `/admin/library`, `/student/{events,documents,
-  library,id,assignments}` predate the redesign and are not in any nav. They
+library,id,assignments}` predate the redesign and are not in any nav. They
   work; decide whether to surface or retire them.
