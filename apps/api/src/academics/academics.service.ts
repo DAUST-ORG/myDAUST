@@ -8,8 +8,16 @@ import {
 import { PrismaService } from "../prisma/prisma.service.js";
 
 export const GRADE_POINTS: Record<string, number> = {
-  A: 4.0, "A-": 3.7, "B+": 3.3, B: 3.0, "B-": 2.7,
-  "C+": 2.3, C: 2.0, "C-": 1.7, D: 1.0, F: 0.0,
+  A: 4.0,
+  "A-": 3.7,
+  "B+": 3.3,
+  B: 3.0,
+  "B-": 2.7,
+  "C+": 2.3,
+  C: 2.0,
+  "C-": 1.7,
+  D: 1.0,
+  F: 0.0,
 };
 
 export function computeGpa(rows: { grade: string; credits: number }[]) {
@@ -22,7 +30,10 @@ export function computeGpa(rows: { grade: string; credits: number }[]) {
     completedCredits += r.credits;
   }
   return {
-    gpa: completedCredits === 0 ? 0 : Math.round((points / completedCredits) * 100) / 100,
+    gpa:
+      completedCredits === 0
+        ? 0
+        : Math.round((points / completedCredits) * 100) / 100,
     completedCredits,
   };
 }
@@ -42,7 +53,10 @@ const OPEN_APPLICANT_STAGES = ["submitted", "review", "interview", "offer"];
 
 /** Class-standing ladder, used to evaluate a course rule's `standingRequired`. */
 const STANDING_RANK: Record<string, number> = {
-  freshman: 1, sophomore: 2, junior: 3, senior: 4,
+  freshman: 1,
+  sophomore: 2,
+  junior: 3,
+  senior: 4,
 };
 
 /**
@@ -154,7 +168,9 @@ export class AcademicsService {
       where: { endDate: { gte: now } },
       orderBy: { startDate: "asc" },
     });
-    return upcoming ?? this.prisma.term.findFirst({ orderBy: { startDate: "desc" } });
+    return (
+      upcoming ?? this.prisma.term.findFirst({ orderBy: { startDate: "desc" } })
+    );
   }
 
   /** Sections offered in a term, with live seat availability. */
@@ -183,7 +199,9 @@ export class AcademicsService {
       startTime: s.startTime,
       endTime: s.endTime,
       room: s.room,
-      instructor: s.instructor ? `${s.instructor.firstName} ${s.instructor.lastName}` : null,
+      instructor: s.instructor
+        ? `${s.instructor.firstName} ${s.instructor.lastName}`
+        : null,
       instructorId: s.instructorId,
       termId: s.termId,
       prerequisites: s.course.prerequisites.map((p) => p.code),
@@ -203,7 +221,9 @@ export class AcademicsService {
       const section = locked[0];
       if (!section) throw new NotFoundException("Section not found");
 
-      const term = await tx.term.findUniqueOrThrow({ where: { id: section.termId } });
+      const term = await tx.term.findUniqueOrThrow({
+        where: { id: section.termId },
+      });
       if (term.endDate.getTime() < Date.now()) {
         throw new BadRequestException("Registration is closed for this term");
       }
@@ -217,19 +237,27 @@ export class AcademicsService {
       const existing = await tx.enrollment.findUnique({
         where: { studentId_sectionId: { studentId, sectionId } },
       });
-      if (existing?.status === "enrolled") throw new ConflictException("Already enrolled");
+      if (existing?.status === "enrolled")
+        throw new ConflictException("Already enrolled");
 
-      const taken = await tx.enrollment.count({ where: { sectionId, status: "enrolled" } });
-      if (taken >= section.capacity) throw new ConflictException("Section is full");
+      const taken = await tx.enrollment.count({
+        where: { sectionId, status: "enrolled" },
+      });
+      if (taken >= section.capacity)
+        throw new ConflictException("Section is full");
 
       // A registrar-closed section is not offered, regardless of remaining seats.
-      const full = await tx.section.findUniqueOrThrow({ where: { id: sectionId } });
+      const full = await tx.section.findUniqueOrThrow({
+        where: { id: sectionId },
+      });
       if (full.status === "closed") {
         throw new ConflictException("This section is closed for registration");
       }
 
       // An active financial or advising hold blocks all registration.
-      const holds = await tx.studentHold.findMany({ where: { studentId, active: true } });
+      const holds = await tx.studentHold.findMany({
+        where: { studentId, active: true },
+      });
       if (holds.length > 0) {
         const kinds = [...new Set(holds.map((h) => h.type))].join(", ");
         throw new ForbiddenException(
@@ -258,7 +286,8 @@ export class AcademicsService {
         const courseId = e.section.courseId;
         const prev = bestGrade.get(courseId);
         // A retake counts at its best grade.
-        if (pts !== undefined && (prev === undefined || pts > prev)) bestGrade.set(courseId, pts);
+        if (pts !== undefined && (prev === undefined || pts > prev))
+          bestGrade.set(courseId, pts);
         else if (!bestGrade.has(courseId)) bestGrade.set(courseId, pts ?? 0);
       }
 
@@ -275,20 +304,32 @@ export class AcademicsService {
         }
       }
       if (unmet.length > 0) {
-        throw new BadRequestException(`Missing prerequisite(s): ${unmet.join(", ")}`);
+        throw new BadRequestException(
+          `Missing prerequisite(s): ${unmet.join(", ")}`,
+        );
       }
 
       // Sections the student already holds this term — the basis for the
       // corequisite, timetable-clash and credit-load checks below.
       const termEnrollments = await tx.enrollment.findMany({
-        where: { studentId, status: "enrolled", section: { termId: section.termId } },
+        where: {
+          studentId,
+          status: "enrolled",
+          section: { termId: section.termId },
+        },
         include: { section: { include: { course: true } } },
       });
 
       if (course.coreqRules.length > 0) {
-        const heldCourseIds = new Set(termEnrollments.map((e) => e.section.courseId));
+        const heldCourseIds = new Set(
+          termEnrollments.map((e) => e.section.courseId),
+        );
         const missingCoreq = course.coreqRules
-          .filter((c) => !heldCourseIds.has(c.coreqCourseId) && !bestGrade.has(c.coreqCourseId))
+          .filter(
+            (c) =>
+              !heldCourseIds.has(c.coreqCourseId) &&
+              !bestGrade.has(c.coreqCourseId),
+          )
           .map((c) => c.coreqCourse.code);
         if (missingCoreq.length > 0) {
           throw new BadRequestException(
@@ -297,14 +338,19 @@ export class AcademicsService {
         }
       }
 
-      const clash = termEnrollments.find((e) => meetingsOverlap(e.section, full));
+      const clash = termEnrollments.find((e) =>
+        meetingsOverlap(e.section, full),
+      );
       if (clash) {
         throw new ConflictException(
           `Time conflict with ${clash.section.course.code} (${clash.section.days} ${clash.section.startTime}-${clash.section.endTime})`,
         );
       }
 
-      const currentCredits = termEnrollments.reduce((s, e) => s + e.section.course.credits, 0);
+      const currentCredits = termEnrollments.reduce(
+        (s, e) => s + e.section.course.credits,
+        0,
+      );
       if (currentCredits + course.credits > MAX_CREDITS_PER_TERM) {
         throw new BadRequestException(
           `Over the ${MAX_CREDITS_PER_TERM}-credit limit for this term (${currentCredits} enrolled + ${course.credits})`,
@@ -317,7 +363,8 @@ export class AcademicsService {
       });
 
       if (course.rule?.standingRequired) {
-        const firstWord = course.rule.standingRequired.trim().split(/\s+/)[0] ?? "";
+        const firstWord =
+          course.rule.standingRequired.trim().split(/\s+/)[0] ?? "";
         const needed = STANDING_RANK[firstWord.toLowerCase()];
         const yr = student.yearLevel ?? 0;
         if (needed !== undefined && yr > 0 && yr < needed) {
@@ -329,13 +376,26 @@ export class AcademicsService {
 
       if (course.rule?.majorRestriction) {
         const allowed = course.rule.majorRestriction.toLowerCase();
-        const mine = (student.major ?? student.program?.name ?? "").toLowerCase();
+        const mine = (
+          student.major ??
+          student.program?.name ??
+          ""
+        ).toLowerCase();
         // Restriction strings are human-authored lists ("Computer / Electrical Eng."),
         // so match loosely on any token rather than demanding an exact equality.
-        const tokens = allowed.split(/[/,]/).map((t) => t.trim()).filter(Boolean);
+        const tokens = allowed
+          .split(/[/,]/)
+          .map((t) => t.trim())
+          .filter(Boolean);
         const head = (t: string) => t.split(/\s+/)[0] ?? t;
-        if (mine && tokens.length > 0 && !tokens.some((t) => mine.includes(head(t)))) {
-          throw new ForbiddenException(`${course.code} is restricted to ${course.rule.majorRestriction}`);
+        if (
+          mine &&
+          tokens.length > 0 &&
+          !tokens.some((t) => mine.includes(head(t)))
+        ) {
+          throw new ForbiddenException(
+            `${course.code} is restricted to ${course.rule.majorRestriction}`,
+          );
         }
       }
 
@@ -344,10 +404,17 @@ export class AcademicsService {
             where: { id: existing.id },
             data: { status: "enrolled", enrolledAt: new Date() },
           })
-        : await tx.enrollment.create({ data: { studentId, sectionId, status: "enrolled" } });
+        : await tx.enrollment.create({
+            data: { studentId, sectionId, status: "enrolled" },
+          });
 
       await tx.auditLog.create({
-        data: { entity: "Enrollment", entityId: enrollment.id, action: "enrolled", actorId: studentId },
+        data: {
+          entity: "Enrollment",
+          entityId: enrollment.id,
+          action: "enrolled",
+          actorId: studentId,
+        },
       });
       return enrollment;
     });
@@ -359,8 +426,10 @@ export class AcademicsService {
       include: { section: { include: { term: true } } },
     });
     if (!enr) throw new NotFoundException("Enrollment not found");
-    if (enr.studentId !== studentId) throw new ForbiddenException("Not your enrollment");
-    if (enr.status !== "enrolled") throw new BadRequestException("Not an active enrollment");
+    if (enr.studentId !== studentId)
+      throw new ForbiddenException("Not your enrollment");
+    if (enr.status !== "enrolled")
+      throw new BadRequestException("Not an active enrollment");
     const { dropDeadline, name } = enr.section.term;
     if (dropDeadline && dropDeadline.getTime() < Date.now()) {
       throw new BadRequestException(
@@ -373,7 +442,12 @@ export class AcademicsService {
       data: { status: "dropped" },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "Enrollment", entityId: enrollmentId, action: "dropped", actorId: studentId },
+      data: {
+        entity: "Enrollment",
+        entityId: enrollmentId,
+        action: "dropped",
+        actorId: studentId,
+      },
     });
     return updated;
   }
@@ -385,44 +459,55 @@ export class AcademicsService {
    * the UX-facing preview, never the gate.
    */
   async registrationCatalog(studentId: string, termId: string) {
-    const [sections, enrollments, completed, holds, student] = await Promise.all([
-      this.prisma.section.findMany({
-        where: { termId, status: "open" },
-        orderBy: [{ course: { code: "asc" } }, { sectionCode: "asc" }],
-        include: {
-          course: {
-            include: {
-              prereqRules: { include: { prereqCourse: true } },
-              rule: true,
+    const [sections, enrollments, completed, holds, student] =
+      await Promise.all([
+        this.prisma.section.findMany({
+          where: { termId, status: "open" },
+          orderBy: [{ course: { code: "asc" } }, { sectionCode: "asc" }],
+          include: {
+            course: {
+              include: {
+                prereqRules: { include: { prereqCourse: true } },
+                rule: true,
+              },
+            },
+            instructor: true,
+            _count: {
+              select: { enrollments: { where: { status: "enrolled" } } },
             },
           },
-          instructor: true,
-          _count: { select: { enrollments: { where: { status: "enrolled" } } } },
-        },
-      }),
-      this.prisma.enrollment.findMany({
-        where: { studentId, status: "enrolled", section: { termId } },
-        include: { section: { include: { course: true } } },
-      }),
-      this.prisma.enrollment.findMany({
-        where: { studentId, status: "completed" },
-        include: { section: true },
-      }),
-      this.prisma.studentHold.findMany({ where: { studentId, active: true } }),
-      this.prisma.student.findUnique({ where: { id: studentId } }),
-    ]);
+        }),
+        this.prisma.enrollment.findMany({
+          where: { studentId, status: "enrolled", section: { termId } },
+          include: { section: { include: { course: true } } },
+        }),
+        this.prisma.enrollment.findMany({
+          where: { studentId, status: "completed" },
+          include: { section: true },
+        }),
+        this.prisma.studentHold.findMany({
+          where: { studentId, active: true },
+        }),
+        this.prisma.student.findUnique({ where: { id: studentId } }),
+      ]);
 
     const bestGrade = new Map<string, number>();
     for (const e of completed) {
       const pts = e.grade ? GRADE_POINTS[e.grade] : undefined;
       const id = e.section.courseId;
       const prev = bestGrade.get(id);
-      if (pts !== undefined && (prev === undefined || pts > prev)) bestGrade.set(id, pts);
+      if (pts !== undefined && (prev === undefined || pts > prev))
+        bestGrade.set(id, pts);
       else if (!bestGrade.has(id)) bestGrade.set(id, pts ?? 0);
     }
 
-    const enrolledCourseIds = new Set(enrollments.map((e) => e.section.courseId));
-    const currentCredits = enrollments.reduce((s, e) => s + e.section.course.credits, 0);
+    const enrolledCourseIds = new Set(
+      enrollments.map((e) => e.section.courseId),
+    );
+    const currentCredits = enrollments.reduce(
+      (s, e) => s + e.section.course.credits,
+      0,
+    );
 
     const rows = sections.map((s) => {
       const seatsLeft = s.capacity - s._count.enrollments;
@@ -433,7 +518,11 @@ export class AcademicsService {
           const required = pr.minGrade ? GRADE_POINTS[pr.minGrade] : undefined;
           return required !== undefined && earned < required;
         })
-        .map((pr) => (pr.minGrade ? `${pr.prereqCourse.code} (min ${pr.minGrade})` : pr.prereqCourse.code));
+        .map((pr) =>
+          pr.minGrade
+            ? `${pr.prereqCourse.code} (min ${pr.minGrade})`
+            : pr.prereqCourse.code,
+        );
 
       const clash = enrollments.find((e) => meetingsOverlap(e.section, s));
 
@@ -454,7 +543,9 @@ export class AcademicsService {
         title: s.course.title,
         credits: s.course.credits,
         sectionCode: s.sectionCode,
-        instructor: s.instructor ? `${s.instructor.firstName} ${s.instructor.lastName}` : null,
+        instructor: s.instructor
+          ? `${s.instructor.firstName} ${s.instructor.lastName}`
+          : null,
         room: s.room,
         days: s.days,
         startTime: s.startTime,
@@ -488,7 +579,15 @@ export class AcademicsService {
     });
     if (!student) throw new NotFoundException("Student not found");
     if (!student.programId) {
-      return { program: null, categories: [], completed: 0, inProgress: 0, remaining: 0, total: 0, pctComplete: 0 };
+      return {
+        program: null,
+        categories: [],
+        completed: 0,
+        inProgress: 0,
+        remaining: 0,
+        total: 0,
+        pctComplete: 0,
+      };
     }
 
     const [requirements, enrollments] = await Promise.all([
@@ -501,7 +600,9 @@ export class AcademicsService {
       }),
       this.prisma.enrollment.findMany({
         where: { studentId, status: { in: ["completed", "enrolled"] } },
-        include: { section: { include: { course: { include: { department: true } } } } },
+        include: {
+          section: { include: { course: { include: { department: true } } } },
+        },
       }),
     ]);
 
@@ -509,26 +610,39 @@ export class AcademicsService {
     // only a fallback, because one department teaches courses counting toward
     // several requirements. Anything still unmatched lands in the elective bucket
     // so earned credit is never silently dropped.
-    const fallback = requirements.find((r) => /elective/i.test(r.category))?.category ?? null;
+    const fallback =
+      requirements.find((r) => /elective/i.test(r.category))?.category ?? null;
     const doneBy = new Map<string, number>();
     const progressBy = new Map<string, number>();
     for (const e of enrollments) {
       const course = e.section.course;
       const declared = course.requirementCategory;
       const match =
-        (declared && requirements.find((r) => r.category.toLowerCase() === declared.toLowerCase())) ||
-        requirements.find((r) => r.category.toLowerCase() === course.department.name.toLowerCase());
+        (declared &&
+          requirements.find(
+            (r) => r.category.toLowerCase() === declared.toLowerCase(),
+          )) ||
+        requirements.find(
+          (r) =>
+            r.category.toLowerCase() === course.department.name.toLowerCase(),
+        );
       const category = match?.category ?? fallback;
       if (!category) continue;
       const bucket = e.status === "completed" ? doneBy : progressBy;
-      bucket.set(category, (bucket.get(category) ?? 0) + e.section.course.credits);
+      bucket.set(
+        category,
+        (bucket.get(category) ?? 0) + e.section.course.credits,
+      );
     }
 
     const categories = requirements.map((r) => {
       // Credit applied to a category is capped at what the category requires.
       const done = Math.min(r.requiredCredits, doneBy.get(r.category) ?? 0);
       const inProgress = progressBy.get(r.category) ?? 0;
-      const pct = r.requiredCredits === 0 ? 100 : Math.round((done / r.requiredCredits) * 100);
+      const pct =
+        r.requiredCredits === 0
+          ? 100
+          : Math.round((done / r.requiredCredits) * 100);
       return {
         category: r.category,
         required: r.requiredCredits,
@@ -536,7 +650,12 @@ export class AcademicsService {
         inProgress,
         remaining: Math.max(0, r.requiredCredits - done),
         pct,
-        status: done >= r.requiredCredits ? "Complete" : pct >= 60 ? "On track" : "In progress",
+        status:
+          done >= r.requiredCredits
+            ? "Complete"
+            : pct >= 60
+              ? "On track"
+              : "In progress",
       };
     });
 
@@ -551,7 +670,8 @@ export class AcademicsService {
       inProgress,
       remaining: Math.max(0, total - completedCredits - inProgress),
       total,
-      pctComplete: total === 0 ? 0 : Math.round((completedCredits / total) * 100),
+      pctComplete:
+        total === 0 ? 0 : Math.round((completedCredits / total) * 100),
     };
   }
 
@@ -568,7 +688,9 @@ export class AcademicsService {
       include: { section: { include: { course: true } } },
     });
     const { gpa, completedCredits } = computeGpa(
-      graded.filter((e) => e.grade).map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
+      graded
+        .filter((e) => e.grade)
+        .map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
     );
 
     return {
@@ -579,6 +701,8 @@ export class AcademicsService {
       gpa,
       completedCredits,
       standing: s.standing ?? standingLabel(gpa),
+      // Saved instant-payment alias, so the billing screen can prefill it.
+      piSpiAlias: s.piSpiAlias,
       personal: {
         preferredName: s.preferredName,
         dateOfBirth: s.dateOfBirth,
@@ -630,7 +754,11 @@ export class AcademicsService {
     // Anyone else assigned to the same room is a roommate.
     const roommates = assignment.room
       ? await this.prisma.housingAssignment.findMany({
-          where: { hallId: assignment.hallId, room: assignment.room, studentId: { not: studentId } },
+          where: {
+            hallId: assignment.hallId,
+            room: assignment.room,
+            studentId: { not: studentId },
+          },
           include: { student: { include: { person: true } } },
         })
       : [];
@@ -642,7 +770,9 @@ export class AcademicsService {
       room: assignment.room,
       status: assignment.status,
       note: assignment.note,
-      roommates: roommates.map((r) => `${r.student.person.firstName} ${r.student.person.lastName}`),
+      roommates: roommates.map(
+        (r) => `${r.student.person.firstName} ${r.student.person.lastName}`,
+      ),
     };
   }
 
@@ -663,13 +793,20 @@ export class AcademicsService {
         present,
         late,
         absent,
-        pct: total === 0 ? null : Math.round(((present + late * 0.5) / total) * 100),
+        pct:
+          total === 0
+            ? null
+            : Math.round(((present + late * 0.5) / total) * 100),
       };
     });
     const rated = rows.filter((r) => r.pct !== null);
     return {
       overall:
-        rated.length === 0 ? null : Math.round(rated.reduce((s, r) => s + (r.pct ?? 0), 0) / rated.length),
+        rated.length === 0
+          ? null
+          : Math.round(
+              rated.reduce((s, r) => s + (r.pct ?? 0), 0) / rated.length,
+            ),
       rows,
     };
   }
@@ -696,7 +833,11 @@ export class AcademicsService {
     }));
   }
 
-  private async assertSectionOwner(sectionId: string, personId: string, isAdmin: boolean) {
+  private async assertSectionOwner(
+    sectionId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
     const section = await this.prisma.section.findUnique({
       where: { id: sectionId },
       include: { course: true },
@@ -737,7 +878,10 @@ export class AcademicsService {
   /** Submit/save grades for a section. finalize=true marks graded enrollments completed → GPA. */
   async submitGrades(
     sectionId: string,
-    input: { grades: { enrollmentId: string; grade: string | null }[]; finalize: boolean },
+    input: {
+      grades: { enrollmentId: string; grade: string | null }[];
+      finalize: boolean;
+    },
     personId: string,
     isAdmin: boolean,
   ) {
@@ -748,15 +892,27 @@ export class AcademicsService {
           where: { id: g.enrollmentId, sectionId },
           data: {
             grade: g.grade,
-            ...(input.finalize ? { status: g.grade ? "completed" : "enrolled" } : {}),
+            ...(input.finalize
+              ? { status: g.grade ? "completed" : "enrolled" }
+              : {}),
           },
         });
       }
       if (input.finalize) {
         await tx.gradeSubmission.upsert({
           where: { sectionId },
-          create: { sectionId, status: "submitted", submittedById: personId, submittedAt: new Date() },
-          update: { status: "submitted", submittedById: personId, submittedAt: new Date(), note: null },
+          create: {
+            sectionId,
+            status: "submitted",
+            submittedById: personId,
+            submittedAt: new Date(),
+          },
+          update: {
+            status: "submitted",
+            submittedById: personId,
+            submittedAt: new Date(),
+            note: null,
+          },
         });
       }
       await tx.auditLog.create({
@@ -773,7 +929,12 @@ export class AcademicsService {
   }
 
   /** Attendance for a section on a date: roster + recorded status. Ownership-checked. */
-  async getAttendance(sectionId: string, date: string, personId: string, isAdmin: boolean) {
+  async getAttendance(
+    sectionId: string,
+    date: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     const day = new Date(date);
     const [enrollments, records] = await Promise.all([
@@ -782,9 +943,13 @@ export class AcademicsService {
         include: { student: { include: { person: true } } },
         orderBy: { student: { studentNo: "asc" } },
       }),
-      this.prisma.attendanceRecord.findMany({ where: { sectionId, date: day } }),
+      this.prisma.attendanceRecord.findMany({
+        where: { sectionId, date: day },
+      }),
     ]);
-    const byEnrollment = new Map(records.map((r) => [r.enrollmentId, r.status]));
+    const byEnrollment = new Map(
+      records.map((r) => [r.enrollmentId, r.status]),
+    );
     return {
       date,
       students: enrollments.map((e) => ({
@@ -798,7 +963,10 @@ export class AcademicsService {
 
   async markAttendance(
     sectionId: string,
-    input: { date: string; records: { enrollmentId: string; status: string }[] },
+    input: {
+      date: string;
+      records: { enrollmentId: string; status: string }[];
+    },
     personId: string,
     isAdmin: boolean,
   ) {
@@ -807,9 +975,16 @@ export class AcademicsService {
     await this.prisma.$transaction(
       input.records.map((r) =>
         this.prisma.attendanceRecord.upsert({
-          where: { enrollmentId_date: { enrollmentId: r.enrollmentId, date: day } },
+          where: {
+            enrollmentId_date: { enrollmentId: r.enrollmentId, date: day },
+          },
           update: { status: r.status as never },
-          create: { enrollmentId: r.enrollmentId, sectionId, date: day, status: r.status as never },
+          create: {
+            enrollmentId: r.enrollmentId,
+            sectionId,
+            date: day,
+            status: r.status as never,
+          },
         }),
       ),
     );
@@ -819,11 +994,17 @@ export class AcademicsService {
   // --- Coursework: assignments + submissions ---
 
   /** Faculty: assignments for a section, each with submission progress vs the enrolled roster. */
-  async listSectionAssignments(sectionId: string, personId: string, isAdmin: boolean) {
+  async listSectionAssignments(
+    sectionId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     const [enrolled, assignments] = await Promise.all([
       // Roster that can submit = current + completed (matches the grading roster denominator).
-      this.prisma.enrollment.count({ where: { sectionId, status: { in: ["enrolled", "completed"] } } }),
+      this.prisma.enrollment.count({
+        where: { sectionId, status: { in: ["enrolled", "completed"] } },
+      }),
       this.prisma.assignment.findMany({
         where: { sectionId },
         orderBy: { dueDate: "asc" },
@@ -839,7 +1020,9 @@ export class AcademicsService {
         maxPoints: a.maxPoints,
         weight: a.weight,
         dueDate: a.dueDate,
-        submitted: a.submissions.length,
+        submitted: a.submissions.filter(
+          (s) => s.status === "submitted" || s.status === "graded",
+        ).length,
         graded: a.submissions.filter((s) => s.status === "graded").length,
       })),
     };
@@ -847,30 +1030,62 @@ export class AcademicsService {
 
   async createAssignment(
     sectionId: string,
-    input: { title: string; description?: string; type: string; maxPoints: number; weight: number; dueDate: string },
+    input: {
+      title: string;
+      description?: string;
+      type: string;
+      maxPoints: number;
+      weight: number;
+      dueDate: string;
+    },
     personId: string,
     isAdmin: boolean,
   ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
-    const assignment = await this.prisma.assignment.create({
-      data: {
-        sectionId,
-        title: input.title,
-        description: input.description ?? null,
-        type: input.type as never,
-        maxPoints: input.maxPoints,
-        weight: input.weight,
-        dueDate: new Date(input.dueDate),
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: { entity: "Assignment", entityId: assignment.id, action: "created", actorId: personId },
+    const assignment = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.assignment.create({
+        data: {
+          sectionId,
+          title: input.title,
+          description: input.description ?? null,
+          type: input.type as never,
+          maxPoints: input.maxPoints,
+          weight: input.weight,
+          dueDate: new Date(input.dueDate),
+        },
+      });
+      const enrollments = await tx.enrollment.findMany({
+        where: { sectionId, status: { in: ["enrolled", "completed"] } },
+        select: { id: true },
+      });
+      if (enrollments.length > 0) {
+        await tx.submission.createMany({
+          data: enrollments.map((enrollment) => ({
+            assignmentId: created.id,
+            enrollmentId: enrollment.id,
+            status: "assigned" as const,
+          })),
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          entity: "Assignment",
+          entityId: created.id,
+          action: "created",
+          actorId: personId,
+        },
+      });
+      return created;
     });
     return assignment;
   }
 
   /** Resolve an assignment + its section, enforcing instructor ownership. */
-  private async assertAssignmentOwner(assignmentId: string, personId: string, isAdmin: boolean) {
+  private async assertAssignmentOwner(
+    assignmentId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
     const assignment = await this.prisma.assignment.findUnique({
       where: { id: assignmentId },
       include: { section: { include: { course: true } } },
@@ -883,16 +1098,47 @@ export class AcademicsService {
   }
 
   /** Faculty: an assignment with the full roster joined to each student's submission (if any). */
-  async getAssignmentSubmissions(assignmentId: string, personId: string, isAdmin: boolean) {
-    const assignment = await this.assertAssignmentOwner(assignmentId, personId, isAdmin);
-    const [enrollments, submissions] = await Promise.all([
+  async getAssignmentSubmissions(
+    assignmentId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    const assignment = await this.assertAssignmentOwner(
+      assignmentId,
+      personId,
+      isAdmin,
+    );
+    const [enrollments, existingSubmissions] = await Promise.all([
       this.prisma.enrollment.findMany({
-        where: { sectionId: assignment.sectionId, status: { in: ["enrolled", "completed"] } },
+        where: {
+          sectionId: assignment.sectionId,
+          status: { in: ["enrolled", "completed"] },
+        },
         include: { student: { include: { person: true } } },
         orderBy: { student: { studentNo: "asc" } },
       }),
       this.prisma.submission.findMany({ where: { assignmentId } }),
     ]);
+    const existingEnrollmentIds = new Set(
+      existingSubmissions.map((submission) => submission.enrollmentId),
+    );
+    const missing = enrollments.filter(
+      (enrollment) => !existingEnrollmentIds.has(enrollment.id),
+    );
+    if (missing.length > 0) {
+      await this.prisma.submission.createMany({
+        data: missing.map((enrollment) => ({
+          assignmentId,
+          enrollmentId: enrollment.id,
+          status: "assigned" as const,
+        })),
+        skipDuplicates: true,
+      });
+    }
+    const submissions =
+      missing.length > 0
+        ? await this.prisma.submission.findMany({ where: { assignmentId } })
+        : existingSubmissions;
     const byEnrollment = new Map(submissions.map((s) => [s.enrollmentId, s]));
     return {
       assignment: {
@@ -936,9 +1182,15 @@ export class AcademicsService {
       include: { assignment: true },
     });
     if (!submission) throw new NotFoundException("Submission not found");
-    await this.assertAssignmentOwner(submission.assignmentId, personId, isAdmin);
+    await this.assertAssignmentOwner(
+      submission.assignmentId,
+      personId,
+      isAdmin,
+    );
     if (input.score > submission.assignment.maxPoints) {
-      throw new BadRequestException(`Score exceeds max points (${submission.assignment.maxPoints})`);
+      throw new BadRequestException(
+        `Score exceeds max points (${submission.assignment.maxPoints})`,
+      );
     }
     const updated = await this.prisma.submission.update({
       where: { id: submissionId },
@@ -950,7 +1202,13 @@ export class AcademicsService {
       },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "Submission", entityId: submissionId, action: "graded", actorId: personId, data: { score: input.score } },
+      data: {
+        entity: "Submission",
+        entityId: submissionId,
+        action: "graded",
+        actorId: personId,
+        data: { score: input.score },
+      },
     });
     return updated;
   }
@@ -990,7 +1248,9 @@ export class AcademicsService {
         };
       }),
     );
-    rows.sort((x, y) => new Date(x.dueDate).getTime() - new Date(y.dueDate).getTime());
+    rows.sort(
+      (x, y) => new Date(x.dueDate).getTime() - new Date(y.dueDate).getTime(),
+    );
     return rows;
   }
 
@@ -1000,10 +1260,14 @@ export class AcademicsService {
     assignmentId: string,
     input: { text?: string; fileUrl?: string; fileName?: string },
   ) {
-    const assignment = await this.prisma.assignment.findUnique({ where: { id: assignmentId } });
+    const assignment = await this.prisma.assignment.findUnique({
+      where: { id: assignmentId },
+    });
     if (!assignment) throw new NotFoundException("Assignment not found");
     const enrollment = await this.prisma.enrollment.findUnique({
-      where: { studentId_sectionId: { studentId, sectionId: assignment.sectionId } },
+      where: {
+        studentId_sectionId: { studentId, sectionId: assignment.sectionId },
+      },
     });
     if (!enrollment || enrollment.status === "dropped") {
       throw new ForbiddenException("You are not enrolled in this section");
@@ -1016,7 +1280,12 @@ export class AcademicsService {
       submittedAt: new Date(),
     };
     return this.prisma.submission.upsert({
-      where: { assignmentId_enrollmentId: { assignmentId, enrollmentId: enrollment.id } },
+      where: {
+        assignmentId_enrollmentId: {
+          assignmentId,
+          enrollmentId: enrollment.id,
+        },
+      },
       update: data,
       create: { assignmentId, enrollmentId: enrollment.id, ...data },
     });
@@ -1038,9 +1307,12 @@ export class AcademicsService {
         submissions: true,
       },
     });
-    if (!enrollment) throw new NotFoundException("You are not enrolled in this section");
+    if (!enrollment)
+      throw new NotFoundException("You are not enrolled in this section");
     const s = enrollment.section;
-    const byAssignment = new Map(enrollment.submissions.map((sub) => [sub.assignmentId, sub]));
+    const byAssignment = new Map(
+      enrollment.submissions.map((sub) => [sub.assignmentId, sub]),
+    );
     return {
       overview: {
         courseCode: s.course.code,
@@ -1048,7 +1320,9 @@ export class AcademicsService {
         credits: s.course.credits,
         description: null as string | null,
         term: s.term.name,
-        instructor: s.instructor ? `${s.instructor.firstName} ${s.instructor.lastName}` : null,
+        instructor: s.instructor
+          ? `${s.instructor.firstName} ${s.instructor.lastName}`
+          : null,
         schedule: `${s.days} ${s.startTime}–${s.endTime}`,
         room: s.room,
         prerequisites: s.course.prerequisites.map((p) => p.code),
@@ -1073,7 +1347,11 @@ export class AcademicsService {
   }
 
   /** Roster for a section the requesting faculty actually teaches (ownership-checked). */
-  async roster(sectionId: string, instructorPersonId: string, isAdmin: boolean) {
+  async roster(
+    sectionId: string,
+    instructorPersonId: string,
+    isAdmin: boolean,
+  ) {
     const section = await this.prisma.section.findUnique({
       where: { id: sectionId },
       include: { course: true },
@@ -1111,7 +1389,10 @@ export class AcademicsService {
     ]);
     const credits = active.reduce((s, e) => s + e.section.course.credits, 0);
     const { gpa, completedCredits } = computeGpa(
-      completed.map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
+      completed.map((e) => ({
+        grade: e.grade!,
+        credits: e.section.course.credits,
+      })),
     );
     return { enrolledCourses: active.length, credits, gpa, completedCredits };
   }
@@ -1129,25 +1410,30 @@ export class AcademicsService {
       credits: e.section.course.credits,
       term: e.section.term.name,
       grade: e.grade,
-      points: e.grade ? GRADE_POINTS[e.grade] ?? null : null,
+      points: e.grade ? (GRADE_POINTS[e.grade] ?? null) : null,
     }));
   }
 
   /** Admin: enrollment stats + by-program breakdown. */
   async adminStats() {
-    const [totalStudents, totalEnrolled, programs, openApplications, balances] = await Promise.all([
-      this.prisma.student.count(),
-      this.prisma.enrollment.count({ where: { status: "enrolled" } }),
-      this.prisma.program.findMany({ include: { _count: { select: { students: true } } } }),
-      this.prisma.applicant.count({ where: { stage: { in: OPEN_APPLICANT_STAGES } } }),
-      // "Accounts with holds" on the registrar dashboard is a headcount, not money:
-      // it is the number of students carrying any unpaid balance. Grouping in the
-      // database keeps this off the finance endpoints a registrar cannot read.
-      this.prisma.invoice.groupBy({
-        by: ["studentId"],
-        _sum: { totalAmount: true, amountPaid: true },
-      }),
-    ]);
+    const [totalStudents, totalEnrolled, programs, openApplications, balances] =
+      await Promise.all([
+        this.prisma.student.count(),
+        this.prisma.enrollment.count({ where: { status: "enrolled" } }),
+        this.prisma.program.findMany({
+          include: { _count: { select: { students: true } } },
+        }),
+        this.prisma.applicant.count({
+          where: { stage: { in: OPEN_APPLICANT_STAGES } },
+        }),
+        // "Accounts with holds" on the registrar dashboard is a headcount, not money:
+        // it is the number of students carrying any unpaid balance. Grouping in the
+        // database keeps this off the finance endpoints a registrar cannot read.
+        this.prisma.invoice.groupBy({
+          by: ["studentId"],
+          _sum: { totalAmount: true, amountPaid: true },
+        }),
+      ]);
     const holdsCount = balances.filter(
       (b) => (b._sum.totalAmount ?? 0) - (b._sum.amountPaid ?? 0) > 0,
     ).length;
@@ -1156,7 +1442,11 @@ export class AcademicsService {
       totalEnrolled,
       holdsCount,
       openApplications,
-      byProgram: programs.map((p) => ({ code: p.code, name: p.name, students: p._count.students })),
+      byProgram: programs.map((p) => ({
+        code: p.code,
+        name: p.name,
+        students: p._count.students,
+      })),
     };
   }
 
@@ -1172,9 +1462,14 @@ export class AcademicsService {
       orderBy: { studentNo: "asc" },
     });
     return students.map((s) => {
-      const completed = s.enrollments.filter((e) => e.status === "completed" && e.grade);
+      const completed = s.enrollments.filter(
+        (e) => e.status === "completed" && e.grade,
+      );
       const { gpa, completedCredits } = computeGpa(
-        completed.map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
+        completed.map((e) => ({
+          grade: e.grade!,
+          credits: e.section.course.credits,
+        })),
       );
       return {
         id: s.id,
@@ -1188,7 +1483,10 @@ export class AcademicsService {
         cohort: s.cohort,
         gpa,
         completedCredits,
-        balance: s.invoices.reduce((b, i) => b + (i.totalAmount - i.amountPaid), 0),
+        balance: s.invoices.reduce(
+          (b, i) => b + (i.totalAmount - i.amountPaid),
+          0,
+        ),
         status: gpa > 0 && gpa < 2 ? "probation" : "active",
         hasLogin: !!s.person.passwordHash,
         mustChangePassword: s.person.mustChangePassword,
@@ -1203,7 +1501,13 @@ export class AcademicsService {
         include: { department: true, _count: { select: { students: true } } },
         orderBy: { code: "asc" },
       }),
-      this.prisma.course.findMany({ include: { department: true, prerequisites: { select: { code: true } } }, orderBy: { code: "asc" } }),
+      this.prisma.course.findMany({
+        include: {
+          department: true,
+          prerequisites: { select: { code: true } },
+        },
+        orderBy: { code: "asc" },
+      }),
       this.prisma.department.findMany({ orderBy: { name: "asc" } }),
     ]);
     return {
@@ -1225,7 +1529,11 @@ export class AcademicsService {
         status: c.status ?? "active",
         prereq: c.prerequisites.map((p) => p.code).join(", ") || null,
       })),
-      departments: departments.map((d) => ({ id: d.id, code: d.code, name: d.name })),
+      departments: departments.map((d) => ({
+        id: d.id,
+        code: d.code,
+        name: d.name,
+      })),
     };
   }
 
@@ -1236,7 +1544,13 @@ export class AcademicsService {
       include: {
         department: true,
         students: {
-          include: { person: true, invoices: true, enrollments: { include: { section: { include: { course: true } } } } },
+          include: {
+            person: true,
+            invoices: true,
+            enrollments: {
+              include: { section: { include: { course: true } } },
+            },
+          },
           orderBy: { studentNo: "asc" },
         },
       },
@@ -1247,9 +1561,14 @@ export class AcademicsService {
       orderBy: { code: "asc" },
     });
     const students = program.students.map((s) => {
-      const completed = s.enrollments.filter((e) => e.status === "completed" && e.grade);
+      const completed = s.enrollments.filter(
+        (e) => e.status === "completed" && e.grade,
+      );
       const { gpa, completedCredits } = computeGpa(
-        completed.map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
+        completed.map((e) => ({
+          grade: e.grade!,
+          credits: e.section.course.credits,
+        })),
       );
       return {
         id: s.id,
@@ -1259,13 +1578,24 @@ export class AcademicsService {
         yearLevel: s.yearLevel,
         gpa,
         completedCredits,
-        balance: s.invoices.reduce((b, i) => b + (i.totalAmount - i.amountPaid), 0),
+        balance: s.invoices.reduce(
+          (b, i) => b + (i.totalAmount - i.amountPaid),
+          0,
+        ),
         status: gpa > 0 && gpa < 2 ? "probation" : "active",
       };
     });
-    const billed = program.students.reduce((sum, s) => sum + s.invoices.reduce((b, i) => b + i.totalAmount, 0), 0);
-    const paid = program.students.reduce((sum, s) => sum + s.invoices.reduce((b, i) => b + i.amountPaid, 0), 0);
-    const yearDist = [1, 2, 3, 4].map((y) => program.students.filter((s) => s.yearLevel === y).length);
+    const billed = program.students.reduce(
+      (sum, s) => sum + s.invoices.reduce((b, i) => b + i.totalAmount, 0),
+      0,
+    );
+    const paid = program.students.reduce(
+      (sum, s) => sum + s.invoices.reduce((b, i) => b + i.amountPaid, 0),
+      0,
+    );
+    const yearDist = [1, 2, 3, 4].map(
+      (y) => program.students.filter((s) => s.yearLevel === y).length,
+    );
     return {
       code: program.code,
       name: program.name,
@@ -1274,9 +1604,19 @@ export class AcademicsService {
       school: program.school,
       tuition: program.tuition,
       color: program.color,
-      stats: { studentCount: program.students.length, billed, paid, revenue: billed, yearDist },
+      stats: {
+        studentCount: program.students.length,
+        billed,
+        paid,
+        revenue: billed,
+        yearDist,
+      },
       students,
-      courses: courses.map((c) => ({ code: c.code, title: c.title, credits: c.credits })),
+      courses: courses.map((c) => ({
+        code: c.code,
+        title: c.title,
+        credits: c.credits,
+      })),
     };
   }
 
@@ -1284,38 +1624,71 @@ export class AcademicsService {
   async updateProgram(
     actorId: string,
     code: string,
-    input: { name?: string; departmentId?: string; degree?: string | null; school?: string | null; tuition?: number | null; color?: string | null },
+    input: {
+      name?: string;
+      departmentId?: string;
+      degree?: string | null;
+      school?: string | null;
+      tuition?: number | null;
+      color?: string | null;
+    },
   ) {
     const program = await this.prisma.program.findUnique({ where: { code } });
     if (!program) throw new NotFoundException("Program not found");
     if (input.departmentId !== undefined) {
-      const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId } });
+      const dept = await this.prisma.department.findUnique({
+        where: { id: input.departmentId },
+      });
       if (!dept) throw new BadRequestException("Unknown department");
     }
     const updated = await this.prisma.program.update({
       where: { code },
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
+        ...(input.departmentId !== undefined
+          ? { departmentId: input.departmentId }
+          : {}),
         ...(input.degree !== undefined ? { degree: input.degree } : {}),
         ...(input.school !== undefined ? { school: input.school } : {}),
         ...(input.tuition !== undefined ? { tuition: input.tuition } : {}),
         ...(input.color !== undefined ? { color: input.color } : {}),
       },
     });
-    await this.prisma.auditLog.create({ data: { entity: "Program", entityId: program.id, action: "program-updated", actorId } });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Program",
+        entityId: program.id,
+        action: "program-updated",
+        actorId,
+      },
+    });
     return updated;
   }
 
   /** Registrar/admin: create a degree program. Audited. */
   async adminCreateProgram(
     actorId: string,
-    input: { code: string; name: string; departmentId: string; degree?: string | null; school?: string | null; tuition?: number | null; color?: string | null },
+    input: {
+      code: string;
+      name: string;
+      departmentId: string;
+      degree?: string | null;
+      school?: string | null;
+      tuition?: number | null;
+      color?: string | null;
+    },
   ) {
-    const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId } });
+    const dept = await this.prisma.department.findUnique({
+      where: { id: input.departmentId },
+    });
     if (!dept) throw new BadRequestException("Unknown department");
-    const dup = await this.prisma.program.findUnique({ where: { code: input.code } });
-    if (dup) throw new ConflictException(`Program code "${input.code}" already exists`);
+    const dup = await this.prisma.program.findUnique({
+      where: { code: input.code },
+    });
+    if (dup)
+      throw new ConflictException(
+        `Program code "${input.code}" already exists`,
+      );
     const program = await this.prisma.program.create({
       data: {
         code: input.code,
@@ -1327,16 +1700,31 @@ export class AcademicsService {
         color: input.color ?? null,
       },
     });
-    await this.prisma.auditLog.create({ data: { entity: "Program", entityId: program.id, action: "program-created", actorId } });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Program",
+        entityId: program.id,
+        action: "program-created",
+        actorId,
+      },
+    });
     return program;
   }
 
   /** Registrar/admin: create a catalog course. Audited. */
-  async adminCreateCourse(actorId: string, input: CatalogCourseInput & { code: string }) {
-    const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId! } });
+  async adminCreateCourse(
+    actorId: string,
+    input: CatalogCourseInput & { code: string },
+  ) {
+    const dept = await this.prisma.department.findUnique({
+      where: { id: input.departmentId! },
+    });
     if (!dept) throw new BadRequestException("Unknown department");
-    const dup = await this.prisma.course.findUnique({ where: { code: input.code } });
-    if (dup) throw new ConflictException(`Course code "${input.code}" already exists`);
+    const dup = await this.prisma.course.findUnique({
+      where: { code: input.code },
+    });
+    if (dup)
+      throw new ConflictException(`Course code "${input.code}" already exists`);
     const course = await this.prisma.course.create({
       data: {
         code: input.code,
@@ -1345,12 +1733,21 @@ export class AcademicsService {
         departmentId: input.departmentId!,
         status: input.status ?? "active",
         description: input.description ?? null,
-        semestersOffered: input.semestersOffered ? input.semestersOffered.join(",") : null,
+        semestersOffered: input.semestersOffered
+          ? input.semestersOffered.join(",")
+          : null,
         ...(await this.prereqConnect(input.prerequisiteCodes, input.code)),
       },
     });
     await this.setCoreqs(course.id, input.corequisiteCodes);
-    await this.prisma.auditLog.create({ data: { entity: "Course", entityId: course.id, action: "course-created", actorId } });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Course",
+        entityId: course.id,
+        action: "course-created",
+        actorId,
+      },
+    });
     return course;
   }
 
@@ -1373,7 +1770,9 @@ export class AcademicsService {
     await this.prisma.courseCorequisite.deleteMany({ where: { courseId } });
     for (const c of coreqs) {
       if (c.id === courseId) continue;
-      await this.prisma.courseCorequisite.create({ data: { courseId, coreqCourseId: c.id } });
+      await this.prisma.courseCorequisite.create({
+        data: { courseId, coreqCourseId: c.id },
+      });
     }
   }
 
@@ -1384,16 +1783,26 @@ export class AcademicsService {
       include: {
         department: true,
         prerequisites: true,
-        coreqRules: { include: { coreqCourse: { select: { code: true, title: true } } } },
+        coreqRules: {
+          include: { coreqCourse: { select: { code: true, title: true } } },
+        },
         sections: {
-          include: { term: true, instructor: true, _count: { select: { enrollments: true } } },
+          include: {
+            term: true,
+            instructor: true,
+            _count: { select: { enrollments: true } },
+          },
           orderBy: [{ term: { startDate: "desc" } }, { sectionCode: "asc" }],
         },
       },
     });
     if (!course) throw new NotFoundException("Course not found");
     const [allCourses, departments, terms] = await Promise.all([
-      this.prisma.course.findMany({ where: { code: { not: code } }, orderBy: { code: "asc" }, select: { code: true, title: true } }),
+      this.prisma.course.findMany({
+        where: { code: { not: code } },
+        orderBy: { code: "asc" },
+        select: { code: true, title: true },
+      }),
       this.prisma.department.findMany({ orderBy: { name: "asc" } }),
       this.prisma.term.findMany({ orderBy: { startDate: "desc" } }),
     ]);
@@ -1404,17 +1813,27 @@ export class AcademicsService {
       credits: course.credits,
       status: course.status ?? "active",
       description: course.description,
-      semestersOffered: course.semestersOffered ? course.semestersOffered.split(",").filter(Boolean) : [],
+      semestersOffered: course.semestersOffered
+        ? course.semestersOffered.split(",").filter(Boolean)
+        : [],
       department: course.department.name,
       departmentId: course.departmentId,
-      prerequisites: course.prerequisites.map((p) => ({ code: p.code, title: p.title })),
-      corequisites: course.coreqRules.map((c) => ({ code: c.coreqCourse.code, title: c.coreqCourse.title })),
+      prerequisites: course.prerequisites.map((p) => ({
+        code: p.code,
+        title: p.title,
+      })),
+      corequisites: course.coreqRules.map((c) => ({
+        code: c.coreqCourse.code,
+        title: c.coreqCourse.title,
+      })),
       sections: course.sections.map((s) => ({
         id: s.id,
         sectionCode: s.sectionCode,
         term: s.term.name,
         termId: s.termId,
-        instructor: s.instructor ? `${s.instructor.firstName} ${s.instructor.lastName}` : null,
+        instructor: s.instructor
+          ? `${s.instructor.firstName} ${s.instructor.lastName}`
+          : null,
         instructorId: s.instructorId,
         days: s.days,
         startTime: s.startTime,
@@ -1424,7 +1843,11 @@ export class AcademicsService {
         seatsTaken: s._count.enrollments,
       })),
       allCourses,
-      departments: departments.map((d) => ({ id: d.id, code: d.code, name: d.name })),
+      departments: departments.map((d) => ({
+        id: d.id,
+        code: d.code,
+        name: d.name,
+      })),
       terms: terms.map((t) => ({ id: t.id, name: t.name })),
     };
   }
@@ -1434,13 +1857,17 @@ export class AcademicsService {
     const course = await this.prisma.course.findUnique({ where: { code } });
     if (!course) throw new NotFoundException("Course not found");
     if (input.departmentId !== undefined) {
-      const dept = await this.prisma.department.findUnique({ where: { id: input.departmentId } });
+      const dept = await this.prisma.department.findUnique({
+        where: { id: input.departmentId },
+      });
       if (!dept) throw new BadRequestException("Unknown department");
     }
     let prereqSet: { id: string }[] | undefined;
     if (input.prerequisiteCodes !== undefined) {
       const prereqs = await this.prisma.course.findMany({
-        where: { code: { in: input.prerequisiteCodes.filter((c) => c !== code) } },
+        where: {
+          code: { in: input.prerequisiteCodes.filter((c) => c !== code) },
+        },
         select: { id: true },
       });
       prereqSet = prereqs.map((p) => ({ id: p.id }));
@@ -1450,15 +1877,28 @@ export class AcademicsService {
       data: {
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.credits !== undefined ? { credits: input.credits } : {}),
-        ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
+        ...(input.departmentId !== undefined
+          ? { departmentId: input.departmentId }
+          : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-        ...(input.semestersOffered !== undefined ? { semestersOffered: input.semestersOffered.join(",") || null } : {}),
+        ...(input.description !== undefined
+          ? { description: input.description }
+          : {}),
+        ...(input.semestersOffered !== undefined
+          ? { semestersOffered: input.semestersOffered.join(",") || null }
+          : {}),
         ...(prereqSet ? { prerequisites: { set: prereqSet } } : {}),
       },
     });
     await this.setCoreqs(course.id, input.corequisiteCodes);
-    await this.prisma.auditLog.create({ data: { entity: "Course", entityId: course.id, action: "course-updated", actorId } });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Course",
+        entityId: course.id,
+        action: "course-updated",
+        actorId,
+      },
+    });
     return updated;
   }
 
@@ -1470,34 +1910,71 @@ export class AcademicsService {
     });
     if (!course) throw new NotFoundException("Course not found");
     if (course._count.sections > 0) {
-      throw new BadRequestException("Retire the course's sections before deleting it");
+      throw new BadRequestException(
+        "Retire the course's sections before deleting it",
+      );
     }
     await this.prisma.$transaction([
-      this.prisma.courseCorequisite.deleteMany({ where: { OR: [{ courseId: course.id }, { coreqCourseId: course.id }] } }),
-      this.prisma.coursePrerequisite.deleteMany({ where: { OR: [{ courseId: course.id }, { prereqCourseId: course.id }] } }),
+      this.prisma.courseCorequisite.deleteMany({
+        where: { OR: [{ courseId: course.id }, { coreqCourseId: course.id }] },
+      }),
+      this.prisma.coursePrerequisite.deleteMany({
+        where: { OR: [{ courseId: course.id }, { prereqCourseId: course.id }] },
+      }),
       this.prisma.course.delete({ where: { id: course.id } }),
     ]);
-    await this.prisma.auditLog.create({ data: { entity: "Course", entityId: course.id, action: "course-deleted", actorId, data: { code } } });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Course",
+        entityId: course.id,
+        action: "course-deleted",
+        actorId,
+        data: { code },
+      },
+    });
     return { ok: true };
   }
 
   /** Registrar/admin: create a section (a scheduled offering of a course in a term). Audited. */
   async createSection(
     actorId: string,
-    input: { courseCode: string; termId: string; sectionCode: string; instructorId?: string | null; capacity: number; days: string; startTime: string; endTime: string; room?: string | null },
+    input: {
+      courseCode: string;
+      termId: string;
+      sectionCode: string;
+      instructorId?: string | null;
+      capacity: number;
+      days: string;
+      startTime: string;
+      endTime: string;
+      room?: string | null;
+    },
   ) {
-    const course = await this.prisma.course.findUnique({ where: { code: input.courseCode } });
+    const course = await this.prisma.course.findUnique({
+      where: { code: input.courseCode },
+    });
     if (!course) throw new BadRequestException("Unknown course");
-    const term = await this.prisma.term.findUnique({ where: { id: input.termId } });
+    const term = await this.prisma.term.findUnique({
+      where: { id: input.termId },
+    });
     if (!term) throw new BadRequestException("Unknown term");
     if (input.instructorId) {
-      const inst = await this.prisma.person.findUnique({ where: { id: input.instructorId } });
+      const inst = await this.prisma.person.findUnique({
+        where: { id: input.instructorId },
+      });
       if (!inst) throw new BadRequestException("Unknown instructor");
     }
     const dup = await this.prisma.section.findFirst({
-      where: { courseId: course.id, termId: input.termId, sectionCode: input.sectionCode },
+      where: {
+        courseId: course.id,
+        termId: input.termId,
+        sectionCode: input.sectionCode,
+      },
     });
-    if (dup) throw new ConflictException(`Section ${input.sectionCode} already exists for this course and term`);
+    if (dup)
+      throw new ConflictException(
+        `Section ${input.sectionCode} already exists for this course and term`,
+      );
     const section = await this.prisma.section.create({
       data: {
         courseId: course.id,
@@ -1511,7 +1988,14 @@ export class AcademicsService {
         room: input.room ?? null,
       },
     });
-    await this.prisma.auditLog.create({ data: { entity: "Section", entityId: section.id, action: "section-created", actorId } });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Section",
+        entityId: section.id,
+        action: "section-created",
+        actorId,
+      },
+    });
     return section;
   }
 
@@ -1519,33 +2003,60 @@ export class AcademicsService {
   async updateSection(
     actorId: string,
     id: string,
-    input: { sectionCode?: string; termId?: string; instructorId?: string | null; capacity?: number; days?: string; startTime?: string; endTime?: string; room?: string | null; status?: string },
+    input: {
+      sectionCode?: string;
+      termId?: string;
+      instructorId?: string | null;
+      capacity?: number;
+      days?: string;
+      startTime?: string;
+      endTime?: string;
+      room?: string | null;
+      status?: string;
+    },
   ) {
     const section = await this.prisma.section.findUnique({ where: { id } });
     if (!section) throw new NotFoundException("Section not found");
     if (input.instructorId) {
-      const inst = await this.prisma.person.findUnique({ where: { id: input.instructorId } });
+      const inst = await this.prisma.person.findUnique({
+        where: { id: input.instructorId },
+      });
       if (!inst) throw new BadRequestException("Unknown instructor");
     }
     if (input.termId) {
-      const term = await this.prisma.term.findUnique({ where: { id: input.termId } });
+      const term = await this.prisma.term.findUnique({
+        where: { id: input.termId },
+      });
       if (!term) throw new BadRequestException("Unknown term");
     }
     const updated = await this.prisma.section.update({
       where: { id },
       data: {
-        ...(input.sectionCode !== undefined ? { sectionCode: input.sectionCode } : {}),
+        ...(input.sectionCode !== undefined
+          ? { sectionCode: input.sectionCode }
+          : {}),
         ...(input.termId !== undefined ? { termId: input.termId } : {}),
-        ...(input.instructorId !== undefined ? { instructorId: input.instructorId } : {}),
+        ...(input.instructorId !== undefined
+          ? { instructorId: input.instructorId }
+          : {}),
         ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
         ...(input.days !== undefined ? { days: input.days } : {}),
-        ...(input.startTime !== undefined ? { startTime: input.startTime } : {}),
+        ...(input.startTime !== undefined
+          ? { startTime: input.startTime }
+          : {}),
         ...(input.endTime !== undefined ? { endTime: input.endTime } : {}),
         ...(input.room !== undefined ? { room: input.room } : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
       },
     });
-    await this.prisma.auditLog.create({ data: { entity: "Section", entityId: id, action: "section-updated", actorId } });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Section",
+        entityId: id,
+        action: "section-updated",
+        actorId,
+      },
+    });
     return updated;
   }
 
@@ -1556,18 +2067,40 @@ export class AcademicsService {
       include: { _count: { select: { enrollments: true } } },
     });
     if (!section) throw new NotFoundException("Section not found");
-    if (section._count.enrollments > 0) throw new BadRequestException("Cannot delete a section that has enrollments");
+    if (section._count.enrollments > 0)
+      throw new BadRequestException(
+        "Cannot delete a section that has enrollments",
+      );
     await this.prisma.section.delete({ where: { id } });
-    await this.prisma.auditLog.create({ data: { entity: "Section", entityId: id, action: "section-deleted", actorId } });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Section",
+        entityId: id,
+        action: "section-deleted",
+        actorId,
+      },
+    });
     return { ok: true };
   }
 
   /** Admissions funnel + applicant list. */
   async adminApplicants() {
-    const apps = await this.prisma.applicant.findMany({ orderBy: { score: "desc" } });
-    const stages = ["submitted", "review", "interview", "offer", "accepted", "rejected"];
+    const apps = await this.prisma.applicant.findMany({
+      orderBy: { score: "desc" },
+    });
+    const stages = [
+      "submitted",
+      "review",
+      "interview",
+      "offer",
+      "accepted",
+      "rejected",
+    ];
     return {
-      funnel: stages.map((s) => ({ stage: s, count: apps.filter((a) => a.stage === s).length })),
+      funnel: stages.map((s) => ({
+        stage: s,
+        count: apps.filter((a) => a.stage === s).length,
+      })),
       applicants: apps.map((a) => ({
         id: a.id,
         name: `${a.firstName} ${a.lastName}`,
@@ -1601,10 +2134,17 @@ export class AcademicsService {
 
   /** All users + roles (settings). */
   async adminUsers() {
-    const people = await this.prisma.person.findMany({ orderBy: { email: "asc" } });
+    const people = await this.prisma.person.findMany({
+      orderBy: { email: "asc" },
+    });
     return people
       .filter((p) => p.roles.length > 0)
-      .map((p) => ({ id: p.id, name: `${p.firstName} ${p.lastName}`, email: p.email, roles: p.roles }));
+      .map((p) => ({
+        id: p.id,
+        name: `${p.firstName} ${p.lastName}`,
+        email: p.email,
+        roles: p.roles,
+      }));
   }
 
   /** Registrar/admin: one student's academic file (profile, enrollments, transcript, GPA, balance). */
@@ -1616,15 +2156,24 @@ export class AcademicsService {
         program: { include: { department: true } },
         invoices: true,
         enrollments: {
-          include: { section: { include: { course: true, term: true, instructor: true } } },
+          include: {
+            section: {
+              include: { course: true, term: true, instructor: true },
+            },
+          },
           orderBy: { enrolledAt: "desc" },
         },
       },
     });
     if (!student) throw new NotFoundException("Student not found");
-    const completed = student.enrollments.filter((e) => e.status === "completed" && e.grade);
+    const completed = student.enrollments.filter(
+      (e) => e.status === "completed" && e.grade,
+    );
     const { gpa, completedCredits } = computeGpa(
-      completed.map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
+      completed.map((e) => ({
+        grade: e.grade!,
+        credits: e.section.course.credits,
+      })),
     );
     const currentTermCredits = student.enrollments
       .filter((e) => e.status === "enrolled")
@@ -1637,7 +2186,9 @@ export class AcademicsService {
       lastName: student.person.lastName,
       email: student.person.email,
       photoUrl: student.photoUrl,
-      program: student.program ? `${student.program.code} — ${student.program.name}` : null,
+      program: student.program
+        ? `${student.program.code} — ${student.program.name}`
+        : null,
       programCode: student.program?.code ?? null,
       department: student.program?.department.name ?? null,
       gpa,
@@ -1645,9 +2196,14 @@ export class AcademicsService {
       currentTermCredits,
       standing: standingLabel(gpa),
       status: gpa > 0 && gpa < 2 ? "probation" : "active",
-      balance: student.invoices.reduce((b, i) => b + (i.totalAmount - i.amountPaid), 0),
+      balance: student.invoices.reduce(
+        (b, i) => b + (i.totalAmount - i.amountPaid),
+        0,
+      ),
       // --- Extended SIS profile (nullable until entered via Edit record) ---
-      dateOfBirth: student.dateOfBirth ? student.dateOfBirth.toISOString().slice(0, 10) : null,
+      dateOfBirth: student.dateOfBirth
+        ? student.dateOfBirth.toISOString().slice(0, 10)
+        : null,
       gender: student.gender,
       phone: student.phone,
       address: student.address,
@@ -1659,7 +2215,9 @@ export class AcademicsService {
       advisor: student.advisor,
       yearLevel: student.yearLevel,
       cohort: student.cohort,
-      enrolledAt: student.enrolledAt ? student.enrolledAt.toISOString().slice(0, 10) : null,
+      enrolledAt: student.enrolledAt
+        ? student.enrolledAt.toISOString().slice(0, 10)
+        : null,
       preferredName: student.preferredName,
       nationalId: student.nationalId,
       maritalStatus: student.maritalStatus,
@@ -1683,7 +2241,9 @@ export class AcademicsService {
         credits: e.section.course.credits,
         term: e.section.term.name,
         sectionCode: e.section.sectionCode,
-        instructor: e.section.instructor ? `${e.section.instructor.firstName} ${e.section.instructor.lastName}` : null,
+        instructor: e.section.instructor
+          ? `${e.section.instructor.firstName} ${e.section.instructor.lastName}`
+          : null,
         status: e.status,
         grade: e.grade,
       })),
@@ -1696,16 +2256,29 @@ export class AcademicsService {
       where: { id: studentId },
       include: {
         program: true,
-        payments: { where: { status: "success" }, orderBy: { createdAt: "desc" } },
-        enrollments: { include: { section: { include: { course: true, term: true } } }, orderBy: { enrolledAt: "desc" } },
+        payments: {
+          where: { status: "success" },
+          orderBy: { createdAt: "desc" },
+        },
+        enrollments: {
+          include: { section: { include: { course: true, term: true } } },
+          orderBy: { enrolledAt: "desc" },
+        },
       },
     });
     if (!student) throw new NotFoundException("Student not found");
-    const events: { type: string; title: string; detail: string; at: string }[] = [];
+    const events: {
+      type: string;
+      title: string;
+      detail: string;
+      at: string;
+    }[] = [];
     events.push({
       type: "account",
       title: "Account created",
-      detail: student.program ? `Enrolled in ${student.program.name}` : "Student record created",
+      detail: student.program
+        ? `Enrolled in ${student.program.name}`
+        : "Student record created",
       at: (student.enrolledAt ?? student.createdAt).toISOString(),
     });
     for (const p of student.payments) {
@@ -1729,11 +2302,22 @@ export class AcademicsService {
   }
 
   /** Registrar/admin: update a student's record (person name/email + extended SIS fields). Audited. */
-  async updateStudent(actorId: string, studentId: string, input: UpdateStudentFields) {
-    const student = await this.prisma.student.findUnique({ where: { id: studentId }, include: { person: true } });
+  async updateStudent(
+    actorId: string,
+    studentId: string,
+    input: UpdateStudentFields,
+  ) {
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      include: { person: true },
+    });
     if (!student) throw new NotFoundException("Student not found");
 
-    const personData: { firstName?: string; lastName?: string; email?: string } = {};
+    const personData: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+    } = {};
     if (input.fullName !== undefined) {
       const parts = input.fullName.replace(/\s+/g, " ").trim().split(" ");
       personData.firstName = parts.shift() ?? student.person.firstName;
@@ -1746,63 +2330,125 @@ export class AcademicsService {
       if (input.programCode === null || input.programCode === "") {
         programId = null;
       } else {
-        const program = await this.prisma.program.findUnique({ where: { code: input.programCode } });
-        if (!program) throw new BadRequestException(`Unknown program code "${input.programCode}"`);
+        const program = await this.prisma.program.findUnique({
+          where: { code: input.programCode },
+        });
+        if (!program)
+          throw new BadRequestException(
+            `Unknown program code "${input.programCode}"`,
+          );
         programId = program.id;
       }
     }
 
     const studentData = {
       ...(programId !== undefined ? { programId } : {}),
-      ...(input.dateOfBirth !== undefined ? { dateOfBirth: input.dateOfBirth ? new Date(`${input.dateOfBirth}T00:00:00Z`) : null } : {}),
+      ...(input.dateOfBirth !== undefined
+        ? {
+            dateOfBirth: input.dateOfBirth
+              ? new Date(`${input.dateOfBirth}T00:00:00Z`)
+              : null,
+          }
+        : {}),
       ...(input.gender !== undefined ? { gender: input.gender } : {}),
       ...(input.phone !== undefined ? { phone: input.phone } : {}),
       ...(input.address !== undefined ? { address: input.address } : {}),
       ...(input.city !== undefined ? { city: input.city } : {}),
-      ...(input.nationality !== undefined ? { nationality: input.nationality } : {}),
-      ...(input.guardianName !== undefined ? { guardianName: input.guardianName } : {}),
-      ...(input.guardianRelation !== undefined ? { guardianRelation: input.guardianRelation } : {}),
-      ...(input.guardianPhone !== undefined ? { guardianPhone: input.guardianPhone } : {}),
+      ...(input.nationality !== undefined
+        ? { nationality: input.nationality }
+        : {}),
+      ...(input.guardianName !== undefined
+        ? { guardianName: input.guardianName }
+        : {}),
+      ...(input.guardianRelation !== undefined
+        ? { guardianRelation: input.guardianRelation }
+        : {}),
+      ...(input.guardianPhone !== undefined
+        ? { guardianPhone: input.guardianPhone }
+        : {}),
       ...(input.advisor !== undefined ? { advisor: input.advisor } : {}),
       ...(input.yearLevel !== undefined ? { yearLevel: input.yearLevel } : {}),
       ...(input.cohort !== undefined ? { cohort: input.cohort } : {}),
-      ...(input.preferredName !== undefined ? { preferredName: input.preferredName } : {}),
-      ...(input.nationalId !== undefined ? { nationalId: input.nationalId } : {}),
-      ...(input.maritalStatus !== undefined ? { maritalStatus: input.maritalStatus } : {}),
-      ...(input.personalEmail !== undefined ? { personalEmail: input.personalEmail } : {}),
+      ...(input.preferredName !== undefined
+        ? { preferredName: input.preferredName }
+        : {}),
+      ...(input.nationalId !== undefined
+        ? { nationalId: input.nationalId }
+        : {}),
+      ...(input.maritalStatus !== undefined
+        ? { maritalStatus: input.maritalStatus }
+        : {}),
+      ...(input.personalEmail !== undefined
+        ? { personalEmail: input.personalEmail }
+        : {}),
       ...(input.bloodType !== undefined ? { bloodType: input.bloodType } : {}),
       ...(input.allergies !== undefined ? { allergies: input.allergies } : {}),
       ...(input.insurance !== undefined ? { insurance: input.insurance } : {}),
       ...(input.physician !== undefined ? { physician: input.physician } : {}),
-      ...(input.emergencyName2 !== undefined ? { emergencyName2: input.emergencyName2 } : {}),
-      ...(input.emergencyPhone2 !== undefined ? { emergencyPhone2: input.emergencyPhone2 } : {}),
+      ...(input.emergencyName2 !== undefined
+        ? { emergencyName2: input.emergencyName2 }
+        : {}),
+      ...(input.emergencyPhone2 !== undefined
+        ? { emergencyPhone2: input.emergencyPhone2 }
+        : {}),
       ...(input.major !== undefined ? { major: input.major } : {}),
       ...(input.minor !== undefined ? { minor: input.minor } : {}),
       ...(input.admitTerm !== undefined ? { admitTerm: input.admitTerm } : {}),
-      ...(input.expectedGrad !== undefined ? { expectedGrad: input.expectedGrad } : {}),
-      ...(input.enrollmentStatus !== undefined ? { enrollmentStatus: input.enrollmentStatus } : {}),
-      ...(input.catalogYear !== undefined ? { catalogYear: input.catalogYear } : {}),
+      ...(input.expectedGrad !== undefined
+        ? { expectedGrad: input.expectedGrad }
+        : {}),
+      ...(input.enrollmentStatus !== undefined
+        ? { enrollmentStatus: input.enrollmentStatus }
+        : {}),
+      ...(input.catalogYear !== undefined
+        ? { catalogYear: input.catalogYear }
+        : {}),
     };
 
     await this.prisma.$transaction([
-      ...(Object.keys(personData).length ? [this.prisma.person.update({ where: { id: student.personId }, data: personData })] : []),
-      this.prisma.student.update({ where: { id: studentId }, data: studentData }),
-      this.prisma.auditLog.create({ data: { entity: "Student", entityId: studentId, action: "student-updated", actorId } }),
+      ...(Object.keys(personData).length
+        ? [
+            this.prisma.person.update({
+              where: { id: student.personId },
+              data: personData,
+            }),
+          ]
+        : []),
+      this.prisma.student.update({
+        where: { id: studentId },
+        data: studentData,
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "Student",
+          entityId: studentId,
+          action: "student-updated",
+          actorId,
+        },
+      }),
     ]);
     return this.adminStudentDetail(studentId);
   }
 
   /** Registrar/admin administrative drop — bypasses the student drop deadline, audited. */
   async adminDropEnrollment(enrollmentId: string, actorId: string) {
-    const enr = await this.prisma.enrollment.findUnique({ where: { id: enrollmentId } });
+    const enr = await this.prisma.enrollment.findUnique({
+      where: { id: enrollmentId },
+    });
     if (!enr) throw new NotFoundException("Enrollment not found");
-    if (enr.status !== "enrolled") throw new BadRequestException("Not an active enrollment");
+    if (enr.status !== "enrolled")
+      throw new BadRequestException("Not an active enrollment");
     const updated = await this.prisma.enrollment.update({
       where: { id: enrollmentId },
       data: { status: "dropped" },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "Enrollment", entityId: enrollmentId, action: "admin-dropped", actorId },
+      data: {
+        entity: "Enrollment",
+        entityId: enrollmentId,
+        action: "admin-dropped",
+        actorId,
+      },
     });
     return updated;
   }
@@ -1811,7 +2457,14 @@ export class AcademicsService {
 
   /** Deterministic course-card colors matching the teacher design palette. */
   private courseColor(index: number) {
-    const palette = ["#153b6a", "#ed8425", "#1d4a82", "#2e7d52", "#9da6ae", "#c4660f"];
+    const palette = [
+      "#153b6a",
+      "#ed8425",
+      "#1d4a82",
+      "#2e7d52",
+      "#9da6ae",
+      "#c4660f",
+    ];
     return palette[index % palette.length]!;
   }
 
@@ -1844,7 +2497,9 @@ export class AcademicsService {
       select: { status: true },
     });
     if (records.length === 0) return null;
-    const ok = records.filter((r) => r.status === "present" || r.status === "late").length;
+    const ok = records.filter(
+      (r) => r.status === "present" || r.status === "late",
+    ).length;
     return Math.round((ok / records.length) * 100);
   }
 
@@ -1863,7 +2518,9 @@ export class AcademicsService {
     const classes = await Promise.all(
       sections.map(async (s, i) => {
         const [ungraded, attendance] = await Promise.all([
-          this.prisma.submission.count({ where: { assignment: { sectionId: s.id }, status: "submitted" } }),
+          this.prisma.submission.count({
+            where: { assignment: { sectionId: s.id }, status: "submitted" },
+          }),
           this.attendanceRate(s.id),
         ]);
         return {
@@ -1887,7 +2544,11 @@ export class AcademicsService {
     const itemsToGrade = classes.reduce((a, c) => a + c.ungraded, 0);
     const rated = classes.filter((c) => c.attendance !== null);
     const avgAttendance =
-      rated.length === 0 ? null : Math.round(rated.reduce((a, c) => a + (c.attendance ?? 0), 0) / rated.length);
+      rated.length === 0
+        ? null
+        : Math.round(
+            rated.reduce((a, c) => a + (c.attendance ?? 0), 0) / rated.length,
+          );
 
     const todayIdx = this.weekdayIndex();
     const today = classes
@@ -1911,7 +2572,12 @@ export class AcademicsService {
       }));
 
     return {
-      kpis: { activeCourses: classes.length, studentsTaught, itemsToGrade, avgAttendance },
+      kpis: {
+        activeCourses: classes.length,
+        studentsTaught,
+        itemsToGrade,
+        avgAttendance,
+      },
       classes,
       today,
       needsAttention,
@@ -1926,7 +2592,9 @@ export class AcademicsService {
       where: { sectionId, status: { in: ["enrolled", "completed"] } },
       include: {
         student: { include: { person: true } },
-        submissions: { include: { assignment: { select: { maxPoints: true } } } },
+        submissions: {
+          include: { assignment: { select: { maxPoints: true } } },
+        },
         attendance: { select: { status: true } },
       },
     });
@@ -1934,14 +2602,20 @@ export class AcademicsService {
     // Each student's standing: final grade if set, else the letter implied by their graded-work
     // average (so the distribution is meaningful mid-term, as in the design). No work yet = excluded.
     const buckets = ["A", "B", "C", "D", "F"];
-    const letterFromPct = (p: number) => (p >= 90 ? "A" : p >= 80 ? "B" : p >= 70 ? "C" : p >= 60 ? "D" : "F");
+    const letterFromPct = (p: number) =>
+      p >= 90 ? "A" : p >= 80 ? "B" : p >= 70 ? "C" : p >= 60 ? "D" : "F";
     const distribution = [0, 0, 0, 0, 0];
     for (const e of enrollments) {
       let letter: string | null = e.grade ? e.grade[0]!.toUpperCase() : null;
       if (!letter) {
-        const scored = e.submissions.filter((s) => s.score !== null && s.assignment.maxPoints > 0);
+        const scored = e.submissions.filter(
+          (s) => s.score !== null && s.assignment.maxPoints > 0,
+        );
         if (scored.length > 0) {
-          const avgPct = (scored.reduce((a, s) => a + s.score! / s.assignment.maxPoints, 0) / scored.length) * 100;
+          const avgPct =
+            (scored.reduce((a, s) => a + s.score! / s.assignment.maxPoints, 0) /
+              scored.length) *
+            100;
           letter = letterFromPct(avgPct);
         }
       }
@@ -1949,7 +2623,14 @@ export class AcademicsService {
       if (idx >= 0) distribution[idx]!++;
     }
     const graded = distribution.reduce((a, b) => a + b, 0);
-    const passRate = graded === 0 ? null : Math.round(((distribution[0]! + distribution[1]! + distribution[2]!) / graded) * 100);
+    const passRate =
+      graded === 0
+        ? null
+        : Math.round(
+            ((distribution[0]! + distribution[1]! + distribution[2]!) /
+              graded) *
+              100,
+          );
 
     const itemsToGrade = await this.prisma.submission.count({
       where: { assignment: { sectionId }, status: "submitted" },
@@ -1975,19 +2656,28 @@ export class AcademicsService {
 
     const atRisk = enrollments
       .map((e) => {
-        const scored = e.submissions.filter((s) => s.score !== null && s.assignment.maxPoints > 0);
+        const scored = e.submissions.filter(
+          (s) => s.score !== null && s.assignment.maxPoints > 0,
+        );
         const avgPct =
           scored.length === 0
             ? null
             : Math.round(
-                (scored.reduce((a, s) => a + s.score! / s.assignment.maxPoints, 0) / scored.length) * 100,
+                (scored.reduce(
+                  (a, s) => a + s.score! / s.assignment.maxPoints,
+                  0,
+                ) /
+                  scored.length) *
+                  100,
               );
         const absent = e.attendance.filter((a) => a.status === "absent").length;
         const reasons: string[] = [];
-        if (avgPct !== null && avgPct < 60) reasons.push(`avg ${avgPct}% on graded work`);
+        if (avgPct !== null && avgPct < 60)
+          reasons.push(`avg ${avgPct}% on graded work`);
         if (absent >= 2) reasons.push(`${absent} absences`);
         if (reasons.length === 0) return null;
-        const severity = (avgPct !== null && avgPct < 50) || absent >= 3 ? "high" : "monitor";
+        const severity =
+          (avgPct !== null && avgPct < 50) || absent >= 3 ? "high" : "monitor";
         return {
           name: `${e.student.person.firstName} ${e.student.person.lastName}`,
           studentNo: e.student.studentNo,
@@ -2002,7 +2692,10 @@ export class AcademicsService {
       course: `${section.course.code} — ${section.course.title}`,
       sectionCode: section.sectionCode,
       kpis: { attendance, passRate, itemsToGrade, atRiskCount: atRisk.length },
-      distribution: buckets.map((label, i) => ({ label, count: distribution[i]! })),
+      distribution: buckets.map((label, i) => ({
+        label,
+        count: distribution[i]!,
+      })),
       trend,
       atRisk,
     };
@@ -2011,7 +2704,10 @@ export class AcademicsService {
   /** Advisees = distinct students across the faculty's sections, with cumulative GPA + risk flag. */
   async facultyAdvisees(personId: string) {
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { section: { instructorId: personId }, status: { in: ["enrolled", "completed"] } },
+      where: {
+        section: { instructorId: personId },
+        status: { in: ["enrolled", "completed"] },
+      },
       include: { student: { include: { person: true, program: true } } },
     });
     const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
@@ -2022,7 +2718,12 @@ export class AcademicsService {
           where: { studentId: sid, status: "completed", grade: { not: null } },
           include: { section: { include: { course: true } } },
         });
-        const { gpa } = computeGpa(completed.map((e) => ({ grade: e.grade!, credits: e.section.course.credits })));
+        const { gpa } = computeGpa(
+          completed.map((e) => ({
+            grade: e.grade!,
+            credits: e.section.course.credits,
+          })),
+        );
         const s = enrollments.find((e) => e.studentId === sid)!.student;
         return {
           studentNo: s.studentNo,
@@ -2040,9 +2741,11 @@ export class AcademicsService {
 
   /** Faculty teaching sections for the schedule grid (with day/time fields). */
   async mySchedule(instructorPersonId: string) {
+    const term = await this.currentTerm();
+    if (!term) return [];
     const sections = await this.prisma.section.findMany({
-      where: { instructorId: instructorPersonId },
-      include: { course: true },
+      where: { instructorId: instructorPersonId, termId: term.id },
+      include: { course: true, term: true },
       orderBy: [{ course: { code: "asc" } }],
     });
     return sections.map((s, i) => ({
@@ -2054,12 +2757,19 @@ export class AcademicsService {
       startTime: s.startTime,
       endTime: s.endTime,
       room: s.room,
+      term: s.term.name,
+      termStartDate: s.term.startDate,
+      termEndDate: s.term.endDate,
     }));
   }
 
   // --- Course materials + class posts (faculty, design: teacher MaterialsTab/PostsTab) ---
 
-  async listSectionMaterials(sectionId: string, personId: string, isAdmin: boolean) {
+  async listSectionMaterials(
+    sectionId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     return this.prisma.sectionMaterial.findMany({
       where: { sectionId },
@@ -2069,7 +2779,13 @@ export class AcademicsService {
 
   async createSectionMaterial(
     sectionId: string,
-    input: { title: string; kind: string; category?: string; fileUrl?: string; fileName?: string },
+    input: {
+      title: string;
+      kind: string;
+      category?: string;
+      fileUrl?: string;
+      fileName?: string;
+    },
     personId: string,
     isAdmin: boolean,
   ) {
@@ -2085,13 +2801,24 @@ export class AcademicsService {
       },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "SectionMaterial", entityId: material.id, action: "created", actorId: personId },
+      data: {
+        entity: "SectionMaterial",
+        entityId: material.id,
+        action: "created",
+        actorId: personId,
+      },
     });
     return material;
   }
 
-  async toggleSectionMaterial(materialId: string, personId: string, isAdmin: boolean) {
-    const material = await this.prisma.sectionMaterial.findUnique({ where: { id: materialId } });
+  async toggleSectionMaterial(
+    materialId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    const material = await this.prisma.sectionMaterial.findUnique({
+      where: { id: materialId },
+    });
     if (!material) throw new NotFoundException("Material not found");
     await this.assertSectionOwner(material.sectionId, personId, isAdmin);
     return this.prisma.sectionMaterial.update({
@@ -2100,7 +2827,11 @@ export class AcademicsService {
     });
   }
 
-  async listSectionPosts(sectionId: string, personId: string, isAdmin: boolean) {
+  async listSectionPosts(
+    sectionId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     return this.prisma.sectionPost.findMany({
       where: { sectionId },
@@ -2117,10 +2848,20 @@ export class AcademicsService {
   ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     const post = await this.prisma.sectionPost.create({
-      data: { sectionId, title: input.title, body: input.body, author: authorName },
+      data: {
+        sectionId,
+        title: input.title,
+        body: input.body,
+        author: authorName,
+      },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "SectionPost", entityId: post.id, action: "created", actorId: personId },
+      data: {
+        entity: "SectionPost",
+        entityId: post.id,
+        action: "created",
+        actorId: personId,
+      },
     });
     return post;
   }

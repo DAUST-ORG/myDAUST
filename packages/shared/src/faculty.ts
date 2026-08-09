@@ -3,10 +3,11 @@
 
 import { z } from "zod";
 
-/** Editable faculty profile fields (all optional; name comes from the Person record). */
+/** Editable faculty identity + public-profile fields. */
 export const FacultyProfileInput = z.object({
   firstName: z.string().trim().min(1).max(120),
   lastName: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(160).optional(),
   title: z.string().trim().max(160).nullable().optional(),
   dept: z.string().trim().max(160).nullable().optional(),
   bio: z.string().trim().max(4000).nullable().optional(),
@@ -45,6 +46,7 @@ export interface AdminFacultyItem {
   firstName: string;
   lastName: string;
   publicProfile: boolean;
+  assignedSectionCount: number;
   profile: {
     title: string | null;
     dept: string | null;

@@ -1,12 +1,23 @@
 import { randomBytes } from "node:crypto";
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import bcrypt from "bcryptjs";
-import { type FacultyCreateInput, type FacultyProfileInput, safeLink } from "@mydaust/shared";
+import {
+  type FacultyCreateInput,
+  type FacultyProfileInput,
+  safeLink,
+} from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 /** Uploaded photo path (/uploads/...) or an http(s) URL; anything else → null. */
 const safePhoto = (v: string | null | undefined): string | null =>
-  typeof v === "string" && (/^\/[^/]/.test(v) || /^https?:\/\//i.test(v)) ? v.slice(0, 300) : null;
+  typeof v === "string" && (/^\/[^/]/.test(v) || /^https?:\/\//i.test(v))
+    ? v.slice(0, 300)
+    : null;
 
 /** Faculty list source: platform people holding the "faculty" role. */
 function facultyWhere() {
@@ -25,7 +36,9 @@ export class FacultyService {
   async publicList() {
     const rows = await this.prisma.facultyProfile.findMany({
       where: { publicProfile: true },
-      include: { person: { select: { id: true, firstName: true, lastName: true } } },
+      include: {
+        person: { select: { id: true, firstName: true, lastName: true } },
+      },
       orderBy: { person: { lastName: "asc" } },
     });
     return rows.map((r) => ({
@@ -45,7 +58,10 @@ export class FacultyService {
   async adminList() {
     const people = await this.prisma.person.findMany({
       where: facultyWhere(),
-      include: { facultyProfile: true },
+      include: {
+        facultyProfile: true,
+        _count: { select: { taughtSections: true } },
+      },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
     return people.map((p) => ({
@@ -54,6 +70,7 @@ export class FacultyService {
       firstName: p.firstName,
       lastName: p.lastName,
       publicProfile: p.facultyProfile?.publicProfile ?? false,
+      assignedSectionCount: p._count.taughtSections,
       profile: p.facultyProfile
         ? {
             title: p.facultyProfile.title,
@@ -72,7 +89,8 @@ export class FacultyService {
     const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
     const bytes = randomBytes(14);
     let out = "";
-    for (let i = 0; i < 14; i += 1) out += alphabet[bytes[i]! % alphabet.length];
+    for (let i = 0; i < 14; i += 1)
+      out += alphabet[bytes[i]! % alphabet.length];
     return out;
   }
 
@@ -86,7 +104,9 @@ export class FacultyService {
     if (await this.prisma.person.findUnique({ where: { email } })) {
       throw new BadRequestException(`Email ${email} is already in use`);
     }
-    const tempPassword = input.provisionLogin ? this.randomTempPassword() : null;
+    const tempPassword = input.provisionLogin
+      ? this.randomTempPassword()
+      : null;
     const person = await this.prisma.person.create({
       data: {
         email,
@@ -95,13 +115,22 @@ export class FacultyService {
         kind: "faculty",
         roles: ["faculty"],
         ...(tempPassword
-          ? { passwordHash: await bcrypt.hash(tempPassword, 10), mustChangePassword: true }
+          ? {
+              passwordHash: await bcrypt.hash(tempPassword, 10),
+              mustChangePassword: true,
+            }
           : {}),
         facultyProfile: { create: { publicProfile: false } },
       },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "Person", entityId: person.id, action: "faculty-created", actorId, data: { email } },
+      data: {
+        entity: "Person",
+        entityId: person.id,
+        action: "faculty-created",
+        actorId,
+        data: { email },
+      },
     });
     return { id: person.id, email, tempPassword };
   }
@@ -117,10 +146,19 @@ export class FacultyService {
   /** Comms: edit the name + profile fields (upserting the profile row). */
   async update(personId: string, input: FacultyProfileInput, actorId: string) {
     const person = await this.mustFaculty(personId);
+    const email = input.email?.trim().toLowerCase() ?? person.email;
+    if (email !== person.email) {
+      const existing = await this.prisma.person.findUnique({
+        where: { email },
+      });
+      if (existing && existing.id !== person.id) {
+        throw new BadRequestException(`Email ${email} is already in use`);
+      }
+    }
     await this.prisma.$transaction([
       this.prisma.person.update({
         where: { id: person.id },
-        data: { firstName: input.firstName, lastName: input.lastName },
+        data: { firstName: input.firstName, lastName: input.lastName, email },
       }),
       this.prisma.facultyProfile.upsert({
         where: { personId: person.id },
@@ -144,7 +182,71 @@ export class FacultyService {
       }),
     ]);
     await this.prisma.auditLog.create({
-      data: { entity: "FacultyProfile", entityId: person.id, action: "faculty-profile-updated", actorId },
+      data: {
+        entity: "FacultyProfile",
+        entityId: person.id,
+        action: "faculty-profile-updated",
+        actorId,
+      },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Registrar: delete a faculty record only when no academic or operational
+   * records reference it. Assigned instructors must be replaced first so a
+   * mistaken click can never orphan a section or its grade history.
+   */
+  async remove(personId: string, actorId: string) {
+    if (personId === actorId) {
+      throw new BadRequestException("You cannot delete your own account");
+    }
+    const person = await this.prisma.person.findFirst({
+      where: { id: personId, ...facultyWhere() },
+      select: {
+        id: true,
+        email: true,
+        _count: {
+          select: {
+            taughtSections: true,
+            threadParticipations: true,
+            messagesSent: true,
+            projectMemberships: true,
+            guardianOf: true,
+            guardianInvites: true,
+            studentInvites: true,
+            broadcasts: true,
+            wireTransfersSubmitted: true,
+            wireTransfersReviewed: true,
+          },
+        },
+      },
+    });
+    if (!person) throw new NotFoundException("Faculty member not found");
+    if (person._count.taughtSections > 0) {
+      throw new ConflictException(
+        `This faculty member is assigned to ${person._count.taughtSections} section${person._count.taughtSections === 1 ? "" : "s"}. Reassign those sections before deleting the record.`,
+      );
+    }
+    const otherReferences = Object.entries(person._count)
+      .filter(([key]) => key !== "taughtSections")
+      .reduce((sum, [, count]) => sum + count, 0);
+    if (otherReferences > 0) {
+      throw new ConflictException(
+        "This faculty member has activity that must be retained. Remove their faculty role instead of deleting the account.",
+      );
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.auditLog.create({
+        data: {
+          entity: "Person",
+          entityId: person.id,
+          action: "faculty-deleted",
+          actorId,
+          data: { email: person.email },
+        },
+      });
+      await tx.person.delete({ where: { id: person.id } });
     });
     return { ok: true };
   }
@@ -158,7 +260,12 @@ export class FacultyService {
       update: { publicProfile: visible },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "FacultyProfile", entityId: person.id, action: visible ? "faculty-made-public" : "faculty-made-private", actorId },
+      data: {
+        entity: "FacultyProfile",
+        entityId: person.id,
+        action: visible ? "faculty-made-public" : "faculty-made-private",
+        actorId,
+      },
     });
     return { ok: true };
   }
