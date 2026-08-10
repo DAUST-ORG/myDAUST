@@ -1125,9 +1125,10 @@ model SectionMaterial {
   fileUrl   String?
   fileName  String?
   published Boolean  @default(true)
+  sortOrder Int      @default(0)
   createdAt DateTime @default(now())
 
-  @@index([sectionId])
+  @@index([sectionId, sortOrder])
 }
 
 model SectionPost {
