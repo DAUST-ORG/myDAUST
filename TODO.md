@@ -157,8 +157,14 @@ Open items left by that work:
 - **Curriculum editor.** `Curriculum`/`CurriculumEntry` are modelled, migrated
   and seeded but have no UI yet; the design's Programs & Curriculum screen shows
   a per-year/semester course map.
-- **Faculty grade submission.** `GradeSubmission` and the registrar's approval
-  queue exist; faculty still need the action that moves a section to `submitted`.
+- **Transcript-led grade publication (local, deployment pending).** Faculty can
+  submit a versioned section snapshot and the registrar queue can approve or
+  return it. Submission alone does not complete enrollments or affect GPA;
+  approval publishes the snapshot to the independent transcript ledger. The
+  migration, API, registrar editor, and guarded S3 import CLI are complete and
+  validated locally. Staged deployment and production smoke tests remain, and
+  the historical import is blocked until 106 names receive authoritative
+  student IDs (see `docs/production-status.md`).
 - **Rule engine writes.** `PATCH /registrar/rules/:courseId` exists and is
   audited, but the screen is read-only — prerequisites are still seeded, not
   edited in the UI.
