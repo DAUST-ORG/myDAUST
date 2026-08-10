@@ -23,6 +23,7 @@ export interface SectionMaterial {
   fileUrl: string | null;
   fileName: string | null;
   published: boolean;
+  sortOrder: number;
   createdAt: string;
 }
 export const getSectionMaterials = (sectionId: string) =>
@@ -34,6 +35,13 @@ export const createSectionMaterial = (
   request<SectionMaterial>(`/academics/sections/${sectionId}/materials`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+export const deleteSectionMaterial = (materialId: string) =>
+  request<{ ok: boolean }>(`/academics/materials/${materialId}`, { method: "DELETE" });
+export const reorderSectionMaterials = (sectionId: string, orderedIds: string[]) =>
+  request<SectionMaterial[]>(`/academics/sections/${sectionId}/materials/reorder`, {
+    method: "PATCH",
+    body: JSON.stringify({ orderedIds }),
   });
 export const toggleSectionMaterial = (materialId: string) =>
   request<SectionMaterial>(`/academics/materials/${materialId}/toggle`, { method: "POST" });
