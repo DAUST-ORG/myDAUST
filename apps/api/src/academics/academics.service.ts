@@ -906,6 +906,48 @@ export class AcademicsService {
     }));
   }
 
+  /** A student's enrolled sections for the active/upcoming term only. */
+  async studentSchedule(studentId: string) {
+    const term = await this.currentTerm();
+    if (!term) return { term: null, entries: [] };
+
+    const enrollments = await this.prisma.enrollment.findMany({
+      where: {
+        studentId,
+        status: "enrolled",
+        section: { termId: term.id },
+      },
+      include: { section: { include: { course: true, term: true } } },
+      orderBy: [
+        { section: { startTime: "asc" } },
+        { section: { course: { code: "asc" } } },
+      ],
+    });
+
+    return {
+      term: {
+        id: term.id,
+        name: term.name,
+        startDate: term.startDate,
+        endDate: term.endDate,
+      },
+      entries: enrollments.map((e) => ({
+        enrollmentId: e.id,
+        sectionId: e.sectionId,
+        courseCode: e.section.course.code,
+        title: e.section.course.title,
+        credits: e.section.course.credits,
+        sectionCode: e.section.sectionCode,
+        term: e.section.term.name,
+        days: e.section.days,
+        startTime: e.section.startTime,
+        endTime: e.section.endTime,
+        schedule: `${e.section.days} ${e.section.startTime}–${e.section.endTime}`,
+        room: e.section.room,
+      })),
+    };
+  }
+
   private async assertSectionOwner(
     sectionId: string,
     personId: string,
@@ -3038,7 +3080,7 @@ export class AcademicsService {
     const existingIds = materials.map((material) => material.id);
     if (!isExactMaterialOrder(orderedIds, existingIds)) {
       throw new BadRequestException(
-        "orderedIds must contain exactly the section's materials",
+        "orderedIds must contain exactly the section's materials, each once",
       );
     }
     await this.prisma.$transaction([
