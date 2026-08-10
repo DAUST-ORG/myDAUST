@@ -152,6 +152,12 @@ export class AcademicsController {
     return this.academics.myEnrollments(user.studentId!);
   }
 
+  @Get("my/schedule")
+  @Roles("student")
+  mySchedule(@CurrentUser() user: AuthUser) {
+    return this.academics.studentSchedule(user.studentId!);
+  }
+
   @Get("my/summary")
   @Roles("student")
   mySummary(@CurrentUser() user: AuthUser) {

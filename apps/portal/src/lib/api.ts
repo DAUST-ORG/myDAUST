@@ -445,6 +445,12 @@ export const getSections = (termId: string) =>
   request<Section[]>(`/academics/sections?termId=${termId}`);
 export const getMyEnrollments = () =>
   request<MyEnrollment[]>("/academics/my/enrollments");
+export interface StudentSchedule {
+  term: Term | null;
+  entries: MyEnrollment[];
+}
+export const getStudentSchedule = () =>
+  request<StudentSchedule>("/academics/my/schedule");
 export const enrollSection = (sectionId: string) =>
   request("/academics/my/enroll", {
     method: "POST",
