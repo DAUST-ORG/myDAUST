@@ -2863,9 +2863,13 @@ export class AcademicsService {
       select: { id: true },
     });
     const existing = new Set(materials.map((m) => m.id));
-    if (orderedIds.some((id) => !existing.has(id)) || orderedIds.length !== existing.size) {
+    if (
+      new Set(orderedIds).size !== orderedIds.length ||
+      orderedIds.length !== existing.size ||
+      orderedIds.some((id) => !existing.has(id))
+    ) {
       throw new BadRequestException(
-        "orderedIds must contain exactly the section's materials",
+        "orderedIds must contain exactly the section's materials, each once",
       );
     }
     await this.prisma.$transaction(
