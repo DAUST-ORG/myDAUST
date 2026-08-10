@@ -23,7 +23,7 @@ endpoint or field. Each names what is required.
 - [ ] 🟡 **Student record + documents** — the design's ~35-field record and 6 PDF document slots are unbacked. There is also **no student invite flow** (only `GuardianInvite`), so any "password-setup email sent" copy on the students screen would be untrue today.
 - [ ] 🟡 **Invoices have no human-readable number** — the finance Billings tab shows a truncated uuid where the design shows `BILL-2026-001`. Needs a nullable `Invoice.number` plus a generator.
 - [ ] 🟡 Smaller CRUD gaps: department delete, parent edit/delete (and expose guardian `id`), calendar event `PATCH`/`DELETE` + term status.
-- [ ] 🟡 **Unbacked student screens** — dining swipe balance/history, housing move-in checklist, and profile documents tab. Each needs a model or endpoint that does not exist. Weekly student/faculty schedules and `.ics` export are implemented locally as of 2026-08-07 and await deployment verification.
+- [ ] 🟡 **Unbacked student screens** — dining swipe balance/history, housing move-in checklist, and profile documents tab. Each needs a model or endpoint that does not exist. Weekly student/faculty schedules and `.ics` export are production-deployed; the student feed is active-term scoped as of 2026-08-10.
 - [ ] ⚪ **"View as" is portal-scoped, not impersonation** — it lists only the portals the admin's own roles grant, because student/faculty/parent endpoints are scoped to _your own_ record. A true "view as this student" needs a session subject + audit trail. Decide whether to build it.
 - [ ] ⚪ **Kept but unreachable from the new nav:** `student/documents` (transcript + enrollment verification — the only working transcript output), `student/assignments` (linked from the dashboard To-do), `student/id` (signed QR campus pass). Decide whether to relocate them into the design's screens or retire them.
 - [ ] 🔴 **Staging carries no demo parent** until one is provisioned through the registrar flow; the seeded `parent@daust.edu` exists locally only.
@@ -42,7 +42,7 @@ endpoint or field. Each names what is required.
 ## 2 · Missing write-paths & role surfaces — ✅ FIXED 2026-06-28 (all verified live)
 
 - [x] **Faculty record correction tools (local, 2026-08-07)** — Registrar Directory can edit faculty identity/profile fields and permanently delete only unused records; assignment and retained-activity guards prevent orphaned history.
-- [x] **Faculty weekly schedule (local, 2026-08-07)** — active-term calendar added to faculty navigation; shared with the student view and exportable as `.ics`.
+- [x] **Faculty/student weekly schedules (production, 2026-08-10)** — active-term calendars are present in both navigation surfaces, exportable as `.ics`, and the student API now returns a single active-term-scoped payload.
 - [x] **Continuous-assessment roster rows (local, 2026-08-07)** — new gradebook items create scoreable rows transactionally, and existing items backfill missing rows when opened.
 
 - [x] **Announcement compose** — `POST /comms/announcements` (admin/registrar/bursar/SA/HR/faculty) + composer UI on `/admin/announcements`; student compose correctly 403.
@@ -58,6 +58,8 @@ endpoint or field. Each names what is required.
 
 - [x] Official payment plan wired: fees (tuition 2 975 000 / housing 680 000 / cafeteria 630 000 per year) in shared + DB (local AND staging, audited PATCHes); quarterly template prefills official due dates (Inscription, Nov 5, Jan 5, Mar 5). Reference designs: design/references/.
 - [x] **Payment links**: PaymentLink model; bursar/admin CRUD (audited) at /admin/finance/links + quick-create on the student account page (prefills open invoice); public branded pay page /pay/[token] (navy split card, OM/Wave/Card via PayTech, bank-transfer instructions + admin mark-paid); PLINK- refs on the verified IPN rail; invoice-linked links allocate to installments (verified: balance 2.0M→1.5M, inst 1 partial); standalone links land on their cost center in the director overview. Deployed to staging (images db1b1f1-07042148).
+- [x] **Exact parent-payment reconciliation (production, 2026-08-10)** — 31 exact SIS/invoice matches totaling 27,434,950 XOF were imported with private source evidence, deterministic references, oldest-due-first allocations, and audits; repeat preflight is idempotent.
+- [ ] ⚪ **Resolve 23 held parent-payment rows** — 21 non-exact identities, one exact duplicate cheque, and one exact amount above the bill remain unposted. Finance/Registrar must approve official IDs, malformed dates, duplicate handling, and above-bill treatment before the follow-up import.
 
 ## 3 · Track P platform services (remaining)
 

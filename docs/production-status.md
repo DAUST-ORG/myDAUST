@@ -39,7 +39,7 @@ Assignment gaps still requiring resolution:
 
 Catalog decisions still needed: `EE 3513` is “Control Systems” in production but “System Design & Control” in the schedule; `ENGR 3412` is “Machine Learning for Engineers” in production but “Numerical Methods with AI for Engineers” in the schedule.
 
-## Payments: Deployed but Disabled
+## Payments: Wire Disabled; Offline Ledger Partially Reconciled
 
 The wire-transfer workflow is deployed across authenticated student billing, public bill lookup, payment links, Billing Admin, and the Finance portal.
 
@@ -52,13 +52,22 @@ Remaining payment work:
 
 - Run a controlled production submission/approval/rejection smoke test after configuration.
 
+### Parent-payment ledger import (2026-08-10)
+
+- The one-page `RECOUVREMENT (2).pdf` source contains **54 rows / 48,483,075 XOF**. The original PDF and structured extraction are retained under `wire-proofs/offline-imports/recouvrement-2026-08-10/` in the private, encrypted production Finance bucket. The PDF SHA-256 is `999b3eb354ab01341acdf10494abc734beb2093d7d02e346f0202c115fa9c3cb`.
+- Production preflight found **31 exact active-student matches** with one unambiguous Fall 2026 bill each, zero prior successful payments, sufficient balances, and reconciled installment plans. These **27,434,950 XOF** were posted with deterministic `OFFLINE-999b3eb354ab-*` references, historical source dates, raw source methods, private evidence links, and bursar audit provenance.
+- Post-import verification found **31 successful payments, 27,434,950 XOF of allocations, 31 payment audits, one batch audit, no rollup mismatch, and no overpaid invoice**. A second dry-run proposed zero writes. Method totals are 17,332,450 XOF wire/bank/cheque, 6,850,000 XOF Wave, and 3,252,500 XOF Orange Money.
+- **23 rows / 21,048,125 XOF remain deliberately held**: 21 lack an exact SIS name match, one exact Mohamed Lam payment exceeds the current bill, and one Marie Nafissatou Diouf cheque line exactly duplicates another source line. The held set also contains two malformed source dates and a second non-exact amount above the current bill. Finance/Registrar must supply official student numbers and discrepancy decisions before a follow-up import.
+
 ## Faculty Operations: Production Verified
 
 The following fixes were promoted through staging and production on 2026-08-07 and 2026-08-10:
 
 - **Faculty edit/delete:** Registrar → Directory can now edit a faculty member's name, email/sign-in identity, and public profile. Deletion is permanent but limited to unused records. Assigned sections must be reassigned first, and accounts with retained academic or communication activity cannot be deleted.
 - **Weekly schedules:** students and faculty now share the same responsive Monday–Friday timetable. The faculty navigation includes **Schedule**, only the active term is shown, and both portals can export a recurring `.ics` calendar.
+- **Schedule correctness (2026-08-10):** production now serves `GET /academics/my/schedule`, which returns one atomic active-term payload for the signed-in student. This prevents prior-term enrolled sections from being relabeled or exported as the current term. Student and faculty pages now distinguish loading, API failure, and genuine empty states.
 - **Faculty gradebook:** creating an assessment now transactionally creates `assigned` grade rows for the current roster. Existing assessments backfill missing rows when opened, allowing faculty to grade quizzes or exams even without a student file submission. The form now reports validation/API errors inside the modal.
+- A fresh disposable-PostgreSQL grading test exercised faculty ownership, assessment/category creation, roster score rows, weighted totals, grade submission, registrar-only approval, transcript publication, `I` policy, idempotent approval, and the post-approval lock. The complete flow passed; no remaining category-creation defect reproduced on current code.
 - **Course materials:** faculty can reorder materials and remove a material record from a course. Reordering requires the exact section material set, and both changes are audited. Removal immediately ends portal access and cannot be restored through the portal.
 
 No Moussa Thiao record was deleted during deployment. Production previously showed `mthiao@daust.org` as public and `mndao@daust.org` as a private duplicate; verify both identities and section assignments immediately before deleting either record.
@@ -98,7 +107,7 @@ Validation on 2026-08-10: **22 shared tests**, **104 API tests**, and all **8 da
 
 Latest local validation on 2026-08-10:
 
-- `pnpm test`: **22 shared and 104 API tests passed**; all 8 database settlement integration tests also passed against PostgreSQL.
+- `pnpm test`: **22 shared and 107 API tests passed**. All 8 database settlement tests and the new full faculty-grading integration test also passed separately against PostgreSQL.
 - `pnpm typecheck`: passed across all workspaces.
 - `pnpm build`: API, portal, database package, shared package, and vitrine passed.
 - Fresh PostgreSQL 16 validation applied all 41 migrations successfully.
@@ -106,8 +115,8 @@ Latest local validation on 2026-08-10:
 
 Latest deployment verified on 2026-08-10:
 
-- Staging: commit `6c9792e`, API task definition `daust-staging-api:84`, portal `daust-staging-portal:46`; migration and SIS reference loader exited 0. Registrar/student transcript access passed, bursar transcript access remained forbidden, and faculty material routes passed.
-- Production: the current services are stable at API task definition `daust-prod-api:79` and portal `daust-prod-portal:43`; the transcript migration/reference loader exited 0, API health returned 200, and the signed-in admin Transcript UI rendered without console errors.
+- Staging: commit `edfa4fb`, API task definition `daust-staging-api:86`, portal `daust-staging-portal:47`; migration/reference tasks, rollout, and health checks passed.
+- Production: commit `deae83a`, API task definition `daust-prod-api:81`, portal `daust-prod-portal:44`; migration/reference tasks, rollout, and health checks passed. A signed-in production smoke rendered `/faculty/schedule` with the expected navigation/empty state and no console warnings or errors.
 - The `material-delete-reorder` work was merged and deployed with the transcript release. Exact reorder validation, deletion audit metadata, split-origin file links, and accurate destructive-action copy are included.
 
 All intended transcript/material application and infrastructure changes are committed and reproducible from Git. Unrelated local screenshots and design references remain untracked and must be preserved. Never commit AWS sessions, passwords, bank details, or provider secrets.
@@ -117,6 +126,7 @@ All intended transcript/material application and infrastructure changes are comm
 1. Verify the two Moussa Thiao identities, delete the confirmed unused duplicate, then resolve the two HSS assignments. Assign the sixteen intentionally TBA sections as staffing decisions are made.
 2. Decide the two catalog-title discrepancies.
 3. Enter the approved bank fields in Billing Admin, confirm the existing Finance recipient, enable wire payments globally, and complete a controlled submission/approval/rejection test.
-4. Re-upload the four missing legacy news images and any missing faculty portraits, then verify their S3-backed URLs.
-5. Complete the Official Student ID and Resolution Status columns for the 106 names in `Historical_Students_Identity_Mapping.xlsx`. The six legacy database workbooks are password-protected and may supply the authoritative IDs.
-6. Build a new manifest against the historical-only workbook and its distinct hash, review the dry-run totals, then execute one production import with `CONFIRM=1` and verify its batch, entry, policy, and audit counts.
+4. Resolve the 23 held parent-payment rows: approve authoritative student numbers, decide the exact duplicate cheque, correct the two malformed dates, and decide how the two above-bill amounts should be represented. Then run the same idempotent preflight/import and verification.
+5. Re-upload the four missing legacy news images and any missing faculty portraits, then verify their S3-backed URLs.
+6. Complete the Official Student ID and Resolution Status columns for the 106 names in `Historical_Students_Identity_Mapping.xlsx`. The six legacy database workbooks are password-protected and may supply the authoritative IDs.
+7. Build a new manifest against the historical-only workbook and its distinct hash, review the dry-run totals, then execute one production import with `CONFIRM=1` and verify its batch, entry, policy, and audit counts.
