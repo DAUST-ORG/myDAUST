@@ -1,6 +1,6 @@
 # Production and Delivery Status
 
-Last verified: **2026-08-07**. This page is the operational handoff for recent production data work and the associated local implementation. `TODO.md` remains the broader product backlog.
+Production last verified: **2026-08-07**. Local transcript worktree reviewed: **2026-08-10**. This page is the operational handoff for recent production data work and the associated local implementation. `TODO.md` remains the broader product backlog.
 
 ## Status Definitions
 
@@ -64,6 +64,26 @@ The following fixes were promoted through staging and production on 2026-08-07:
 
 No Moussa Thiao record was deleted during deployment. Production previously showed `mthiao@daust.org` as public and `mndao@daust.org` as a private duplicate; verify both identities and section assignments immediately before deleting either record.
 
+## Transcript Ledger: Ready for Staging, Not Yet Application-Deployed
+
+The current worktree introduces an independent `TranscriptEntry` ledger for official academic history. This changes the publication boundary:
+
+- Faculty **Save** updates provisional enrollment grades. **Submit for approval** freezes a versioned `GradeSubmissionItem` roster snapshot but leaves enrollments Enrolled and does not affect GPA, earned credits, degree progress, or transcript output.
+- Submitted and Approved sections reject further faculty Save/Submit calls. A registrar return records the note, publishes nothing, and permits a corrected resubmission as the next version.
+- Registrar approval transactionally claims the Submitted record, publishes each reviewed item once, completes its enrollment, and audits the decision. Unique enrollment and submission-item links plus the status claim make retries idempotent and reject conflicting official history.
+- The standard policy is explicit: **I** has no GPA weight or earned credit; **P** earns credit without GPA weight; **F** contributes zero points to attempted GPA and earns no credit.
+- Student/parent grade views, degree progress, student-success GPA, and printable records now read non-voided ledger entries. Registrar/admin API operations can create, edit, void, restore, and inspect the audit history of manual entries.
+
+Deployment and import gaps:
+
+- Migration `20260810100000_transcript_ledger` and its API/portal consumers have **not** yet been applied or smoke-tested in staging or production. Production application behavior remains the 2026-08-07 deployment until promotion is explicitly verified.
+- The migration backfills already-official Approved or pre-workflow Completed enrollment grades, deliberately excludes Submitted/Returned grades, and reopens enrollments that the previous workflow completed prematurely. All 41 migrations apply cleanly to fresh PostgreSQL 16 databases.
+- A production-safe S3/CLI importer now exists locally. It verifies the workbook hash, defaults to dry-run, requires an admin/registrar actor, accepts only authoritative student numbers, creates archived records only with explicit authorization, snapshots unmatched courses/terms, deduplicates exact content, and writes the batch, entries, and audit records atomically.
+- The normalized workbook and blocker manifest are staged in private, encrypted, versioned S3 buckets in both environments. The source has **8,884 rows**; all **637 empty grades became `I`** (750 total `I` grades). The current manifest resolves **6,291 rows across 298 official identities** and deliberately blocks **2,593 rows across 106 unresolved names**. No transcript rows have been imported.
+- Registrar transcript management is implemented locally with grouped terms, summaries, Add/Edit/Void/Restore operations, catalog-match/source indicators, and mandatory audit reasons. Student output is labeled “Unofficial Academic Record.” Do not create historical enrollments as a substitute.
+
+Local validation on 2026-08-10: **22 shared tests**, **104 API tests**, and all **8 database settlement tests** passed; workspace typecheck and production build passed. All 41 migrations applied to fresh PostgreSQL 16 databases, the transcript-specific state-machine/import tests passed, and both infrastructure configurations validated. The private transcript buckets and prefix-scoped API read policies are already deployed; application promotion and live smoke tests remain.
+
 ## Public Website and Media
 
 - The production homepage now shows exactly three news stories and exposes the complete list through **All news**.
@@ -94,5 +114,6 @@ The worktree contains substantial uncommitted application, migration, infrastruc
 2. Decide the two catalog-title discrepancies.
 3. Enter the approved bank fields in Billing Admin, confirm the existing Finance recipient, enable wire payments globally, and complete a controlled submission/approval/rejection test.
 4. Re-upload the four missing legacy news images and any missing faculty portraits, then verify their S3-backed URLs.
-5. Import the manually created staging media/wire buckets into OpenTofu state before the next staging infrastructure apply.
-6. Review and split the dirty worktree into reproducible feature commits; rerun the complete test, typecheck, build, Prisma migration validation, and infrastructure plans.
+5. Obtain authoritative student IDs for the 106 unresolved historical names (the six legacy database workbooks are password-protected), regenerate the manifest, review the identical dry-run, and only then run with `CONFIRM=1`.
+6. Promote the transcript migration/API/portal through staging, complete role and transcript smoke tests, then promote the identical artifact to production.
+7. Verify faculty material removal and reordering in staging; stored uploads are retained for audit/recovery after a material is removed from its course.

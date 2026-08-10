@@ -9,7 +9,9 @@ export type EnrollInput = z.infer<typeof EnrollInput>;
 export const DropInput = z.object({ enrollmentId: z.string().uuid() });
 export type DropInput = z.infer<typeof DropInput>;
 
-export const LetterGrade = z.enum(["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"]);
+// The active grading scheme is database-configured. The API validates submitted
+// values against that section's scheme, so the contract must not freeze one list.
+export const LetterGrade = z.string().trim().min(1).max(20);
 export type LetterGrade = z.infer<typeof LetterGrade>;
 
 export const SubmitGradesInput = z.object({

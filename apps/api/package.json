@@ -8,7 +8,8 @@
     "dev": "nest start --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "echo 'no lint yet'",
-    "test": "vitest run"
+    "test": "vitest run",
+    "import:historical-transcripts": "node dist/transcript/historical-import.cli.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.864.0",

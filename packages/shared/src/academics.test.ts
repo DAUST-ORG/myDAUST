@@ -14,9 +14,10 @@ describe("SubmitAssignmentInput", () => {
 });
 
 describe("SubmitGradesInput", () => {
-  it("rejects grades outside the letter scale", () => {
-    const bad = { grades: [{ enrollmentId: "0b7f4e9e-1111-4111-8111-000000000001", grade: "Z" }] };
-    expect(SubmitGradesInput.safeParse(bad).success).toBe(false);
+  it("accepts configurable grade labels but rejects blank labels", () => {
+    const enrollmentId = "0b7f4e9e-1111-4111-8111-000000000001";
+    expect(SubmitGradesInput.safeParse({ grades: [{ enrollmentId, grade: "Level 5" }] }).success).toBe(true);
+    expect(SubmitGradesInput.safeParse({ grades: [{ enrollmentId, grade: "   " }] }).success).toBe(false);
   });
 
   it("defaults finalize to false", () => {

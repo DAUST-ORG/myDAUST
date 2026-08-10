@@ -1,10 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import type { Prisma } from "@mydaust/db";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
-import { computeGpa } from "../academics/academics.service.js";
+import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
 
 /** Defaults for the early-alert thresholds shown on Student Success. */
 const DEFAULT_MIN_GPA = 2.5;
@@ -65,7 +69,9 @@ export class RegistrarService {
     const studentNo = input.studentNo.trim();
     if (!studentNo) throw new BadRequestException("A Student ID is required");
     if (await this.prisma.student.findUnique({ where: { studentNo } })) {
-      throw new BadRequestException(`This ID is already assigned to another student.`);
+      throw new BadRequestException(
+        `This ID is already assigned to another student.`,
+      );
     }
     const email = input.email.trim().toLowerCase();
     if (!email) throw new BadRequestException("An email is required");
@@ -75,11 +81,14 @@ export class RegistrarService {
     const dob = input.dateOfBirth
       ? new Date(`${input.dateOfBirth.slice(0, 10)}T00:00:00Z`)
       : null;
-    if (dob && Number.isNaN(dob.getTime())) throw new BadRequestException("Invalid date of birth");
+    if (dob && Number.isNaN(dob.getTime()))
+      throw new BadRequestException("Invalid date of birth");
 
     let programId: string | null = null;
     if (input.programCode) {
-      const program = await this.prisma.program.findUnique({ where: { code: input.programCode } });
+      const program = await this.prisma.program.findUnique({
+        where: { code: input.programCode },
+      });
       if (!program) throw new BadRequestException("Unknown program");
       programId = program.id;
     }
@@ -146,8 +155,17 @@ export class RegistrarService {
     });
 
     const name = `${input.firstName.trim()} ${input.lastName.trim()}`.trim();
-    const invite = await this.issueStudentInvite(student.person.id, email, name);
-    return { id: student.student.id, studentNo, email, inviteExpiresAt: invite.expiresAt };
+    const invite = await this.issueStudentInvite(
+      student.person.id,
+      email,
+      name,
+    );
+    return {
+      id: student.student.id,
+      studentNo,
+      email,
+      inviteExpiresAt: invite.expiresAt,
+    };
   }
 
   /** Invite tokens are stored hashed — a leaked database row must not grant access. */
@@ -156,7 +174,11 @@ export class RegistrarService {
   }
 
   /** Issue a student password-setup token and email it (mirrors the guardian invite). */
-  private async issueStudentInvite(studentPersonId: string, email: string, name: string) {
+  private async issueStudentInvite(
+    studentPersonId: string,
+    email: string,
+    name: string,
+  ) {
     const token = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 3600_000);
     await this.prisma.studentInvite.create({
@@ -181,18 +203,27 @@ export class RegistrarService {
 
   private mydaustLocal(first: string, last: string): string {
     const clean = (s: string) =>
-      s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "");
+      s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/[^a-z0-9]+/g, "");
     const f = clean(first) || "student";
     const l = clean(last);
     return l ? `${f}.${l}` : f;
   }
 
   /** A free @mydaust.com address, suffixing .2/.3… against the Person.email unique constraint. */
-  private async allocMydaustEmail(first: string, last: string): Promise<string> {
+  private async allocMydaustEmail(
+    first: string,
+    last: string,
+  ): Promise<string> {
     const base = this.mydaustLocal(first, last);
     let candidate = `${base}@mydaust.com`;
     let n = 1;
-    while (await this.prisma.person.findUnique({ where: { email: candidate } })) {
+    while (
+      await this.prisma.person.findUnique({ where: { email: candidate } })
+    ) {
       n += 1;
       candidate = `${base}.${n}@mydaust.com`;
     }
@@ -204,7 +235,8 @@ export class RegistrarService {
     const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
     const bytes = randomBytes(14);
     let out = "";
-    for (let i = 0; i < 14; i += 1) out += alphabet[bytes[i]! % alphabet.length];
+    for (let i = 0; i < 14; i += 1)
+      out += alphabet[bytes[i]! % alphabet.length];
     return out;
   }
 
@@ -214,14 +246,20 @@ export class RegistrarService {
    * Returns the temp password ONCE — never logged or audited.
    */
   async provisionLogin(actorId: string, studentId: string) {
-    const student = await this.prisma.student.findUnique({ where: { id: studentId }, include: { person: true } });
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      include: { person: true },
+    });
     if (!student) throw new NotFoundException("Student not found");
     const person = student.person;
     let email = person.email;
 
     if (!email.toLowerCase().endsWith("@mydaust.com")) {
       if (!student.personalEmail) {
-        await this.prisma.student.update({ where: { id: studentId }, data: { personalEmail: email } });
+        await this.prisma.student.update({
+          where: { id: studentId },
+          data: { personalEmail: email },
+        });
       }
       email = await this.allocMydaustEmail(person.firstName, person.lastName);
     }
@@ -229,23 +267,39 @@ export class RegistrarService {
     const tempPassword = this.randomTempPassword();
     await this.prisma.person.update({
       where: { id: person.id },
-      data: { email, passwordHash: await bcrypt.hash(tempPassword, 10), mustChangePassword: true },
+      data: {
+        email,
+        passwordHash: await bcrypt.hash(tempPassword, 10),
+        mustChangePassword: true,
+      },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "Person", entityId: person.id, action: "login-provisioned", actorId },
+      data: {
+        entity: "Person",
+        entityId: person.id,
+        action: "login-provisioned",
+        actorId,
+      },
     });
-    return { studentId, studentNo: student.studentNo, name: `${person.firstName} ${person.lastName}`, email, tempPassword };
+    return {
+      studentId,
+      studentNo: student.studentNo,
+      name: `${person.firstName} ${person.lastName}`,
+      email,
+      tempPassword,
+    };
   }
 
   /** Bulk-provision every student that has no password yet (onboards the imported cohort). */
   async provisionAllMissing(actorId: string) {
     const students = await this.prisma.student.findMany({
-      where: { person: { passwordHash: null } },
+      where: { recordStatus: "active", person: { passwordHash: null } },
       select: { id: true },
       orderBy: { studentNo: "asc" },
     });
     const credentials = [];
-    for (const s of students) credentials.push(await this.provisionLogin(actorId, s.id));
+    for (const s of students)
+      credentials.push(await this.provisionLogin(actorId, s.id));
     return { count: credentials.length, credentials };
   }
 
@@ -263,27 +317,50 @@ export class RegistrarService {
     studentId: string,
     input: { slot: string; url: string; name?: string | null },
   ) {
-    const student = await this.prisma.student.findUnique({ where: { id: studentId } });
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+    });
     if (!student) throw new NotFoundException("Student not found");
     // The six typed slots hold one document each; "other" is an open list.
     if (input.slot !== "other") {
-      await this.prisma.studentDocument.deleteMany({ where: { studentId, slot: input.slot } });
+      await this.prisma.studentDocument.deleteMany({
+        where: { studentId, slot: input.slot },
+      });
     }
     const doc = await this.prisma.studentDocument.create({
-      data: { studentId, slot: input.slot, url: input.url, name: input.name ?? null },
+      data: {
+        studentId,
+        slot: input.slot,
+        url: input.url,
+        name: input.name ?? null,
+      },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "StudentDocument", entityId: doc.id, action: "created", actorId, data: { studentId, slot: input.slot } },
+      data: {
+        entity: "StudentDocument",
+        entityId: doc.id,
+        action: "created",
+        actorId,
+        data: { studentId, slot: input.slot },
+      },
     });
     return doc;
   }
 
   async removeDocument(actorId: string, documentId: string) {
-    const doc = await this.prisma.studentDocument.findUnique({ where: { id: documentId } });
+    const doc = await this.prisma.studentDocument.findUnique({
+      where: { id: documentId },
+    });
     if (!doc) throw new NotFoundException("Document not found");
     await this.prisma.studentDocument.delete({ where: { id: documentId } });
     await this.prisma.auditLog.create({
-      data: { entity: "StudentDocument", entityId: documentId, action: "deleted", actorId, data: { studentId: doc.studentId, slot: doc.slot } },
+      data: {
+        entity: "StudentDocument",
+        entityId: documentId,
+        action: "deleted",
+        actorId,
+        data: { studentId: doc.studentId, slot: doc.slot },
+      },
     });
     return { ok: true };
   }
@@ -309,7 +386,11 @@ export class RegistrarService {
     actorId: string,
     input: { id?: string; code: string; name: string; head?: string | null },
   ) {
-    const data = { code: input.code.trim(), name: input.name.trim(), head: input.head ?? null };
+    const data = {
+      code: input.code.trim(),
+      name: input.name.trim(),
+      head: input.head ?? null,
+    };
     const dept = input.id
       ? await this.prisma.department.update({ where: { id: input.id }, data })
       : await this.prisma.department.create({ data });
@@ -333,11 +414,19 @@ export class RegistrarService {
     });
     if (!dept) throw new NotFoundException("Department not found");
     if (dept._count.programs > 0 || dept._count.courses > 0) {
-      throw new BadRequestException("Reassign this department's programmes and courses before deleting it");
+      throw new BadRequestException(
+        "Reassign this department's programmes and courses before deleting it",
+      );
     }
     await this.prisma.department.delete({ where: { id } });
     await this.prisma.auditLog.create({
-      data: { entity: "Department", entityId: id, action: "deleted", actorId, data: { code: dept.code } },
+      data: {
+        entity: "Department",
+        entityId: id,
+        action: "deleted",
+        actorId,
+        data: { code: dept.code },
+      },
     });
     return { ok: true };
   }
@@ -352,9 +441,17 @@ export class RegistrarService {
   }
 
   async createAcademicYear(actorId: string, label: string) {
-    const year = await this.prisma.academicYear.create({ data: { label: label.trim() } });
+    const year = await this.prisma.academicYear.create({
+      data: { label: label.trim() },
+    });
     await this.prisma.auditLog.create({
-      data: { entity: "AcademicYear", entityId: year.id, action: "created", actorId, data: { label } },
+      data: {
+        entity: "AcademicYear",
+        entityId: year.id,
+        action: "created",
+        actorId,
+        data: { label },
+      },
     });
     return year;
   }
@@ -369,7 +466,10 @@ export class RegistrarService {
         where: { status: "active", id: { not: id } },
         data: { status: "archived" },
       });
-      await tx.academicYear.update({ where: { id }, data: { status: "active" } });
+      await tx.academicYear.update({
+        where: { id },
+        data: { status: "active" },
+      });
       await tx.auditLog.create({
         data: {
           entity: "AcademicYear",
@@ -396,9 +496,18 @@ export class RegistrarService {
   async addGradeRow(
     actorId: string,
     schemeId: string,
-    input: { grade: string; points: number | null; minScore: number | null; maxScore: number | null },
+    input: {
+      grade: string;
+      points: number | null;
+      minScore: number | null;
+      maxScore: number | null;
+      countsTowardGpa: boolean;
+      countsTowardCredits: boolean;
+    },
   ) {
-    const scheme = await this.prisma.gradingScheme.findUnique({ where: { id: schemeId } });
+    const scheme = await this.prisma.gradingScheme.findUnique({
+      where: { id: schemeId },
+    });
     if (!scheme) throw new NotFoundException("Grading scheme not found");
     const last = await this.prisma.gradeScaleRow.findFirst({
       where: { schemeId },
@@ -407,27 +516,48 @@ export class RegistrarService {
     const row = await this.prisma.gradeScaleRow.create({
       data: { schemeId, ...input, position: (last?.position ?? -1) + 1 },
     });
-    await this.audit("GradeScaleRow", row.id, "created", actorId, { scheme: scheme.key, grade: input.grade });
+    await this.audit("GradeScaleRow", row.id, "created", actorId, {
+      scheme: scheme.key,
+      grade: input.grade,
+    });
     return row;
   }
 
   async updateGradeRow(
     actorId: string,
     rowId: string,
-    input: { grade?: string; points?: number | null; minScore?: number | null; maxScore?: number | null },
+    input: {
+      grade?: string;
+      points?: number | null;
+      minScore?: number | null;
+      maxScore?: number | null;
+      countsTowardGpa?: boolean;
+      countsTowardCredits?: boolean;
+    },
   ) {
-    const existing = await this.prisma.gradeScaleRow.findUnique({ where: { id: rowId } });
+    const existing = await this.prisma.gradeScaleRow.findUnique({
+      where: { id: rowId },
+    });
     if (!existing) throw new NotFoundException("Grade row not found");
-    const row = await this.prisma.gradeScaleRow.update({ where: { id: rowId }, data: input });
-    await this.audit("GradeScaleRow", rowId, "updated", actorId, { grade: row.grade });
+    const row = await this.prisma.gradeScaleRow.update({
+      where: { id: rowId },
+      data: input,
+    });
+    await this.audit("GradeScaleRow", rowId, "updated", actorId, {
+      grade: row.grade,
+    });
     return row;
   }
 
   async deleteGradeRow(actorId: string, rowId: string) {
-    const existing = await this.prisma.gradeScaleRow.findUnique({ where: { id: rowId } });
+    const existing = await this.prisma.gradeScaleRow.findUnique({
+      where: { id: rowId },
+    });
     if (!existing) throw new NotFoundException("Grade row not found");
     await this.prisma.gradeScaleRow.delete({ where: { id: rowId } });
-    await this.audit("GradeScaleRow", rowId, "deleted", actorId, { grade: existing.grade });
+    await this.audit("GradeScaleRow", rowId, "deleted", actorId, {
+      grade: existing.grade,
+    });
     return { ok: true };
   }
 
@@ -469,7 +599,9 @@ export class RegistrarService {
       waitlistEnabled?: boolean;
     },
   ) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId } });
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+    });
     if (!course) throw new NotFoundException("Course not found");
 
     const rule = await this.prisma.courseRule.upsert({
@@ -498,18 +630,36 @@ export class RegistrarService {
   async setCourseRequisites(
     actorId: string,
     courseId: string,
-    input: { prerequisites: { code: string; minGrade?: string | null }[]; corequisites: string[] },
+    input: {
+      prerequisites: { code: string; minGrade?: string | null }[];
+      corequisites: string[];
+    },
   ) {
-    const course = await this.prisma.course.findUnique({ where: { id: courseId } });
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+    });
     if (!course) throw new NotFoundException("Course not found");
 
-    const codes = [...input.prerequisites.map((p) => p.code), ...input.corequisites];
-    const referenced = await this.prisma.course.findMany({ where: { code: { in: codes } } });
+    const codes = [
+      ...input.prerequisites.map((p) => p.code),
+      ...input.corequisites,
+    ];
+    const referenced = await this.prisma.course.findMany({
+      where: { code: { in: codes } },
+    });
     const idByCode = new Map(referenced.map((c) => [c.code, c.id]));
     const missing = codes.filter((c) => !idByCode.has(c));
-    if (missing.length > 0) throw new BadRequestException(`Unknown course code(s): ${missing.join(", ")}`);
-    if (input.prerequisites.some((p) => idByCode.get(p.code) === courseId) || input.corequisites.includes(course.code)) {
-      throw new BadRequestException("A course cannot be its own prerequisite or corequisite");
+    if (missing.length > 0)
+      throw new BadRequestException(
+        `Unknown course code(s): ${missing.join(", ")}`,
+      );
+    if (
+      input.prerequisites.some((p) => idByCode.get(p.code) === courseId) ||
+      input.corequisites.includes(course.code)
+    ) {
+      throw new BadRequestException(
+        "A course cannot be its own prerequisite or corequisite",
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -517,11 +667,17 @@ export class RegistrarService {
       await tx.courseCorequisite.deleteMany({ where: { courseId } });
       for (const p of input.prerequisites) {
         await tx.coursePrerequisite.create({
-          data: { courseId, prereqCourseId: idByCode.get(p.code)!, minGrade: p.minGrade ?? null },
+          data: {
+            courseId,
+            prereqCourseId: idByCode.get(p.code)!,
+            minGrade: p.minGrade ?? null,
+          },
         });
       }
       for (const code of input.corequisites) {
-        await tx.courseCorequisite.create({ data: { courseId, coreqCourseId: idByCode.get(code)! } });
+        await tx.courseCorequisite.create({
+          data: { courseId, coreqCourseId: idByCode.get(code)! },
+        });
       }
     });
     await this.audit("Course", courseId, "requisites-updated", actorId, {
@@ -538,6 +694,10 @@ export class RegistrarService {
     const submissions = await this.prisma.gradeSubmission.findMany({
       orderBy: { submittedAt: "desc" },
       include: {
+        items: {
+          include: { student: { include: { person: true } } },
+          orderBy: { createdAt: "asc" },
+        },
         section: {
           include: {
             course: true,
@@ -553,12 +713,22 @@ export class RegistrarService {
     });
     return submissions.map((s) => {
       const roster = s.section.enrollments;
-      const grades = roster.map((e) => ({
-        name: `${e.student.person.firstName} ${e.student.person.lastName}`,
-        grade: e.grade,
-      }));
+      const reviewedItems = s.items.filter(
+        (item) => item.version === s.version,
+      );
+      const grades =
+        reviewedItems.length > 0
+          ? reviewedItems.map((item) => ({
+              name: `${item.student.person.firstName} ${item.student.person.lastName}`,
+              grade: item.grade,
+            }))
+          : roster.map((e) => ({
+              name: `${e.student.person.firstName} ${e.student.person.lastName}`,
+              grade: e.grade,
+            }));
       return {
         id: s.id,
+        version: s.version,
         status: s.status,
         submittedAt: s.submittedAt,
         approvedAt: s.approvedAt,
@@ -569,7 +739,7 @@ export class RegistrarService {
         instructor: s.section.instructor
           ? `${s.section.instructor.firstName} ${s.section.instructor.lastName}`
           : null,
-        students: roster.length,
+        students: grades.length,
         graded: grades.filter((g) => g.grade).length,
         grades,
       };
@@ -586,31 +756,147 @@ export class RegistrarService {
     decision: "approved" | "returned",
     note?: string,
   ) {
-    const submission = await this.prisma.gradeSubmission.findUnique({ where: { id } });
+    const submission = await this.prisma.gradeSubmission.findUnique({
+      where: { id },
+    });
     if (!submission) throw new NotFoundException("Grade submission not found");
+    if (submission.status === decision) return submission;
     if (submission.status !== "submitted") {
-      throw new BadRequestException("Only submitted grades can be approved or returned");
+      throw new BadRequestException(
+        "Only submitted grades can be approved or returned",
+      );
     }
 
-    const updated = await this.prisma.gradeSubmission.update({
-      where: { id },
-      data: {
-        status: decision,
-        approvedById: actorId,
-        approvedAt: new Date(),
-        note: note ?? null,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const reviewedAt = new Date();
+      const claimed = await tx.gradeSubmission.updateMany({
+        where: { id, status: "submitted" },
+        data: {
+          status: decision,
+          approvedById: decision === "approved" ? actorId : null,
+          approvedAt: decision === "approved" ? reviewedAt : null,
+          note: note ?? null,
+        },
+      });
+      if (claimed.count !== 1) {
+        const current = await tx.gradeSubmission.findUnique({ where: { id } });
+        if (current?.status === decision) return current;
+        throw new BadRequestException(
+          "This grade submission was already reviewed",
+        );
+      }
+
+      const current = await tx.gradeSubmission.findUnique({
+        where: { id },
+        include: {
+          items: true,
+          section: { include: { course: true, term: true } },
+        },
+      });
+      if (!current) throw new NotFoundException("Grade submission not found");
+      const items = current.items.filter(
+        (item) => item.version === current.version,
+      );
+      if (items.length === 0 || items.some((item) => !item.grade)) {
+        throw new BadRequestException(
+          "The reviewed grade snapshot is empty or incomplete",
+        );
+      }
+
+      const enrollmentIds = items.map((item) => item.enrollmentId);
+
+      if (decision === "returned") {
+        await tx.enrollment.updateMany({
+          where: { id: { in: enrollmentIds }, status: "completed" },
+          data: { status: "enrolled" },
+        });
+      } else {
+        const activeEnrollments = await tx.enrollment.findMany({
+          where: { sectionId: current.sectionId, status: "enrolled" },
+          select: { id: true },
+        });
+        const snapshotEnrollmentIds = new Set(enrollmentIds);
+        if (
+          activeEnrollments.length !== snapshotEnrollmentIds.size ||
+          activeEnrollments.some(
+            (enrollment) => !snapshotEnrollmentIds.has(enrollment.id),
+          )
+        ) {
+          throw new BadRequestException(
+            "The section roster changed after submission; return it for correction",
+          );
+        }
+
+        for (const item of items) {
+          const existing = await tx.transcriptEntry.findUnique({
+            where: { enrollmentId: item.enrollmentId },
+          });
+          if (existing && existing.gradeSubmissionItemId !== item.id) {
+            throw new BadRequestException(
+              `Enrollment ${item.enrollmentId} already has a different official transcript entry`,
+            );
+          }
+          if (!existing) {
+            await tx.transcriptEntry.create({
+              data: {
+                studentId: item.studentId,
+                source: "approved_enrollment",
+                sourceKey: `enrollment:${item.enrollmentId}`,
+                gradeSubmissionItemId: item.id,
+                enrollmentId: item.enrollmentId,
+                courseId: item.courseId,
+                termId: item.termId,
+                courseCode: item.courseCode,
+                courseTitle: item.courseTitle,
+                termLabel: item.termLabel,
+                termSortKey: `${current.section.term.startDate
+                  .toISOString()
+                  .slice(0, 10)}:${item.termLabel}`,
+                grade: item.grade!,
+                credits: item.credits,
+                earnedCredits: item.countsTowardCredits ? item.credits : 0,
+                gradePoints: item.gradePoints,
+                countsTowardGpa:
+                  item.countsTowardGpa && item.gradePoints !== null,
+                countsTowardCredits: item.countsTowardCredits,
+                requirementCategory: current.section.course.requirementCategory,
+                createdById: actorId,
+                updatedById: actorId,
+              },
+            });
+          }
+          const published = await tx.enrollment.updateMany({
+            where: {
+              id: item.enrollmentId,
+              sectionId: current.sectionId,
+              status: "enrolled",
+            },
+            data: { grade: item.grade, status: "completed" },
+          });
+          if (published.count !== 1) {
+            throw new BadRequestException(
+              "The section roster changed after submission; return it for correction",
+            );
+          }
+        }
+      }
+
+      await tx.auditLog.create({
+        data: {
+          entity: "GradeSubmission",
+          entityId: id,
+          action: `grades-${decision}`,
+          actorId,
+          data: {
+            sectionId: current.sectionId,
+            version: current.version,
+            count: items.length,
+            note: note ?? null,
+          },
+        },
+      });
+      return tx.gradeSubmission.findUniqueOrThrow({ where: { id } });
     });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "GradeSubmission",
-        entityId: id,
-        action: `grades-${decision}`,
-        actorId,
-        data: { sectionId: submission.sectionId, note: note ?? null },
-      },
-    });
-    return updated;
   }
 
   // --- Student success (early alert) --------------------------------------
@@ -619,44 +905,58 @@ export class RegistrarService {
    * Students below the GPA or attendance threshold. Computed live rather than
    * stored, so the list always reflects current grades and attendance.
    */
-  async studentSuccess(actorId: string, minGpa = DEFAULT_MIN_GPA, minAttendance = DEFAULT_MIN_ATTENDANCE) {
+  async studentSuccess(
+    actorId: string,
+    minGpa = DEFAULT_MIN_GPA,
+    minAttendance = DEFAULT_MIN_ATTENDANCE,
+  ) {
     // "Warnings sent this term" is scoped to the active term's date range; falls
     // back to all-time only when no term is marked active.
-    const activeTerm = await this.prisma.term.findFirst({ where: { status: "active" } });
+    const activeTerm = await this.prisma.term.findFirst({
+      where: { status: "active" },
+    });
     const warnWhere = activeTerm
       ? { warnedAt: { gte: activeTerm.startDate, lte: activeTerm.endDate } }
       : { warnedAt: { not: null } };
     const [students, watched, warningsSent] = await Promise.all([
       this.prisma.student.findMany({
+        where: { recordStatus: "active" },
         include: {
           person: true,
           program: true,
+          transcriptEntries: { where: { voidedAt: null } },
           enrollments: {
-            include: { section: { include: { course: true } }, attendance: true },
+            include: {
+              section: { include: { course: true } },
+              attendance: true,
+            },
           },
           alerts: { orderBy: { createdAt: "desc" }, take: 1 },
         },
       }),
-      this.prisma.staffWatch.findMany({ where: { personId: actorId }, select: { studentId: true } }),
+      this.prisma.staffWatch.findMany({
+        where: { personId: actorId },
+        select: { studentId: true },
+      }),
       this.prisma.studentAlert.count({ where: warnWhere }),
     ]);
     const watchedIds = new Set(watched.map((w) => w.studentId));
 
     const rows = students.map((s) => {
-      const graded = s.enrollments
-        .filter((e) => e.status === "completed" && e.grade)
-        .map((e) => ({ grade: e.grade!, credits: e.section.course.credits }));
-      const { gpa } = computeGpa(graded);
+      const transcript = summarizeTranscriptRows(s.transcriptEntries);
+      const { gpa } = transcript;
 
       const records = s.enrollments.flatMap((e) => e.attendance);
       const present = records.filter((a) => a.status === "present").length;
       const late = records.filter((a) => a.status === "late").length;
       const attendance =
-        records.length === 0 ? null : Math.round(((present + late * 0.5) / records.length) * 100);
+        records.length === 0
+          ? null
+          : Math.round(((present + late * 0.5) / records.length) * 100);
 
       const flags: string[] = [];
       // A student with no graded credits yet is not "below" the GPA bar.
-      const gpaFlagged = graded.length > 0 && gpa < minGpa;
+      const gpaFlagged = transcript.attemptedCredits > 0 && gpa < minGpa;
       if (gpaFlagged) flags.push(`GPA ${gpa.toFixed(2)} below ${minGpa}`);
       if (attendance !== null && attendance < minAttendance) {
         flags.push(`Attendance ${attendance}% below ${minAttendance}%`);
@@ -664,7 +964,8 @@ export class RegistrarService {
 
       // Critical ("At risk") once a student misses both bars, or sits well under
       // either; a single, milder breach is a "Watch".
-      const severe = (gpaFlagged && gpa < 2.0) || (attendance !== null && attendance < 60);
+      const severe =
+        (gpaFlagged && gpa < 2.0) || (attendance !== null && attendance < 60);
       const level = flags.length >= 2 || severe ? "critical" : "warning";
 
       return {
@@ -693,11 +994,20 @@ export class RegistrarService {
   }
 
   /** Record that a flagged student has been warned, so the list shows follow-up. */
-  async warnStudent(actorId: string, studentId: string, reason: string, level = "warning") {
+  async warnStudent(
+    actorId: string,
+    studentId: string,
+    reason: string,
+    level = "warning",
+  ) {
     const alert = await this.prisma.studentAlert.create({
       data: { studentId, reason, level, warnedAt: new Date() },
     });
-    await this.audit("StudentAlert", alert.id, "student-warned", actorId, { studentId, reason, level });
+    await this.audit("StudentAlert", alert.id, "student-warned", actorId, {
+      studentId,
+      reason,
+      level,
+    });
     return alert;
   }
 
@@ -717,7 +1027,9 @@ export class RegistrarService {
   }
 
   async watchStudent(personId: string, studentId: string) {
-    const student = await this.prisma.student.findUnique({ where: { id: studentId } });
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+    });
     if (!student) throw new NotFoundException("Student not found");
     await this.prisma.staffWatch.upsert({
       where: { personId_studentId: { personId, studentId } },
@@ -755,7 +1067,11 @@ export class RegistrarService {
   async listCalendar(academicYearId?: string) {
     const yearId =
       academicYearId ??
-      (await this.prisma.academicYear.findFirst({ where: { status: "active" } }))?.id;
+      (
+        await this.prisma.academicYear.findFirst({
+          where: { status: "active" },
+        })
+      )?.id;
     if (!yearId) return [];
     return this.prisma.calendarEvent.findMany({
       where: { academicYearId: yearId },
@@ -765,7 +1081,14 @@ export class RegistrarService {
 
   async createCalendarEvent(
     actorId: string,
-    input: { academicYearId: string; title: string; type: string; startsOn: string; endsOn?: string; note?: string },
+    input: {
+      academicYearId: string;
+      title: string;
+      type: string;
+      startsOn: string;
+      endsOn?: string;
+      note?: string;
+    },
   ) {
     const event = await this.prisma.calendarEvent.create({
       data: {
@@ -777,36 +1100,56 @@ export class RegistrarService {
         note: input.note ?? null,
       },
     });
-    await this.audit("CalendarEvent", event.id, "created", actorId, { title: input.title });
+    await this.audit("CalendarEvent", event.id, "created", actorId, {
+      title: input.title,
+    });
     return event;
   }
 
   async updateCalendarEvent(
     actorId: string,
     id: string,
-    input: { title?: string; type?: string; startsOn?: string; endsOn?: string | null; note?: string | null },
+    input: {
+      title?: string;
+      type?: string;
+      startsOn?: string;
+      endsOn?: string | null;
+      note?: string | null;
+    },
   ) {
-    const existing = await this.prisma.calendarEvent.findUnique({ where: { id } });
+    const existing = await this.prisma.calendarEvent.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Calendar event not found");
     const event = await this.prisma.calendarEvent.update({
       where: { id },
       data: {
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.type !== undefined ? { type: input.type } : {}),
-        ...(input.startsOn !== undefined ? { startsOn: new Date(input.startsOn) } : {}),
-        ...(input.endsOn !== undefined ? { endsOn: input.endsOn ? new Date(input.endsOn) : null } : {}),
+        ...(input.startsOn !== undefined
+          ? { startsOn: new Date(input.startsOn) }
+          : {}),
+        ...(input.endsOn !== undefined
+          ? { endsOn: input.endsOn ? new Date(input.endsOn) : null }
+          : {}),
         ...(input.note !== undefined ? { note: input.note } : {}),
       },
     });
-    await this.audit("CalendarEvent", id, "updated", actorId, { title: event.title });
+    await this.audit("CalendarEvent", id, "updated", actorId, {
+      title: event.title,
+    });
     return event;
   }
 
   async deleteCalendarEvent(actorId: string, id: string) {
-    const existing = await this.prisma.calendarEvent.findUnique({ where: { id } });
+    const existing = await this.prisma.calendarEvent.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Calendar event not found");
     await this.prisma.calendarEvent.delete({ where: { id } });
-    await this.audit("CalendarEvent", id, "deleted", actorId, { title: existing.title });
+    await this.audit("CalendarEvent", id, "deleted", actorId, {
+      title: existing.title,
+    });
     return { ok: true };
   }
 
@@ -833,27 +1176,55 @@ export class RegistrarService {
   async updateTerm(
     actorId: string,
     id: string,
-    input: { status?: string; startDate?: string; endDate?: string; addDeadline?: string | null; dropDeadline?: string | null },
+    input: {
+      status?: string;
+      startDate?: string;
+      endDate?: string;
+      addDeadline?: string | null;
+      dropDeadline?: string | null;
+    },
   ) {
     const existing = await this.prisma.term.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Term not found");
 
     const term = await this.prisma.$transaction(async (tx) => {
       if (input.status === "active") {
-        await tx.term.updateMany({ where: { status: "active", id: { not: id } }, data: { status: "planning" } });
+        await tx.term.updateMany({
+          where: { status: "active", id: { not: id } },
+          data: { status: "planning" },
+        });
       }
       return tx.term.update({
         where: { id },
         data: {
           ...(input.status !== undefined ? { status: input.status } : {}),
-          ...(input.startDate !== undefined ? { startDate: new Date(input.startDate) } : {}),
-          ...(input.endDate !== undefined ? { endDate: new Date(input.endDate) } : {}),
-          ...(input.addDeadline !== undefined ? { addDeadline: input.addDeadline ? new Date(input.addDeadline) : null } : {}),
-          ...(input.dropDeadline !== undefined ? { dropDeadline: input.dropDeadline ? new Date(input.dropDeadline) : null } : {}),
+          ...(input.startDate !== undefined
+            ? { startDate: new Date(input.startDate) }
+            : {}),
+          ...(input.endDate !== undefined
+            ? { endDate: new Date(input.endDate) }
+            : {}),
+          ...(input.addDeadline !== undefined
+            ? {
+                addDeadline: input.addDeadline
+                  ? new Date(input.addDeadline)
+                  : null,
+              }
+            : {}),
+          ...(input.dropDeadline !== undefined
+            ? {
+                dropDeadline: input.dropDeadline
+                  ? new Date(input.dropDeadline)
+                  : null,
+              }
+            : {}),
         },
       });
     });
-    await this.audit("Term", id, "updated", actorId, { name: term.name, status: term.status });
+    await this.audit("Term", id, "updated", actorId, {
+      name: term.name,
+      status: term.status,
+    });
     return term;
   }
 
@@ -863,13 +1234,20 @@ export class RegistrarService {
     const [program, year, courses] = await Promise.all([
       this.prisma.program.findUnique({ where: { code: programCode } }),
       this.prisma.academicYear.findUnique({ where: { id: academicYearId } }),
-      this.prisma.course.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true, title: true, credits: true } }),
+      this.prisma.course.findMany({
+        orderBy: { code: "asc" },
+        select: { id: true, code: true, title: true, credits: true },
+      }),
     ]);
     if (!program) throw new NotFoundException("Programme not found");
     if (!year) throw new NotFoundException("Academic year not found");
     const curriculum = await this.prisma.curriculum.findUnique({
-      where: { programId_academicYearId: { programId: program.id, academicYearId } },
-      include: { entries: { include: { course: true }, orderBy: { position: "asc" } } },
+      where: {
+        programId_academicYearId: { programId: program.id, academicYearId },
+      },
+      include: {
+        entries: { include: { course: true }, orderBy: { position: "asc" } },
+      },
     });
     return {
       programCode,
@@ -892,14 +1270,22 @@ export class RegistrarService {
     academicYearId: string,
     entries: { yearIndex: number; semester: string; courseCode: string }[],
   ) {
-    const program = await this.prisma.program.findUnique({ where: { code: programCode } });
+    const program = await this.prisma.program.findUnique({
+      where: { code: programCode },
+    });
     if (!program) throw new NotFoundException("Programme not found");
     const programId = program.id;
     const codes = [...new Set(entries.map((e) => e.courseCode))];
-    const courses = await this.prisma.course.findMany({ where: { code: { in: codes } }, select: { id: true, code: true } });
+    const courses = await this.prisma.course.findMany({
+      where: { code: { in: codes } },
+      select: { id: true, code: true },
+    });
     const idByCode = new Map(courses.map((c) => [c.code, c.id]));
     const missing = codes.filter((c) => !idByCode.has(c));
-    if (missing.length > 0) throw new BadRequestException(`Unknown course code(s): ${missing.join(", ")}`);
+    if (missing.length > 0)
+      throw new BadRequestException(
+        `Unknown course code(s): ${missing.join(", ")}`,
+      );
 
     await this.prisma.$transaction(async (tx) => {
       const curriculum = await tx.curriculum.upsert({
@@ -907,7 +1293,9 @@ export class RegistrarService {
         update: {},
         create: { programId, academicYearId },
       });
-      await tx.curriculumEntry.deleteMany({ where: { curriculumId: curriculum.id } });
+      await tx.curriculumEntry.deleteMany({
+        where: { curriculumId: curriculum.id },
+      });
       await tx.curriculumEntry.createMany({
         data: entries.map((e, i) => ({
           curriculumId: curriculum.id,
@@ -918,13 +1306,31 @@ export class RegistrarService {
         })),
       });
     });
-    await this.audit("Curriculum", `${programCode}:${academicYearId}`, "saved", actorId, { entries: entries.length });
+    await this.audit(
+      "Curriculum",
+      `${programCode}:${academicYearId}`,
+      "saved",
+      actorId,
+      { entries: entries.length },
+    );
     return { ok: true };
   }
 
-  private audit(entity: string, entityId: string, action: string, actorId: string, data: object) {
+  private audit(
+    entity: string,
+    entityId: string,
+    action: string,
+    actorId: string,
+    data: object,
+  ) {
     return this.prisma.auditLog.create({
-      data: { entity, entityId, action, actorId, data: data as Prisma.InputJsonValue },
+      data: {
+        entity,
+        entityId,
+        action,
+        actorId,
+        data: data as Prisma.InputJsonValue,
+      },
     });
   }
 }

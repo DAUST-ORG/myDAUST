@@ -2,22 +2,33 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   BookOpen,
   ClipboardList,
   FileQuestion,
   FileText,
   File as FileIcon,
   Link2,
+  Trash2,
   Upload,
 } from "lucide-react";
-import { Card, EmptyState } from "@/components/ui";
+import { Card, EmptyState, IconButton } from "@/components/ui";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CourseTabs, courseTitle } from "../CourseTabs";
-import { type TeachingSection, getTeaching, uploadFile } from "@/lib/api";
+import {
+  type TeachingSection,
+  fileUrl,
+  getTeaching,
+  uploadFile,
+} from "@/lib/api";
 import {
   type MaterialCategory,
   type SectionMaterial,
   createSectionMaterial,
+  deleteSectionMaterial,
   getSectionMaterials,
+  reorderSectionMaterials,
 } from "@/lib/api-faculty";
 
 const CATEGORIES: { key: MaterialCategory; label: string; icon: typeof FileText }[] = [
@@ -34,6 +45,8 @@ export default function FacultyMaterials() {
   const [materials, setMaterials] = useState<SectionMaterial[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [uploading, setUploading] = useState<MaterialCategory | null>(null);
+  const [moving, setMoving] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<SectionMaterial | null>(null);
 
   useEffect(() => {
     getTeaching()
@@ -73,6 +86,37 @@ export default function FacultyMaterials() {
     } finally {
       setUploading(null);
     }
+  }
+
+  async function move(material: SectionMaterial, dir: -1 | 1) {
+    setMoving(material.id);
+    setMsg(null);
+    try {
+      const sameCategory = materials.filter((m) => m.category === material.category);
+      const idx = sameCategory.findIndex((m) => m.id === material.id);
+      const neighbor = sameCategory[idx + dir];
+      if (!neighbor) return;
+      const next = [...materials];
+      const a = next.findIndex((m) => m.id === material.id);
+      const b = next.findIndex((m) => m.id === neighbor.id);
+      const itemA = next[a];
+      const itemB = next[b];
+      if (!itemA || !itemB) return;
+      next[a] = itemB;
+      next[b] = itemA;
+      setMaterials(await reorderSectionMaterials(sectionId, next.map((m) => m.id)));
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setMoving(null);
+    }
+  }
+
+  async function remove() {
+    if (!removing) return;
+    await deleteSectionMaterial(removing.id);
+    setRemoving(null);
+    load();
   }
 
   return (
@@ -156,39 +200,73 @@ export default function FacultyMaterials() {
 
                   {files.length > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-                      {files.map((m) => (
-                        <a
+                      {files.map((m, i) => (
+                        <div
                           key={m.id}
-                          href={m.fileUrl ?? "#"}
-                          target="_blank"
-                          rel="noreferrer"
                           style={{
                             display: "flex",
                             alignItems: "center",
-                            gap: 10,
+                            gap: 8,
                             background: "var(--bg-subtle)",
                             border: "1px solid var(--border)",
                             borderRadius: 9,
-                            padding: "9px 13px",
-                            color: "inherit",
-                            textDecoration: "none",
+                            padding: "6px 8px 6px 13px",
                           }}
                         >
-                          <FileIcon size={15} color="var(--daust-navy)" />
-                          <span
+                          <a
+                            href={m.fileUrl ? fileUrl(m.fileUrl) : "#"}
+                            target="_blank"
+                            rel="noreferrer"
                             style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
                               flex: 1,
                               minWidth: 0,
-                              fontSize: 12.5,
-                              fontWeight: 500,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
+                              color: "inherit",
+                              textDecoration: "none",
                             }}
                           >
-                            {m.fileName ?? m.title}
-                          </span>
-                        </a>
+                            <FileIcon size={15} color="var(--daust-navy)" />
+                            <span
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                fontSize: 12.5,
+                                fontWeight: 500,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {m.fileName ?? m.title}
+                            </span>
+                          </a>
+                          <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                            <IconButton
+                              label={`Move ${m.fileName ?? m.title} up`}
+                              disabled={moving !== null || i === 0}
+                              onClick={() => move(m, -1)}
+                            >
+                              <ArrowUp size={13} />
+                            </IconButton>
+                            <IconButton
+                              label={`Move ${m.fileName ?? m.title} down`}
+                              disabled={moving !== null || i === files.length - 1}
+                              onClick={() => move(m, 1)}
+                            >
+                              <ArrowDown size={13} />
+                            </IconButton>
+                            <IconButton
+                              label={`Remove ${m.fileName ?? m.title}`}
+                              tone="danger"
+                              disabled={moving !== null}
+                              onClick={() => setRemoving(m)}
+                            >
+                              <Trash2 size={13} />
+                            </IconButton>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -197,6 +275,22 @@ export default function FacultyMaterials() {
             })}
           </div>
         </>
+      )}
+
+      {removing && (
+        <ConfirmDialog
+          title="Remove material from course?"
+          confirmLabel="Remove material"
+          message={
+            <>
+              Remove <strong>{removing.fileName ?? removing.title}</strong> from
+              this course? Students will lose access immediately, and this
+              course material record cannot be restored in the portal.
+            </>
+          }
+          onClose={() => setRemoving(null)}
+          onConfirm={remove}
+        />
       )}
     </>
   );

@@ -157,9 +157,16 @@ jobs:
                   --query 'services[0].taskDefinition' --output text)
             # Re-register the current definition with only the image swapped.
             aws ecs describe-task-definition --task-definition "$TD" --query 'taskDefinition' --output json \
-              | jq --arg img "$ECR/daust-$SVC:$TAG" \
+              | jq --arg img "$ECR/daust-$SVC:$TAG" --arg svc "$SVC" \
+                   --arg transcript_bucket "daust-$ENV_NAME-transcript-imports-961828155948" \
                    'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
-                    | .containerDefinitions[0].image = $img' > td.json
+                    | .containerDefinitions[0].image = $img
+                    | if $svc == "api" then
+                        .containerDefinitions[0].environment =
+                          ((.containerDefinitions[0].environment // [])
+                           | map(select(.name != "TRANSCRIPT_IMPORT_BUCKET"))
+                           + [{"name":"TRANSCRIPT_IMPORT_BUCKET","value":$transcript_bucket}])
+                      else . end' > td.json
             NEW=$(aws ecs register-task-definition --cli-input-json file://td.json \
                   --query 'taskDefinition.taskDefinitionArn' --output text)
             aws ecs update-service --cluster "$CLUSTER" --service "daust-$ENV_NAME-$SVC" \
