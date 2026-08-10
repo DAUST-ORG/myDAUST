@@ -2773,7 +2773,7 @@ export class AcademicsService {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     return this.prisma.sectionMaterial.findMany({
       where: { sectionId },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
   }
 
@@ -2824,6 +2824,61 @@ export class AcademicsService {
     return this.prisma.sectionMaterial.update({
       where: { id: materialId },
       data: { published: !material.published },
+    });
+  }
+
+  async deleteSectionMaterial(
+    materialId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    const material = await this.prisma.sectionMaterial.findUnique({
+      where: { id: materialId },
+    });
+    if (!material) throw new NotFoundException("Material not found");
+    await this.assertSectionOwner(material.sectionId, personId, isAdmin);
+    await this.prisma.$transaction([
+      this.prisma.sectionMaterial.delete({ where: { id: materialId } }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "SectionMaterial",
+          entityId: materialId,
+          action: "deleted",
+          actorId: personId,
+        },
+      }),
+    ]);
+    return { ok: true };
+  }
+
+  async reorderSectionMaterials(
+    sectionId: string,
+    orderedIds: string[],
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    const materials = await this.prisma.sectionMaterial.findMany({
+      where: { sectionId },
+      select: { id: true },
+    });
+    const existing = new Set(materials.map((m) => m.id));
+    if (orderedIds.some((id) => !existing.has(id)) || orderedIds.length !== existing.size) {
+      throw new BadRequestException(
+        "orderedIds must contain exactly the section's materials",
+      );
+    }
+    await this.prisma.$transaction(
+      orderedIds.map((id, index) =>
+        this.prisma.sectionMaterial.update({
+          where: { id },
+          data: { sortOrder: index },
+        }),
+      ),
+    );
+    return this.prisma.sectionMaterial.findMany({
+      where: { sectionId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
   }
 
