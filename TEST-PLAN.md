@@ -548,10 +548,11 @@ Data: `getTeaching`, `submitGrades(sectionId, grades, finalize)`.
 | ID | Tags | Steps | Expected |
 |---|---|---|---|
 | FAC-GRD-001 | FUNC | Pick a section, set grades, Save (not finalize) | Grades persist as draft; audit `grades-saved`. |
-| FAC-GRD-002 | FUNC | Set grades + "Submit for approval" (finalize) | `gradeSubmission` status submitted; graded enrollments → completed (feed GPA); audit `grades-finalized`; appears in registrar Grade Approvals. |
+| FAC-GRD-002 | FUNC | Set grades + "Submit for approval" (finalize) | A versioned roster/grade snapshot is stored and `gradeSubmission` becomes Submitted; enrollments remain Enrolled and no transcript/GPA entry is published; audit `grades-finalized`; appears in registrar Grade Approvals. |
 | FAC-GRD-003 | AUTHZ | `POST /api/academics/sections/:id/grades` for a section Ba doesn't teach | 403 "You do not teach this section". |
 | FAC-GRD-004 | NEG | Submit invalid grade value | 400 validation. |
-| FAC-GRD-005 | FUNC | Verify a graded student's GPA downstream | Student `/student/grades` reflects the finalized grade. |
+| FAC-GRD-005 | FUNC | Approve the submission as registrar, then verify GPA downstream | Student `/student/grades` reflects the approved transcript entry, not faculty finalization alone. |
+| FAC-GRD-006 | STATE | Attempt Save or Submit while status is Submitted or Approved | 400 lock response; no grades, snapshot, or audit row changes. Returned submissions can be corrected and resubmitted as a new version. |
 
 ### 4.3 Gradebook — `/faculty/gradebook` — `FAC-GB`
 
@@ -777,8 +778,25 @@ filter by course; decide (approved / returned + note). Data: `getGradeApprovals`
 | ID | Tags | Steps | Expected |
 |---|---|---|---|
 | REG-GA-001 | FUNC | (After FAC-GRD-002) Load approvals | The faculty submission appears as Submitted. |
-| REG-GA-002 | FUNC | Approve it | Status Approved; audit; grades locked. |
-| REG-GA-003 | FUNC | Return it with a note | Status Returned; faculty sees the note; can resubmit. |
+| REG-GA-002 | FUNC,DATA | Approve it; repeat the same approval request | In one transaction, the reviewed snapshot is copied once to the transcript ledger, matching enrollments become Completed, status becomes Approved, and `grades-approved` is audited. Repeating approval is idempotent and creates no duplicate entries. |
+| REG-GA-003 | FUNC,DATA | Return it with a note | Status Returned; no transcript entry is created and the enrollment remains Enrolled; faculty sees the note and can resubmit. |
+| REG-GA-004 | POLICY | Approve I, P, and F grades | I: no GPA/no earned credit; P: no GPA/full earned credit; F: zero points included in attempted GPA/no earned credit. |
+| REG-GA-005 | CONC,DATA | Add or drop a student after faculty submission, then attempt approval | Approval rejects exact-roster drift and publishes nothing; Return remains available so faculty can submit a corrected snapshot. A dropped enrollment is never restored to Completed. |
+
+### 5.14a Independent Transcript Ledger — `REG-TR`
+
+The official GPA, degree progress, student/parent grade views, student-success rules, and printable
+transcript must read non-voided `TranscriptEntry` rows. Mutable enrollment grades are draft/review
+state only. Registrar/admin manual create, edit, void, and restore operations must be reasoned and
+audited; snapshot course/term labels remain authoritative even when a current catalog link exists.
+
+| ID | Tags | Steps | Expected |
+|---|---|---|---|
+| REG-TR-001 | FUNC | Open a student with legacy and newly approved history | Both sources appear in one transcript; GPA and credits are calculated only from non-voided ledger rows. |
+| REG-TR-002 | FUNC,AUDIT | Manually add/edit an unmatched historical course, then void and restore it with reasons | Each mutation is audited; void immediately removes the row from GPA/credit totals and restore adds it back. |
+| REG-TR-003 | DATA | Import the same historical source twice or retry a partial batch | Source hash and row source keys prevent duplicate ledger entries; counts and errors reconcile to source rows. |
+| REG-TR-004 | MIGRATION | Apply the transcript migration to a production snapshot | Approved/pre-workflow completed grades backfill once; Submitted/Returned grades do not publish and any prematurely Completed enrollment is reopened. |
+| REG-TR-005 | POLICY | Use an approved P grade as a prerequisite/corequisite | P satisfies a requirement with no minimum grade; a requirement with a numeric minimum remains unmet because P has no comparable grade points. |
 
 ### 5.15 Faculty & Staff — `/admin/staff` — `REG-STF`
 

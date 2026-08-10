@@ -1,8 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Check, CheckCircle2, Plus, SlidersHorizontal } from "lucide-react";
-import { Avatar, Button, Card, EmptyState, Field, Input, Modal, Select } from "@/components/ui";
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Plus,
+  SlidersHorizontal,
+} from "lucide-react";
+import {
+  Avatar,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Modal,
+  Select,
+} from "@/components/ui";
 import { CourseTabs } from "../CourseTabs";
 import {
   type SectionAssignment,
@@ -24,7 +39,12 @@ const CATEGORIES = [
 ] as const;
 
 function category(type: string): { label: string; color: string } {
-  return CATEGORIES.find((c) => c.value === type) ?? { label: type, color: "var(--daust-steel)" };
+  return (
+    CATEGORIES.find((c) => c.value === type) ?? {
+      label: type,
+      color: "var(--daust-steel)",
+    }
+  );
 }
 
 function letterFor(pct: number): string {
@@ -55,7 +75,13 @@ interface Student {
 type ScoreCell = { submissionId: string | null; score: number | null };
 type ScoreMap = Record<string, Record<string, ScoreCell>>;
 
-const BLANK_ITEM = { title: "", type: "quiz", weight: "10", maxPoints: "20", dueDate: "" };
+const BLANK_ITEM = {
+  title: "",
+  type: "quiz",
+  weight: "10",
+  maxPoints: "20",
+  dueDate: "",
+};
 
 export default function FacultyGradebook() {
   const [sections, setSections] = useState<TeachingSection[] | null>(null);
@@ -66,6 +92,7 @@ export default function FacultyGradebook() {
   const [showCols, setShowCols] = useState(false);
   const [newItem, setNewItem] = useState(BLANK_ITEM);
   const [msg, setMsg] = useState<string | null>(null);
+  const [itemError, setItemError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -77,29 +104,50 @@ export default function FacultyGradebook() {
       .catch((e: Error) => setMsg(e.message));
   }, []);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     if (!sectionId) return;
-    Promise.all([getFacultyGradebook(sectionId), getSectionAssignments(sectionId)])
-      .then(async ([gb, sa]) => {
-        setStudents(gb.students.map((s) => ({ enrollmentId: s.enrollmentId, name: s.name, studentNo: s.studentNo })));
-        setColumns(sa.assignments);
-        const sheets = await Promise.all(sa.assignments.map((a) => getAssignmentSubmissions(a.id)));
-        const next: ScoreMap = {};
-        sheets.forEach((sheet, i) => {
-          const assignmentId = sa.assignments[i]!.id;
-          next[assignmentId] = Object.fromEntries(
-            sheet.submissions.map((s) => [s.enrollmentId, { submissionId: s.submissionId, score: s.score }]),
-          );
-        });
-        setScores(next);
-      })
-      .catch((e: Error) => setMsg(e.message));
+    try {
+      const [gb, sa] = await Promise.all([
+        getFacultyGradebook(sectionId),
+        getSectionAssignments(sectionId),
+      ]);
+      setStudents(
+        gb.students.map((s) => ({
+          enrollmentId: s.enrollmentId,
+          name: s.name,
+          studentNo: s.studentNo,
+        })),
+      );
+      setColumns(sa.assignments);
+      const sheets = await Promise.all(
+        sa.assignments.map((a) => getAssignmentSubmissions(a.id)),
+      );
+      const next: ScoreMap = {};
+      sheets.forEach((sheet, i) => {
+        const assignmentId = sa.assignments[i]!.id;
+        next[assignmentId] = Object.fromEntries(
+          sheet.submissions.map((s) => [
+            s.enrollmentId,
+            { submissionId: s.submissionId, score: s.score },
+          ]),
+        );
+      });
+      setScores(next);
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
   }, [sectionId]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const weightTotal = columns.reduce((sum, c) => sum + c.weight, 0);
 
-  async function saveScore(assignmentId: string, enrollmentId: string, raw: string) {
+  async function saveScore(
+    assignmentId: string,
+    enrollmentId: string,
+    raw: string,
+  ) {
     const cell = scores[assignmentId]?.[enrollmentId];
     if (!cell?.submissionId) return;
     const score = raw === "" ? null : Number(raw);
@@ -109,7 +157,10 @@ export default function FacultyGradebook() {
       await gradeSubmission(cell.submissionId, score);
       setScores((prev) => ({
         ...prev,
-        [assignmentId]: { ...prev[assignmentId], [enrollmentId]: { ...cell, score } },
+        [assignmentId]: {
+          ...prev[assignmentId],
+          [enrollmentId]: { ...cell, score },
+        },
       }));
     } catch (e) {
       setMsg((e as Error).message);
@@ -117,24 +168,41 @@ export default function FacultyGradebook() {
   }
 
   async function addColumn() {
-    if (!newItem.title || !newItem.dueDate) {
-      setMsg("An assessment item needs a name and a due date.");
+    setItemError(null);
+    const maxPoints = Number(newItem.maxPoints);
+    const weight = Number(newItem.weight);
+    if (!newItem.title.trim() || !newItem.dueDate) {
+      setItemError("Enter an item name and due date.");
+      return;
+    }
+    if (!Number.isInteger(maxPoints) || maxPoints < 1 || maxPoints > 1000) {
+      setItemError("Max points must be a whole number between 1 and 1,000.");
+      return;
+    }
+    if (!Number.isInteger(weight) || weight < 0 || weight > 100) {
+      setItemError("Weight must be a whole percentage from 0 to 100.");
+      return;
+    }
+    if (weightTotal + weight > 100) {
+      setItemError(
+        `This would make the total ${weightTotal + weight}%. Reduce the item weight so the gradebook stays at or below 100%.`,
+      );
       return;
     }
     setBusy(true);
     setMsg(null);
     try {
       await createAssignment(sectionId, {
-        title: newItem.title,
+        title: newItem.title.trim(),
         type: newItem.type,
-        maxPoints: Number(newItem.maxPoints) || 100,
-        weight: Number(newItem.weight) || 0,
+        maxPoints,
+        weight,
         dueDate: new Date(newItem.dueDate).toISOString(),
       });
       setNewItem(BLANK_ITEM);
-      load();
+      await load();
     } catch (e) {
-      setMsg((e as Error).message);
+      setItemError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -144,12 +212,16 @@ export default function FacultyGradebook() {
    * Weighted total re-normalises over graded items only: a student with just the
    * midterm entered shows their midterm percentage, not a fraction of 100.
    */
-  function rowTotal(enrollmentId: string): { pct: number | null; letter: string } {
+  function rowTotal(enrollmentId: string): {
+    pct: number | null;
+    letter: string;
+  } {
     let weighted = 0;
     let weightSum = 0;
     for (const col of columns) {
       const score = scores[col.id]?.[enrollmentId]?.score;
-      if (score === null || score === undefined || col.maxPoints === 0) continue;
+      if (score === null || score === undefined || col.maxPoints === 0)
+        continue;
       weighted += (score / col.maxPoints) * col.weight;
       weightSum += col.weight;
     }
@@ -162,10 +234,15 @@ export default function FacultyGradebook() {
     <>
       <h1 className="page-title">Gradebook</h1>
       <p className="muted" style={{ margin: "2px 0 22px", fontSize: 14 }}>
-        Continuous assessment · quizzes, assignments, exams and projects · weighted totals compute automatically
+        Continuous assessment · quizzes, assignments, exams and projects ·
+        weighted totals compute automatically
       </p>
 
-      {msg && <p className="card" style={{ color: "var(--danger)" }}>{msg}</p>}
+      {msg && (
+        <p className="card" style={{ color: "var(--danger)" }}>
+          {msg}
+        </p>
+      )}
 
       {sections && sections.length === 0 && (
         <EmptyState
@@ -176,13 +253,41 @@ export default function FacultyGradebook() {
 
       {sections && sections.length > 0 && (
         <>
-          <CourseTabs sections={sections} value={sectionId} onChange={setSectionId} />
+          <CourseTabs
+            sections={sections}
+            value={sectionId}
+            onChange={setSectionId}
+          />
 
-          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 16,
+              flexWrap: "wrap",
+              marginBottom: 14,
+            }}
+          >
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
               {CATEGORIES.map((c) => (
-                <span key={c.value} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--fg2)" }}>
-                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: c.color }} />
+                <span
+                  key={c.value}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 12,
+                    color: "var(--fg2)",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 9,
+                      height: 9,
+                      borderRadius: "50%",
+                      background: c.color,
+                    }}
+                  />
                   {c.label}
                 </span>
               ))}
@@ -192,12 +297,20 @@ export default function FacultyGradebook() {
                 marginLeft: "auto",
                 fontSize: 12.5,
                 fontWeight: 600,
-                color: weightTotal === 100 ? "var(--success-500)" : "var(--daust-orange)",
+                color:
+                  weightTotal === 100
+                    ? "var(--success-500)"
+                    : "var(--daust-orange)",
               }}
             >
               Total weight: {weightTotal}%
             </span>
-            <Button variant="navy" size="sm" icon={<SlidersHorizontal size={14} />} onClick={() => setShowCols(true)}>
+            <Button
+              variant="navy"
+              size="sm"
+              icon={<SlidersHorizontal size={14} />}
+              onClick={() => setShowCols(true)}
+            >
               Manage columns
             </Button>
           </div>
@@ -207,7 +320,15 @@ export default function FacultyGradebook() {
               <EmptyState
                 title="No assessment items yet"
                 note="Add quizzes, assignments, exams or projects to start recording continuous assessment."
-                action={<Button variant="navy" icon={<Plus size={14} />} onClick={() => setShowCols(true)}>Add assessment item</Button>}
+                action={
+                  <Button
+                    variant="navy"
+                    icon={<Plus size={14} />}
+                    onClick={() => setShowCols(true)}
+                  >
+                    Add assessment item
+                  </Button>
+                }
               />
             ) : (
               <div style={{ overflowX: "auto" }}>
@@ -236,12 +357,37 @@ export default function FacultyGradebook() {
                     {columns.map((c) => {
                       const cat = category(c.type);
                       return (
-                        <span key={c.id} style={{ width: 104, textAlign: "center" }}>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 700 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: cat.color }} />
+                        <span
+                          key={c.id}
+                          style={{ width: 104, textAlign: "center" }}
+                        >
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 5,
+                              fontSize: 12,
+                              fontWeight: 700,
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: "50%",
+                                background: cat.color,
+                              }}
+                            />
                             {c.title}
                           </span>
-                          <span style={{ display: "block", fontSize: 10, color: "var(--fg-faint)", marginTop: 2 }}>
+                          <span
+                            style={{
+                              display: "block",
+                              fontSize: 10,
+                              color: "var(--fg-faint)",
+                              marginTop: 2,
+                            }}
+                          >
                             {cat.label} · {c.weight}% · /{c.maxPoints}
                           </span>
                         </span>
@@ -276,28 +422,53 @@ export default function FacultyGradebook() {
                           borderRadius: 8,
                         }}
                       >
-                        <span style={{ flex: 1, minWidth: 180, display: "flex", alignItems: "center", gap: 12 }}>
+                        <span
+                          style={{
+                            flex: 1,
+                            minWidth: 180,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                          }}
+                        >
                           <Avatar name={s.name} size={32} />
-                          <span style={{ fontWeight: 600, fontSize: 13.5 }}>{s.name}</span>
+                          <span style={{ fontWeight: 600, fontSize: 13.5 }}>
+                            {s.name}
+                          </span>
                         </span>
                         {columns.map((c) => {
                           const cell = scores[c.id]?.[s.enrollmentId];
                           const gradable = !!cell?.submissionId;
                           return (
-                            <span key={c.id} style={{ width: 104, textAlign: "center" }}>
+                            <span
+                              key={c.id}
+                              style={{ width: 104, textAlign: "center" }}
+                            >
                               <input
                                 type="number"
                                 defaultValue={cell?.score ?? ""}
                                 disabled={!gradable}
-                                title={gradable ? undefined : "This student has not submitted yet, so there is no submission to score."}
-                                onBlur={(e) => saveScore(c.id, s.enrollmentId, e.target.value)}
+                                title={
+                                  gradable
+                                    ? undefined
+                                    : "This student has not submitted yet, so there is no submission to score."
+                                }
+                                onBlur={(e) =>
+                                  saveScore(
+                                    c.id,
+                                    s.enrollmentId,
+                                    e.target.value,
+                                  )
+                                }
                                 style={{
                                   width: 64,
                                   textAlign: "center",
                                   padding: "6px 8px",
                                   borderRadius: "var(--radius-md)",
                                   border: "1px solid var(--border)",
-                                  background: gradable ? "var(--surface)" : "var(--surface-2)",
+                                  background: gradable
+                                    ? "var(--surface)"
+                                    : "var(--surface-2)",
                                   fontSize: 13,
                                 }}
                               />
@@ -311,25 +482,33 @@ export default function FacultyGradebook() {
                               fontFamily: "var(--font-display)",
                               fontWeight: 800,
                               fontSize: 15,
-                              color: pct === null ? "var(--fg-faint)" : totalTone(pct),
+                              color:
+                                pct === null
+                                  ? "var(--fg-faint)"
+                                  : totalTone(pct),
                             }}
                           >
                             {pct === null ? "—" : `${pct}%`}
                           </span>
-                          <span style={{ fontSize: 11, color: "var(--fg3)" }}>{letter}</span>
+                          <span style={{ fontSize: 11, color: "var(--fg3)" }}>
+                            {letter}
+                          </span>
                         </span>
                       </div>
                     );
                   })}
 
-                  {students.length === 0 && <EmptyState title="No students enrolled in this section" />}
+                  {students.length === 0 && (
+                    <EmptyState title="No students enrolled in this section" />
+                  )}
                 </div>
               </div>
             )}
           </Card>
 
           <p style={{ fontSize: 12, color: "var(--fg-faint)", marginTop: 12 }}>
-            Weighted total = Σ (score ÷ max × weight) across entered items. Blank items are excluded until graded.
+            Weighted total = Σ (score ÷ max × weight) across entered items.
+            Blank items are excluded until graded.
           </p>
         </>
       )}
@@ -339,11 +518,36 @@ export default function FacultyGradebook() {
         onClose={() => setShowCols(false)}
         width={680}
         title="Assessment categories"
-        footer={<Button variant="navy" icon={<Check size={14} />} onClick={() => setShowCols(false)}>Done</Button>}
+        footer={
+          <Button
+            variant="navy"
+            icon={<Check size={14} />}
+            onClick={() => setShowCols(false)}
+          >
+            Done
+          </Button>
+        }
       >
         <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-          Add graded items and set each item&apos;s weight toward the final grade.
+          Add graded items and set each item&apos;s weight toward the final
+          grade.
         </p>
+
+        {itemError && (
+          <div
+            role="alert"
+            style={{
+              color: "var(--error-500)",
+              background: "rgba(163,41,27,.08)",
+              borderRadius: 9,
+              padding: "10px 12px",
+              fontSize: 13,
+              marginBottom: 12,
+            }}
+          >
+            {itemError}
+          </div>
+        )}
 
         {columns.map((c) => (
           <div
@@ -356,36 +560,76 @@ export default function FacultyGradebook() {
               borderBottom: "1px solid var(--divider)",
             }}
           >
-            <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{c.title}</span>
-            <span style={{ width: 130, fontSize: 12.5, color: "var(--fg3)" }}>{category(c.type).label}</span>
-            <span style={{ width: 78, textAlign: "center", fontSize: 12.5 }}>{c.weight}%</span>
-            <span style={{ width: 70, textAlign: "center", fontSize: 12.5 }}>/{c.maxPoints}</span>
+            <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>
+              {c.title}
+            </span>
+            <span style={{ width: 130, fontSize: 12.5, color: "var(--fg3)" }}>
+              {category(c.type).label}
+            </span>
+            <span style={{ width: 78, textAlign: "center", fontSize: 12.5 }}>
+              {c.weight}%
+            </span>
+            <span style={{ width: 70, textAlign: "center", fontSize: 12.5 }}>
+              /{c.maxPoints}
+            </span>
           </div>
         ))}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, margin: "16px 0" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 12,
+            margin: "16px 0",
+          }}
+        >
           <Field label="Item name">
-            <Input value={newItem.title} onChange={(v) => setNewItem({ ...newItem, title: v })} placeholder="Midterm" />
+            <Input
+              value={newItem.title}
+              onChange={(v) => setNewItem({ ...newItem, title: v })}
+              placeholder="Midterm"
+            />
           </Field>
           <Field label="Category">
             <Select
               value={newItem.type}
               onChange={(v) => setNewItem({ ...newItem, type: v })}
-              options={CATEGORIES.map((c) => ({ value: c.value, label: c.label }))}
+              options={CATEGORIES.map((c) => ({
+                value: c.value,
+                label: c.label,
+              }))}
             />
           </Field>
           <Field label="Weight %">
-            <Input value={newItem.weight} onChange={(v) => setNewItem({ ...newItem, weight: v })} type="number" />
+            <Input
+              value={newItem.weight}
+              onChange={(v) => setNewItem({ ...newItem, weight: v })}
+              type="number"
+            />
           </Field>
           <Field label="Max points">
-            <Input value={newItem.maxPoints} onChange={(v) => setNewItem({ ...newItem, maxPoints: v })} type="number" />
+            <Input
+              value={newItem.maxPoints}
+              onChange={(v) => setNewItem({ ...newItem, maxPoints: v })}
+              type="number"
+            />
           </Field>
           <Field label="Due date">
-            <Input value={newItem.dueDate} onChange={(v) => setNewItem({ ...newItem, dueDate: v })} type="date" />
+            <Input
+              value={newItem.dueDate}
+              onChange={(v) => setNewItem({ ...newItem, dueDate: v })}
+              type="date"
+            />
           </Field>
         </div>
 
-        <Button variant="secondary" icon={<Plus size={14} />} disabled={busy} onClick={addColumn} full>
+        <Button
+          variant="secondary"
+          icon={<Plus size={14} />}
+          disabled={busy}
+          onClick={addColumn}
+          full
+        >
           Add assessment item
         </Button>
 
@@ -397,15 +641,29 @@ export default function FacultyGradebook() {
             padding: "12px 14px",
             borderRadius: 10,
             marginTop: 16,
-            background: weightTotal === 100 ? "rgba(46,125,82,.10)" : "rgba(237,132,37,.12)",
-            color: weightTotal === 100 ? "var(--success-500)" : "var(--daust-orange)",
+            background:
+              weightTotal === 100
+                ? "rgba(46,125,82,.10)"
+                : "rgba(237,132,37,.12)",
+            color:
+              weightTotal === 100
+                ? "var(--success-500)"
+                : "var(--daust-orange)",
             fontSize: 13,
             fontWeight: 600,
           }}
         >
-          {weightTotal === 100 ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+          {weightTotal === 100 ? (
+            <CheckCircle2 size={16} />
+          ) : (
+            <AlertTriangle size={16} />
+          )}
           Total weight: {weightTotal}%{" "}
-          {weightTotal === 100 ? "· weights balanced" : weightTotal < 100 ? "· should total 100%" : "· over 100%, reduce weights"}
+          {weightTotal === 100
+            ? "· weights balanced"
+            : weightTotal < 100
+              ? "· should total 100%"
+              : "· over 100%, reduce weights"}
         </div>
       </Modal>
     </>

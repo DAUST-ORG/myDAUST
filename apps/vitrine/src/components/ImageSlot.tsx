@@ -1,9 +1,12 @@
+"use client";
+
 /*
  * ImageSlot — the design's <image-slot> elements. Renders a licensed DAUST photo
  * (`src`, official photography from daust.org) when given one, else a tasteful navy
  * placeholder with the subject labeled (never a broken/empty image) — used where no
  * photo fits yet (e.g. individual faculty portraits fall back to a monogram).
  */
+import { useEffect, useState } from "react";
 import { assetUrl } from "@/lib/api";
 
 export function ImageSlot({
@@ -17,17 +20,20 @@ export function ImageSlot({
   src?: string;
   variant?: "navy" | "steel";
 }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
   const bg =
     variant === "steel"
       ? "linear-gradient(150deg,#1d4a82 0%,#153b6a 60%,#0f2c50 100%)"
       : "linear-gradient(150deg,#0f2c50 0%,#153b6a 70%,#1d4a82 100%)";
-  if (src) {
+  if (src && !failed) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- static export, plain img by design
       <img
         src={assetUrl(src)}
         alt={label}
         loading="lazy"
+        onError={() => setFailed(true)}
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
       />
     );

@@ -29,7 +29,9 @@ function gradeTone(grade: string | null): { bg: string; fg: string } {
 
 /** Term GPA is derived from the same points the cumulative figure uses; never stored. */
 function termGpa(rows: GradeRow[]): number | null {
-  const graded = rows.filter((r) => r.points !== null);
+  const graded = rows.filter(
+    (r) => r.countsTowardGpa && r.points !== null,
+  );
   const credits = graded.reduce((s, r) => s + r.credits, 0);
   if (credits === 0) return null;
   return graded.reduce((s, r) => s + r.points! * r.credits, 0) / credits;
@@ -75,7 +77,7 @@ export default function GradesPage() {
       </div>
 
       {blocks.length === 0 ? (
-        <EmptyState title="No graded courses yet" note="Grades appear here once instructors submit them." />
+        <EmptyState title="No graded courses yet" note="Grades appear here after the registrar approves the final results." />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {blocks.map((b) => (

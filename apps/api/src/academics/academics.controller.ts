@@ -26,6 +26,10 @@ const CreatePostInput = z.object({
   body: z.string().min(1).max(5000),
 });
 
+const ReorderMaterialsInput = z.object({
+  orderedIds: z.array(z.string().min(1)).min(1),
+});
+
 const CreateProgramInput = z.object({
   code: z.string().min(1).max(20),
   name: z.string().min(1).max(120),
@@ -444,6 +448,23 @@ export class AcademicsController {
   @Roles("faculty", "admin")
   toggleSectionMaterial(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.academics.toggleSectionMaterial(id, user.personId, user.roles.includes("admin"));
+  }
+
+  @Delete("materials/:id")
+  @Roles("faculty", "admin")
+  deleteSectionMaterial(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.academics.deleteSectionMaterial(id, user.personId, user.roles.includes("admin"));
+  }
+
+  @Patch("sections/:id/materials/reorder")
+  @Roles("faculty", "admin")
+  reorderSectionMaterials(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = ReorderMaterialsInput.parse(body);
+    return this.academics.reorderSectionMaterials(id, input.orderedIds, user.personId, user.roles.includes("admin"));
   }
 
   @Get("sections/:id/posts")

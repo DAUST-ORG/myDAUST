@@ -21,7 +21,6 @@ function Dash({ label, onDark }: { label: string; onDark?: boolean }) {
     </div>
   );
 }
-
 function SectionHead({ num, label, accent = "navy", onDark }: { num?: string; label: string; accent?: "navy" | "orange"; onDark?: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 14, borderTop: `2px solid var(--daust-${accent})`, paddingTop: 20 }}>
@@ -302,7 +301,7 @@ export default function Site() {
           </div>
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36, marginTop: 52 }}>
             {newsList.length > 0
-              ? newsList.map((n) => (
+              ? newsList.slice(0, 3).map((n) => (
                 <button key={n.id} onClick={() => openNews(n)} style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
                   <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={fr ? n.titleFr : n.titleEn} src={n.imageUrl ?? undefined} /></div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
@@ -313,7 +312,7 @@ export default function Site() {
                   <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "12px 0 0" }}>{fr ? n.excerptFr : n.excerptEn}</p>
                 </button>
               ))
-              : c.news.map((n, i) => (
+              : c.news.slice(0, 3).map((n, i) => (
                 <button key={n.slot} onClick={() => go("news")} style={{ display: "flex", flexDirection: "column", color: "inherit", minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer" }}>
                   <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={n.title} src={IMG.news[i % IMG.news.length]} /></div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>

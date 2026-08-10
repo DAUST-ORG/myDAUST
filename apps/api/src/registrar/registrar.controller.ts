@@ -54,6 +54,8 @@ const GradeRowInput = z.object({
   points: z.number().min(0).max(5).nullish(),
   minScore: z.number().int().min(0).max(100).nullish(),
   maxScore: z.number().int().min(0).max(100).nullish(),
+  countsTowardGpa: z.boolean().default(true),
+  countsTowardCredits: z.boolean().default(true),
 });
 const GradeRowPatch = GradeRowInput.partial();
 
@@ -190,6 +192,8 @@ export class RegistrarController {
       points: r.points ?? null,
       minScore: r.minScore ?? null,
       maxScore: r.maxScore ?? null,
+      countsTowardGpa: r.countsTowardGpa,
+      countsTowardCredits: r.countsTowardCredits,
     });
   }
 

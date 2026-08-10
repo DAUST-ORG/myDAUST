@@ -22,4 +22,22 @@ export class FinanceTasks {
     const stale = await this.finance.listStalePendingPayments(60);
     if (stale.length > 0) this.log.warn(`${stale.length} stale pending payment(s) need bursar review`);
   }
+
+  /**
+   * Poll PI-SPI for requests whose webhook never landed. Unlike the PayTech sweep above
+   * this one does settle: the rail is the authority on whether a request-to-pay was
+   * approved, so a lost notification must not leave a paid invoice showing a balance.
+   * No-ops when PI-SPI is unconfigured.
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async reconcilePiSpi(): Promise<void> {
+    try {
+      const changed = await this.finance.reconcilePiSpiRequests();
+      if (changed > 0) this.log.log(`Reconciled ${changed} PI-SPI request(s)`);
+    } catch (err) {
+      this.log.error(
+        `PI-SPI reconciliation failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
 }

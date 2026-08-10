@@ -29,14 +29,20 @@ import {
   adminDropEnrollment,
   getAdminStudentActivity,
   getAdminStudentDetail,
+  getMe,
   getStudentAccount,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
 import { Avatar, Tabs } from "@/components/ui";
 import { EditStudentModal, type EditSection } from "./EditStudentModal";
 import { StudentDocuments } from "./StudentDocuments";
+import { TranscriptManager } from "./TranscriptManager";
 
-const ENROLL_BADGE: Record<string, string> = { enrolled: "enrolled", completed: "completed", dropped: "dropped" };
+const ENROLL_BADGE: Record<string, string> = {
+  enrolled: "enrolled",
+  completed: "completed",
+  dropped: "dropped",
+};
 
 function gradeColor(grade: string | null): string {
   if (!grade) return "var(--fg2)";
@@ -53,18 +59,49 @@ export default function AdminStudentDetailPage() {
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState<EditSection | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [canManageTranscript, setCanManageTranscript] = useState(false);
   const pencil = (section: EditSection) => (
-    <button onClick={() => setEditing(section)} title="Edit" style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, color: "var(--fg3)", border: "none", background: "none" }}>
+    <button
+      onClick={() => setEditing(section)}
+      title="Edit"
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: 8,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+        color: "var(--fg3)",
+        border: "none",
+        background: "none",
+      }}
+    >
       <Pencil size={14} />
     </button>
   );
 
   const load = useCallback(() => {
-    getAdminStudentDetail(id).then(setS).catch(() => {});
-    getStudentAccount(id).then(setAccount).catch(() => {});
-    getAdminStudentActivity(id).then(setActivity).catch(() => {});
+    getAdminStudentDetail(id)
+      .then(setS)
+      .catch(() => {});
+    getStudentAccount(id)
+      .then(setAccount)
+      .catch(() => {});
+    getAdminStudentActivity(id)
+      .then(setActivity)
+      .catch(() => {});
   }, [id]);
   useEffect(() => load(), [load]);
+  useEffect(() => {
+    getMe()
+      .then((me) =>
+        setCanManageTranscript(
+          me.roles.some((role) => role === "admin" || role === "registrar"),
+        ),
+      )
+      .catch(() => setCanManageTranscript(false));
+  }, []);
 
   async function drop(enrollmentId: string) {
     setNote(null);
@@ -79,45 +116,153 @@ export default function AdminStudentDetailPage() {
 
   if (!s) return <p className="muted">Loading…</p>;
 
-  const balanceLabel = s.balance > 0 ? formatXof(s.balance) : s.balance < 0 ? `Credit ${formatXof(-s.balance)}` : "Cleared";
+  const balanceLabel =
+    s.balance > 0
+      ? formatXof(s.balance)
+      : s.balance < 0
+        ? `Credit ${formatXof(-s.balance)}`
+        : "Cleared";
   const balanceTone = s.balance > 0 ? "var(--danger)" : "var(--success)";
   const payments = (account?.invoices ?? [])
-    .flatMap((inv) => inv.payments.filter((p) => p.status === "success").map((p) => ({ ...p, item: inv.description ?? inv.term })))
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .flatMap((inv) =>
+      inv.payments
+        .filter((p) => p.status === "success")
+        .map((p) => ({ ...p, item: inv.description ?? inv.term })),
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   const lastPayment = payments[0];
 
   return (
     <>
       {/* Back + actions */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
-        <Link href="/admin/students" style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--fg3)", fontWeight: 600, fontSize: 13.5 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+          marginBottom: 18,
+        }}
+      >
+        <Link
+          href="/admin/students"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            color: "var(--fg3)",
+            fontWeight: 600,
+            fontSize: 13.5,
+          }}
+        >
           <ArrowLeft size={16} /> All students
         </Link>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button className="primary" onClick={() => setEditing("all")} style={{ display: "flex", alignItems: "center", gap: 7 }}><Pencil size={15} /> Edit record</button>
+          <button
+            className="primary"
+            onClick={() => setEditing("all")}
+            style={{ display: "flex", alignItems: "center", gap: 7 }}
+          >
+            <Pencil size={15} /> Edit record
+          </button>
         </div>
       </div>
 
       {/* Hero */}
-      <div style={{ background: "linear-gradient(120deg, var(--daust-navy), var(--daust-navy-deep))", borderRadius: "var(--radius-xl)", padding: "26px 28px", color: "#fff", display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+      <div
+        style={{
+          background:
+            "linear-gradient(120deg, var(--daust-navy), var(--daust-navy-deep))",
+          borderRadius: "var(--radius-xl)",
+          padding: "26px 28px",
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          gap: 20,
+          flexWrap: "wrap",
+        }}
+      >
         <Avatar name={s.name} size={72} src={s.photoUrl} />
         <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 800 }}>{s.name}</div>
-          <div style={{ fontSize: 13.5, color: "rgba(255,255,255,0.65)", marginTop: 3 }}>{s.studentNo} · {s.email}</div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-            <HeroPill icon={BadgeCheck} tone={s.status === "probation" ? "warn" : "ok"}>{s.status === "probation" ? "Probation" : "Enrolled"}</HeroPill>
+          <div
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 26,
+              fontWeight: 800,
+            }}
+          >
+            {s.name}
+          </div>
+          <div
+            style={{
+              fontSize: 13.5,
+              color: "rgba(255,255,255,0.65)",
+              marginTop: 3,
+            }}
+          >
+            {s.studentNo} · {s.email}
+          </div>
+          <div
+            style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}
+          >
+            <HeroPill
+              icon={BadgeCheck}
+              tone={s.status === "probation" ? "warn" : "ok"}
+            >
+              {s.status === "probation" ? "Probation" : "Enrolled"}
+            </HeroPill>
             {s.program && <HeroPill icon={GraduationCap}>{s.program}</HeroPill>}
-            <HeroPill icon={CalendarDays}>{s.yearLevel ? `Year ${s.yearLevel}` : "Year —"}{s.cohort ? ` · ${s.cohort}` : ""}</HeroPill>
+            <HeroPill icon={CalendarDays}>
+              {s.yearLevel ? `Year ${s.yearLevel}` : "Year —"}
+              {s.cohort ? ` · ${s.cohort}` : ""}
+            </HeroPill>
           </div>
         </div>
       </div>
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginTop: 16 }}>
-        <ProfileStat label="Account balance" icon={Wallet} value={balanceLabel} color={s.balance === 0 ? "var(--success)" : balanceTone} />
-        <ProfileStat label="Cumulative GPA" icon={Award} value={s.gpa > 0 ? s.gpa.toFixed(2) : "—"} unit="/ 4.0" color="var(--daust-navy)" />
-        <ProfileStat label="Credits earned" icon={Layers} value={String(s.completedCredits)} unit="/ 132" />
-        <ProfileStat label="Standing" icon={CheckCircle2} value={s.standing === "Academic Probation" ? "Probation" : s.standing === "Dean's List" ? "Dean's List" : "Good"} />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+          gap: 14,
+          marginTop: 16,
+        }}
+      >
+        <ProfileStat
+          label="Account balance"
+          icon={Wallet}
+          value={balanceLabel}
+          color={s.balance === 0 ? "var(--success)" : balanceTone}
+        />
+        <ProfileStat
+          label="Cumulative GPA"
+          icon={Award}
+          value={s.gpa > 0 ? s.gpa.toFixed(2) : "—"}
+          unit="/ 4.0"
+          color="var(--daust-navy)"
+        />
+        <ProfileStat
+          label="Credits earned"
+          icon={Layers}
+          value={String(s.completedCredits)}
+          unit="/ 132"
+        />
+        <ProfileStat
+          label="Standing"
+          icon={CheckCircle2}
+          value={
+            s.standing === "Academic Probation"
+              ? "Probation"
+              : s.standing === "Dean's List"
+                ? "Dean's List"
+                : "Good"
+          }
+        />
       </div>
 
       <div style={{ marginTop: 22 }}>
@@ -125,6 +270,9 @@ export default function AdminStudentDetailPage() {
           tabs={[
             { value: "overview", label: "Overview" },
             { value: "academics", label: "Academics" },
+            ...(canManageTranscript
+              ? [{ value: "transcript", label: "Transcript" }]
+              : []),
             { value: "finance", label: "Finance" },
             { value: "personal", label: "Personal & contact" },
             { value: "documents", label: "Documents" },
@@ -136,19 +284,54 @@ export default function AdminStudentDetailPage() {
       </div>
 
       {tab === "overview" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>
-          <ProfileCard title="Enrollment" icon={BookOpen} action={pencil("enrollment")}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          <ProfileCard
+            title="Enrollment"
+            icon={BookOpen}
+            action={pencil("enrollment")}
+          >
             <KV k="Program" v={s.program ?? "—"} />
             <KV k="Major" v={s.major ?? "—"} />
-            <KV k="Year of study" v={s.yearLevel ? `Year ${s.yearLevel}` : "—"} />
+            <KV
+              k="Year of study"
+              v={s.yearLevel ? `Year ${s.yearLevel}` : "—"}
+            />
             <KV k="Cohort" v={s.cohort ?? "—"} />
-            <KV k="Enrollment status" v={s.enrollmentStatus ?? (s.status === "probation" ? "Probation" : "Active")} />
+            <KV
+              k="Enrollment status"
+              v={
+                s.enrollmentStatus ??
+                (s.status === "probation" ? "Probation" : "Active")
+              }
+            />
             <KV k="Advisor" v={s.advisor ?? "—"} />
           </ProfileCard>
           <ProfileCard title="Account summary" icon={Receipt}>
-            <KV k="Balance" v={<span style={{ color: s.balance === 0 ? "var(--success)" : balanceTone, fontWeight: 700 }}>{balanceLabel}</span>} />
+            <KV
+              k="Balance"
+              v={
+                <span
+                  style={{
+                    color: s.balance === 0 ? "var(--success)" : balanceTone,
+                    fontWeight: 700,
+                  }}
+                >
+                  {balanceLabel}
+                </span>
+              }
+            />
             <KV k="Payments on record" v={String(payments.length)} />
-            <KV k="Total paid" v={account ? formatXof(account.totals.paid) : "—"} />
+            <KV
+              k="Total paid"
+              v={account ? formatXof(account.totals.paid) : "—"}
+            />
             <KV k="Credits this term" v={String(s.currentTermCredits)} />
           </ProfileCard>
           <ProfileCard title="Contact" icon={Phone} action={pencil("contact")}>
@@ -161,9 +344,23 @@ export default function AdminStudentDetailPage() {
       )}
 
       {tab === "academics" && (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.5fr)", gap: 16, alignItems: "start" }}>
-          <ProfileCard title="Standing" icon={Award} action={pencil("enrollment")}>
-            <KV k="Cumulative GPA" v={<b>{s.gpa > 0 ? `${s.gpa.toFixed(2)} / 4.0` : "—"}</b>} />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.5fr)",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          <ProfileCard
+            title="Standing"
+            icon={Award}
+            action={pencil("enrollment")}
+          >
+            <KV
+              k="Cumulative GPA"
+              v={<b>{s.gpa > 0 ? `${s.gpa.toFixed(2)} / 4.0` : "—"}</b>}
+            />
             <KV k="Academic standing" v={s.standing} />
             <KV k="Credits earned" v={`${s.completedCredits} / 132`} />
             <KV k="Credits this term" v={String(s.currentTermCredits)} />
@@ -177,108 +374,284 @@ export default function AdminStudentDetailPage() {
           <ProfileCard title="Courses & enrollment" icon={BookOpen}>
             {s.enrollments.length ? (
               <table>
-                <thead><tr><th>Code</th><th>Course</th><th>Cr.</th><th>Instructor</th><th>Status</th><th>Grade</th><th /></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Course</th>
+                    <th>Cr.</th>
+                    <th>Instructor</th>
+                    <th>Status</th>
+                    <th>Grade</th>
+                    <th />
+                  </tr>
+                </thead>
                 <tbody>
                   {s.enrollments.map((e) => (
                     <tr key={e.enrollmentId}>
-                      <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5, fontWeight: 600 }}>{e.courseCode}</td>
+                      <td
+                        style={{
+                          fontFamily: "ui-monospace, monospace",
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {e.courseCode}
+                      </td>
                       <td style={{ fontWeight: 600 }}>{e.title}</td>
                       <td>{e.credits}</td>
                       <td style={{ fontSize: 12.5 }}>{e.instructor ?? "—"}</td>
-                      <td><span className={`badge ${ENROLL_BADGE[e.status] ?? "pending"}`}>{e.status}</span></td>
-                      <td><span style={{ fontWeight: 800, color: gradeColor(e.grade) }}>{e.grade ?? "—"}</span></td>
-                      <td>{e.status === "enrolled" && <button onClick={() => drop(e.enrollmentId)} style={{ fontSize: 11.5, padding: "5px 9px" }}>Drop</button>}</td>
+                      <td>
+                        <span
+                          className={`badge ${ENROLL_BADGE[e.status] ?? "pending"}`}
+                        >
+                          {e.status}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          style={{
+                            fontWeight: 800,
+                            color: gradeColor(e.grade),
+                          }}
+                        >
+                          {e.grade ?? "—"}
+                        </span>
+                      </td>
+                      <td>
+                        {e.status === "enrolled" && (
+                          <button
+                            onClick={() => drop(e.enrollmentId)}
+                            style={{ fontSize: 11.5, padding: "5px 9px" }}
+                          >
+                            Drop
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : (
-              <p className="muted" style={{ margin: 0 }}>No enrollments on record.</p>
+              <p className="muted" style={{ margin: 0 }}>
+                No enrollments on record.
+              </p>
             )}
-            {note && <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>{note}</p>}
+            {note && (
+              <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
+                {note}
+              </p>
+            )}
           </ProfileCard>
         </div>
+      )}
+
+      {tab === "transcript" && canManageTranscript && (
+        <TranscriptManager studentId={id} />
       )}
 
       {tab === "finance" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.5fr)", gap: 16, alignItems: "start" }}>
-          <ProfileCard title="Balance" icon={Wallet}>
-            <div style={{ textAlign: "center", padding: "8px 0 14px" }}>
-              <div className="muted" style={{ fontSize: 12.5 }}>Outstanding</div>
-              <div style={{ fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 800, color: s.balance === 0 ? "var(--success)" : balanceTone, marginTop: 4 }}>{balanceLabel}</div>
-            </div>
-            <KV k="Total billed" v={account ? formatXof(account.totals.billed) : "—"} />
-            <KV k="Total paid" v={account ? formatXof(account.totals.paid) : "—"} />
-            <KV k="Last payment" v={lastPayment ? new Date(lastPayment.createdAt).toLocaleDateString("fr-SN", { day: "numeric", month: "short", year: "numeric" }) : "—"} />
-            <p className="muted" style={{ fontSize: 12, margin: "14px 0 0" }}>Billing is managed by the Bursar in the Finance portal.</p>
-          </ProfileCard>
-          <ProfileCard title="Payment history" icon={Clock}>
-            {payments.length ? (
-              <table>
-                <thead><tr><th>Date</th><th>Item</th><th>Method</th><th style={{ textAlign: "right" }}>Amount</th></tr></thead>
-                <tbody>
-                  {payments.map((p) => (
-                    <tr key={p.id}>
-                      <td style={{ whiteSpace: "nowrap" }}>{new Date(p.createdAt).toLocaleDateString("fr-SN", { day: "numeric", month: "short", year: "numeric" })}</td>
-                      <td style={{ fontWeight: 600 }}>{p.item}</td>
-                      <td>{p.method}</td>
-                      <td style={{ textAlign: "right", fontWeight: 700, color: "var(--success)" }}>{formatXof(p.amount)}</td>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.5fr)",
+              gap: 16,
+              alignItems: "start",
+            }}
+          >
+            <ProfileCard title="Balance" icon={Wallet}>
+              <div style={{ textAlign: "center", padding: "8px 0 14px" }}>
+                <div className="muted" style={{ fontSize: 12.5 }}>
+                  Outstanding
+                </div>
+                <div
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    fontSize: 30,
+                    fontWeight: 800,
+                    color: s.balance === 0 ? "var(--success)" : balanceTone,
+                    marginTop: 4,
+                  }}
+                >
+                  {balanceLabel}
+                </div>
+              </div>
+              <KV
+                k="Total billed"
+                v={account ? formatXof(account.totals.billed) : "—"}
+              />
+              <KV
+                k="Total paid"
+                v={account ? formatXof(account.totals.paid) : "—"}
+              />
+              <KV
+                k="Last payment"
+                v={
+                  lastPayment
+                    ? new Date(lastPayment.createdAt).toLocaleDateString(
+                        "fr-SN",
+                        { day: "numeric", month: "short", year: "numeric" },
+                      )
+                    : "—"
+                }
+              />
+              <p className="muted" style={{ fontSize: 12, margin: "14px 0 0" }}>
+                Billing is managed by the Bursar in the Finance portal.
+              </p>
+            </ProfileCard>
+            <ProfileCard title="Payment history" icon={Clock}>
+              {payments.length ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Item</th>
+                      <th>Method</th>
+                      <th style={{ textAlign: "right" }}>Amount</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className="muted" style={{ margin: 0 }}>No payments recorded.</p>
-            )}
-          </ProfileCard>
-        </div>
+                  </thead>
+                  <tbody>
+                    {payments.map((p) => (
+                      <tr key={p.id}>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {new Date(p.createdAt).toLocaleDateString("fr-SN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{p.item}</td>
+                        <td>{p.method}</td>
+                        <td
+                          style={{
+                            textAlign: "right",
+                            fontWeight: 700,
+                            color: "var(--success)",
+                          }}
+                        >
+                          {formatXof(p.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>
+                  No payments recorded.
+                </p>
+              )}
+            </ProfileCard>
+          </div>
 
-        <ProfileCard title="Charges on account" icon={Receipt}>
-          {account && account.invoices.length > 0 ? (
-            account.invoices.map((inv) => {
-              const isCredit = inv.total < 0;
-              return (
-                <div key={inv.id} style={{ padding: "14px 0", borderBottom: "1px solid var(--divider)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 600, color: isCredit ? "var(--success)" : "var(--fg1)" }}>{inv.description ?? (isCredit ? "Account credit" : `Tuition — ${inv.term}`)}</span>
-                    {!isCredit && <span className={`badge ${inv.status}`}>{inv.status}</span>}
-                    <span style={{ flex: 1 }} />
-                    {isCredit ? (
-                      <span style={{ fontWeight: 700, color: "var(--success)", fontVariantNumeric: "tabular-nums" }}>−{formatXof(-inv.total)}</span>
-                    ) : (
-                      <span className="muted">{formatXof(inv.paid)} / {formatXof(inv.total)}</span>
+          <ProfileCard title="Charges on account" icon={Receipt}>
+            {account && account.invoices.length > 0 ? (
+              account.invoices.map((inv) => {
+                const isCredit = inv.total < 0;
+                return (
+                  <div
+                    key={inv.id}
+                    style={{
+                      padding: "14px 0",
+                      borderBottom: "1px solid var(--divider)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          color: isCredit ? "var(--success)" : "var(--fg1)",
+                        }}
+                      >
+                        {inv.description ??
+                          (isCredit
+                            ? "Account credit"
+                            : `Tuition — ${inv.term}`)}
+                      </span>
+                      {!isCredit && (
+                        <span className={`badge ${inv.status}`}>
+                          {inv.status}
+                        </span>
+                      )}
+                      <span style={{ flex: 1 }} />
+                      {isCredit ? (
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            color: "var(--success)",
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          −{formatXof(-inv.total)}
+                        </span>
+                      ) : (
+                        <span className="muted">
+                          {formatXof(inv.paid)} / {formatXof(inv.total)}
+                        </span>
+                      )}
+                    </div>
+                    {!isCredit && inv.installments.length > 0 && (
+                      <table style={{ marginTop: 8 }}>
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>Due</th>
+                            <th>Amount</th>
+                            <th>Paid</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {inv.installments.map((i) => (
+                            <tr key={i.id}>
+                              <td>{i.sequence}</td>
+                              <td style={{ whiteSpace: "nowrap" }}>
+                                {formatDate(i.dueDate)}
+                              </td>
+                              <td>{formatXof(i.amountDue)}</td>
+                              <td>{formatXof(i.amountPaid)}</td>
+                              <td>
+                                <span className={`badge ${i.status}`}>
+                                  {i.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     )}
                   </div>
-                  {!isCredit && inv.installments.length > 0 && (
-                    <table style={{ marginTop: 8 }}>
-                      <thead><tr><th>#</th><th>Due</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead>
-                      <tbody>
-                        {inv.installments.map((i) => (
-                          <tr key={i.id}>
-                            <td>{i.sequence}</td>
-                            <td style={{ whiteSpace: "nowrap" }}>{formatDate(i.dueDate)}</td>
-                            <td>{formatXof(i.amountDue)}</td>
-                            <td>{formatXof(i.amountPaid)}</td>
-                            <td><span className={`badge ${i.status}`}>{i.status}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              );
-            })
-          ) : (
-            <p className="muted" style={{ margin: 0 }}>No charges on account.</p>
-          )}
-        </ProfileCard>
+                );
+              })
+            ) : (
+              <p className="muted" style={{ margin: 0 }}>
+                No charges on account.
+              </p>
+            )}
+          </ProfileCard>
         </div>
       )}
 
       {tab === "personal" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>
-          <ProfileCard title="Personal details" icon={UserPlus} action={pencil("personal")}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          <ProfileCard
+            title="Personal details"
+            icon={UserPlus}
+            action={pencil("personal")}
+          >
             <KV k="Full name" v={s.name} />
             <KV k="Preferred name" v={s.preferredName ?? "—"} />
             <KV k="Student ID" v={s.studentNo} />
@@ -296,7 +669,11 @@ export default function AdminStudentDetailPage() {
             <KV k="Address" v={s.address ?? "—"} />
             <KV k="City" v={s.city ?? "—"} />
           </ProfileCard>
-          <ProfileCard title="Emergency & health" icon={Users} action={pencil("guardian")}>
+          <ProfileCard
+            title="Emergency & health"
+            icon={Users}
+            action={pencil("guardian")}
+          >
             <KV k="Guardian name" v={s.guardianName ?? "—"} />
             <KV k="Relationship" v={s.guardianRelation ?? "—"} />
             <KV k="Guardian phone" v={s.guardianPhone ?? "—"} />
@@ -316,22 +693,81 @@ export default function AdminStudentDetailPage() {
           {activity.length ? (
             <div>
               {activity.map((e, i) => (
-                <div key={i} style={{ display: "flex", gap: 14, paddingBottom: i < activity.length - 1 ? 18 : 0 }}>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                    <span style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--bg-subtle)", border: "1px solid var(--border)", color: e.type === "payment" ? "var(--success)" : "var(--daust-navy)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {e.type === "payment" ? <CheckCircle2 size={15} /> : e.type === "enrollment" ? <BookOpen size={15} /> : <UserPlus size={15} />}
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    gap: 14,
+                    paddingBottom: i < activity.length - 1 ? 18 : 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: "50%",
+                        background: "var(--bg-subtle)",
+                        border: "1px solid var(--border)",
+                        color:
+                          e.type === "payment"
+                            ? "var(--success)"
+                            : "var(--daust-navy)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {e.type === "payment" ? (
+                        <CheckCircle2 size={15} />
+                      ) : e.type === "enrollment" ? (
+                        <BookOpen size={15} />
+                      ) : (
+                        <UserPlus size={15} />
+                      )}
                     </span>
-                    {i < activity.length - 1 && <span style={{ width: 1, flex: 1, minHeight: 18, background: "var(--border)", marginTop: 2 }} />}
+                    {i < activity.length - 1 && (
+                      <span
+                        style={{
+                          width: 1,
+                          flex: 1,
+                          minHeight: 18,
+                          background: "var(--border)",
+                          marginTop: 2,
+                        }}
+                      />
+                    )}
                   </div>
                   <div style={{ paddingTop: 5 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{e.title}</div>
-                    <div className="muted" style={{ fontSize: 12, marginTop: 1 }}>{new Date(e.at).toLocaleDateString("fr-SN", { day: "numeric", month: "short", year: "numeric" })} · {e.detail}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>
+                      {e.title}
+                    </div>
+                    <div
+                      className="muted"
+                      style={{ fontSize: 12, marginTop: 1 }}
+                    >
+                      {new Date(e.at).toLocaleDateString("fr-SN", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}{" "}
+                      · {e.detail}
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="muted" style={{ margin: 0 }}>No activity recorded.</p>
+            <p className="muted" style={{ margin: 0 }}>
+              No activity recorded.
+            </p>
           )}
         </ProfileCard>
       )}
@@ -352,37 +788,127 @@ export default function AdminStudentDetailPage() {
   );
 }
 
-function HeroPill({ icon: Icon, children, tone }: { icon: LucideIcon; children: React.ReactNode; tone?: "ok" | "warn" }) {
-  const bg = tone === "warn" ? "rgba(237,132,37,0.28)" : "rgba(255,255,255,0.12)";
-  const ic = tone === "ok" ? "#7ee0a8" : tone === "warn" ? "#ffc98f" : "#a9c4ec";
+function HeroPill({
+  icon: Icon,
+  children,
+  tone,
+}: {
+  icon: LucideIcon;
+  children: React.ReactNode;
+  tone?: "ok" | "warn";
+}) {
+  const bg =
+    tone === "warn" ? "rgba(237,132,37,0.28)" : "rgba(255,255,255,0.12)";
+  const ic =
+    tone === "ok" ? "#7ee0a8" : tone === "warn" ? "#ffc98f" : "#a9c4ec";
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: bg, borderRadius: 999, padding: "5px 12px", fontSize: 11.5, fontWeight: 600, color: "#fff" }}>
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        background: bg,
+        borderRadius: 999,
+        padding: "5px 12px",
+        fontSize: 11.5,
+        fontWeight: 600,
+        color: "#fff",
+      }}
+    >
       <Icon size={13} color={ic} />
       {children}
     </span>
   );
 }
 
-function ProfileStat({ label, value, unit, icon: Icon, color = "var(--fg1)" }: { label: string; value: string; unit?: string; icon: LucideIcon; color?: string }) {
+function ProfileStat({
+  label,
+  value,
+  unit,
+  icon: Icon,
+  color = "var(--fg1)",
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  icon: LucideIcon;
+  color?: string;
+}) {
   return (
     <div className="card" style={{ margin: 0, padding: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 600, color: "var(--fg3)" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          fontSize: 12,
+          fontWeight: 600,
+          color: "var(--fg3)",
+        }}
+      >
         <Icon size={14} color="var(--daust-navy)" /> {label}
       </div>
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 23, fontWeight: 800, marginTop: 8, color }}>
+      <div
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 23,
+          fontWeight: 800,
+          marginTop: 8,
+          color,
+        }}
+      >
         {value}
-        {unit && <span style={{ fontSize: 12, fontWeight: 600, color: "var(--fg3)", marginLeft: 4 }}>{unit}</span>}
+        {unit && (
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--fg3)",
+              marginLeft: 4,
+            }}
+          >
+            {unit}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-function ProfileCard({ title, icon: Icon, children, action }: { title: string; icon: LucideIcon; children: React.ReactNode; action?: React.ReactNode }) {
+function ProfileCard({
+  title,
+  icon: Icon,
+  children,
+  action,
+}: {
+  title: string;
+  icon: LucideIcon;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+}) {
   return (
     <div className="card" style={{ margin: 0, padding: 0, overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 12px 10px 18px", borderBottom: "1px solid var(--divider)" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          padding: "10px 12px 10px 18px",
+          borderBottom: "1px solid var(--divider)",
+        }}
+      >
         <Icon size={16} color="var(--daust-navy)" />
-        <h4 style={{ margin: 0, flex: 1, fontFamily: "var(--font-display)", fontSize: 14.5, fontWeight: 700 }}>{title}</h4>
+        <h4
+          style={{
+            margin: 0,
+            flex: 1,
+            fontFamily: "var(--font-display)",
+            fontSize: 14.5,
+            fontWeight: 700,
+          }}
+        >
+          {title}
+        </h4>
         {action}
       </div>
       <div style={{ padding: 18 }}>{children}</div>
@@ -392,8 +918,20 @@ function ProfileCard({ title, icon: Icon, children, action }: { title: string; i
 
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, padding: "9px 0", borderBottom: "1px solid var(--divider)", fontSize: 13 }}>
-      <span className="muted" style={{ flexShrink: 0 }}>{k}</span>
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 14,
+        padding: "9px 0",
+        borderBottom: "1px solid var(--divider)",
+        fontSize: 13,
+      }}
+    >
+      <span className="muted" style={{ flexShrink: 0 }}>
+        {k}
+      </span>
       <span style={{ fontWeight: 600, textAlign: "right" }}>{v}</span>
     </div>
   );

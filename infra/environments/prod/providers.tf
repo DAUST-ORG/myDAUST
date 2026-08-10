@@ -21,7 +21,10 @@ terraform {
 # an empty token leaves the (opt-in) DNS resources unmanaged so existing operator
 # `tofu plan` runs are unaffected. See dns.tf.
 provider "cloudflare" {
-  api_token = var.cloudflare_api_token
+  # Cloudflare v4 requires one syntactically valid credential even when the
+  # opt-in DNS resources have count/for_each zero. This inert value is never
+  # used for an API request while cloudflare_api_token is empty.
+  api_token = var.cloudflare_api_token != "" ? var.cloudflare_api_token : "0000000000000000000000000000000000000000"
 }
 
 provider "aws" {
@@ -30,7 +33,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project   = "mydaust"
-      Env       = "staging"
+      Env       = "prod"
       ManagedBy = "opentofu"
     }
   }

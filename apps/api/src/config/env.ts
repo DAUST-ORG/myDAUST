@@ -5,32 +5,66 @@ import { z } from "zod";
  * app (and the read-only tracking UI) runs before sandbox keys are set — the PayTech
  * provider throws a clear error if a payment is initiated without them.
  */
-const schema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  PORT: z.coerce.number().default(4000),
-  DATABASE_URL: z.string().url(),
-  PORTAL_ORIGIN: z.string().url().default("http://localhost:3001"),
-  VITRINE_ORIGIN: z.string().url().default("http://localhost:3000"),
-  // Public bill-payment portal (payment.daust.net); drives its PayTech return URLs.
-  PAYMENT_ORIGIN: z.string().url().default("http://localhost:3000"),
-  SESSION_SECRET: z.string().min(16).default("dev-only-session-secret-change-me"),
-  COOKIE_SECURE: z.enum(["true", "false"]).optional(),
+const schema = z
+  .object({
+    NODE_ENV: z
+      .enum(["development", "test", "production"])
+      .default("development"),
+    PORT: z.coerce.number().default(4000),
+    DATABASE_URL: z.string().url(),
+    PORTAL_ORIGIN: z.string().url().default("http://localhost:3001"),
+    VITRINE_ORIGIN: z.string().url().default("http://localhost:3000"),
+    // Public bill-payment portal (payment.daust.net); drives its PayTech return URLs.
+    PAYMENT_ORIGIN: z.string().url().default("http://localhost:3000"),
+    WIRE_PROOFS_BUCKET: z.string().min(3).optional(),
+    MEDIA_BUCKET: z.string().min(3).optional(),
+    AWS_REGION: z.string().min(3).default("us-east-1"),
+    SESSION_SECRET: z
+      .string()
+      .min(16)
+      .default("dev-only-session-secret-change-me"),
+    COOKIE_SECURE: z.enum(["true", "false"]).optional(),
 
-  PAYTECH_ENV: z.enum(["test", "prod"]).default("test"),
-  PAYTECH_API_KEY: z.string().optional(),
-  PAYTECH_API_SECRET: z.string().optional(),
-  PAYTECH_IPN_URL: z.string().url().optional(),
-  PAYTECH_SUCCESS_URL: z.string().url().optional(),
-  PAYTECH_CANCEL_URL: z.string().url().optional(),
-}).superRefine((env, ctx) => {
-  if (env.NODE_ENV === "production" && env.SESSION_SECRET === "dev-only-session-secret-change-me") {
-    ctx.addIssue({
-      code: "custom",
-      path: ["SESSION_SECRET"],
-      message: "SESSION_SECRET must be set to a real secret in production",
-    });
-  }
-});
+    PAYTECH_ENV: z.enum(["test", "prod"]).default("test"),
+    PAYTECH_API_KEY: z.string().optional(),
+    PAYTECH_API_SECRET: z.string().optional(),
+    PAYTECH_IPN_URL: z.string().url().optional(),
+    PAYTECH_SUCCESS_URL: z.string().url().optional(),
+    PAYTECH_CANCEL_URL: z.string().url().optional(),
+
+    // PI-SPI (BCEAO instant-payment rail). All optional on the PayTech precedent: the app
+    // boots without them and the provider reports itself unconfigured, which keeps the
+    // method hidden from payers rather than failing at checkout. Calling the Business API
+    // needs all four of client id/secret, api key and the mTLS certificate pair — the
+    // gateway drops the TLS connection outright when no client certificate is presented.
+    PI_SPI_ENABLED: z.enum(["true", "false"]).default("false"),
+    PI_SPI_BASE_URL: z.string().url().default("https://sandbox.api.pi-bceao.com/piz/v1"),
+    PI_SPI_TOKEN_URL: z.string().url().optional(),
+    PI_SPI_CLIENT_ID: z.string().optional(),
+    PI_SPI_CLIENT_SECRET: z.string().optional(),
+    PI_SPI_API_KEY: z.string().optional(),
+    /** DAUST's own alias — the account credited by every request-to-pay we send. */
+    PI_SPI_PAYE_ALIAS: z.string().uuid().optional(),
+    /** Shared secret PI-SPI signs webhook bodies with (from POST /webhooks/{id}/secrets). */
+    PI_SPI_WEBHOOK_SECRET: z.string().optional(),
+    /** PEM client certificate + key issued through the PICERT portal. */
+    PI_SPI_CLIENT_CERT: z.string().optional(),
+    PI_SPI_CLIENT_KEY: z.string().optional(),
+    /** Hours a tuition request-to-pay stays payable before the rail expires it. */
+    PI_SPI_REQUEST_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(72),
+  })
+  .superRefine((env, ctx) => {
+    if (
+      env.NODE_ENV === "production" &&
+      env.SESSION_SECRET === "dev-only-session-secret-change-me"
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SESSION_SECRET"],
+        message: "SESSION_SECRET must be set to a real secret in production",
+      });
+    }
+  });
 
 export type Env = z.infer<typeof schema>;
 

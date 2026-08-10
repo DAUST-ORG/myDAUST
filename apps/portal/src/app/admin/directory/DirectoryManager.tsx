@@ -1,25 +1,53 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Copy, ExternalLink, Globe, Pencil, Plus, Upload, UserPlus } from "lucide-react";
-import type { AdminFacultyItem } from "@mydaust/shared";
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  Download,
+  ExternalLink,
+  Globe,
+  KeyRound,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  UserPlus,
+} from "lucide-react";
+import type {
+  AdminFacultyItem,
+  FacultyProvisionedLogin,
+} from "@mydaust/shared";
 import { slugify } from "@mydaust/shared";
 import {
   type CreatedFaculty,
   type StaffMember,
   createFaculty,
+  deleteFaculty,
   fileUrl,
   getFacultyList,
   getStaff,
+  provisionAllFacultyLogins,
+  provisionFacultyLogin,
   setFacultyVisibility,
   updateFacultyProfile,
   uploadFile,
 } from "@/lib/api";
-import { Badge, Button, Card, Field, Input, Modal, Toggle } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  Modal,
+  Toggle,
+} from "@/components/ui";
 
 interface Form {
   firstName: string;
   lastName: string;
+  email: string;
   title: string;
   dept: string;
   bio: string;
@@ -29,8 +57,16 @@ interface Form {
 }
 
 const taStyle: React.CSSProperties = {
-  width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border)",
-  background: "var(--surface)", color: "var(--fg1)", fontSize: 13.5, fontFamily: "var(--font-body)", resize: "vertical", lineHeight: 1.5,
+  width: "100%",
+  padding: "9px 12px",
+  borderRadius: "var(--radius-md)",
+  border: "1px solid var(--border)",
+  background: "var(--surface)",
+  color: "var(--fg1)",
+  fontSize: 13.5,
+  fontFamily: "var(--font-body)",
+  resize: "vertical",
+  lineHeight: 1.5,
 };
 
 /** The public site origin, so the "View public page" link points at the right host. */
@@ -52,6 +88,7 @@ function toForm(a: AdminFacultyItem): Form {
   return {
     firstName: a.firstName,
     lastName: a.lastName,
+    email: a.email,
     title: p?.title ?? "",
     dept: p?.dept ?? "",
     bio: p?.bio ?? "",
@@ -62,7 +99,11 @@ function toForm(a: AdminFacultyItem): Form {
 }
 
 function fieldLabel(text: string) {
-  return <div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>{text}</div>;
+  return (
+    <div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>
+      {text}
+    </div>
+  );
 }
 
 export default function DirectoryManager() {
@@ -73,18 +114,31 @@ export default function DirectoryManager() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminFacultyItem | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
+  const [provisioning, setProvisioning] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const [addOpen, setAddOpen] = useState(false);
-  const [creds, setCreds] = useState<(CreatedFaculty & { name: string }) | null>(null);
+  const [creds, setCreds] = useState<FacultyProvisionedLogin[] | null>(null);
 
   const load = () =>
     Promise.all([getFacultyList(), getStaff()])
-      .then(([f, s]) => { setList(f); setStaff(s); })
-      .catch((e) => setErr(e instanceof Error ? e.message : "Failed to load directory."));
-  useEffect(() => { load(); }, []);
+      .then(([f, s]) => {
+        setList(f);
+        setStaff(s);
+      })
+      .catch((e) =>
+        setErr(e instanceof Error ? e.message : "Failed to load directory."),
+      );
+  useEffect(() => {
+    load();
+  }, []);
 
-  const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
+  const set = <K extends keyof Form>(k: K, v: Form[K]) =>
+    setForm((f) => (f ? { ...f, [k]: v } : f));
 
   function openEditor(a: AdminFacultyItem) {
     setErr(null);
@@ -97,7 +151,12 @@ export default function DirectoryManager() {
     setErr(null);
     try {
       await setFacultyVisibility(a.id, visible);
-      setList((ls) => ls?.map((x) => (x.id === a.id ? { ...x, publicProfile: visible } : x)) ?? null);
+      setList(
+        (ls) =>
+          ls?.map((x) =>
+            x.id === a.id ? { ...x, publicProfile: visible } : x,
+          ) ?? null,
+      );
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not update visibility.");
     } finally {
@@ -121,17 +180,24 @@ export default function DirectoryManager() {
 
   async function save() {
     if (!form) return;
-    if (!form.firstName.trim() || !form.lastName.trim()) { setErr("First and last name are required."); return; }
+    if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim()) {
+      setErr("First name, last name and email are required.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
       await updateFacultyProfile(editId!, {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
+        email: form.email.trim(),
         title: form.title.trim() || null,
         dept: form.dept.trim() || null,
         bio: form.bio.trim() || null,
-        interests: form.interests.split(",").map((s) => s.trim()).filter(Boolean),
+        interests: form.interests
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
         scholar: form.scholar.trim() || null,
         photoUrl: form.photoUrl.trim() || null,
       });
@@ -145,120 +211,452 @@ export default function DirectoryManager() {
     }
   }
 
-  if (err && !list) return <Card><div style={{ color: "var(--error-500)" }}>{err}</div></Card>;
-  if (!list) return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
+  async function removeFaculty() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setErr(null);
+    try {
+      await deleteFaculty(deleteTarget.id);
+      setDeleteTarget(null);
+      setEditId(null);
+      setForm(null);
+      await load();
+    } catch (e) {
+      setErr(
+        e instanceof Error ? e.message : "Could not delete faculty member.",
+      );
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function provisionOne(id: string) {
+    setProvisioning(id);
+    setErr(null);
+    try {
+      const credential = await provisionFacultyLogin(id);
+      setCreds([credential]);
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not provision login.");
+    } finally {
+      setProvisioning(null);
+    }
+  }
+
+  async function provisionAll() {
+    setProvisioning("all");
+    setErr(null);
+    try {
+      const result = await provisionAllFacultyLogins();
+      if (result.credentials.length > 0) setCreds(result.credentials);
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not provision logins.");
+    } finally {
+      setProvisioning(null);
+    }
+  }
+
+  if (err && !list)
+    return (
+      <Card>
+        <div style={{ color: "var(--error-500)" }}>{err}</div>
+      </Card>
+    );
+  if (!list)
+    return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
 
   const otherStaff = (staff ?? []).filter((s) => s.kind !== "faculty");
+  const missingLogins = list.filter((a) => !a.hasLogin).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <Card>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-          <div style={{ flex: 1, fontSize: 13.5, color: "var(--fg2)", lineHeight: 1.6 }}>
-            The directory is the single source for who appears on the public site. Add faculty here, edit
-            their public profile and photo, and use the toggle to publish or unpublish them. Published
-            professors get a shareable page at <code>/directory/faculty/…</code>.
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 14,
+            flexWrap: "wrap",
+          }}
+        >
+          <div
+            style={{
+              flex: 1,
+              fontSize: 13.5,
+              color: "var(--fg2)",
+              lineHeight: 1.6,
+            }}
+          >
+            The directory is the single source for who appears on the public
+            site. Add faculty here, edit their public profile and photo, and use
+            the toggle to publish or unpublish them. Published professors get a
+            shareable page at <code>/directory/faculty/…</code>.
             <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--fg3)" }}>
-              {list.filter((a) => a.publicProfile).length} of {list.length} faculty visible on the site.
+              {list.filter((a) => a.publicProfile).length} of {list.length}{" "}
+              faculty visible on the site · {list.length - missingLogins} login
+              {list.length - missingLogins === 1 ? "" : "s"} active
+              {missingLogins > 0 ? ` · ${missingLogins} need setup` : ""}.
             </div>
           </div>
-          <Button variant="primary" icon={<UserPlus size={15} />} onClick={() => { setErr(null); setAddOpen(true); }}>
-            Add faculty
-          </Button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {missingLogins > 0 && (
+              <Button
+                variant="secondary"
+                icon={<KeyRound size={15} />}
+                onClick={provisionAll}
+                disabled={provisioning !== null}
+              >
+                {provisioning === "all"
+                  ? "Generating…"
+                  : `Generate ${missingLogins} login${missingLogins === 1 ? "" : "s"}`}
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              icon={<UserPlus size={15} />}
+              onClick={() => {
+                setErr(null);
+                setAddOpen(true);
+              }}
+            >
+              Add faculty
+            </Button>
+          </div>
         </div>
       </Card>
 
-      {err && <div style={{ color: "var(--error-500)", fontSize: 13 }}>{err}</div>}
+      {err && (
+        <div style={{ color: "var(--error-500)", fontSize: 13 }}>{err}</div>
+      )}
 
       <SectionLabel>Faculty</SectionLabel>
       {list.length === 0 && (
-        <Card><div style={{ color: "var(--fg3)", padding: "20px 0", textAlign: "center" }}>No faculty yet. Use “Add faculty” to create the first record. The public Faculty page falls back to its built-in list until someone is toggled on.</div></Card>
+        <Card>
+          <div
+            style={{
+              color: "var(--fg3)",
+              padding: "20px 0",
+              textAlign: "center",
+            }}
+          >
+            No faculty yet. Use “Add faculty” to create the first record. The
+            public Faculty page falls back to its built-in list until someone is
+            toggled on.
+          </div>
+        </Card>
       )}
       {list.map((a) => {
         const isEditing = editId === a.id;
         return (
           <Card key={a.id}>
             {!isEditing ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                <div style={{ width: 44, height: 44, flexShrink: 0, borderRadius: "var(--radius-md)", overflow: "hidden", background: "var(--daust-navy)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {a.profile?.photoUrl
-                    ? // eslint-disable-next-line @next/next/no-img-element
-                      <img src={fileUrl(a.profile.photoUrl)} alt={`${a.firstName} ${a.lastName}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    : <span style={{ color: "#fff", fontWeight: 700, fontSize: 13 }}>{`${a.firstName.charAt(0)}${a.lastName.charAt(0)}`.toUpperCase()}</span>}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    flexShrink: 0,
+                    borderRadius: "var(--radius-md)",
+                    overflow: "hidden",
+                    background: "var(--daust-navy)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {a.profile?.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={fileUrl(a.profile.photoUrl)}
+                      alt={`${a.firstName} ${a.lastName}`}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{ color: "#fff", fontWeight: 700, fontSize: 13 }}
+                    >
+                      {`${a.firstName.charAt(0)}${a.lastName.charAt(0)}`.toUpperCase()}
+                    </span>
+                  )}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <strong style={{ fontSize: 14.5 }}>{a.firstName} {a.lastName}</strong>
-                    {a.publicProfile ? <Badge tone="success">Public</Badge> : <Badge tone="neutral">Private</Badge>}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <strong style={{ fontSize: 14.5 }}>
+                      {a.firstName} {a.lastName}
+                    </strong>
+                    {a.publicProfile ? (
+                      <Badge tone="success">Public</Badge>
+                    ) : (
+                      <Badge tone="neutral">Private</Badge>
+                    )}
+                    {!a.hasLogin ? (
+                      <Badge tone="neutral">No login</Badge>
+                    ) : a.mustChangePassword ? (
+                      <Badge tone="warning">Must change password</Badge>
+                    ) : (
+                      <Badge tone="success">Login active</Badge>
+                    )}
                     {a.publicProfile && (
-                      <a href={publicFacultyUrl(a)} target="_blank" rel="noopener noreferrer"
-                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--daust-navy)", fontWeight: 600 }}>
+                      <a
+                        href={publicFacultyUrl(a)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          fontSize: 12,
+                          color: "var(--daust-navy)",
+                          fontWeight: 600,
+                        }}
+                      >
                         <ExternalLink size={12} /> View public page
                       </a>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--fg3)", marginTop: 2 }}>{a.email}</div>
-                  {a.profile && <div style={{ fontSize: 12.5, color: "var(--fg2)", marginTop: 4 }}>{[a.profile.title, a.profile.dept].filter(Boolean).join(" · ") || "—"}</div>}
+                  <div
+                    style={{ fontSize: 12, color: "var(--fg3)", marginTop: 2 }}
+                  >
+                    {a.email}
+                  </div>
+                  {a.profile && (
+                    <div
+                      style={{
+                        fontSize: 12.5,
+                        color: "var(--fg2)",
+                        marginTop: 4,
+                      }}
+                    >
+                      {[a.profile.title, a.profile.dept]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </div>
+                  )}
                 </div>
-                <Toggle
-                  checked={a.publicProfile}
-                  disabled={toggling === a.id}
-                  onChange={(v) => toggleVisible(a, v)}
-                  label={toggling === a.id ? "Saving…" : "Public on site"}
-                />
-                <Button variant="secondary" size="sm" icon={<Pencil size={14} />} onClick={() => openEditor(a)}>Edit</Button>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<KeyRound size={14} />}
+                    onClick={() => provisionOne(a.id)}
+                    disabled={provisioning !== null}
+                  >
+                    {provisioning === a.id
+                      ? "Generating…"
+                      : a.hasLogin
+                        ? "Reset password"
+                        : "Generate login"}
+                  </Button>
+                  <Toggle
+                    checked={a.publicProfile}
+                    disabled={toggling === a.id}
+                    onChange={(v) => toggleVisible(a, v)}
+                    label={toggling === a.id ? "Saving…" : "Public on site"}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Pencil size={14} />}
+                    onClick={() => openEditor(a)}
+                  >
+                    Edit
+                  </Button>
+                </div>
               </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 14 }}
+              >
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <Pencil size={15} />
-                  <strong style={{ fontSize: 14.5 }}>Edit profile — {a.firstName} {a.lastName}</strong>
-                  <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--fg3)" }}>{a.email}</span>
+                  <strong style={{ fontSize: 14.5 }}>
+                    Edit profile — {a.firstName} {a.lastName}
+                  </strong>
+                  <span
+                    style={{
+                      marginLeft: "auto",
+                      fontSize: 12,
+                      color: "var(--fg3)",
+                    }}
+                  >
+                    {a.email}
+                  </span>
                 </div>
                 <div style={{ display: "flex", gap: 18 }}>
                   <div style={{ width: 96, flexShrink: 0 }}>
-                    {form?.photoUrl
-                      ? // eslint-disable-next-line @next/next/no-img-element
-                        <img src={fileUrl(form.photoUrl)} alt="profile" style={{ width: 96, height: 96, objectFit: "cover", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }} />
-                      : <div style={{ width: 96, height: 96, borderRadius: "var(--radius-md)", border: "1px dashed var(--border)", background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--fg3)", fontSize: 12 }}>No photo</div>}
-                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "var(--daust-navy)", cursor: "pointer", marginTop: 8 }}>
-                      <Upload size={13} />{uploading ? "Uploading…" : "Photo"}
-                      <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onPhoto(e.target.files?.[0])} disabled={uploading} />
+                    {form?.photoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={fileUrl(form.photoUrl)}
+                        alt="profile"
+                        style={{
+                          width: 96,
+                          height: 96,
+                          objectFit: "cover",
+                          borderRadius: "var(--radius-md)",
+                          border: "1px solid var(--border)",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 96,
+                          height: 96,
+                          borderRadius: "var(--radius-md)",
+                          border: "1px dashed var(--border)",
+                          background: "var(--surface-2)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "var(--fg3)",
+                          fontSize: 12,
+                        }}
+                      >
+                        No photo
+                      </div>
+                    )}
+                    <label
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "var(--daust-navy)",
+                        cursor: "pointer",
+                        marginTop: 8,
+                      }}
+                    >
+                      <Upload size={13} />
+                      {uploading ? "Uploading…" : "Photo"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        onChange={(e) => onPhoto(e.target.files?.[0])}
+                        disabled={uploading}
+                      />
                     </label>
                     {form?.photoUrl && (
-                      <button onClick={() => set("photoUrl", "")} style={{ display: "block", fontSize: 11.5, color: "var(--fg3)", background: "none", border: "none", cursor: "pointer", padding: "4px 0 0" }}>Remove</button>
+                      <button
+                        onClick={() => set("photoUrl", "")}
+                        style={{
+                          display: "block",
+                          fontSize: 11.5,
+                          color: "var(--fg3)",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          padding: "4px 0 0",
+                        }}
+                      >
+                        Remove
+                      </button>
                     )}
                   </div>
-                  <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 12,
+                    }}
+                  >
                     <div>
                       {fieldLabel("First name")}
-                      <Input value={form?.firstName ?? ""} onChange={(v) => set("firstName", v)} />
+                      <Input
+                        value={form?.firstName ?? ""}
+                        onChange={(v) => set("firstName", v)}
+                      />
                     </div>
                     <div>
                       {fieldLabel("Last name")}
-                      <Input value={form?.lastName ?? ""} onChange={(v) => set("lastName", v)} />
+                      <Input
+                        value={form?.lastName ?? ""}
+                        onChange={(v) => set("lastName", v)}
+                      />
+                    </div>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                      {fieldLabel("Email / sign-in identity")}
+                      <Input
+                        value={form?.email ?? ""}
+                        onChange={(v) => set("email", v)}
+                        type="email"
+                        inputMode="email"
+                      />
                     </div>
                   </div>
                 </div>
                 <div>
-                  {fieldLabel("Title (e.g. Associate Professor of Mechanical Engineering)")}
-                  <Input value={form?.title ?? ""} onChange={(v) => set("title", v)} />
+                  {fieldLabel(
+                    "Title (e.g. Associate Professor of Mechanical Engineering)",
+                  )}
+                  <Input
+                    value={form?.title ?? ""}
+                    onChange={(v) => set("title", v)}
+                  />
                 </div>
                 <div>
                   {fieldLabel("Department / research center")}
-                  <Input value={form?.dept ?? ""} onChange={(v) => set("dept", v)} />
+                  <Input
+                    value={form?.dept ?? ""}
+                    onChange={(v) => set("dept", v)}
+                  />
                 </div>
                 <div>
                   {fieldLabel("Research interests (comma-separated)")}
-                  <textarea rows={2} value={form?.interests ?? ""} onChange={(e) => set("interests", e.target.value)} style={taStyle} />
+                  <textarea
+                    rows={2}
+                    value={form?.interests ?? ""}
+                    onChange={(e) => set("interests", e.target.value)}
+                    style={taStyle}
+                  />
                 </div>
                 <div>
                   {fieldLabel("Bio")}
-                  <textarea rows={4} value={form?.bio ?? ""} onChange={(e) => set("bio", e.target.value)} style={taStyle} />
+                  <textarea
+                    rows={4}
+                    value={form?.bio ?? ""}
+                    onChange={(e) => set("bio", e.target.value)}
+                    style={taStyle}
+                  />
                 </div>
                 <div>
                   {fieldLabel("Publications / research profile link (URL)")}
-                  <Input value={form?.scholar ?? ""} onChange={(v) => set("scholar", v)} placeholder="https://…" />
+                  <Input
+                    value={form?.scholar ?? ""}
+                    onChange={(v) => set("scholar", v)}
+                    placeholder="https://…"
+                  />
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                   <Toggle
@@ -267,12 +665,57 @@ export default function DirectoryManager() {
                     onChange={(v) => toggleVisible(a, v)}
                     label={toggling === a.id ? "Saving…" : "Public on site"}
                   />
-                  <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--fg3)" }}><Globe size={12} style={{ verticalAlign: "-2px" }} /> Toggling is saved instantly</span>
+                  <span
+                    style={{
+                      marginLeft: "auto",
+                      fontSize: 12,
+                      color: "var(--fg3)",
+                    }}
+                  >
+                    <Globe size={12} style={{ verticalAlign: "-2px" }} />{" "}
+                    Toggling is saved instantly
+                  </span>
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <Button variant="primary" icon={<Check size={15} />} onClick={save} disabled={busy}>{busy ? "Saving…" : "Save profile"}</Button>
-                  <Button variant="secondary" onClick={() => { setEditId(null); setForm(null); setErr(null); }}>Cancel</Button>
+                  <Button
+                    variant="primary"
+                    icon={<Check size={15} />}
+                    onClick={save}
+                    disabled={busy}
+                  >
+                    {busy ? "Saving…" : "Save profile"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setEditId(null);
+                      setForm(null);
+                      setErr(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    icon={<Trash2 size={14} />}
+                    onClick={() => setDeleteTarget(a)}
+                    disabled={a.assignedSectionCount > 0}
+                    title={
+                      a.assignedSectionCount > 0
+                        ? "Reassign this instructor's sections before deleting."
+                        : "Delete this unused faculty record"
+                    }
+                  >
+                    Delete faculty
+                  </Button>
                 </div>
+                {a.assignedSectionCount > 0 && (
+                  <div style={{ fontSize: 12, color: "var(--fg3)" }}>
+                    Deletion is locked while this instructor is assigned to{" "}
+                    {a.assignedSectionCount} section
+                    {a.assignedSectionCount === 1 ? "" : "s"}.
+                  </div>
+                )}
               </div>
             )}
           </Card>
@@ -282,20 +725,45 @@ export default function DirectoryManager() {
       <SectionLabel>Staff & administration</SectionLabel>
       <Card>
         <div style={{ fontSize: 12.5, color: "var(--fg3)", marginBottom: 10 }}>
-          Non-teaching accounts. Manage their roles under Roles &amp; Permissions; they do not appear on the public site.
+          Non-teaching accounts. Manage their roles under Roles &amp;
+          Permissions; they do not appear on the public site.
         </div>
         {otherStaff.length === 0 ? (
-          <div style={{ color: "var(--fg3)", padding: "8px 0" }}>No staff accounts.</div>
+          <div style={{ color: "var(--fg3)", padding: "8px 0" }}>
+            No staff accounts.
+          </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column" }}>
             {otherStaff.map((s) => (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderTop: "1px solid var(--border)" }}>
+              <div
+                key={s.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "9px 0",
+                  borderTop: "1px solid var(--border)",
+                }}
+              >
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <strong style={{ fontSize: 13.5 }}>{s.name}</strong>
-                  <div style={{ fontSize: 12, color: "var(--fg3)" }}>{s.email}</div>
+                  <div style={{ fontSize: 12, color: "var(--fg3)" }}>
+                    {s.email}
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  {s.roles.map((r) => <Badge key={r} tone="neutral">{r}</Badge>)}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    flexWrap: "wrap",
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  {s.roles.map((r) => (
+                    <Badge key={r} tone="neutral">
+                      {r}
+                    </Badge>
+                  ))}
                 </div>
               </div>
             ))}
@@ -306,19 +774,91 @@ export default function DirectoryManager() {
       <AddFacultyModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        onCreated={(c) => { setAddOpen(false); if (c.tempPassword) setCreds(c); load(); }}
+        onCreated={(c) => {
+          setAddOpen(false);
+          if (c.tempPassword) {
+            setCreds([
+              {
+                facultyId: c.id,
+                name: c.name,
+                email: c.email,
+                tempPassword: c.tempPassword,
+              },
+            ]);
+          }
+          load();
+        }}
       />
-      {creds && <CredentialsModal creds={creds} onClose={() => setCreds(null)} />}
+      {creds && (
+        <CredentialsModal creds={creds} onClose={() => setCreds(null)} />
+      )}
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => !deleting && setDeleteTarget(null)}
+        title="Delete faculty record?"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              icon={<Trash2 size={14} />}
+              onClick={removeFaculty}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting…" : "Delete permanently"}
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+          <AlertTriangle
+            size={20}
+            color="var(--error-500)"
+            style={{ flexShrink: 0, marginTop: 2 }}
+          />
+          <div
+            style={{ fontSize: 13.5, lineHeight: 1.55, color: "var(--fg2)" }}
+          >
+            This permanently removes{" "}
+            <strong>
+              {deleteTarget?.firstName} {deleteTarget?.lastName}
+            </strong>{" "}
+            ({deleteTarget?.email}). Only unused records can be deleted;
+            academic or communication history is always preserved.
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--fg3)", marginTop: 6 }}>{children}</div>;
+  return (
+    <div
+      style={{
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        textTransform: "uppercase",
+        color: "var(--fg3)",
+        marginTop: 6,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 function AddFacultyModal({
-  open, onClose, onCreated,
+  open,
+  onClose,
+  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
@@ -332,18 +872,34 @@ function AddFacultyModal({
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) { setFirstName(""); setLastName(""); setEmail(""); setProvisionLogin(true); setErr(null); }
+    if (open) {
+      setFirstName("");
+      setLastName("");
+      setEmail("");
+      setProvisionLogin(true);
+      setErr(null);
+    }
   }, [open]);
 
   async function submit() {
-    if (!firstName.trim() || !lastName.trim() || !email.trim()) { setErr("First name, last name and email are required."); return; }
+    if (!firstName.trim() || !lastName.trim() || !email.trim()) {
+      setErr("First name, last name and email are required.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
-      const c = await createFaculty({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), provisionLogin });
+      const c = await createFaculty({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim(),
+        provisionLogin,
+      });
       onCreated({ ...c, name: `${firstName.trim()} ${lastName.trim()}` });
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not create faculty member.");
+      setErr(
+        e instanceof Error ? e.message : "Could not create faculty member.",
+      );
     } finally {
       setBusy(false);
     }
@@ -356,19 +912,43 @@ function AddFacultyModal({
       title="Add faculty member"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant="primary" icon={<Plus size={15} />} onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create"}</Button>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            icon={<Plus size={15} />}
+            onClick={submit}
+            disabled={busy}
+          >
+            {busy ? "Creating…" : "Create"}
+          </Button>
         </>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {err && <div style={{ color: "var(--error-500)", fontSize: 13 }}>{err}</div>}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="First name"><Input value={firstName} onChange={setFirstName} /></Field>
-          <Field label="Last name"><Input value={lastName} onChange={setLastName} /></Field>
+        {err && (
+          <div style={{ color: "var(--error-500)", fontSize: 13 }}>{err}</div>
+        )}
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+        >
+          <Field label="First name">
+            <Input value={firstName} onChange={setFirstName} />
+          </Field>
+          <Field label="Last name">
+            <Input value={lastName} onChange={setLastName} />
+          </Field>
         </div>
-        <Field label="Email" hint="Their institutional email — becomes the sign-in identity.">
-          <Input value={email} onChange={setEmail} placeholder="name@daust.org" />
+        <Field
+          label="Email"
+          hint="Their institutional email — becomes the sign-in identity."
+        >
+          <Input
+            value={email}
+            onChange={setEmail}
+            placeholder="name@daust.org"
+          />
         </Field>
         <Toggle
           checked={provisionLogin}
@@ -376,36 +956,150 @@ function AddFacultyModal({
           label="Create a login now (a temporary password is shown once)"
         />
         <div style={{ fontSize: 12, color: "var(--fg3)", lineHeight: 1.5 }}>
-          You can fill in the public profile (title, bio, photo) and publish them after creating the record.
+          You can fill in the public profile (title, bio, photo) and publish
+          them after creating the record.
         </div>
       </div>
     </Modal>
   );
 }
 
-function CredentialsModal({ creds, onClose }: { creds: CreatedFaculty & { name: string }; onClose: () => void }) {
+function CredentialsModal({
+  creds,
+  onClose,
+}: {
+  creds: FacultyProvisionedLogin[];
+  onClose: () => void;
+}) {
   const [copied, setCopied] = useState(false);
+  const bulk = creds.length > 1;
+
   function copy() {
-    navigator.clipboard?.writeText(`${creds.email}\n${creds.tempPassword ?? ""}`).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+    const credential = creds[0];
+    if (!credential) return;
+    navigator.clipboard
+      ?.writeText(`${credential.email}\n${credential.tempPassword}`)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      });
   }
+
+  function downloadCsv() {
+    const header = "name,email,tempPassword";
+    const body = creds
+      .map((credential) =>
+        [credential.name, credential.email, credential.tempPassword]
+          .map((value) => `"${value.replace(/"/g, '""')}"`)
+          .join(","),
+      )
+      .join("\n");
+    const blob = new Blob([`${header}\n${body}\n`], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `daust-faculty-logins-${creds.length}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <Modal
       open
       onClose={onClose}
-      title="Login created"
-      footer={<Button variant="primary" onClick={onClose}>Done</Button>}
+      title={bulk ? `${creds.length} logins generated` : "Login generated"}
+      width={bulk ? 640 : 460}
+      footer={
+        <>
+          {bulk && (
+            <Button
+              variant="secondary"
+              icon={<Download size={14} />}
+              onClick={downloadCsv}
+            >
+              Download CSV
+            </Button>
+          )}
+          <Button variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        </>
+      }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ fontSize: 13, color: "var(--fg2)", lineHeight: 1.5 }}>
-          Give <strong>{creds.name}</strong> these credentials now — the password is shown once, never stored or
-          emailed, and must be changed on first login.
+        <div
+          style={{
+            padding: "9px 12px",
+            borderRadius: "var(--radius-md)",
+            background: "var(--warning-50, #fff7e8)",
+            color: "var(--fg2)",
+            fontSize: 12.5,
+            lineHeight: 1.5,
+          }}
+        >
+          Copy these credentials now. Passwords are shown once, are never stored
+          or emailed, and must be changed on first login.
         </div>
-        <Field label="Email"><div style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}>{creds.email}</div></Field>
-        <Field label="Temporary password"><div style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, fontSize: 16 }}>{creds.tempPassword}</div></Field>
-        <Button variant="secondary" icon={<Copy size={14} />} onClick={copy}>{copied ? "Copied" : "Copy email + password"}</Button>
+        {bulk ? (
+          <div
+            style={{
+              maxHeight: 340,
+              overflowY: "auto",
+              overflowX: "auto",
+              fontFamily: "ui-monospace, monospace",
+              fontSize: 12.5,
+            }}
+          >
+            {creds.map((credential) => (
+              <div
+                key={credential.facultyId}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1.3fr 1fr",
+                  minWidth: 520,
+                  gap: 8,
+                  padding: "7px 0",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <span>{credential.name}</span>
+                <span>{credential.email}</span>
+                <strong>{credential.tempPassword}</strong>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Field label="Name">
+              <div>{creds[0]!.name}</div>
+            </Field>
+            <Field label="Email (login)">
+              <div
+                style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}
+              >
+                {creds[0]!.email}
+              </div>
+            </Field>
+            <Field label="Temporary password">
+              <div
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 700,
+                  fontSize: 16,
+                }}
+              >
+                {creds[0]!.tempPassword}
+              </div>
+            </Field>
+            <Button
+              variant="secondary"
+              icon={<Copy size={14} />}
+              onClick={copy}
+            >
+              {copied ? "Copied" : "Copy email + password"}
+            </Button>
+          </div>
+        )}
       </div>
     </Modal>
   );

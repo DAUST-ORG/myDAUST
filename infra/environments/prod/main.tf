@@ -117,6 +117,24 @@ locals {
   database_url = "postgresql://mydaust:${random_password.db.result}@${module.rds.address}:5432/mydaust?schema=public"
 }
 
+module "wire_proofs" {
+  source      = "../../modules/private-bucket"
+  bucket_name = "daust-prod-wire-proofs-961828155948"
+  tags        = { DataClassification = "financial-confidential" }
+}
+
+module "media" {
+  source      = "../../modules/private-bucket"
+  bucket_name = "daust-prod-media-961828155948"
+  tags        = { DataClassification = "public-site-media" }
+}
+
+module "transcript_imports" {
+  source      = "../../modules/private-bucket"
+  bucket_name = "daust-prod-transcript-imports-961828155948"
+  tags        = { DataClassification = "academic-confidential" }
+}
+
 module "secrets" {
   source = "../../modules/secrets"
 
@@ -155,6 +173,9 @@ module "api_service" {
     { name = "PORTAL_ORIGIN", value = local.public_url },
     { name = "VITRINE_ORIGIN", value = local.vitrine_url },
     { name = "PAYMENT_ORIGIN", value = local.payment_url },
+    { name = "WIRE_PROOFS_BUCKET", value = module.wire_proofs.name },
+    { name = "MEDIA_BUCKET", value = module.media.name },
+    { name = "TRANSCRIPT_IMPORT_BUCKET", value = module.transcript_imports.name },
     { name = "PAYTECH_ENV", value = "test" },
     { name = "PAYTECH_IPN_URL", value = "${local.public_url}/api/finance/webhook/paytech" },
     { name = "PAYTECH_SUCCESS_URL", value = "${local.public_url}/student/billing" },
@@ -173,6 +194,46 @@ module "api_service" {
   )
 
   secret_arns = values(module.secrets.arns)
+  task_policy_json = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${module.wire_proofs.arn}/wire-proofs/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${module.media.arn}/uploads/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = module.media.arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["uploads/*"]
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${module.transcript_imports.arn}/transcript-imports/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = module.transcript_imports.arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["transcript-imports/*"]
+          }
+        }
+      }
+    ]
+  })
 }
 
 module "portal_service" {

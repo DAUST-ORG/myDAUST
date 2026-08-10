@@ -1,4 +1,10 @@
-import { type CanActivate, type ExecutionContext, HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import {
+  type CanActivate,
+  type ExecutionContext,
+  HttpException,
+  HttpStatus,
+  Injectable,
+} from "@nestjs/common";
 import type { Request } from "express";
 
 // Rate limiter for the unauthenticated bill endpoints. The security-critical key is
@@ -22,14 +28,32 @@ export class BillThrottleGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<Request>();
     const now = Date.now();
     const body = req.body as { studentNo?: unknown } | undefined;
-    const studentNo = typeof body?.studentNo === "string" ? body.studentNo.trim().toLowerCase() : "__none__";
+    const studentNo =
+      typeof body?.studentNo === "string"
+        ? body.studentNo.trim().toLowerCase()
+        : "__none__";
 
     this.hitList(this.global, now, GLOBAL_MAX, GLOBAL_WINDOW_MS);
-    this.hitMap(this.byStudent, studentNo, now, STUDENT_MAX, STUDENT_WINDOW_MS);
+    // Multipart proof uploads are parsed by Multer after guards run, so their body is not
+    // available here. They still receive the global limit and FinanceService's hard
+    // per-student failed-DOB cap; do not collapse all multipart users into one key.
+    if (studentNo !== "__none__")
+      this.hitMap(
+        this.byStudent,
+        studentNo,
+        now,
+        STUDENT_MAX,
+        STUDENT_WINDOW_MS,
+      );
     return true;
   }
 
-  private hitList(list: number[], now: number, max: number, window: number): void {
+  private hitList(
+    list: number[],
+    now: number,
+    max: number,
+    window: number,
+  ): void {
     const kept = list.filter((t) => now - t < window);
     if (kept.length >= max) this.tooMany();
     kept.push(now);
@@ -37,7 +61,13 @@ export class BillThrottleGuard implements CanActivate {
     list.push(...kept);
   }
 
-  private hitMap(map: Map<string, number[]>, key: string, now: number, max: number, window: number): void {
+  private hitMap(
+    map: Map<string, number[]>,
+    key: string,
+    now: number,
+    max: number,
+    window: number,
+  ): void {
     const recent = (map.get(key) ?? []).filter((t) => now - t < window);
     if (recent.length >= max) this.tooMany();
     recent.push(now);
@@ -52,6 +82,9 @@ export class BillThrottleGuard implements CanActivate {
   }
 
   private tooMany(): never {
-    throw new HttpException("Too many attempts. Please wait a minute and try again.", HttpStatus.TOO_MANY_REQUESTS);
+    throw new HttpException(
+      "Too many attempts. Please wait a minute and try again.",
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
   }
 }

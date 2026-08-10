@@ -112,7 +112,7 @@ jobs:
                 --query 'taskDefinition.taskDefinitionArn' --output text)
           TASK=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$MIGTD" \
                 --launch-type FARGATE --network-configuration "$NET" \
-                --overrides '{"containerOverrides":[{"name":"api","command":["pnpm","--filter","@mydaust/db","exec","prisma","migrate","deploy"]}]}' \
+                --overrides '{"containerOverrides":[{"name":"api","command":["node","node_modules/prisma/build/index.js","migrate","deploy","--schema=node_modules/@mydaust/db/prisma/schema.prisma"]}]}' \
                 --query 'tasks[0].taskArn' --output text)
           echo "migration task: $TASK"
           aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
@@ -138,7 +138,7 @@ jobs:
           # or payment row changed before it exits, so it is safe on every deploy.
           TASK=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$MIGTD" \
                 --launch-type FARGATE --network-configuration "$NET" \
-                --overrides '{"containerOverrides":[{"name":"api","command":["pnpm","--filter","@mydaust/db","run","load:sis-reference"]}]}' \
+                --overrides '{"containerOverrides":[{"name":"api","command":["node","node_modules/tsx/dist/cli.mjs","node_modules/@mydaust/db/prisma/load-sis-reference.ts"]}]}' \
                 --query 'tasks[0].taskArn' --output text)
           echo "reference-data task: $TASK"
           aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
@@ -157,9 +157,16 @@ jobs:
                   --query 'services[0].taskDefinition' --output text)
             # Re-register the current definition with only the image swapped.
             aws ecs describe-task-definition --task-definition "$TD" --query 'taskDefinition' --output json \
-              | jq --arg img "$ECR/daust-$SVC:$TAG" \
+              | jq --arg img "$ECR/daust-$SVC:$TAG" --arg svc "$SVC" \
+                   --arg transcript_bucket "daust-$ENV_NAME-transcript-imports-961828155948" \
                    'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
-                    | .containerDefinitions[0].image = $img' > td.json
+                    | .containerDefinitions[0].image = $img
+                    | if $svc == "api" then
+                        .containerDefinitions[0].environment =
+                          ((.containerDefinitions[0].environment // [])
+                           | map(select(.name != "TRANSCRIPT_IMPORT_BUCKET"))
+                           + [{"name":"TRANSCRIPT_IMPORT_BUCKET","value":$transcript_bucket}])
+                      else . end' > td.json
             NEW=$(aws ecs register-task-definition --cli-input-json file://td.json \
                   --query 'taskDefinition.taskDefinitionArn' --output text)
             aws ecs update-service --cluster "$CLUSTER" --service "daust-$ENV_NAME-$SVC" \

@@ -4,12 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import {
   type BillingInvoice,
   type MyProfile,
+  type PublicWireConfig,
   getCurrentTerm,
   getMyBilling,
   getMyProfile,
+  getMyPiSpiRequest,
+  getPiSpiConfig,
+  getWireConfig,
   initiatePayment,
+  type PiSpiRequestSummary,
+  submitStudentPiSpi,
+  submitStudentWire,
+  verifyPiSpiAlias,
 } from "@/lib/api";
 import { Card, EmptyState, PageHeader, Select } from "@/components/ui";
+import { PiSpiPayForm } from "@/components/PiSpiPayForm";
+import { WireTransferForm } from "@/components/WireTransferForm";
 import { formatDate, formatXof } from "@/lib/format";
 
 const METHODS = [
@@ -29,10 +39,21 @@ interface ChargeRow {
   status: string;
 }
 
-function statusStyle(status: string): { bg: string; fg: string; label: string } {
-  if (status === "paid") return { bg: "rgba(46,125,82,.12)", fg: "#1f6b42", label: "Paid" };
-  if (status === "overdue") return { bg: "rgba(192,57,43,.10)", fg: "var(--error-500)", label: "Overdue" };
-  if (status === "partial") return { bg: "rgba(237,132,37,.14)", fg: "#a85f16", label: "Partial" };
+function statusStyle(status: string): {
+  bg: string;
+  fg: string;
+  label: string;
+} {
+  if (status === "paid")
+    return { bg: "rgba(46,125,82,.12)", fg: "#1f6b42", label: "Paid" };
+  if (status === "overdue")
+    return {
+      bg: "rgba(192,57,43,.10)",
+      fg: "var(--error-500)",
+      label: "Overdue",
+    };
+  if (status === "partial")
+    return { bg: "rgba(237,132,37,.14)", fg: "#a85f16", label: "Partial" };
   return { bg: "rgba(237,132,37,.14)", fg: "#a85f16", label: "Due" };
 }
 
@@ -44,14 +65,27 @@ export default function BillingPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [wireConfig, setWireConfig] = useState<PublicWireConfig | null>(null);
+  const [piSpiEnabled, setPiSpiEnabled] = useState(false);
+  const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(null);
 
   useEffect(() => {
     getMyBilling()
       .then(setInvoices)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoaded(true));
-    getMyProfile().then(setProfile).catch(() => {});
-    getCurrentTerm().then((t) => setTerm(t.name)).catch(() => {});
+    getMyProfile()
+      .then(setProfile)
+      .catch(() => {});
+    getCurrentTerm()
+      .then((t) => setTerm(t.name))
+      .catch(() => {});
+    getWireConfig()
+      .then(setWireConfig)
+      .catch(() => {});
+    getPiSpiConfig()
+      .then((c) => setPiSpiEnabled(c.enabled))
+      .catch(() => {});
   }, []);
 
   const charges: ChargeRow[] = useMemo(
@@ -75,14 +109,24 @@ export default function BillingPage() {
 
   const balance = invoices.reduce((s, i) => s + i.balance, 0);
   const nextCharge = charges.find((c) => c.outstanding > 0);
+  const nextInvoice = nextCharge
+    ? invoices.find((invoice) => invoice.id === nextCharge.invoiceId)
+    : null;
+  const pendingWire =
+    nextInvoice?.wireTransfers.find((wire) => wire.status === "submitted") ??
+    null;
   const settled = balance <= 0;
 
   async function pay() {
-    if (!nextCharge) return;
+    if (!nextCharge || method === "wire" || method === "pi_spi") return;
     setBusy(true);
     setError(null);
     try {
-      const { redirectUrl } = await initiatePayment(nextCharge.invoiceId, nextCharge.outstanding, method);
+      const { redirectUrl } = await initiatePayment(
+        nextCharge.invoiceId,
+        nextCharge.outstanding,
+        method,
+      );
       window.location.href = redirectUrl; // hand off to PayTech checkout
     } catch (e) {
       setError((e as Error).message);
@@ -90,19 +134,68 @@ export default function BillingPage() {
     }
   }
 
+  async function sendPiSpi(alias: string, saveAlias: boolean) {
+    if (!nextCharge) throw new Error("Nothing outstanding to pay");
+    const summary = await submitStudentPiSpi({
+      invoiceId: nextCharge.invoiceId,
+      alias,
+      amountXof: nextCharge.outstanding,
+      saveAlias,
+    });
+    setPiSpiRequest(summary);
+    return summary;
+  }
+
+  // A settled request means the money landed, so refresh the balance behind it.
+  async function pollPiSpi(txId: string) {
+    const summary = await getMyPiSpiRequest(txId);
+    setPiSpiRequest(summary);
+    if (summary.status === "settled") setInvoices(await getMyBilling());
+    return summary;
+  }
+
+  async function submitWire(proof: File) {
+    if (!nextCharge) return;
+    await submitStudentWire(
+      nextCharge.invoiceId,
+      nextCharge.outstanding,
+      proof,
+    );
+    setInvoices(await getMyBilling());
+  }
+
   return (
     <>
       <PageHeader
         title="Billing & Financials"
-        subtitle={[term || null, profile ? `Account ${profile.studentNo}` : null].filter(Boolean).join(" · ")}
+        subtitle={[
+          term || null,
+          profile ? `Account ${profile.studentNo}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       />
 
-      {error && <p className="card" style={{ color: "var(--error-500)" }}>{error}</p>}
+      {error && (
+        <p className="card" style={{ color: "var(--error-500)" }}>
+          {error}
+        </p>
+      )}
 
       {loaded && invoices.length === 0 ? (
-        <EmptyState title="No invoices yet" note="Charges appear here once the bursar issues them." />
+        <EmptyState
+          title="No invoices yet"
+          note="Charges appear here once the bursar issues them."
+        />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 1fr) minmax(0, 1.6fr)", gap: 18, alignItems: "start" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(280px, 1fr) minmax(0, 1.6fr)",
+            gap: 18,
+            alignItems: "start",
+          }}
+        >
           <div
             style={{
               background: "var(--grad-brand)",
@@ -113,10 +206,23 @@ export default function BillingPage() {
             }}
           >
             <div style={{ fontSize: 13, opacity: 0.8 }}>Current balance</div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 800, marginTop: 4 }}>
+            <div
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 32,
+                fontWeight: 800,
+                marginTop: 4,
+              }}
+            >
               {formatXof(balance)}
             </div>
-            <div style={{ fontSize: 12.5, marginTop: 4, color: settled ? "rgba(180,240,200,.9)" : "#ffb3a8" }}>
+            <div
+              style={{
+                fontSize: 12.5,
+                marginTop: 4,
+                color: settled ? "rgba(180,240,200,.9)" : "#ffb3a8",
+              }}
+            >
               {settled
                 ? "Account settled — thank you"
                 : nextCharge
@@ -125,33 +231,87 @@ export default function BillingPage() {
             </div>
 
             {!settled && nextCharge && (
-              <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 10 }}>
-                <Select value={method} onChange={setMethod} options={METHODS} style={{ width: "100%" }} />
-                <button
-                  disabled={busy}
-                  onClick={pay}
-                  style={{
-                    width: "100%",
-                    padding: "11px 18px",
-                    borderRadius: "var(--radius-pill)",
-                    border: "1px solid transparent",
-                    background: "var(--daust-orange)",
-                    color: "#fff",
-                    fontWeight: 700,
-                    fontSize: 13.5,
-                    cursor: busy ? "not-allowed" : "pointer",
-                    opacity: busy ? 0.6 : 1,
-                  }}
-                >
-                  {busy ? "Redirecting…" : `Pay ${formatXof(nextCharge.outstanding)}`}
-                </button>
+              <div
+                style={{
+                  marginTop: 18,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <Select
+                  value={method}
+                  onChange={setMethod}
+                  options={[
+                    ...METHODS,
+                    ...(piSpiEnabled
+                      ? [{ value: "pi_spi", label: "Instant payment (PI-SPI)" }]
+                      : []),
+                    ...(wireConfig?.enabled
+                      ? [{ value: "wire", label: "Bank wire transfer" }]
+                      : []),
+                  ]}
+                  style={{ width: "100%" }}
+                />
+                {method === "pi_spi" && piSpiEnabled ? (
+                  <PiSpiPayForm
+                    amountXof={nextCharge.outstanding}
+                    savedAlias={profile?.piSpiAlias ?? null}
+                    allowSaveAlias
+                    request={piSpiRequest}
+                    onVerifyAlias={verifyPiSpiAlias}
+                    onSend={sendPiSpi}
+                    onPoll={pollPiSpi}
+                  />
+                ) : method === "wire" && wireConfig?.enabled ? (
+                  <WireTransferForm
+                    config={wireConfig}
+                    amountXof={nextCharge.outstanding}
+                    pending={pendingWire}
+                    onSubmit={submitWire}
+                  />
+                ) : (
+                  <button
+                    disabled={busy}
+                    onClick={pay}
+                    style={{
+                      width: "100%",
+                      padding: "11px 18px",
+                      borderRadius: "var(--radius-pill)",
+                      border: "1px solid transparent",
+                      background: "var(--daust-orange)",
+                      color: "#fff",
+                      fontWeight: 700,
+                      fontSize: 13.5,
+                      cursor: busy ? "not-allowed" : "pointer",
+                      opacity: busy ? 0.6 : 1,
+                    }}
+                  >
+                    {busy
+                      ? "Redirecting…"
+                      : `Pay ${formatXof(nextCharge.outstanding)}`}
+                  </button>
+                )}
               </div>
             )}
 
-            <div style={{ borderTop: "1px solid rgba(255,255,255,.2)", margin: "18px 0 12px" }} />
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+            <div
+              style={{
+                borderTop: "1px solid rgba(255,255,255,.2)",
+                margin: "18px 0 12px",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: 13,
+              }}
+            >
               <span style={{ opacity: 0.8 }}>Next due date</span>
-              <strong>{nextCharge ? formatDate(nextCharge.dueDate) : "—"}</strong>
+              <strong>
+                {nextCharge ? formatDate(nextCharge.dueDate) : "—"}
+              </strong>
             </div>
             <p style={{ fontSize: 11, opacity: 0.7, margin: "12px 0 0" }}>
               {charges.length > 0
@@ -191,17 +351,33 @@ export default function BillingPage() {
                     gap: 12,
                     alignItems: "center",
                     padding: "13px 18px",
-                    borderBottom: i < charges.length - 1 ? "1px solid var(--divider)" : undefined,
+                    borderBottom:
+                      i < charges.length - 1
+                        ? "1px solid var(--divider)"
+                        : undefined,
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>{c.description}</div>
-                    <div className="muted" style={{ fontSize: 11.5 }}>{c.note}</div>
+                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                      {c.description}
+                    </div>
+                    <div className="muted" style={{ fontSize: 11.5 }}>
+                      {c.note}
+                    </div>
                   </div>
-                  <span style={{ textAlign: "right", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+                  <span
+                    style={{
+                      textAlign: "right",
+                      fontSize: 13,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
                     {formatXof(c.amount)}
                   </span>
-                  <span className="muted" style={{ textAlign: "right", fontSize: 12.5 }}>
+                  <span
+                    className="muted"
+                    style={{ textAlign: "right", fontSize: 12.5 }}
+                  >
                     {formatDate(c.dueDate)}
                   </span>
                   <span style={{ textAlign: "right" }}>

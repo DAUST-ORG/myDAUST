@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { PLAN_TEMPLATES, splitEvenXof } from "./finance.js";
+import {
+  PLAN_TEMPLATES,
+  PaymentMethod,
+  PiSpiAliasInput,
+  PiSpiInitiateInput,
+  WireApprovalInput,
+  WirePaymentConfig,
+  piSpiReasonText,
+  splitEvenXof,
+} from "./finance.js";
 
 describe("splitEvenXof", () => {
   it("always sums back to the exact total (zero-decimal XOF)", () => {
@@ -23,5 +32,73 @@ describe("splitEvenXof", () => {
       const split = splitEvenXof(2_975_000, t.installments);
       expect(split.reduce((s, v) => s + v, 0)).toBe(2_975_000);
     }
+  });
+});
+
+describe("wire payment contracts", () => {
+  it("recognizes wire as a payment method", () => {
+    expect(PaymentMethod.parse("wire")).toBe("wire");
+  });
+
+  it("requires approval evidence and a positive confirmed amount", () => {
+    expect(
+      WireApprovalInput.safeParse({ confirmedAmountXof: 1000 }).success,
+    ).toBe(false);
+    expect(
+      WireApprovalInput.safeParse({
+        confirmedAmountXof: 1000,
+        bankReference: "BNK-42",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("validates notification recipient emails", () => {
+    expect(
+      WirePaymentConfig.safeParse({
+        enabled: false,
+        notificationRecipients: ["not-an-email"],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("PI-SPI contracts", () => {
+  it("accepts pi_spi as a payment method", () => {
+    expect(PaymentMethod.safeParse("pi_spi").success).toBe(true);
+  });
+
+  it("requires the alias to be a UUID, not a phone number or free text", () => {
+    expect(
+      PiSpiAliasInput.safeParse({ alias: "550e8400-e29b-41d4-a716-446655440000" })
+        .success,
+    ).toBe(true);
+    expect(PiSpiAliasInput.safeParse({ alias: "+221771234567" }).success).toBe(false);
+    expect(PiSpiAliasInput.safeParse({ alias: "" }).success).toBe(false);
+  });
+
+  it("rejects a zero, negative or non-integer amount", () => {
+    const alias = "550e8400-e29b-41d4-a716-446655440000";
+    expect(PiSpiInitiateInput.safeParse({ alias, amountXof: 0 }).success).toBe(false);
+    expect(PiSpiInitiateInput.safeParse({ alias, amountXof: -100 }).success).toBe(false);
+    expect(PiSpiInitiateInput.safeParse({ alias, amountXof: 12.5 }).success).toBe(false);
+    expect(PiSpiInitiateInput.safeParse({ alias, amountXof: 450000 }).success).toBe(true);
+  });
+
+  it("maps rail reason codes to human copy and never leaks a bare code", () => {
+    expect(piSpiReasonText("BE23")).toMatch(/alias was not recognised/i);
+    expect(piSpiReasonText("DU03")).toMatch(/already exists/i);
+    expect(piSpiReasonText("ZZ99")).toMatch(/code ZZ99/);
+    expect(piSpiReasonText(null)).toMatch(/not completed/i);
+  });
+});
+
+describe("WireApprovalInput bounds", () => {
+  it("rejects an absurd confirmed amount", () => {
+    expect(
+      WireApprovalInput.safeParse({
+        confirmedAmountXof: 999_999_999_999,
+        bankReference: "BNK-1",
+      }).success,
+    ).toBe(false);
   });
 });

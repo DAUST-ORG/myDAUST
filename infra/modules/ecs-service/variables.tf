@@ -72,8 +72,13 @@ variable "secret_arns" {
   default = []
 }
 
+variable "task_policy_json" {
+  type        = string
+  default     = ""
+  description = "Optional least-privilege IAM policy attached to the application task role."
+}
+
 variable "desired_count" {
   type    = number
   default = 1
 }
-

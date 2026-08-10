@@ -35,7 +35,9 @@ data "cloudflare_zone" "daust_net" {
 }
 
 resource "cloudflare_record" "tunnel" {
-  for_each = local.tunnel_hosts
+  # The map keys and values are fixed public hostnames. The condition inherits
+  # sensitivity from the API token, so explicitly remove it for for_each.
+  for_each = nonsensitive(local.tunnel_hosts)
 
   zone_id = data.cloudflare_zone.daust_net[0].id
   name    = each.value
