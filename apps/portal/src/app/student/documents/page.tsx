@@ -4,7 +4,7 @@ import Link from "next/link";
 import { FileText, ShieldCheck } from "lucide-react";
 
 const DOCS = [
-  { href: "/student/documents/transcript", icon: FileText, title: "Official Transcript", desc: "Your full academic record with GPA, printable to PDF.", color: "var(--daust-navy)" },
+  { href: "/student/documents/transcript", icon: FileText, title: "Unofficial Academic Record", desc: "Your current academic record with GPA, printable for personal use.", color: "var(--daust-navy)" },
   { href: "/student/documents/enrollment", icon: ShieldCheck, title: "Enrollment Verification", desc: "Proof of current enrollment for the active term.", color: "#2e7d52" },
 ];
 

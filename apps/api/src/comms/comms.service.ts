@@ -238,7 +238,7 @@ export class CommsService {
     if (audienceType === "individual") {
       if (!audienceValue) throw new BadRequestException("Select a student");
       const student = await this.prisma.student.findFirst({
-        where: { OR: [{ id: audienceValue }, { studentNo: audienceValue }] },
+        where: { recordStatus: "active", OR: [{ id: audienceValue }, { studentNo: audienceValue }] },
         select: { personId: true },
       });
       if (!student) throw new NotFoundException("Student not found");
@@ -246,10 +246,10 @@ export class CommsService {
     }
     const where =
       audienceType === "year"
-        ? { yearLevel: Number(audienceValue) }
+        ? { recordStatus: "active" as const, yearLevel: Number(audienceValue) }
         : audienceType === "program"
-          ? { program: { code: audienceValue } }
-          : {};
+          ? { recordStatus: "active" as const, program: { code: audienceValue } }
+          : { recordStatus: "active" as const };
     const students = await this.prisma.student.findMany({ where, select: { personId: true } });
     return students.map((s) => s.personId);
   }

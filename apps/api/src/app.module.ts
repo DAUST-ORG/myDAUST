@@ -21,6 +21,7 @@ import { NavModule } from "./nav/nav.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { RegistrarModule } from "./registrar/registrar.module.js";
 import { UploadsModule } from "./uploads/uploads.module.js";
+import { TranscriptModule } from "./transcript/transcript.module.js";
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { UploadsModule } from "./uploads/uploads.module.js";
     FacultyModule,
     HrModule,
     UploadsModule,
+    TranscriptModule,
   ],
   controllers: [HealthController],
 })

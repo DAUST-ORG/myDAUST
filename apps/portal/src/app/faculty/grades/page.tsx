@@ -10,8 +10,6 @@ import {
   getFacultyGradebook,
 } from "@/lib/api-faculty";
 
-const GRADE_OPTIONS = ["", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"];
-
 const STATUS_STYLE: Record<GradeSubmissionStatus, { label: string; bg: string; fg: string }> = {
   draft: { label: "Draft", bg: "var(--bg-subtle)", fg: "var(--fg3)" },
   submitted: { label: "Submitted", bg: "rgba(237,132,37,.14)", fg: "#a85f16" },
@@ -193,7 +191,7 @@ export default function FacultyGradeEntry() {
                     onChange={(e) => setDraft({ ...draft, [s.enrollmentId]: e.target.value })}
                     style={{ width: 120 }}
                   >
-                    {GRADE_OPTIONS.map((g) => (
+                    {["", ...(gb.gradeOptions ?? [])].map((g) => (
                       <option key={g} value={g}>{g || "—"}</option>
                     ))}
                   </select>
