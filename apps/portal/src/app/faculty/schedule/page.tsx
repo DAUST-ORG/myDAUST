@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download } from "lucide-react";
 import { WeeklySchedule } from "@/components/WeeklySchedule";
-import { Button, PageHeader } from "@/components/ui";
+import { Button, Card, PageHeader } from "@/components/ui";
 import { type FacultyScheduleItem, getFacultySchedule } from "@/lib/api";
 import {
   downloadWeeklySchedule,
@@ -13,11 +13,13 @@ import {
 export default function FacultySchedulePage() {
   const [items, setItems] = useState<FacultyScheduleItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     getFacultySchedule()
       .then(setItems)
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
   }, []);
 
   const activeTerm = items[0]
@@ -67,19 +69,25 @@ export default function FacultySchedulePage() {
           ) : undefined
         }
       />
-      {error && (
-        <div
-          className="card"
-          style={{ color: "var(--error-500)", marginBottom: 14 }}
-        >
-          {error}
-        </div>
+      {loading ? (
+        <Card>
+          <div role="status" aria-live="polite" className="muted">
+            Loading schedule…
+          </div>
+        </Card>
+      ) : error ? (
+        <Card>
+          <div role="alert" style={{ color: "var(--error-500)" }}>
+            {error}
+          </div>
+        </Card>
+      ) : (
+        <WeeklySchedule
+          entries={schedule}
+          emptyTitle="No teaching schedule"
+          emptyNote="Your classes appear here after the registrar assigns you to a section."
+        />
       )}
-      <WeeklySchedule
-        entries={schedule}
-        emptyTitle="No teaching schedule"
-        emptyNote="Your classes appear here after the registrar assigns you to a section."
-      />
     </>
   );
 }

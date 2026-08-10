@@ -2,13 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
-import {
-  type MyEnrollment,
-  type Term,
-  getCurrentTerm,
-  getMyEnrollments,
-} from "@/lib/api";
-import { Button, PageHeader } from "@/components/ui";
+import { type StudentSchedule, getStudentSchedule } from "@/lib/api";
+import { Button, Card, PageHeader } from "@/components/ui";
 import { WeeklySchedule } from "@/components/WeeklySchedule";
 import { COURSE_COLORS } from "@/lib/student-schedule";
 import {
@@ -17,18 +12,19 @@ import {
 } from "@/lib/weekly-schedule";
 
 export default function SchedulePage() {
-  const [items, setItems] = useState<MyEnrollment[]>([]);
-  const [term, setTerm] = useState<Term | null>(null);
+  const [data, setData] = useState<StudentSchedule | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getMyEnrollments()
-      .then(setItems)
-      .catch(() => {});
-    getCurrentTerm()
-      .then(setTerm)
-      .catch(() => {});
+    getStudentSchedule()
+      .then(setData)
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
   }, []);
 
+  const items = data?.entries ?? [];
+  const term = data?.term ?? null;
   const credits = items.reduce((s, e) => s + e.credits, 0);
   const schedule: WeeklyScheduleEntry[] = items.map((entry, index) => ({
     id: entry.enrollmentId,
@@ -65,11 +61,25 @@ export default function SchedulePage() {
           ) : undefined
         }
       />
-      <WeeklySchedule
-        entries={schedule}
-        emptyTitle="No enrolled courses"
-        emptyNote="Add sections from Registration to build your week."
-      />
+      {loading ? (
+        <Card>
+          <div role="status" aria-live="polite" className="muted">
+            Loading schedule…
+          </div>
+        </Card>
+      ) : error ? (
+        <Card>
+          <div role="alert" style={{ color: "var(--error-500)" }}>
+            {error}
+          </div>
+        </Card>
+      ) : (
+        <WeeklySchedule
+          entries={schedule}
+          emptyTitle="No enrolled courses"
+          emptyNote="Add sections from Registration to build your week."
+        />
+      )}
     </>
   );
 }
