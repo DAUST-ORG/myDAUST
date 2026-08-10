@@ -1995,6 +1995,7 @@ export class FinanceService {
   /** All student accounts with derived balances + status. Powers the standalone billing admin. */
   async listStudentAccounts() {
     const students = await this.prisma.student.findMany({
+      where: { recordStatus: "active" },
       orderBy: { studentNo: "asc" },
       include: {
         person: true,
@@ -2333,7 +2334,7 @@ export class FinanceService {
     if (ids.length === 0) throw new BadRequestException("No students selected");
     const validIds = (
       await this.prisma.student.findMany({
-        where: { id: { in: ids } },
+        where: { id: { in: ids }, recordStatus: "active" },
         select: { id: true },
       })
     ).map((s) => s.id);

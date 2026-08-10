@@ -56,3 +56,7 @@ coverage/
 .playwright-mcp/
 apps/api/uploads/
 .data/
+
+# Generated reports and local student-data exports (may contain PII)
+/outputs/
+/Active Students*.csv

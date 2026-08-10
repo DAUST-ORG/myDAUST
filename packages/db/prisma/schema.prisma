@@ -74,6 +74,11 @@ enum EnrollmentStatus {
   completed
 }
 
+enum StudentRecordStatus {
+  active
+  archived
+}
+
 enum AttendanceStatus {
   present
   late
@@ -175,6 +180,10 @@ model Person {
   facultyProfile  FacultyProfile?
   wireTransfersSubmitted WireTransferSubmission[] @relation("WireTransferSubmitter")
   wireTransfersReviewed  WireTransferSubmission[] @relation("WireTransferReviewer")
+  transcriptImportBatches TranscriptImportBatch[] @relation("TranscriptImportBatchCreator")
+  transcriptEntriesCreated TranscriptEntry[] @relation("TranscriptEntryCreator")
+  transcriptEntriesUpdated TranscriptEntry[] @relation("TranscriptEntryUpdater")
+  transcriptEntriesVoided  TranscriptEntry[] @relation("TranscriptEntryVoider")
 }
 
 model Student {
@@ -223,6 +232,9 @@ model Student {
   enrollmentStatus String? // full-time | part-time | leave
   catalogYear      String? // requirement set the student is audited against
   standing         String? // Good Standing | Probation | ...
+  // Lifecycle of the SIS record itself. Archiving hides a student from active
+  // rosters without deleting their academic or financial history.
+  recordStatus     StudentRecordStatus @default(active)
   holds            StudentHold[]
   alerts           StudentAlert[]
   watchers         StaffWatch[]
@@ -232,6 +244,8 @@ model Student {
   wireTransfers WireTransferSubmission[]
   piSpiRequests PiSpiRequest[]
   enrollments Enrollment[]
+  transcriptEntries TranscriptEntry[]
+  gradeSubmissionItems GradeSubmissionItem[]
   mealPlan    MealPlan?
   diningOrders DiningOrder[]
   diningScans DiningScan[]
@@ -239,6 +253,8 @@ model Student {
   roommateProfile RoommateProfile?
   documents   StudentDocument[]
   createdAt   DateTime     @default(now())
+
+  @@index([recordStatus])
 }
 
 /// A faculty member's public-website profile. Only people whose roles include
@@ -279,6 +295,8 @@ model Term {
   status         String?
   invoices  Invoice[]
   sections  Section[]
+  transcriptEntries TranscriptEntry[]
+  gradeSubmissionItems GradeSubmissionItem[]
 }
 
 model Invoice {
@@ -643,6 +661,8 @@ model Course {
   coreqRules      CourseCorequisite[]  @relation("CoreqRuleCourse")
   coreqFor        CourseCorequisite[]  @relation("CoreqCourse")
   curriculumSlots CurriculumEntry[]
+  transcriptEntries TranscriptEntry[]
+  gradeSubmissionItems GradeSubmissionItem[]
 }
 
 model Section {
@@ -686,6 +706,8 @@ model Enrollment {
   enrolledAt DateTime         @default(now())
   attendance AttendanceRecord[]
   submissions Submission[]
+  transcriptEntry TranscriptEntry?
+  gradeSubmissionItems GradeSubmissionItem[]
 
   @@unique([studentId, sectionId])
   @@index([sectionId])
@@ -1371,6 +1393,10 @@ model GradeScaleRow {
   minScore Int?
   maxScore Int?
   position Int           @default(0)
+  // Explicit policy keeps non-letter grades such as P/I/W from being inferred
+  // from whether a numeric point value happens to be present.
+  countsTowardGpa     Boolean @default(true)
+  countsTowardCredits Boolean @default(true)
 
   @@index([schemeId])
 }
@@ -1380,6 +1406,19 @@ enum GradeSubmissionStatus {
   submitted
   approved
   returned
+}
+
+enum TranscriptEntrySource {
+  legacy_import
+  approved_enrollment
+  manual
+}
+
+enum TranscriptImportBatchStatus {
+  pending
+  validated
+  imported
+  failed
 }
 
 /// Faculty submit a section's final grades; the registrar approves before they
@@ -1394,8 +1433,121 @@ model GradeSubmission {
   approvedById  String?
   approvedAt    DateTime?
   note          String?
+  // Incremented for every faculty submission/resubmission. GradeSubmissionItem
+  // preserves the exact roster and grades reviewed for each version.
+  version       Int                   @default(0)
+  items         GradeSubmissionItem[]
 
   @@index([status])
+}
+
+/// Immutable per-student snapshot of a submitted section-grade version. The
+/// registrar approves these values rather than mutable Enrollment rows.
+model GradeSubmissionItem {
+  id                  String          @id @default(uuid())
+  gradeSubmissionId   String
+  gradeSubmission     GradeSubmission @relation(fields: [gradeSubmissionId], references: [id], onDelete: Cascade)
+  version             Int
+  enrollmentId        String
+  enrollment          Enrollment      @relation(fields: [enrollmentId], references: [id])
+  studentId           String
+  student             Student         @relation(fields: [studentId], references: [id])
+  courseId            String?
+  course              Course?         @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  termId              String?
+  term                Term?           @relation(fields: [termId], references: [id], onDelete: SetNull)
+  courseCode          String
+  courseTitle         String
+  termLabel           String
+  credits             Int
+  grade               String?
+  gradePoints         Float?
+  countsTowardGpa     Boolean         @default(false)
+  countsTowardCredits Boolean         @default(false)
+  createdAt           DateTime        @default(now())
+  transcriptEntry     TranscriptEntry?
+
+  @@unique([gradeSubmissionId, version, enrollmentId])
+  @@index([gradeSubmissionId, version])
+  @@index([studentId])
+  @@index([enrollmentId])
+  @@index([courseId])
+  @@index([termId])
+}
+
+/// One idempotent source workbook load. The source hash prevents the same file
+/// from being imported twice while entry-level source keys protect row retries.
+model TranscriptImportBatch {
+  id             String                      @id @default(uuid())
+  sourceFileName String
+  sourceSha256   String                      @unique
+  sourceObjectKey String?
+  status         TranscriptImportBatchStatus @default(pending)
+  totalRows      Int                         @default(0)
+  importedRows   Int                         @default(0)
+  skippedRows    Int                         @default(0)
+  errorRows      Int                         @default(0)
+  errorSummary   Json?
+  note           String?
+  createdById    String?
+  createdBy      Person?                     @relation("TranscriptImportBatchCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  importedAt     DateTime?
+  entries        TranscriptEntry[]
+
+  @@index([status, createdAt])
+}
+
+/// Canonical academic-history ledger. Snapshot fields remain authoritative even
+/// when catalog courses or terms are renamed; nullable links add context when a
+/// legacy row can be matched to current SIS entities.
+model TranscriptEntry {
+  id                    String                @id @default(uuid())
+  studentId             String
+  student               Student               @relation(fields: [studentId], references: [id])
+  source                TranscriptEntrySource
+  sourceKey             String?               @unique
+  importBatchId         String?
+  importBatch           TranscriptImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  importRowNumber       Int?
+  gradeSubmissionItemId String?               @unique
+  gradeSubmissionItem   GradeSubmissionItem?  @relation(fields: [gradeSubmissionItemId], references: [id], onDelete: SetNull)
+  enrollmentId          String?               @unique
+  enrollment            Enrollment?           @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  courseId              String?
+  course                Course?                @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  termId                String?
+  term                  Term?                  @relation(fields: [termId], references: [id], onDelete: SetNull)
+  courseCode            String
+  courseTitle           String
+  termLabel             String
+  termSortKey           String?
+  grade                 String
+  credits               Int
+  earnedCredits         Int
+  gradePoints           Float?
+  countsTowardGpa       Boolean               @default(true)
+  countsTowardCredits   Boolean               @default(true)
+  requirementCategory   String?
+  note                  String?
+  createdById           String?
+  createdBy             Person?               @relation("TranscriptEntryCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById           String?
+  updatedBy             Person?               @relation("TranscriptEntryUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  voidedById            String?
+  voidedBy              Person?               @relation("TranscriptEntryVoider", fields: [voidedById], references: [id], onDelete: SetNull)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  voidedAt              DateTime?
+  voidReason            String?
+
+  @@index([studentId, voidedAt, termSortKey])
+  @@index([studentId, voidedAt, courseCode])
+  @@index([importBatchId])
+  @@unique([importBatchId, importRowNumber])
+  @@index([courseId])
+  @@index([termId])
 }
 
 /// Financial or advising hold. An active hold blocks course registration.

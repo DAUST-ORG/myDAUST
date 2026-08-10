@@ -19,7 +19,7 @@ import { PrismaClient } from "@mydaust/db";
 const SCHEMA = `settlement_test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
 
 function databaseUrl(): string | null {
-  const base = process.env.DATABASE_URL;
+  const base = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!base) return null;
   const url = new URL(base);
   url.searchParams.set("schema", SCHEMA);

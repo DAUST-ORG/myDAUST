@@ -16,7 +16,12 @@ import {
 import { Card, EmptyState, IconButton } from "@/components/ui";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CourseTabs, courseTitle } from "../CourseTabs";
-import { type TeachingSection, getTeaching, uploadFile } from "@/lib/api";
+import {
+  type TeachingSection,
+  fileUrl,
+  getTeaching,
+  uploadFile,
+} from "@/lib/api";
 import {
   type MaterialCategory,
   type SectionMaterial,
@@ -209,7 +214,7 @@ export default function FacultyMaterials() {
                           }}
                         >
                           <a
-                            href={m.fileUrl ?? "#"}
+                            href={m.fileUrl ? fileUrl(m.fileUrl) : "#"}
                             target="_blank"
                             rel="noreferrer"
                             style={{
@@ -253,7 +258,7 @@ export default function FacultyMaterials() {
                               <ArrowDown size={13} />
                             </IconButton>
                             <IconButton
-                              label={`Delete ${m.fileName ?? m.title}`}
+                              label={`Remove ${m.fileName ?? m.title}`}
                               tone="danger"
                               disabled={moving !== null}
                               onClick={() => setRemoving(m)}
@@ -274,9 +279,15 @@ export default function FacultyMaterials() {
 
       {removing && (
         <ConfirmDialog
-          title="Delete material?"
-          confirmLabel="Delete"
-          message={<>Remove <strong>{removing.fileName ?? removing.title}</strong> from this course? Students will no longer be able to download it.</>}
+          title="Remove material from course?"
+          confirmLabel="Remove material"
+          message={
+            <>
+              Remove <strong>{removing.fileName ?? removing.title}</strong> from
+              this course? Students will lose access immediately, and this
+              course material record cannot be restored in the portal.
+            </>
+          }
           onClose={() => setRemoving(null)}
           onConfirm={remove}
         />

@@ -6,8 +6,14 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
+import {
+  bestPointsByCourse,
+  summarizeTranscriptRows,
+} from "../transcript/transcript-calculation.js";
+import { TranscriptService } from "../transcript/transcript.service.js";
 
 export const GRADE_POINTS: Record<string, number> = {
+  "A+": 4.0,
   A: 4.0,
   "A-": 3.7,
   "B+": 3.3,
@@ -16,7 +22,9 @@ export const GRADE_POINTS: Record<string, number> = {
   "C+": 2.3,
   C: 2.0,
   "C-": 1.7,
+  "D+": 1.3,
   D: 1.0,
+  "D-": 0.7,
   F: 0.0,
 };
 
@@ -45,8 +53,39 @@ export function standingLabel(gpa: number): string {
   return "Good Standing";
 }
 
+/**
+ * Credit-bearing pass marks satisfy an ungraded prerequisite. A prerequisite
+ * with a minimum grade additionally needs numeric grade points to compare.
+ */
+export function meetsPrerequisite(
+  bestPoints: Map<string, number | null>,
+  courseId: string,
+  minGrade?: string | null,
+): boolean {
+  if (!bestPoints.has(courseId)) return false;
+  if (!minGrade) return true;
+  const required = GRADE_POINTS[minGrade];
+  if (required === undefined) return false;
+  const earned = bestPoints.get(courseId);
+  return earned !== null && earned !== undefined && earned >= required;
+}
+
 /** Maximum credits a student may carry in one term (enrolled + newly added). */
 export const MAX_CREDITS_PER_TERM = 30;
+
+/** True only when the proposed order contains every material id exactly once. */
+export function isExactMaterialOrder(
+  orderedIds: string[],
+  existingIds: Iterable<string>,
+): boolean {
+  const existing = new Set(existingIds);
+  const proposed = new Set(orderedIds);
+  return (
+    orderedIds.length === existing.size &&
+    proposed.size === existing.size &&
+    orderedIds.every((id) => existing.has(id))
+  );
+}
 
 /** Applicant stages still awaiting a decision — what the dashboard counts as "in pipeline". */
 const OPEN_APPLICANT_STAGES = ["submitted", "review", "interview", "offer"];
@@ -159,7 +198,11 @@ export interface UpdateStudentFields {
 
 @Injectable()
 export class AcademicsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly transcript: TranscriptService;
+
+  constructor(private readonly prisma: PrismaService) {
+    this.transcript = new TranscriptService(prisma);
+  }
 
   /** The active/upcoming term (the one registration targets). */
   async currentTerm() {
@@ -274,34 +317,32 @@ export class AcademicsService {
         },
       });
 
-      // Everything the student has completed, with the grade earned, so a
-      // prerequisite can require a minimum grade rather than a bare pass.
-      const completed = await tx.enrollment.findMany({
-        where: { studentId, status: "completed" },
-        include: { section: { include: { course: true } } },
+      // Official transcript entries are the publication gate. Faculty drafts
+      // and submitted-but-unapproved enrollment grades never satisfy a prereq.
+      const completed = await tx.transcriptEntry.findMany({
+        where: { studentId, voidedAt: null, courseId: { not: null } },
+        select: {
+          courseId: true,
+          courseCode: true,
+          credits: true,
+          earnedCredits: true,
+          gradePoints: true,
+          countsTowardGpa: true,
+          countsTowardCredits: true,
+        },
       });
-      const bestGrade = new Map<string, number>();
-      for (const e of completed) {
-        const pts = e.grade ? GRADE_POINTS[e.grade] : undefined;
-        const courseId = e.section.courseId;
-        const prev = bestGrade.get(courseId);
-        // A retake counts at its best grade.
-        if (pts !== undefined && (prev === undefined || pts > prev))
-          bestGrade.set(courseId, pts);
-        else if (!bestGrade.has(courseId)) bestGrade.set(courseId, pts ?? 0);
-      }
+      const bestGrade = bestPointsByCourse(completed);
 
       const unmet: string[] = [];
       for (const pr of course.prereqRules) {
-        const earned = bestGrade.get(pr.prereqCourseId);
-        if (earned === undefined) {
-          unmet.push(pr.prereqCourse.code);
+        if (meetsPrerequisite(bestGrade, pr.prereqCourseId, pr.minGrade)) {
           continue;
         }
-        const required = pr.minGrade ? GRADE_POINTS[pr.minGrade] : undefined;
-        if (required !== undefined && earned < required) {
-          unmet.push(`${pr.prereqCourse.code} (min ${pr.minGrade})`);
-        }
+        unmet.push(
+          pr.minGrade
+            ? `${pr.prereqCourse.code} (min ${pr.minGrade})`
+            : pr.prereqCourse.code,
+        );
       }
       if (unmet.length > 0) {
         throw new BadRequestException(
@@ -481,9 +522,17 @@ export class AcademicsService {
           where: { studentId, status: "enrolled", section: { termId } },
           include: { section: { include: { course: true } } },
         }),
-        this.prisma.enrollment.findMany({
-          where: { studentId, status: "completed" },
-          include: { section: true },
+        this.prisma.transcriptEntry.findMany({
+          where: { studentId, voidedAt: null, courseId: { not: null } },
+          select: {
+            courseId: true,
+            courseCode: true,
+            credits: true,
+            earnedCredits: true,
+            gradePoints: true,
+            countsTowardGpa: true,
+            countsTowardCredits: true,
+          },
         }),
         this.prisma.studentHold.findMany({
           where: { studentId, active: true },
@@ -491,15 +540,7 @@ export class AcademicsService {
         this.prisma.student.findUnique({ where: { id: studentId } }),
       ]);
 
-    const bestGrade = new Map<string, number>();
-    for (const e of completed) {
-      const pts = e.grade ? GRADE_POINTS[e.grade] : undefined;
-      const id = e.section.courseId;
-      const prev = bestGrade.get(id);
-      if (pts !== undefined && (prev === undefined || pts > prev))
-        bestGrade.set(id, pts);
-      else if (!bestGrade.has(id)) bestGrade.set(id, pts ?? 0);
-    }
+    const bestGrade = bestPointsByCourse(completed);
 
     const enrolledCourseIds = new Set(
       enrollments.map((e) => e.section.courseId),
@@ -512,12 +553,14 @@ export class AcademicsService {
     const rows = sections.map((s) => {
       const seatsLeft = s.capacity - s._count.enrollments;
       const unmetPrereqs = s.course.prereqRules
-        .filter((pr) => {
-          const earned = bestGrade.get(pr.prereqCourseId);
-          if (earned === undefined) return true;
-          const required = pr.minGrade ? GRADE_POINTS[pr.minGrade] : undefined;
-          return required !== undefined && earned < required;
-        })
+        .filter(
+          (pr) =>
+            !meetsPrerequisite(
+              bestGrade,
+              pr.prereqCourseId,
+              pr.minGrade,
+            ),
+        )
         .map((pr) =>
           pr.minGrade
             ? `${pr.prereqCourse.code} (min ${pr.minGrade})`
@@ -590,7 +633,7 @@ export class AcademicsService {
       };
     }
 
-    const [requirements, enrollments] = await Promise.all([
+    const [requirements, enrollments, transcriptEntries] = await Promise.all([
       this.prisma.programRequirement.findMany({
         where: {
           programId: student.programId,
@@ -599,10 +642,19 @@ export class AcademicsService {
         orderBy: { position: "asc" },
       }),
       this.prisma.enrollment.findMany({
-        where: { studentId, status: { in: ["completed", "enrolled"] } },
+        where: { studentId, status: "enrolled" },
         include: {
           section: { include: { course: { include: { department: true } } } },
         },
+      }),
+      this.prisma.transcriptEntry.findMany({
+        where: {
+          studentId,
+          voidedAt: null,
+          countsTowardCredits: true,
+          earnedCredits: { gt: 0 },
+        },
+        include: { course: { include: { department: true } } },
       }),
     ]);
 
@@ -614,6 +666,36 @@ export class AcademicsService {
       requirements.find((r) => /elective/i.test(r.category))?.category ?? null;
     const doneBy = new Map<string, number>();
     const progressBy = new Map<string, number>();
+    const appliedCourseCredits = new Map<string, number>();
+    for (const entry of transcriptEntries) {
+      const course = entry.course;
+      const declared = entry.requirementCategory ?? course?.requirementCategory;
+      const match =
+        (declared &&
+          requirements.find(
+            (requirement) =>
+              requirement.category.toLowerCase() === declared.toLowerCase(),
+          )) ||
+        (course
+          ? requirements.find(
+              (requirement) =>
+                requirement.category.toLowerCase() ===
+                course.department.name.toLowerCase(),
+            )
+          : null);
+      const category = match?.category ?? fallback;
+      if (!category) continue;
+      const identity = course?.id ?? entry.courseCode.trim().toUpperCase();
+      const key = `${category}\u001f${identity}`;
+      appliedCourseCredits.set(
+        key,
+        Math.max(appliedCourseCredits.get(key) ?? 0, entry.earnedCredits),
+      );
+    }
+    for (const [key, credits] of appliedCourseCredits) {
+      const category = key.split("\u001f", 1)[0]!;
+      doneBy.set(category, (doneBy.get(category) ?? 0) + credits);
+    }
     for (const e of enrollments) {
       const course = e.section.course;
       const declared = course.requirementCategory;
@@ -628,10 +710,9 @@ export class AcademicsService {
         );
       const category = match?.category ?? fallback;
       if (!category) continue;
-      const bucket = e.status === "completed" ? doneBy : progressBy;
-      bucket.set(
+      progressBy.set(
         category,
-        (bucket.get(category) ?? 0) + e.section.course.credits,
+        (progressBy.get(category) ?? 0) + e.section.course.credits,
       );
     }
 
@@ -683,15 +764,7 @@ export class AcademicsService {
     });
     if (!s) throw new NotFoundException("Student not found");
 
-    const graded = await this.prisma.enrollment.findMany({
-      where: { studentId, status: "completed" },
-      include: { section: { include: { course: true } } },
-    });
-    const { gpa, completedCredits } = computeGpa(
-      graded
-        .filter((e) => e.grade)
-        .map((e) => ({ grade: e.grade!, credits: e.section.course.credits })),
-    );
+    const { gpa, completedCredits } = await this.transcript.summary(studentId);
 
     return {
       name: `${s.person.firstName} ${s.person.lastName}`,
@@ -852,19 +925,34 @@ export class AcademicsService {
   /** Gradebook: enrolled students + their current (final) grade/status. Ownership-checked. */
   async getGradebook(sectionId: string, personId: string, isAdmin: boolean) {
     const section = await this.assertSectionOwner(sectionId, personId, isAdmin);
-    const [enrollments, submission] = await Promise.all([
+    const [enrollments, submission, configuredSection] = await Promise.all([
       this.prisma.enrollment.findMany({
         where: { sectionId, status: { in: ["enrolled", "completed"] } },
         include: { student: { include: { person: true } } },
         orderBy: { student: { studentNo: "asc" } },
       }),
       this.prisma.gradeSubmission.findUnique({ where: { sectionId } }),
+      this.prisma.section.findUnique({
+        where: { id: sectionId },
+        include: {
+          gradingScheme: {
+            include: { rows: { orderBy: { position: "asc" } } },
+          },
+        },
+      }),
     ]);
+    const scheme =
+      configuredSection?.gradingScheme ??
+      (await this.prisma.gradingScheme.findFirst({
+        where: { isDefault: true },
+        include: { rows: { orderBy: { position: "asc" } } },
+      }));
     return {
       course: `${section.course.code} — ${section.course.title}`,
       sectionCode: section.sectionCode,
       status: submission?.status ?? "draft",
       statusNote: submission?.note ?? null,
+      gradeOptions: scheme?.rows.map((row) => row.grade) ?? [],
       students: enrollments.map((e) => ({
         enrollmentId: e.id,
         studentNo: e.student.studentNo,
@@ -875,7 +963,7 @@ export class AcademicsService {
     };
   }
 
-  /** Submit/save grades for a section. finalize=true marks graded enrollments completed → GPA. */
+  /** Save provisional grades or freeze a versioned roster for registrar review. */
   async submitGrades(
     sectionId: string,
     input: {
@@ -887,32 +975,130 @@ export class AcademicsService {
   ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     await this.prisma.$transaction(async (tx) => {
-      for (const g of input.grades) {
-        await tx.enrollment.updateMany({
-          where: { id: g.enrollmentId, sectionId },
-          data: {
-            grade: g.grade,
-            ...(input.finalize
-              ? { status: g.grade ? "completed" : "enrolled" }
-              : {}),
+      const [section, roster, existingSubmission] = await Promise.all([
+        tx.section.findUnique({
+          where: { id: sectionId },
+          include: {
+            course: true,
+            term: true,
+            gradingScheme: {
+              include: { rows: { orderBy: { position: "asc" } } },
+            },
           },
-        });
+        }),
+        tx.enrollment.findMany({
+          where: { sectionId, status: { in: ["enrolled", "completed"] } },
+        }),
+        tx.gradeSubmission.findUnique({ where: { sectionId } }),
+      ]);
+      if (!section) throw new NotFoundException("Section not found");
+      if (
+        existingSubmission?.status === "submitted" ||
+        existingSubmission?.status === "approved"
+      ) {
+        throw new BadRequestException(
+          "Grades are locked while submitted or after approval",
+        );
       }
+      if (roster.some((enrollment) => enrollment.status === "completed")) {
+        throw new BadRequestException(
+          "Published grades cannot be changed through faculty grade entry",
+        );
+      }
+
+      const gradeByEnrollment = new Map(
+        input.grades.map((item) => [item.enrollmentId, item.grade]),
+      );
+      if (
+        gradeByEnrollment.size !== input.grades.length ||
+        gradeByEnrollment.size !== roster.length ||
+        roster.some((enrollment) => !gradeByEnrollment.has(enrollment.id))
+      ) {
+        throw new BadRequestException(
+          "Submit every roster enrollment exactly once",
+        );
+      }
+
+      const scheme =
+        section.gradingScheme ??
+        (await tx.gradingScheme.findFirst({
+          where: { isDefault: true },
+          include: { rows: { orderBy: { position: "asc" } } },
+        }));
+      if (!scheme) {
+        throw new BadRequestException("No grading scheme is configured");
+      }
+      const policyByGrade = new Map(
+        scheme.rows.map((row) => [row.grade.trim().toUpperCase(), row]),
+      );
+      const normalized = roster.map((enrollment) => {
+        const raw = gradeByEnrollment.get(enrollment.id);
+        const grade = raw ? raw.trim().toUpperCase() : null;
+        const policy = grade ? policyByGrade.get(grade) : null;
+        if (grade && !policy) {
+          throw new BadRequestException(
+            `Grade ${grade} is not part of ${scheme.name}`,
+          );
+        }
+        if (input.finalize && !grade) {
+          throw new BadRequestException(
+            "Every enrolled student needs a grade before submission",
+          );
+        }
+        return { enrollment, grade, policy };
+      });
+
+      for (const item of normalized) {
+        const updated = await tx.enrollment.updateMany({
+          where: { id: item.enrollment.id, sectionId },
+          data: { grade: item.grade },
+        });
+        if (updated.count !== 1) {
+          throw new BadRequestException(
+            "The section roster changed; reload grades",
+          );
+        }
+      }
+
       if (input.finalize) {
-        await tx.gradeSubmission.upsert({
+        const version = (existingSubmission?.version ?? 0) + 1;
+        const submission = await tx.gradeSubmission.upsert({
           where: { sectionId },
           create: {
             sectionId,
             status: "submitted",
             submittedById: personId,
             submittedAt: new Date(),
+            version,
           },
           update: {
             status: "submitted",
             submittedById: personId,
             submittedAt: new Date(),
+            approvedById: null,
+            approvedAt: null,
             note: null,
+            version,
           },
+        });
+        await tx.gradeSubmissionItem.createMany({
+          data: normalized.map(({ enrollment, grade, policy }) => ({
+            gradeSubmissionId: submission.id,
+            version,
+            enrollmentId: enrollment.id,
+            studentId: enrollment.studentId,
+            courseId: section.courseId,
+            termId: section.termId,
+            courseCode: section.course.code,
+            courseTitle: section.course.title,
+            termLabel: section.term.name,
+            credits: section.course.credits,
+            grade,
+            gradePoints: policy?.points ?? null,
+            countsTowardGpa:
+              !!policy?.countsTowardGpa && policy.points !== null,
+            countsTowardCredits: policy?.countsTowardCredits ?? false,
+          })),
         });
       }
       await tx.auditLog.create({
@@ -1377,51 +1563,39 @@ export class AcademicsService {
 
   /** Student dashboard summary: course load + GPA. */
   async mySummary(studentId: string) {
-    const [active, completed] = await Promise.all([
+    const [active, transcript] = await Promise.all([
       this.prisma.enrollment.findMany({
         where: { studentId, status: "enrolled" },
         include: { section: { include: { course: true } } },
       }),
-      this.prisma.enrollment.findMany({
-        where: { studentId, status: "completed", grade: { not: null } },
-        include: { section: { include: { course: true } } },
-      }),
+      this.transcript.summary(studentId),
     ]);
     const credits = active.reduce((s, e) => s + e.section.course.credits, 0);
-    const { gpa, completedCredits } = computeGpa(
-      completed.map((e) => ({
-        grade: e.grade!,
-        credits: e.section.course.credits,
-      })),
-    );
-    return { enrolledCourses: active.length, credits, gpa, completedCredits };
+    return {
+      enrolledCourses: active.length,
+      credits,
+      gpa: transcript.gpa,
+      completedCredits: transcript.completedCredits,
+    };
   }
 
   /** Completed courses with grades (transcript-lite). */
   async myGrades(studentId: string) {
-    const completed = await this.prisma.enrollment.findMany({
-      where: { studentId, status: "completed" },
-      include: { section: { include: { course: true, term: true } } },
-      orderBy: { enrolledAt: "desc" },
-    });
-    return completed.map((e) => ({
-      courseCode: e.section.course.code,
-      title: e.section.course.title,
-      credits: e.section.course.credits,
-      term: e.section.term.name,
-      grade: e.grade,
-      points: e.grade ? (GRADE_POINTS[e.grade] ?? null) : null,
-    }));
+    return this.transcript.list(studentId);
   }
 
   /** Admin: enrollment stats + by-program breakdown. */
   async adminStats() {
     const [totalStudents, totalEnrolled, programs, openApplications, balances] =
       await Promise.all([
-        this.prisma.student.count(),
+        this.prisma.student.count({ where: { recordStatus: "active" } }),
         this.prisma.enrollment.count({ where: { status: "enrolled" } }),
         this.prisma.program.findMany({
-          include: { _count: { select: { students: true } } },
+          include: {
+            _count: {
+              select: { students: { where: { recordStatus: "active" } } },
+            },
+          },
         }),
         this.prisma.applicant.count({
           where: { stage: { in: OPEN_APPLICANT_STAGES } },
@@ -1457,19 +1631,13 @@ export class AcademicsService {
         person: true,
         program: true,
         invoices: true,
-        enrollments: { include: { section: { include: { course: true } } } },
+        transcriptEntries: { where: { voidedAt: null } },
       },
       orderBy: { studentNo: "asc" },
     });
     return students.map((s) => {
-      const completed = s.enrollments.filter(
-        (e) => e.status === "completed" && e.grade,
-      );
-      const { gpa, completedCredits } = computeGpa(
-        completed.map((e) => ({
-          grade: e.grade!,
-          credits: e.section.course.credits,
-        })),
+      const { gpa, completedCredits } = summarizeTranscriptRows(
+        s.transcriptEntries,
       );
       return {
         id: s.id,
@@ -1487,7 +1655,13 @@ export class AcademicsService {
           (b, i) => b + (i.totalAmount - i.amountPaid),
           0,
         ),
-        status: gpa > 0 && gpa < 2 ? "probation" : "active",
+        status:
+          s.recordStatus === "archived"
+            ? "archived"
+            : gpa > 0 && gpa < 2
+              ? "probation"
+              : "active",
+        recordStatus: s.recordStatus,
         hasLogin: !!s.person.passwordHash,
         mustChangePassword: s.person.mustChangePassword,
       };
@@ -1498,7 +1672,12 @@ export class AcademicsService {
   async adminPrograms() {
     const [programs, courses, departments] = await Promise.all([
       this.prisma.program.findMany({
-        include: { department: true, _count: { select: { students: true } } },
+        include: {
+          department: true,
+          _count: {
+            select: { students: { where: { recordStatus: "active" } } },
+          },
+        },
         orderBy: { code: "asc" },
       }),
       this.prisma.course.findMany({
@@ -1544,12 +1723,11 @@ export class AcademicsService {
       include: {
         department: true,
         students: {
+          where: { recordStatus: "active" },
           include: {
             person: true,
             invoices: true,
-            enrollments: {
-              include: { section: { include: { course: true } } },
-            },
+            transcriptEntries: { where: { voidedAt: null } },
           },
           orderBy: { studentNo: "asc" },
         },
@@ -1561,14 +1739,8 @@ export class AcademicsService {
       orderBy: { code: "asc" },
     });
     const students = program.students.map((s) => {
-      const completed = s.enrollments.filter(
-        (e) => e.status === "completed" && e.grade,
-      );
-      const { gpa, completedCredits } = computeGpa(
-        completed.map((e) => ({
-          grade: e.grade!,
-          credits: e.section.course.credits,
-        })),
+      const { gpa, completedCredits } = summarizeTranscriptRows(
+        s.transcriptEntries,
       );
       return {
         id: s.id,
@@ -2155,6 +2327,7 @@ export class AcademicsService {
         person: true,
         program: { include: { department: true } },
         invoices: true,
+        transcriptEntries: { where: { voidedAt: null } },
         enrollments: {
           include: {
             section: {
@@ -2166,14 +2339,8 @@ export class AcademicsService {
       },
     });
     if (!student) throw new NotFoundException("Student not found");
-    const completed = student.enrollments.filter(
-      (e) => e.status === "completed" && e.grade,
-    );
-    const { gpa, completedCredits } = computeGpa(
-      completed.map((e) => ({
-        grade: e.grade!,
-        credits: e.section.course.credits,
-      })),
+    const { gpa, completedCredits } = summarizeTranscriptRows(
+      student.transcriptEntries,
     );
     const currentTermCredits = student.enrollments
       .filter((e) => e.status === "enrolled")
@@ -2195,7 +2362,13 @@ export class AcademicsService {
       completedCredits,
       currentTermCredits,
       standing: standingLabel(gpa),
-      status: gpa > 0 && gpa < 2 ? "probation" : "active",
+      status:
+        student.recordStatus === "archived"
+          ? "archived"
+          : gpa > 0 && gpa < 2
+            ? "probation"
+            : "active",
+      recordStatus: student.recordStatus,
       balance: student.invoices.reduce(
         (b, i) => b + (i.totalAmount - i.amountPaid),
         0,
@@ -2708,23 +2881,22 @@ export class AcademicsService {
         section: { instructorId: personId },
         status: { in: ["enrolled", "completed"] },
       },
-      include: { student: { include: { person: true, program: true } } },
+      include: {
+        student: {
+          include: {
+            person: true,
+            program: true,
+            transcriptEntries: { where: { voidedAt: null } },
+          },
+        },
+      },
     });
     const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
 
     const advisees = await Promise.all(
       studentIds.map(async (sid) => {
-        const completed = await this.prisma.enrollment.findMany({
-          where: { studentId: sid, status: "completed", grade: { not: null } },
-          include: { section: { include: { course: true } } },
-        });
-        const { gpa } = computeGpa(
-          completed.map((e) => ({
-            grade: e.grade!,
-            credits: e.section.course.credits,
-          })),
-        );
         const s = enrollments.find((e) => e.studentId === sid)!.student;
+        const { gpa } = summarizeTranscriptRows(s.transcriptEntries);
         return {
           studentNo: s.studentNo,
           name: `${s.person.firstName} ${s.person.lastName}`,
@@ -2845,6 +3017,7 @@ export class AcademicsService {
           entityId: materialId,
           action: "deleted",
           actorId: personId,
+          data: { before: material },
         },
       }),
     ]);
@@ -2862,20 +3035,29 @@ export class AcademicsService {
       where: { sectionId },
       select: { id: true },
     });
-    const existing = new Set(materials.map((m) => m.id));
-    if (orderedIds.some((id) => !existing.has(id)) || orderedIds.length !== existing.size) {
+    const existingIds = materials.map((material) => material.id);
+    if (!isExactMaterialOrder(orderedIds, existingIds)) {
       throw new BadRequestException(
         "orderedIds must contain exactly the section's materials",
       );
     }
-    await this.prisma.$transaction(
-      orderedIds.map((id, index) =>
+    await this.prisma.$transaction([
+      ...orderedIds.map((id, index) =>
         this.prisma.sectionMaterial.update({
           where: { id },
           data: { sortOrder: index },
         }),
       ),
-    );
+      this.prisma.auditLog.create({
+        data: {
+          entity: "Section",
+          entityId: sectionId,
+          action: "materials-reordered",
+          actorId: personId,
+          data: { orderedIds },
+        },
+      }),
+    ]);
     return this.prisma.sectionMaterial.findMany({
       where: { sectionId },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],

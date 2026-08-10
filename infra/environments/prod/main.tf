@@ -129,6 +129,12 @@ module "media" {
   tags        = { DataClassification = "public-site-media" }
 }
 
+module "transcript_imports" {
+  source      = "../../modules/private-bucket"
+  bucket_name = "daust-prod-transcript-imports-961828155948"
+  tags        = { DataClassification = "academic-confidential" }
+}
+
 module "secrets" {
   source = "../../modules/secrets"
 
@@ -169,6 +175,7 @@ module "api_service" {
     { name = "PAYMENT_ORIGIN", value = local.payment_url },
     { name = "WIRE_PROOFS_BUCKET", value = module.wire_proofs.name },
     { name = "MEDIA_BUCKET", value = module.media.name },
+    { name = "TRANSCRIPT_IMPORT_BUCKET", value = module.transcript_imports.name },
     { name = "PAYTECH_ENV", value = "test" },
     { name = "PAYTECH_IPN_URL", value = "${local.public_url}/api/finance/webhook/paytech" },
     { name = "PAYTECH_SUCCESS_URL", value = "${local.public_url}/student/billing" },
@@ -207,6 +214,21 @@ module "api_service" {
         Condition = {
           StringLike = {
             "s3:prefix" = ["uploads/*"]
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${module.transcript_imports.arn}/transcript-imports/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = module.transcript_imports.arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["transcript-imports/*"]
           }
         }
       }

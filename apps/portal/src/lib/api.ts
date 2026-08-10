@@ -568,6 +568,7 @@ export const getRoster = (sectionId: string) =>
 export interface Gradebook {
   course: string;
   sectionCode: string;
+  gradeOptions: string[];
   students: {
     enrollmentId: string;
     studentNo: string;
@@ -752,6 +753,7 @@ export interface GradeRow {
   term: string;
   grade: string | null;
   points: number | null;
+  countsTowardGpa: boolean;
 }
 export const getMySummary = () => request<MySummary>("/academics/my/summary");
 export const getMyGrades = () => request<GradeRow[]>("/academics/my/grades");
@@ -1041,6 +1043,96 @@ export interface AdminStudentDetail {
 }
 export const getAdminStudentDetail = (id: string) =>
   request<AdminStudentDetail>(`/academics/admin/students/${id}`);
+
+// --- Registrar: canonical transcript ledger ---
+export type TranscriptEntrySource =
+  "legacy_import" | "approved_enrollment" | "manual";
+
+export interface TranscriptActor {
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+export interface TranscriptEntryRow {
+  id: string;
+  courseId: string | null;
+  termId: string | null;
+  courseCode: string;
+  title: string;
+  credits: number;
+  earnedCredits: number;
+  term: string;
+  termSortKey: string | null;
+  grade: string;
+  points: number | null;
+  countsTowardGpa: boolean;
+  countsTowardCredits: boolean;
+  requirementCategory: string | null;
+  source: TranscriptEntrySource;
+  sourceRow: number | null;
+  matched: boolean;
+  note: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: TranscriptActor | null;
+  updatedBy: TranscriptActor | null;
+  voidedBy: TranscriptActor | null;
+}
+
+export interface TranscriptEntryInput {
+  courseId?: string | null;
+  termId?: string | null;
+  courseCode: string;
+  courseTitle: string;
+  termLabel: string;
+  termSortKey?: string | null;
+  grade: string;
+  credits: number;
+  earnedCredits?: number;
+  gradePoints?: number | null;
+  countsTowardGpa?: boolean;
+  countsTowardCredits?: boolean;
+  requirementCategory?: string | null;
+  note?: string | null;
+}
+
+export const getRegistrarTranscript = (
+  studentId: string,
+  includeVoided = true,
+) =>
+  request<TranscriptEntryRow[]>(
+    `/registrar/students/${studentId}/transcript?includeVoided=${includeVoided}`,
+  );
+export const createTranscriptEntry = (
+  studentId: string,
+  input: TranscriptEntryInput,
+) =>
+  request<unknown>(`/registrar/students/${studentId}/transcript`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export const updateTranscriptEntry = (
+  entryId: string,
+  input: Partial<TranscriptEntryInput> & { reason: string },
+) =>
+  request<unknown>(`/registrar/transcript/${entryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+export const voidTranscriptEntry = (entryId: string, reason: string) =>
+  request<unknown>(`/registrar/transcript/${entryId}/void`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+export const restoreTranscriptEntry = (entryId: string, reason: string) =>
+  request<unknown>(`/registrar/transcript/${entryId}/restore`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+
 export interface StudentActivity {
   type: string;
   title: string;
@@ -2683,6 +2775,8 @@ export interface GradingSchemeRow {
     points: number | null;
     minScore: number | null;
     maxScore: number | null;
+    countsTowardGpa: boolean;
+    countsTowardCredits: boolean;
   }[];
 }
 export const getGradingSchemes = () =>
@@ -2861,6 +2955,8 @@ export const addGradeRow = (
     points: number | null;
     minScore: number | null;
     maxScore: number | null;
+    countsTowardGpa: boolean;
+    countsTowardCredits: boolean;
   },
 ) =>
   request<unknown>(`/registrar/grading-schemes/${schemeId}/rows`, {
@@ -2874,6 +2970,8 @@ export const updateGradeRow = (
     points?: number | null;
     minScore?: number | null;
     maxScore?: number | null;
+    countsTowardGpa?: boolean;
+    countsTowardCredits?: boolean;
   },
 ) =>
   request<unknown>(`/registrar/grading-schemes/rows/${rowId}`, {
