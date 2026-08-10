@@ -6,7 +6,7 @@ Production last verified: **2026-08-10**. This page is the operational handoff f
 
 - **Production verified** means the behavior or data was checked on `my.daust.net` or `daust.net`.
 - **Deployed but disabled** means the feature is live but hidden behind configuration.
-- **Import blocked** means the application is deployed, but the data import has made no database changes because a preflight safety check failed.
+- **Partially imported** means authoritative records are live while unresolved identities remain isolated from production.
 
 ## Academics: Production Verified
 
@@ -63,7 +63,7 @@ The following fixes were promoted through staging and production on 2026-08-07 a
 
 No Moussa Thiao record was deleted during deployment. Production previously showed `mthiao@daust.org` as public and `mndao@daust.org` as a private duplicate; verify both identities and section assignments immediately before deleting either record.
 
-## Transcript Ledger: Production Deployed; Historical Import Blocked
+## Transcript Ledger: Production Deployed; Current Students Imported
 
 The deployed independent `TranscriptEntry` ledger is now the source of official academic history. This changes the publication boundary:
 
@@ -78,8 +78,12 @@ Deployment and import status:
 - Migration `20260810100000_transcript_ledger`, the API, and the portal were promoted through PRs `#4` and `#5` on **2026-08-10**. Staging migration/reference-loader tasks exited 0 and services stabilized at API revision 84 and portal revision 46. Production tasks exited 0 and stabilized at API revision 77 and portal revision 42 using immutable `63595a5-main` images.
 - The migration backfills already-official Approved or pre-workflow Completed enrollment grades, deliberately excludes Submitted/Returned grades, and reopens enrollments that the previous workflow completed prematurely. All 41 migrations apply cleanly to fresh PostgreSQL 16 databases.
 - The production-safe S3/CLI importer verifies the workbook hash, defaults to dry-run, requires an admin/registrar actor, accepts only authoritative student numbers, creates archived records only with explicit authorization, snapshots unmatched courses/terms, deduplicates exact content, and writes the batch, entries, and audit records atomically.
-- The normalized workbook and blocker manifest are staged in private, encrypted, versioned S3 buckets in both environments. The source has **8,884 rows**; all **637 empty grades became `I`** (750 total `I` grades). The current manifest resolves **6,291 rows across 298 official identities** and deliberately blocks **2,593 rows across 106 unresolved names**. No transcript rows have been imported.
-- The staging and production dry runs both stopped before database access with `missingCount=2593` and `ambiguousCount=0`; `CONFIRM=1` was not run. A production read-back confirmed **0 legacy-import entries, 0 import batches, 0 total transcript entries, 298 active students, and 0 archived students**.
+- The normalized source has **8,884 rows**; all **637 empty grades became `I`** (750 source `I` grades). The matched manifest contains **6,291 rows across all 298 active student identities**. Its production dry-run authorized 298 existing students, rejected no identities, found 27 exact-content duplicates, and planned 6,264 entries.
+- Production batch `e5e1bd9e-9845-4fa1-8b1d-4f31743e6c13` committed atomically on **2026-08-10**: **6,264 legacy transcript entries imported, 27 exact duplicates skipped, 0 errors, 298 distinct students, and 0 archived profiles created**. A repeat dry-run returned the same imported batch with zero rows to add.
+- Post-import read-back confirmed 6,264 batch entries, 6,264 `legacy-imported` entry audits, and one batch audit. **5,860 entries** link to a unique current catalog course; **404** intentionally retain historical course snapshots only. Historical terms remain stable snapshots rather than fabricated current `Term` records.
+- The matched import contains **489 `I` entries**. All have null grade points, no GPA or earned-credit flags, and zero earned credits; the policy-violation query returned zero.
+- The remaining **2,593 rows across 106 historical names** are isolated in `Historical_Students_Identity_Mapping.xlsx`, with 241 `I` grades and editable registrar identity fields. The workbook is stored locally and in the private, encrypted, versioned production import bucket with SHA-256 `f209c252f1f62d2a147c5674139bc39fbfc16aa0cb2234cf475f6d58fdcbb5b5`.
+- Audit note: the matched batch references the original normalized workbook while its immutable manifest selects only the 6,291 verified rows. That original workbook hash is now owned by the completed batch. Any later import of the unresolved records must reference the separate historical-only workbook and its distinct hash.
 - Registrar transcript management is live with grouped terms, summaries, Add/Edit/Void/Restore operations, catalog-match/source indicators, and mandatory audit reasons. Student output is labeled “Unofficial Academic Record.” Authenticated role smoke tests confirmed registrar access, bursar denial, student-safe output, and the production admin Transcript screen. Do not create historical enrollments as a substitute.
 
 Validation on 2026-08-10: **22 shared tests**, **104 API tests**, and all **8 database settlement tests** passed; workspace typecheck and production build passed. All 41 migrations applied to fresh PostgreSQL 16 databases, transcript state-machine/import tests passed, and both infrastructure configurations validated. Private transcript buckets and prefix-scoped API read policies are deployed. Production health returned 200 and the new API task emitted no errors or exceptions during the smoke window.
@@ -103,7 +107,7 @@ Latest local validation on 2026-08-10:
 Latest deployment verified on 2026-08-10:
 
 - Staging: commit `6c9792e`, API task definition `daust-staging-api:84`, portal `daust-staging-portal:46`; migration and SIS reference loader exited 0. Registrar/student transcript access passed, bursar transcript access remained forbidden, and faculty material routes passed.
-- Production: commit `63595a5`, API task definition `daust-prod-api:77`, portal `daust-prod-portal:42`; migration and SIS reference loader exited 0, both services stabilized, API health returned 200, and the signed-in admin Transcript UI rendered without console errors.
+- Production: the current services are stable at API task definition `daust-prod-api:79` and portal `daust-prod-portal:43`; the transcript migration/reference loader exited 0, API health returned 200, and the signed-in admin Transcript UI rendered without console errors.
 - The `material-delete-reorder` work was merged and deployed with the transcript release. Exact reorder validation, deletion audit metadata, split-origin file links, and accurate destructive-action copy are included.
 
 All intended transcript/material application and infrastructure changes are committed and reproducible from Git. Unrelated local screenshots and design references remain untracked and must be preserved. Never commit AWS sessions, passwords, bank details, or provider secrets.
@@ -114,5 +118,5 @@ All intended transcript/material application and infrastructure changes are comm
 2. Decide the two catalog-title discrepancies.
 3. Enter the approved bank fields in Billing Admin, confirm the existing Finance recipient, enable wire payments globally, and complete a controlled submission/approval/rejection test.
 4. Re-upload the four missing legacy news images and any missing faculty portraits, then verify their S3-backed URLs.
-5. Obtain authoritative student IDs for the 106 unresolved historical names (the six legacy database workbooks are password-protected), regenerate the manifest, review the identical dry-run, and only then run with `CONFIRM=1`.
-6. After authoritative mappings are complete, regenerate the manifest, compare the dry-run totals, then execute the production importer once with `CONFIRM=1` and verify the batch/entry counts.
+5. Complete the Official Student ID and Resolution Status columns for the 106 names in `Historical_Students_Identity_Mapping.xlsx`. The six legacy database workbooks are password-protected and may supply the authoritative IDs.
+6. Build a new manifest against the historical-only workbook and its distinct hash, review the dry-run totals, then execute one production import with `CONFIRM=1` and verify its batch, entry, policy, and audit counts.

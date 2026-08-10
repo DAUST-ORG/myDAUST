@@ -162,9 +162,10 @@ Open items left by that work:
   return it. Submission alone does not complete enrollments or affect GPA;
   approval publishes the snapshot to the independent transcript ledger. The
   migration, API, registrar editor, and guarded S3 import CLI passed staging and
-  production smoke tests. The historical import remains blocked—with zero rows
-  written—until 106 names receive authoritative student IDs (see
-  `docs/production-status.md`).
+  production smoke tests. Production now contains 6,264 verified legacy entries
+  for all 298 active students; 27 exact duplicates were skipped. The remaining
+  2,593 rows are isolated in the identity-mapping workbook until 106 historical
+  names receive authoritative student IDs (see `docs/production-status.md`).
 - **Rule engine writes.** `PATCH /registrar/rules/:courseId` exists and is
   audited, but the screen is read-only — prerequisites are still seeded, not
   edited in the UI.
