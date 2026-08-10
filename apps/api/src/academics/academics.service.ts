@@ -3038,7 +3038,7 @@ export class AcademicsService {
     const existingIds = materials.map((material) => material.id);
     if (!isExactMaterialOrder(orderedIds, existingIds)) {
       throw new BadRequestException(
-        "orderedIds must contain exactly the section's materials",
+        "orderedIds must contain exactly the section's materials, each once",
       );
     }
     await this.prisma.$transaction([
