@@ -110,6 +110,22 @@ button { font-family: var(--font-body); }
 @keyframes daustDot { 0%, 60%, 100% { transform: translateY(0); opacity: .35; } 30% { transform: translateY(-4px); opacity: 1; } }
 @keyframes daustRise { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* ---------- card animations ---------- */
+.reveal {
+  transition: opacity .6s var(--ease-out), transform .6s var(--ease-out);
+  will-change: opacity, transform;
+}
+html.js .reveal { opacity: 0; transform: translateY(22px); }
+.reveal.in { opacity: 1; transform: none; }
+.card-lift {
+  transition: transform .3s var(--ease-standard), box-shadow .3s var(--ease-standard), background .2s var(--ease-standard);
+}
+.card-lift:hover { transform: translateY(-6px); box-shadow: var(--shadow-md); position: relative; z-index: 1; }
+@media (prefers-reduced-motion: reduce) {
+  html.js .reveal, .reveal { opacity: 1; transform: none; transition: none; }
+  .card-lift, .card-lift:hover { transform: none; box-shadow: none; transition: none; }
+}
+
 .tri-dash { display: flex; gap: 9px; }
 .tri-dash > span { display: block; width: 36px; height: 5px; border-radius: 999px; }
 .tri-dash > span:nth-child(1) { background: var(--daust-navy); }

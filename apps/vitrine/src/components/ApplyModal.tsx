@@ -210,8 +210,8 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
       window.location.href = redirectUrl;
     } catch {
       setFeeNote(t(
-        "Online payment isn’t available right now — you can pay the application fee at the Office of Admissions.",
-        "Le paiement en ligne n’est pas disponible pour le moment — vous pouvez régler les frais de dossier au Bureau des admissions.",
+    "Online payment isn’t available right now. You can pay the application fee at the Office of Admissions.",
+    "Le paiement en ligne n’est pas disponible pour le moment. Vous pouvez régler les frais de dossier au Bureau des admissions.",
       ));
       setFeeBusy(false);
     }
@@ -257,7 +257,7 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
             {piReq && piReq.status === "settled" ? (
               <div style={{ margin: "20px auto 0", maxWidth: 420, background: "rgba(46,125,82,.10)", border: "1px solid rgba(46,125,82,.35)", borderRadius: 6, padding: "14px 16px", fontFamily: "var(--font-body)", fontSize: 13.5, color: "#1d6b34" }}>
                 <strong>{t("Application fee received", "Frais de dossier reçus")}</strong>
-                <div style={{ marginTop: 4 }}>{t("Thank you — your payment has been recorded.", "Merci — votre paiement a été enregistré.")}</div>
+        <div style={{ marginTop: 4 }}>{t("Thank you. Your payment has been recorded.", "Merci. Votre paiement a été enregistré.")}</div>
               </div>
             ) : piReq && (piReq.status === "sent" || piReq.status === "initiated") ? (
               <div style={{ margin: "20px auto 0", maxWidth: 420, background: "#fff7e8", border: "1px solid #f1d3a7", borderRadius: 6, padding: "14px 16px", fontFamily: "var(--font-body)", fontSize: 13.5, color: "#8a5319" }}>
@@ -332,20 +332,20 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
                 <Grid>
                   <F label={t("Program of choice", "Programme choisi")}>
                     <select value={f.programCode} onChange={(e) => set("programCode", e.target.value)} style={{ ...field, background: "#fff" }}>
-                      <option value="">{t("— Select a program —", "— Choisir un programme —")}</option>
+                      <option value="">{t("Select a program", "Choisir un programme")}</option>
                       {programList.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
                     </select>
                   </F>
                   <Row>
                     <F label={t("Intake term", "Session d’entrée")}>
                       <select value={f.term} onChange={(e) => set("term", e.target.value)} style={{ ...field, background: "#fff" }}>
-                        <option value="">—</option>
+            <option value=""></option>
                         {TERMS.map((tm) => <option key={tm} value={tm}>{tm}</option>)}
                       </select>
                     </F>
                     <F label={t("Applying from", "Vous candidatez depuis")}>
                       <select value={f.origin} onChange={(e) => set("origin", e.target.value as FormState["origin"])} style={{ ...field, background: "#fff" }}>
-                        <option value="">—</option>
+            <option value=""></option>
                         <option value="high-school">{t("High school", "Lycée")}</option>
                         <option value="transfer">{t("University transfer", "Transfert universitaire")}</option>
                       </select>
@@ -368,7 +368,7 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
                     <F label={t("Date of birth", "Date de naissance")}><input type="date" value={f.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} style={field} /></F>
                     <F label={t("Gender", "Genre")}>
                       <select value={f.gender} onChange={(e) => set("gender", e.target.value)} style={{ ...field, background: "#fff" }}>
-                        <option value="">—</option>
+            <option value=""></option>
                         {genderOpts.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
                       </select>
                     </F>
@@ -411,7 +411,7 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
                     <F label={t("Allergies / medical", "Allergies / médical")}><input value={f.allergies} onChange={(e) => set("allergies", e.target.value)} style={field} /></F>
                     <F label={t("How did you hear about DAUST?", "Comment avez-vous connu DAUST ?")}>
                       <select value={f.source} onChange={(e) => set("source", e.target.value)} style={{ ...field, background: "#fff" }}>
-                        <option value="">—</option>
+            <option value=""></option>
                         {sourceOpts.map((o) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </F>
@@ -429,11 +429,11 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
                   </p>
                   <Review label={t("Name", "Nom")} value={`${f.firstName} ${f.lastName}`.trim()} />
                   <Review label={t("Email", "E-mail")} value={f.email} />
-                  <Review label={t("Program", "Programme")} value={programList.find((p) => p.code === f.programCode)?.label ?? "—"} />
-                  <Review label={t("Intake", "Session")} value={f.term || "—"} />
-                  <Review label={t("Phone", "Téléphone")} value={f.phone || "—"} />
-                  <Review label={t("Score", "Note")} value={f.score || "—"} />
-                  <Review label={t("Guardian", "Tuteur")} value={f.parentName || "—"} />
+         <Review label={t("Program", "Programme")} value={programList.find((p) => p.code === f.programCode)?.label ?? "N/A"} />
+         <Review label={t("Intake", "Session")} value={f.term || "N/A"} />
+         <Review label={t("Phone", "Téléphone")} value={f.phone || "N/A"} />
+         <Review label={t("Score", "Note")} value={f.score || "N/A"} />
+         <Review label={t("Guardian", "Tuteur")} value={f.parentName || "N/A"} />
                 </div>
               )}
 
@@ -457,12 +457,12 @@ export function ApplyModal({ tx, lang, onClose, onOpenAI }: { tx: Content["tx"];
               <p style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "var(--fg3)", textAlign: "center", margin: 0, padding: "0 28px 16px" }}>
                 {tx.applyQ}{" "}
                 <button onClick={onOpenAI} style={{ color: "var(--daust-navy)", fontWeight: 600, cursor: "pointer", background: "none", border: "none", padding: 0, fontSize: 12 }}>{tx.applyAI}</button>
-              </p>
+                  </p>
             )}
           </>
-        )}
-      </div>
-    </div>
+            )}
+        </div>
+        </div>
   );
 }
 
@@ -477,14 +477,14 @@ function F({ label, hint, children }: { label: string; hint?: string; children: 
     <div>
       <label style={labelSt}>{label}{hint && <span style={{ textTransform: "none", fontWeight: 400, color: "var(--fg3)", marginLeft: 6 }}>({hint})</span>}</label>
       {children}
-    </div>
+        </div>
   );
 }
 function Review({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "10px 0", borderBottom: "1px solid var(--divider)" }}>
       <span style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--fg3)" }}>{label}</span>
-      <span style={{ fontFamily: "var(--font-body)", fontSize: 13.5, fontWeight: 600, color: "var(--fg1)", textAlign: "right" }}>{value || "—"}</span>
-    </div>
+   <span style={{ fontFamily: "var(--font-body)", fontSize: 13.5, fontWeight: 600, color: "var(--fg1)", textAlign: "right" }}>{value || "N/A"}</span>
+        </div>
   );
 }

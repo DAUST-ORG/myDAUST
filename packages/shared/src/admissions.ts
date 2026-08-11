@@ -45,7 +45,7 @@ export interface ScholarshipTierDef {
 
 /** Default merit tiers — the SEED for the director-editable `ScholarshipTier` table, and the offline fallback. */
 export const SCHOLARSHIP_TIERS: readonly ScholarshipTierDef[] = [
-  { minScore: 15, pct: 20, band: "BAC 15 and above", note: "Top of the class — the highest automatic merit discount." },
+  { minScore: 15, pct: 20, band: "BAC 15 and above", note: "Top of the class · the highest automatic merit discount." },
   { minScore: 13.5, pct: 15, band: "BAC 13.5 – 14.9", note: "Strong academic performance rewarded on enrollment." },
   { minScore: 12, pct: 10, band: "BAC 12 – 13.4", note: "A solid foundation earns a meaningful tuition reduction." },
 ];
@@ -98,7 +98,7 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplatesInput = {
 <p>We've received your application to DAUST for the September 2026 intake.</p>
 {{scholarshipLine}}
 <p>Next step: submit your documents and the {{appFee}} FCFA application fee. Our admissions team will be in touch.</p>
-<p>— Office of Admissions, DAUST</p>`,
+<p>Office of Admissions, DAUST</p>`,
   applicationCc: ["admissions@daust.org"],
   applicationBcc: ["sndao@daust.org"],
   acceptanceSubject: "Congratulations! You have been accepted to DAUST",
@@ -106,7 +106,7 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplatesInput = {
 <p>We are thrilled to offer you admission to DAUST for the September 2026 intake.</p>
 {{scholarshipLine}}
 <p>Please log in to your portal to review your offer and next steps.</p>
-<p>— Office of Admissions, DAUST</p>`,
+<p>Office of Admissions, DAUST</p>`,
   acceptanceCc: ["admissions@daust.org"],
   acceptanceBcc: ["sndao@daust.org"],
 };

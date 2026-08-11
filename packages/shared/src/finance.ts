@@ -204,7 +204,7 @@ export const PLAN_TEMPLATES = [
   },
   {
     key: "quarterly",
-    label: "4 installments — official (Inscription, Nov 5, Jan 5, Mar 5)",
+    label: "4 installments · official (Inscription, Nov 5, Jan 5, Mar 5)",
     installments: 4,
     dueMonthDays: ["enrolment", "11-05", "01-05", "03-05"],
   },
