@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { BookOpen, CheckCheck, ClipboardList, FileText, TrendingUp, Wallet } from "lucide-react";
 import {
   type Announcement,
+  type AccountBalanceSummary,
   type BillingInvoice,
   type DegreeAudit,
   type MyAssignment,
@@ -18,10 +19,12 @@ import {
   getMyAssignments,
   getMyAttendance,
   getMyBilling,
+  getMyBillingSummary,
   getMyEnrollments,
   getMySummary,
 } from "@/lib/api";
-import { formatXof } from "@/lib/format";
+import { formatDateShort, formatXof } from "@/lib/format";
+import { accountBalanceLabel, accountPresentation, installmentOutstanding, resolveAccountSummary } from "@/components/AccountBalance";
 import { Card, Progress, Stat } from "@/components/ui";
 import { COURSE_COLORS, parseDayIndexes } from "@/lib/student-schedule";
 
@@ -33,13 +36,14 @@ interface TodoItem {
   due: string;
 }
 
-const dayLabel = (iso: string) => new Date(iso).toLocaleDateString("fr-SN", { day: "numeric", month: "short" });
+const dayLabel = formatDateShort;
 
 export default function StudentDashboard() {
   const [first, setFirst] = useState("");
   const [term, setTerm] = useState("");
   const [summary, setSummary] = useState<MySummary | null>(null);
   const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
+  const [billingSummary, setBillingSummary] = useState<AccountBalanceSummary | null>(null);
   const [courses, setCourses] = useState<MyEnrollment[]>([]);
   const [news, setNews] = useState<Announcement[]>([]);
   const [assignments, setAssignments] = useState<MyAssignment[]>([]);
@@ -51,6 +55,7 @@ export default function StudentDashboard() {
     getCurrentTerm().then((t) => setTerm(t.name)).catch(() => {});
     getMySummary().then(setSummary).catch(() => {});
     getMyBilling().then(setInvoices).catch(() => {});
+    getMyBillingSummary().then(setBillingSummary).catch(() => {});
     getMyEnrollments().then(setCourses).catch(() => {});
     getAnnouncements().then(setNews).catch(() => {});
     getMyAssignments().then(setAssignments).catch(() => {});
@@ -59,6 +64,12 @@ export default function StudentDashboard() {
   }, []);
 
   const balance = invoices.reduce((b, i) => b + i.balance, 0);
+  const accountSummary = resolveAccountSummary(billingSummary, {
+    balanceXof: balance,
+    billedXof: invoices.reduce((sum, invoice) => sum + invoice.total, 0),
+    installments: invoices.flatMap((invoice) => invoice.installments),
+  });
+  const accountMeta = accountPresentation(accountSummary);
 
   /* Falls back to Monday on a weekend so the panel is never empty for a student who has classes. */
   const jsDay = new Date().getDay();
@@ -74,7 +85,7 @@ export default function StudentDashboard() {
 
   const nextInstallment = invoices
     .flatMap((inv) => inv.installments)
-    .filter((i) => i.status !== "paid")
+    .filter((i) => installmentOutstanding(i) > 0)
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
 
   const todos: TodoItem[] = [
@@ -97,7 +108,7 @@ export default function StudentDashboard() {
             icon: <Wallet size={16} color="var(--daust-orange)" />,
             title: `Tuition installment ${nextInstallment.sequence}`,
             due: `Due ${dayLabel(nextInstallment.dueDate)} · ${formatXof(
-              nextInstallment.amountDue - nextInstallment.amountPaid,
+              installmentOutstanding(nextInstallment),
             )}`,
           },
         ]
@@ -132,16 +143,22 @@ export default function StudentDashboard() {
         </Link>
         <Link href="/student/billing" style={{ textDecoration: "none", color: "inherit" }}>
           <Stat
-            label="Balance due"
-            value={formatXof(balance)}
+            label="Account balance"
+            value={accountBalanceLabel(accountSummary)}
             sub={
-              balance > 0
-                ? nextInstallment
-                  ? `Due ${dayLabel(nextInstallment.dueDate)}`
-                  : "Payment due"
-                : "Settled"
+              <span
+                style={{
+                  color:
+                    accountSummary.standing === "on_time" &&
+                    accountSummary.dueTodayXof > 0
+                      ? "var(--warning)"
+                      : undefined,
+                }}
+              >
+                {accountMeta.description}
+              </span>
             }
-            tone={balance > 0 ? "var(--error-500)" : "var(--success-500)"}
+            tone={accountMeta.color}
             icon={<Wallet size={16} />}
           />
         </Link>

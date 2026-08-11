@@ -13,7 +13,7 @@ import {
   provisionAllStudentLogins,
   provisionStudentLogin,
 } from "@/lib/api";
-import { formatXof } from "@/lib/format";
+import { AccountBalanceText, AccountStatusLine, resolveAccountSummary } from "@/components/AccountBalance";
 import { Avatar, Badge, type BadgeTone, Button, Field, IconButton, Modal, PageHeader, SearchInput, Select, SortTh, useSort } from "@/components/ui";
 
 const STATUS_TONE: Record<string, BadgeTone> = { active: "success", probation: "warning" };
@@ -23,6 +23,20 @@ function gpaColor(gpa: number): string {
   if (gpa >= 3.5) return "var(--success)";
   if (gpa > 0 && gpa < 2) return "var(--danger)";
   return "var(--fg1)";
+}
+
+function StudentBalance({ student }: { student: AdminStudent }) {
+  const summary = resolveAccountSummary(student.summary, { balanceXof: student.balance });
+  return (
+    <td style={{ textAlign: "right" }}>
+      <span style={{ display: "grid", gap: 2, justifyItems: "end" }}>
+        <AccountBalanceText summary={summary} style={{ fontWeight: 600 }} />
+        {(summary.standing === "overdue" ||
+          summary.standing === "unscheduled" ||
+          summary.dueTodayXof > 0) && <AccountStatusLine summary={summary} />}
+      </span>
+    </td>
+  );
 }
 
 interface CreatedNotice {
@@ -174,9 +188,7 @@ export default function AdminStudentsPage() {
                   <td><Badge tone="neutral">{s.program}</Badge></td>
                   <td>{s.yearLevel ? `Year ${s.yearLevel}` : "—"}</td>
                   <td><span style={{ fontWeight: 700, color: gpaColor(s.gpa) }}>{s.gpa > 0 ? s.gpa.toFixed(2) : "—"}</span></td>
-                  <td style={{ textAlign: "right", fontWeight: s.balance > 0 ? 600 : 400, color: s.balance > 0 ? "var(--danger)" : s.balance < 0 ? "var(--success)" : "var(--fg3)" }}>
-                    {s.balance > 0 ? formatXof(s.balance) : s.balance < 0 ? `Credit ${formatXof(-s.balance)}` : "Cleared"}
-                  </td>
+                  <StudentBalance student={s} />
                   <td><Badge tone={STATUS_TONE[s.status] ?? "neutral"}>{STATUS_LABEL[s.status] ?? s.status}</Badge></td>
                   <td onClick={(e) => e.stopPropagation()}>
                     {!s.hasLogin ? (

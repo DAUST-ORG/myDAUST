@@ -1,7 +1,7 @@
 "use client";
 
 import { GraduationCap, Layers, UserCheck, Wallet } from "lucide-react";
-import { formatXof } from "@/lib/format";
+import { accountBalanceLabel, accountPresentation, resolveAccountSummary } from "@/components/AccountBalance";
 import { EmptyState, PageHeader, Stat } from "@/components/ui";
 import { ChildSwitcher } from "./ChildSwitcher";
 import { useChildren } from "./useChildren";
@@ -19,6 +19,8 @@ export default function ParentDashboard() {
       />
     );
   }
+  const accountSummary = resolveAccountSummary(active?.summary, { balanceXof: active?.balance ?? 0 });
+  const accountMeta = accountPresentation(accountSummary);
 
   return (
     <>
@@ -57,10 +59,22 @@ export default function ParentDashboard() {
               icon={<UserCheck size={16} />}
             />
             <Stat
-              label="Balance due"
-              value={active.balance <= 0 ? "0 FCFA" : formatXof(active.balance)}
-              sub={active.balance <= 0 ? "Settled" : "See Billing to pay"}
-              tone={active.balance > 0 ? "var(--danger)" : "var(--success)"}
+              label="Account balance"
+              value={accountBalanceLabel(accountSummary)}
+              sub={
+                <span
+                  style={{
+                    color:
+                      accountSummary.standing === "on_time" &&
+                      accountSummary.dueTodayXof > 0
+                        ? "var(--warning)"
+                        : undefined,
+                  }}
+                >
+                  {accountMeta.description}
+                </span>
+              }
+              tone={accountMeta.color}
               icon={<Wallet size={16} />}
             />
           </div>

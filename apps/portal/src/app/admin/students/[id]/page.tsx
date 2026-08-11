@@ -34,6 +34,16 @@ import {
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
 import { Avatar, Tabs } from "@/components/ui";
+import {
+  AccountStandingBadge,
+  AccountStatusLine,
+  InstallmentStandingBadge,
+  accountBalanceLabel,
+  accountPresentation,
+  installmentEffectiveSettled,
+  invoiceEffectiveOutstanding,
+  resolveAccountSummary,
+} from "@/components/AccountBalance";
 import { EditStudentModal, type EditSection } from "./EditStudentModal";
 import { StudentDocuments } from "./StudentDocuments";
 import { TranscriptManager } from "./TranscriptManager";
@@ -116,13 +126,14 @@ export default function AdminStudentDetailPage() {
 
   if (!s) return <p className="muted">Loading…</p>;
 
-  const balanceLabel =
-    s.balance > 0
-      ? formatXof(s.balance)
-      : s.balance < 0
-        ? `Credit ${formatXof(-s.balance)}`
-        : "Cleared";
-  const balanceTone = s.balance > 0 ? "var(--danger)" : "var(--success)";
+  const accountSummary = resolveAccountSummary(account?.summary ?? s.summary, {
+    balanceXof: account?.totals.balance ?? s.balance,
+    billedXof: account?.totals.billed,
+    installments: account?.invoices.flatMap((invoice) => invoice.installments),
+  });
+  const balanceLabel = accountBalanceLabel(accountSummary);
+  const accountMeta = accountPresentation(accountSummary);
+  const balanceTone = accountMeta.color;
   const payments = (account?.invoices ?? [])
     .flatMap((inv) =>
       inv.payments
@@ -237,7 +248,8 @@ export default function AdminStudentDetailPage() {
           label="Account balance"
           icon={Wallet}
           value={balanceLabel}
-          color={s.balance === 0 ? "var(--success)" : balanceTone}
+          color={balanceTone}
+          sub={accountMeta.description}
         />
         <ProfileStat
           label="Cumulative GPA"
@@ -319,11 +331,17 @@ export default function AdminStudentDetailPage() {
               v={
                 <span
                   style={{
-                    color: s.balance === 0 ? "var(--success)" : balanceTone,
+                    color: balanceTone,
                     fontWeight: 700,
+                    display: "grid",
+                    gap: 2,
+                    justifyItems: "end",
                   }}
                 >
                   {balanceLabel}
+                  {accountSummary.standing === "overdue" && (
+                    <AccountStatusLine summary={accountSummary} />
+                  )}
                 </span>
               }
             />
@@ -462,18 +480,26 @@ export default function AdminStudentDetailPage() {
             <ProfileCard title="Balance" icon={Wallet}>
               <div style={{ textAlign: "center", padding: "8px 0 14px" }}>
                 <div className="muted" style={{ fontSize: 12.5 }}>
-                  Outstanding
+                  {accountMeta.label}
                 </div>
                 <div
                   style={{
                     fontFamily: "var(--font-display)",
                     fontSize: 30,
                     fontWeight: 800,
-                    color: s.balance === 0 ? "var(--success)" : balanceTone,
+                    color: balanceTone,
                     marginTop: 4,
                   }}
                 >
                   {balanceLabel}
+                </div>
+                {accountSummary.standing === "overdue" && (
+                  <div style={{ marginTop: 4 }}>
+                    <AccountStatusLine summary={accountSummary} />
+                  </div>
+                )}
+                <div style={{ marginTop: 8 }}>
+                  <AccountStandingBadge summary={accountSummary} />
                 </div>
               </div>
               <KV
@@ -547,6 +573,12 @@ export default function AdminStudentDetailPage() {
             {account && account.invoices.length > 0 ? (
               account.invoices.map((inv) => {
                 const isCredit = inv.total < 0;
+                const invoiceOutstanding = invoiceEffectiveOutstanding(inv);
+                const invoiceSummary = resolveAccountSummary(inv.summary, {
+                  balanceXof: invoiceOutstanding,
+                  billedXof: inv.total,
+                  installments: inv.installments,
+                });
                 return (
                   <div
                     key={inv.id}
@@ -575,9 +607,7 @@ export default function AdminStudentDetailPage() {
                             : `Tuition — ${inv.term}`)}
                       </span>
                       {!isCredit && (
-                        <span className={`badge ${inv.status}`}>
-                          {inv.status}
-                        </span>
+                        <AccountStandingBadge summary={invoiceSummary} />
                       )}
                       <span style={{ flex: 1 }} />
                       {isCredit ? (
@@ -592,7 +622,8 @@ export default function AdminStudentDetailPage() {
                         </span>
                       ) : (
                         <span className="muted">
-                          {formatXof(inv.paid)} / {formatXof(inv.total)}
+                          {formatXof(inv.total - invoiceOutstanding)} /{" "}
+                          {formatXof(inv.total)} settled
                         </span>
                       )}
                     </div>
@@ -603,7 +634,7 @@ export default function AdminStudentDetailPage() {
                             <th>#</th>
                             <th>Due</th>
                             <th>Amount</th>
-                            <th>Paid</th>
+                            <th>Settled</th>
                             <th>Status</th>
                           </tr>
                         </thead>
@@ -615,11 +646,11 @@ export default function AdminStudentDetailPage() {
                                 {formatDate(i.dueDate)}
                               </td>
                               <td>{formatXof(i.amountDue)}</td>
-                              <td>{formatXof(i.amountPaid)}</td>
                               <td>
-                                <span className={`badge ${i.status}`}>
-                                  {i.status}
-                                </span>
+                                {formatXof(installmentEffectiveSettled(i))}
+                              </td>
+                              <td>
+                                <InstallmentStandingBadge installment={i} />
                               </td>
                             </tr>
                           ))}
@@ -827,12 +858,14 @@ function ProfileStat({
   unit,
   icon: Icon,
   color = "var(--fg1)",
+  sub,
 }: {
   label: string;
   value: string;
   unit?: string;
   icon: LucideIcon;
   color?: string;
+  sub?: string;
 }) {
   return (
     <div className="card" style={{ margin: 0, padding: 16 }}>
@@ -871,6 +904,11 @@ function ProfileStat({
           </span>
         )}
       </div>
+      {sub && (
+        <div style={{ color, fontSize: 11, fontWeight: 600, marginTop: 3 }}>
+          {sub}
+        </div>
+      )}
     </div>
   );
 }

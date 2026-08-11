@@ -53,6 +53,12 @@ export class PaymentsController {
     return this.finance.getStudentBilling(user.studentId!);
   }
 
+  @Get("my/billing-summary")
+  @Roles("student")
+  myBillingSummary(@CurrentUser() user: AuthUser) {
+    return this.finance.getStudentBillingSummary(user.studentId!);
+  }
+
   @Post("my/payments")
   @Roles("student")
   initiate(@CurrentUser() user: AuthUser, @Body() body: unknown) {
@@ -161,7 +167,11 @@ export class PaymentsController {
   @Roles("student")
   submitStudentPiSpi(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const input = StudentPiSpiInput.parse(body);
-    return this.finance.submitStudentPiSpi(user.studentId!, user.personId, input);
+    return this.finance.submitStudentPiSpi(
+      user.studentId!,
+      user.personId,
+      input,
+    );
   }
 
   @Post("links/:token/pi-spi")
@@ -198,7 +208,8 @@ export class PaymentsController {
     @Req() request: RawBodyRequest<Request>,
     @Headers("x-signature") signature: string | undefined,
   ) {
-    const raw = request.rawBody ?? Buffer.from(JSON.stringify(request.body ?? {}));
+    const raw =
+      request.rawBody ?? Buffer.from(JSON.stringify(request.body ?? {}));
     const { valid } = await this.finance.handlePiSpiWebhook(raw, signature);
     if (!valid) throw new ForbiddenException("Invalid signature");
   }

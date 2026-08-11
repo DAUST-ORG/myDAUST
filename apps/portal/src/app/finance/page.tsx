@@ -1,34 +1,178 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { type FeePlan, type StudentAccountRow, getCurrentTerm, getFeePlan, listStudentAccounts } from "@/lib/api";
-import { formatXof, formatXofAbbrev } from "@/lib/format";
-import { Avatar, Badge, Card, PageHeader, Stat } from "@/components/ui";
+import {
+  type ArAging,
+  type FeePlan,
+  type StudentAccountRow,
+  getArAging,
+  getCurrentTerm,
+  getFeePlan,
+  listStudentAccounts,
+} from "@/lib/api";
+import { formatXof } from "@/lib/format";
+import { Avatar, Card, PageHeader } from "@/components/ui";
+import {
+  AccountBalanceText,
+  AccountStandingBadge,
+  AgingBuckets,
+  ReceivablesKpis,
+  resolveAccountSummary,
+  type AgingBucketDisplay,
+} from "@/components/AccountBalance";
 
-/** Above this balance an account reads as overdue rather than merely due. */
-const OVERDUE_XOF = 400_000;
+function fallbackAging(rows: StudentAccountRow[]): AgingBucketDisplay[] {
+  const buckets: AgingBucketDisplay[] = [
+    {
+      key: "current",
+      label: "Not yet overdue",
+      amount: 0,
+      accountCount: 0,
+      installmentCount: 0,
+    },
+    {
+      key: "1-30",
+      label: "1–30 days",
+      amount: 0,
+      accountCount: 0,
+      installmentCount: 0,
+    },
+    {
+      key: "31-60",
+      label: "31–60 days",
+      amount: 0,
+      accountCount: 0,
+      installmentCount: 0,
+    },
+    {
+      key: "61-90",
+      label: "61–90 days",
+      amount: 0,
+      accountCount: 0,
+      installmentCount: 0,
+    },
+    {
+      key: "90+",
+      label: "Over 90 days",
+      amount: 0,
+      accountCount: 0,
+      installmentCount: 0,
+    },
+    {
+      key: "unscheduled",
+      label: "No schedule",
+      amount: 0,
+      accountCount: 0,
+      installmentCount: 0,
+    },
+  ];
+  const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+  for (const row of rows) {
+    const summary = resolveAccountSummary(row.summary, {
+      balanceXof: row.balance,
+      billedXof: row.billed,
+    });
+    if (summary.notYetDueXof > 0) {
+      const bucket = byKey.get("current")!;
+      bucket.amount += summary.notYetDueXof;
+      bucket.accountCount = (bucket.accountCount ?? 0) + 1;
+      bucket.installmentCount = (bucket.installmentCount ?? 0) + 1;
+    }
+    if (summary.overdueXof > 0) {
+      const key =
+        summary.daysPastDue <= 30
+          ? "1-30"
+          : summary.daysPastDue <= 60
+            ? "31-60"
+            : summary.daysPastDue <= 90
+              ? "61-90"
+              : "90+";
+      const bucket = byKey.get(key)!;
+      bucket.amount += summary.overdueXof;
+      bucket.accountCount = (bucket.accountCount ?? 0) + 1;
+      bucket.installmentCount = (bucket.installmentCount ?? 0) + 1;
+    }
+    if (summary.unscheduledXof > 0) {
+      const bucket = byKey.get("unscheduled")!;
+      bucket.amount += summary.unscheduledXof;
+      bucket.accountCount = (bucket.accountCount ?? 0) + 1;
+    }
+  }
+  return buckets;
+}
 
 export default function FinanceDashboard() {
   const [accounts, setAccounts] = useState<StudentAccountRow[] | null>(null);
+  const [aging, setAging] = useState<ArAging | null>(null);
   const [plan, setPlan] = useState<FeePlan | null>(null);
   const [term, setTerm] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    listStudentAccounts().then(setAccounts).catch((e: Error) => setError(e.message));
-    getFeePlan().then(setPlan).catch(() => setPlan(null));
-    getCurrentTerm().then((t) => setTerm(t.name)).catch(() => setTerm(null));
+    listStudentAccounts()
+      .then(setAccounts)
+      .catch((e: Error) => setError(e.message));
+    getArAging()
+      .then(setAging)
+      .catch(() => setAging(null));
+    getFeePlan()
+      .then(setPlan)
+      .catch(() => setPlan(null));
+    getCurrentTerm()
+      .then((t) => setTerm(t.name))
+      .catch(() => setTerm(null));
   }, []);
 
-  const owing = useMemo(
-    () => (accounts ?? []).filter((r) => r.balance > 0).sort((a, b) => b.balance - a.balance),
+  const positioned = useMemo(
+    () =>
+      (accounts ?? []).map((row) => ({
+        row,
+        summary: resolveAccountSummary(row.summary, {
+          balanceXof: row.balance,
+          billedXof: row.billed,
+        }),
+      })),
     [accounts],
   );
+  const attention = useMemo(
+    () =>
+      positioned
+        .filter(({ summary }) => summary.standing === "overdue")
+        .sort((a, b) => b.summary.overdueXof - a.summary.overdueXof),
+    [positioned],
+  );
+  const metrics = useMemo(
+    () => ({
+      grossOutstandingXof: positioned.reduce(
+        (sum, account) => sum + account.summary.outstandingXof,
+        0,
+      ),
+      overdueXof: positioned.reduce(
+        (sum, account) => sum + account.summary.overdueXof,
+        0,
+      ),
+      onTimeCount: positioned.filter(
+        (account) => account.summary.standing === "on_time",
+      ).length,
+      overdueCount: attention.length,
+      clearedCount: positioned.filter(
+        (account) => account.summary.standing === "cleared",
+      ).length,
+      activeHoldCount: positioned.filter(({ row }) => row.hasActiveHold).length,
+    }),
+    [attention.length, positioned],
+  );
+  const agingBuckets = aging?.buckets?.length
+    ? aging.buckets
+    : fallbackAging(accounts ?? []);
 
-  if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
+  if (error)
+    return (
+      <p className="card" style={{ color: "var(--danger)" }}>
+        {error}
+      </p>
+    );
 
-  const outstanding = owing.reduce((sum, r) => sum + r.balance, 0);
-  const total = accounts?.length ?? 0;
   const period = term ?? plan?.academicYearLabel;
   const eyebrow = period ? `Finance · ${period}` : "Finance";
 
@@ -37,62 +181,68 @@ export default function FinanceDashboard() {
       <PageHeader
         eyebrow={eyebrow}
         title="Bursar Dashboard"
-        subtitle="Billing, collections and student accounts at a glance."
+        subtitle="Receivables follow each student's payment-plan dates—not their total balance alone."
       />
 
-      {!accounts && <p className="muted">Loading…</p>}
+      {!accounts && <p className="muted">Loading account positions…</p>}
 
       {accounts && (
         <>
-          <div className="kpi-grid" style={{ marginBottom: 20 }}>
-            <Stat
-              label="Outstanding"
-              value={formatXofAbbrev(outstanding)}
-              sub="FCFA due"
-              tone="var(--danger)"
-            />
-            <Stat
-              label="Accounts with holds"
-              value={owing.length}
-              sub="unpaid balance"
-              tone="var(--daust-orange)"
-            />
-            <Stat
-              label="Cleared accounts"
-              value={total - owing.length}
-              sub="zero balance"
-              tone="var(--success-500)"
-            />
-            <Stat label="Total accounts" value={total} />
-          </div>
+          <ReceivablesKpis metrics={metrics} />
+          <AgingBuckets buckets={agingBuckets} />
 
-          <Card title="Accounts needing attention" action={<span className="muted" style={{ fontSize: 12.5 }}>Outstanding balances</span>}>
-            {owing.length === 0 ? (
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>Every account is settled.</p>
+          <Card
+            title="Accounts needing attention"
+            action={
+              <span className="muted" style={{ fontSize: 12.5 }}>
+                Overdue portions only
+              </span>
+            }
+          >
+            {attention.length === 0 ? (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                No account is past its payment-plan date.
+              </p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {owing.map((r) => (
+                {attention.map(({ row, summary }) => (
                   <div
-                    key={r.id}
+                    key={row.id}
                     className="sis-row"
                     style={{
                       display: "flex",
                       alignItems: "center",
                       gap: 12,
-                      padding: "10px 0",
+                      padding: "11px 0",
                       borderBottom: "1px solid var(--border)",
                     }}
                   >
-                    <Avatar name={r.name} size={40} src={r.photoUrl} />
+                    <Avatar name={row.name} size={40} src={row.photoUrl} />
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontWeight: 600 }}>{r.name}</div>
+                      <div style={{ fontWeight: 600 }}>{row.name}</div>
                       <div style={{ fontSize: 12, color: "var(--fg3)" }}>
-                        {[r.program, formatXof(r.balance)].filter(Boolean).join(" · ")}
+                        {[
+                          row.program,
+                          `${formatXof(summary.overdueXof)} past due`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </div>
                     </div>
-                    <Badge tone={r.balance >= OVERDUE_XOF ? "warning" : "navy"}>
-                      {r.balance >= OVERDUE_XOF ? "Overdue" : "Due"}
-                    </Badge>
+                    <div
+                      style={{
+                        textAlign: "right",
+                        display: "grid",
+                        gap: 4,
+                        justifyItems: "end",
+                      }}
+                    >
+                      <AccountBalanceText
+                        summary={summary}
+                        style={{ fontWeight: 700 }}
+                      />
+                      <AccountStandingBadge summary={summary} />
+                    </div>
                   </div>
                 ))}
               </div>

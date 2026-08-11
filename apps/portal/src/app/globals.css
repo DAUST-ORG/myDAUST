@@ -7,7 +7,8 @@
    wordmark relies on, and drops a render-blocking third-party request. */
 @font-face {
   font-family: "Saira";
-  src: url("/fonts/Saira-VariableFont_wdth_wght.ttf") format("truetype-variations");
+  src: url("/fonts/Saira-VariableFont_wdth_wght.ttf")
+    format("truetype-variations");
   font-weight: 100 900;
   font-stretch: 50% 125%;
   font-style: normal;
@@ -80,19 +81,27 @@
   --info-500: #1d4a82;
   --info-400: #5b89c0;
   --success: var(--success-500);
-  --warning: var(--warning-500);
+  /* Accessible warning foreground; keep the brighter ramp for fills and markers. */
+  --warning: #8a4b0f;
   --danger: var(--error-500);
   --info: var(--info-500);
 
   /* Brand gradients — the navy ramp is the only true gradient in the system */
   --grad-brand: linear-gradient(135deg, #153b6a 0%, #1d4a82 100%);
   --grad-hero: linear-gradient(180deg, #ffffff 0%, #f5f7f9 100%);
-  --grad-dark-surface: linear-gradient(150deg, #0f2c50 0%, #153b6a 70%, #1d4a82 100%);
+  --grad-dark-surface: linear-gradient(
+    150deg,
+    #0f2c50 0%,
+    #153b6a 70%,
+    #1d4a82 100%
+  );
 
   /* Type */
   --font-display: "Saira", system-ui, sans-serif;
-  --font-body: "Montserrat", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-body:
+    "Montserrat", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:
+    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
@@ -138,8 +147,10 @@
 
   /* Elevation — navy-tinted, never gray/black */
   --shadow-xs: 0 1px 2px rgba(15, 44, 80, 0.06);
-  --shadow-sm: 0 1px 3px rgba(15, 44, 80, 0.08), 0 1px 2px rgba(15, 44, 80, 0.06);
-  --shadow-md: 0 4px 14px rgba(15, 44, 80, 0.1), 0 2px 4px rgba(15, 44, 80, 0.06);
+  --shadow-sm:
+    0 1px 3px rgba(15, 44, 80, 0.08), 0 1px 2px rgba(15, 44, 80, 0.06);
+  --shadow-md:
+    0 4px 14px rgba(15, 44, 80, 0.1), 0 2px 4px rgba(15, 44, 80, 0.06);
   --shadow-lg: 0 14px 40px rgba(15, 44, 80, 0.16);
   --shadow-xl: 0 18px 50px rgba(15, 44, 80, 0.22);
   --shadow-navy: 0 18px 50px rgba(15, 44, 80, 0.3);
@@ -586,6 +597,116 @@ th {
   color: var(--danger);
 }
 
+/* ---------- Receivables status + aging ---------- */
+.receivables-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(145px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.aging-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.aging-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+.aging-panel-head h2 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  margin: 0;
+}
+.aging-panel-head p {
+  color: var(--fg3);
+  font-size: 12px;
+  margin: 3px 0 0;
+}
+.aging-asof {
+  color: var(--fg3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.aging-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+}
+.aging-bucket {
+  display: grid;
+  grid-template-columns: 5px minmax(0, 1fr);
+  column-gap: 9px;
+  row-gap: 4px;
+  padding: 14px 16px;
+  border-right: 1px solid var(--divider);
+}
+.aging-bucket:last-child {
+  border-right: 0;
+}
+.aging-marker {
+  grid-row: 1 / span 3;
+  width: 3px;
+  border-radius: 999px;
+}
+.aging-label,
+.aging-count {
+  color: var(--fg3);
+  font-size: 11px;
+}
+.aging-label {
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.aging-bucket strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 1180px) {
+  .receivables-kpi-grid {
+    grid-template-columns: repeat(3, minmax(160px, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .receivables-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .aging-panel-head {
+    display: block;
+  }
+  .aging-asof {
+    display: block;
+    margin-top: 8px;
+  }
+  .aging-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .aging-bucket:nth-child(2n) {
+    border-right: 0;
+  }
+}
+@media (max-width: 430px) {
+  .receivables-kpi-grid,
+  .aging-grid {
+    grid-template-columns: 1fr;
+  }
+  .aging-bucket {
+    border-right: 0;
+    border-bottom: 1px solid var(--divider);
+  }
+  .aging-bucket:last-child {
+    border-bottom: 0;
+  }
+}
+
 button,
 select {
   font: inherit;
@@ -732,7 +853,8 @@ input {
    Restrained and professional: buttons darken + lift 1px, cards lift 2px with a
    deeper navy-tinted shadow, press is a plain scale with no extra colour shift. */
 .sis-btn {
-  transition: filter var(--dur-fast) var(--ease-standard),
+  transition:
+    filter var(--dur-fast) var(--ease-standard),
     transform var(--dur-fast) var(--ease-standard),
     background var(--dur-fast) var(--ease-standard),
     border-color var(--dur-fast) var(--ease-standard);
@@ -749,7 +871,8 @@ input {
   box-shadow: var(--focus-ring);
 }
 .sis-card {
-  transition: transform var(--dur-base) var(--ease-standard),
+  transition:
+    transform var(--dur-base) var(--ease-standard),
     box-shadow var(--dur-base) var(--ease-standard);
 }
 .sis-lift:hover {
@@ -773,21 +896,40 @@ input {
   height: 5px;
   border-radius: var(--radius-pill);
 }
-.tri-dash > span:nth-child(1) { background: var(--daust-navy); }
-.tri-dash > span:nth-child(2) { background: var(--daust-orange); }
-.tri-dash > span:nth-child(3) { background: var(--daust-steel); }
-.tri-dash.on-navy > span:nth-child(1) { background: #fff; }
+.tri-dash > span:nth-child(1) {
+  background: var(--daust-navy);
+}
+.tri-dash > span:nth-child(2) {
+  background: var(--daust-orange);
+}
+.tri-dash > span:nth-child(3) {
+  background: var(--daust-steel);
+}
+.tri-dash.on-navy > span:nth-child(1) {
+  background: #fff;
+}
 
-.tri-dash.sm { gap: 4px; }
-.tri-dash.sm > span { width: 18px; height: 3px; }
+.tri-dash.sm {
+  gap: 4px;
+}
+.tri-dash.sm > span {
+  width: 18px;
+  height: 3px;
+}
 
 /* Scroll-reveal is translate-only, never opacity-gated, so content can never be
    trapped invisible if the animation does not run. */
 @keyframes daust-rise {
-  from { transform: translateY(8px); }
-  to { transform: none; }
+  from {
+    transform: translateY(8px);
+  }
+  to {
+    transform: none;
+  }
 }
-.fade-in { animation: daust-rise var(--dur-slow) var(--ease-out); }
+.fade-in {
+  animation: daust-rise var(--dur-slow) var(--ease-out);
+}
 
 .eyebrow-brand {
   font-family: var(--font-body);
@@ -800,16 +942,31 @@ input {
 
 /* ---------- Shared UI primitives (ui.tsx) ---------- */
 @keyframes ui-slide-in {
-  from { transform: translateX(24px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 @keyframes ui-pop-in {
-  from { transform: scale(0.97); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 /* hover lift for card-like buttons (quick actions, program cards) */
 .lift {
-  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.14s ease,
+    border-color 0.14s ease;
 }
 .lift:hover {
   transform: translateY(-2px);
@@ -819,11 +976,17 @@ input {
 
 /* ---------- Login ---------- */
 @keyframes login-kenburns {
-  0% { transform: scale(1) translate3d(0, 0, 0); }
-  100% { transform: scale(1.12) translate3d(-1.5%, -1.5%, 0); }
+  0% {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  100% {
+    transform: scale(1.12) translate3d(-1.5%, -1.5%, 0);
+  }
 }
 @keyframes login-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .login-screen {
   min-height: 100vh;
@@ -833,7 +996,11 @@ input {
 .login-brand {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(180deg, var(--daust-navy), var(--daust-navy-deep));
+  background: linear-gradient(
+    180deg,
+    var(--daust-navy),
+    var(--daust-navy-deep)
+  );
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -850,13 +1017,20 @@ input {
   animation: login-kenburns 24s ease-in-out infinite alternate;
 }
 @media (prefers-reduced-motion: reduce) {
-  .login-brand-bg { animation: none; }
+  .login-brand-bg {
+    animation: none;
+  }
 }
 .login-brand-fade {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(125deg, var(--daust-navy) 25%, rgba(21, 59, 106, 0.5) 60%, rgba(21, 59, 106, 0.15) 100%),
+    linear-gradient(
+      125deg,
+      var(--daust-navy) 25%,
+      rgba(21, 59, 106, 0.5) 60%,
+      rgba(21, 59, 106, 0.15) 100%
+    ),
     linear-gradient(0deg, var(--daust-navy-deep) 0%, transparent 50%);
 }
 .login-brand-content {
@@ -867,7 +1041,9 @@ input {
   height: 100%;
   min-height: 480px;
 }
-.login-brand-top { margin-bottom: auto; }
+.login-brand-top {
+  margin-bottom: auto;
+}
 .login-quote {
   font-family: "Fraunces", Georgia, serif;
   font-style: italic;
@@ -910,16 +1086,30 @@ input {
   width: 100%;
   max-width: 380px;
 }
-.login-card-head { margin-bottom: 26px; }
-.login-mobile-logo { display: none; height: 24px; margin-bottom: 18px; }
-.login-form { display: flex; flex-direction: column; gap: 4px; }
+.login-card-head {
+  margin-bottom: 26px;
+}
+.login-mobile-logo {
+  display: none;
+  height: 24px;
+  margin-bottom: 18px;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .login-label {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--fg2);
   margin: 14px 0 6px;
 }
-.login-input-wrap { position: relative; display: flex; align-items: center; }
+.login-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
 .login-input-icon {
   position: absolute;
   left: 13px;
@@ -933,7 +1123,9 @@ input {
   border: 1px solid var(--border);
   font-family: var(--font-body);
   font-size: 14.5px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 .login-input:focus {
   outline: none;
@@ -950,7 +1142,10 @@ input {
   cursor: pointer;
   border-radius: 8px;
 }
-.login-input-toggle:hover { color: var(--fg1); background: var(--bg-subtle); }
+.login-input-toggle:hover {
+  color: var(--fg1);
+  background: var(--bg-subtle);
+}
 .login-error {
   display: flex;
   align-items: center;
@@ -973,7 +1168,9 @@ input {
   justify-content: center;
   gap: 8px;
 }
-.login-spin { animation: login-spin 0.8s linear infinite; }
+.login-spin {
+  animation: login-spin 0.8s linear infinite;
+}
 .login-demo {
   margin-top: 22px;
   border-top: 1px solid var(--divider);
@@ -1004,13 +1201,34 @@ input {
   flex-direction: column;
   gap: 1px;
 }
-.login-demo-chip:hover { border-color: var(--daust-navy); background: var(--bg-tint); }
-.login-demo-role { font-size: 12px; font-weight: 700; color: var(--daust-navy); }
-.login-demo-email { font-size: 10.5px; color: var(--fg3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.login-demo-chip:hover {
+  border-color: var(--daust-navy);
+  background: var(--bg-tint);
+}
+.login-demo-role {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--daust-navy);
+}
+.login-demo-email {
+  font-size: 10.5px;
+  color: var(--fg3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 @media (max-width: 860px) {
-  .login-screen { grid-template-columns: 1fr; }
-  .login-brand { display: none; }
-  .login-mobile-logo { display: block; }
-  .login-panel { padding: 48px 24px; }
+  .login-screen {
+    grid-template-columns: 1fr;
+  }
+  .login-brand {
+    display: none;
+  }
+  .login-mobile-logo {
+    display: block;
+  }
+  .login-panel {
+    padding: 48px 24px;
+  }
 }

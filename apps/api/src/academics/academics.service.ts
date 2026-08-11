@@ -11,6 +11,7 @@ import {
   summarizeTranscriptRows,
 } from "../transcript/transcript-calculation.js";
 import { TranscriptService } from "../transcript/transcript.service.js";
+import { deriveApiAccountPosition } from "../finance/account-position.js";
 
 export const GRADE_POINTS: Record<string, number> = {
   "A+": 4.0,
@@ -554,12 +555,7 @@ export class AcademicsService {
       const seatsLeft = s.capacity - s._count.enrollments;
       const unmetPrereqs = s.course.prereqRules
         .filter(
-          (pr) =>
-            !meetsPrerequisite(
-              bestGrade,
-              pr.prereqCourseId,
-              pr.minGrade,
-            ),
+          (pr) => !meetsPrerequisite(bestGrade, pr.prereqCourseId, pr.minGrade),
         )
         .map((pr) =>
           pr.minGrade
@@ -1628,35 +1624,38 @@ export class AcademicsService {
 
   /** Admin: enrollment stats + by-program breakdown. */
   async adminStats() {
-    const [totalStudents, totalEnrolled, programs, openApplications, balances] =
-      await Promise.all([
-        this.prisma.student.count({ where: { recordStatus: "active" } }),
-        this.prisma.enrollment.count({ where: { status: "enrolled" } }),
-        this.prisma.program.findMany({
-          include: {
-            _count: {
-              select: { students: { where: { recordStatus: "active" } } },
-            },
+    const [
+      totalStudents,
+      totalEnrolled,
+      programs,
+      openApplications,
+      heldStudents,
+    ] = await Promise.all([
+      this.prisma.student.count({ where: { recordStatus: "active" } }),
+      this.prisma.enrollment.count({ where: { status: "enrolled" } }),
+      this.prisma.program.findMany({
+        include: {
+          _count: {
+            select: { students: { where: { recordStatus: "active" } } },
           },
-        }),
-        this.prisma.applicant.count({
-          where: { stage: { in: OPEN_APPLICANT_STAGES } },
-        }),
-        // "Accounts with holds" on the registrar dashboard is a headcount, not money:
-        // it is the number of students carrying any unpaid balance. Grouping in the
-        // database keeps this off the finance endpoints a registrar cannot read.
-        this.prisma.invoice.groupBy({
-          by: ["studentId"],
-          _sum: { totalAmount: true, amountPaid: true },
-        }),
-      ]);
-    const holdsCount = balances.filter(
-      (b) => (b._sum.totalAmount ?? 0) - (b._sum.amountPaid ?? 0) > 0,
-    ).length;
+        },
+      }),
+      this.prisma.applicant.count({
+        where: { stage: { in: OPEN_APPLICANT_STAGES } },
+      }),
+      this.prisma.studentHold.findMany({
+        where: {
+          active: true,
+          student: { recordStatus: "active" },
+        },
+        distinct: ["studentId"],
+        select: { studentId: true },
+      }),
+    ]);
     return {
       totalStudents,
       totalEnrolled,
-      holdsCount,
+      holdsCount: heldStudents.length,
       openApplications,
       byProgram: programs.map((p) => ({
         code: p.code,
@@ -1672,7 +1671,10 @@ export class AcademicsService {
       include: {
         person: true,
         program: true,
-        invoices: true,
+        holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
+        invoices: {
+          include: { plan: { include: { installments: true } } },
+        },
         transcriptEntries: { where: { voidedAt: null } },
       },
       orderBy: { studentNo: "asc" },
@@ -1681,6 +1683,7 @@ export class AcademicsService {
       const { gpa, completedCredits } = summarizeTranscriptRows(
         s.transcriptEntries,
       );
+      const summary = deriveApiAccountPosition(s.invoices).summary;
       return {
         id: s.id,
         studentNo: s.studentNo,
@@ -1693,10 +1696,10 @@ export class AcademicsService {
         cohort: s.cohort,
         gpa,
         completedCredits,
-        balance: s.invoices.reduce(
-          (b, i) => b + (i.totalAmount - i.amountPaid),
-          0,
-        ),
+        balance: summary.balanceXof,
+        summary,
+        hasActiveHold: s.holds.length > 0,
+        activeHoldCount: s.holds.length,
         status:
           s.recordStatus === "archived"
             ? "archived"
@@ -1768,7 +1771,10 @@ export class AcademicsService {
           where: { recordStatus: "active" },
           include: {
             person: true,
-            invoices: true,
+            holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
+            invoices: {
+              include: { plan: { include: { installments: true } } },
+            },
             transcriptEntries: { where: { voidedAt: null } },
           },
           orderBy: { studentNo: "asc" },
@@ -1784,6 +1790,7 @@ export class AcademicsService {
       const { gpa, completedCredits } = summarizeTranscriptRows(
         s.transcriptEntries,
       );
+      const summary = deriveApiAccountPosition(s.invoices).summary;
       return {
         id: s.id,
         studentNo: s.studentNo,
@@ -1792,10 +1799,10 @@ export class AcademicsService {
         yearLevel: s.yearLevel,
         gpa,
         completedCredits,
-        balance: s.invoices.reduce(
-          (b, i) => b + (i.totalAmount - i.amountPaid),
-          0,
-        ),
+        balance: summary.balanceXof,
+        summary,
+        hasActiveHold: s.holds.length > 0,
+        activeHoldCount: s.holds.length,
         status: gpa > 0 && gpa < 2 ? "probation" : "active",
       };
     });
@@ -1806,6 +1813,9 @@ export class AcademicsService {
     const paid = program.students.reduce(
       (sum, s) => sum + s.invoices.reduce((b, i) => b + i.amountPaid, 0),
       0,
+    );
+    const accountSummaries = program.students.map(
+      (student) => deriveApiAccountPosition(student.invoices).summary,
     );
     const yearDist = [1, 2, 3, 4].map(
       (y) => program.students.filter((s) => s.yearLevel === y).length,
@@ -1822,6 +1832,18 @@ export class AcademicsService {
         studentCount: program.students.length,
         billed,
         paid,
+        outstanding: accountSummaries.reduce(
+          (sum, summary) => sum + summary.outstandingXof,
+          0,
+        ),
+        credit: accountSummaries.reduce(
+          (sum, summary) => sum + summary.creditXof,
+          0,
+        ),
+        overdue: accountSummaries.reduce(
+          (sum, summary) => sum + summary.overdueXof,
+          0,
+        ),
         revenue: billed,
         yearDist,
       },
@@ -2368,7 +2390,10 @@ export class AcademicsService {
       include: {
         person: true,
         program: { include: { department: true } },
-        invoices: true,
+        holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
+        invoices: {
+          include: { plan: { include: { installments: true } } },
+        },
         transcriptEntries: { where: { voidedAt: null } },
         enrollments: {
           include: {
@@ -2387,6 +2412,7 @@ export class AcademicsService {
     const currentTermCredits = student.enrollments
       .filter((e) => e.status === "enrolled")
       .reduce((c, e) => c + e.section.course.credits, 0);
+    const summary = deriveApiAccountPosition(student.invoices).summary;
     return {
       id: student.id,
       studentNo: student.studentNo,
@@ -2411,10 +2437,16 @@ export class AcademicsService {
             ? "probation"
             : "active",
       recordStatus: student.recordStatus,
-      balance: student.invoices.reduce(
-        (b, i) => b + (i.totalAmount - i.amountPaid),
-        0,
-      ),
+      balance: summary.balanceXof,
+      summary,
+      hasActiveHold: student.holds.length > 0,
+      activeHoldCount: student.holds.length,
+      activeHolds: student.holds.map((hold) => ({
+        id: hold.id,
+        type: hold.type,
+        reason: hold.reason,
+        placedAt: hold.placedAt,
+      })),
       // --- Extended SIS profile (nullable until entered via Edit record) ---
       dateOfBirth: student.dateOfBirth
         ? student.dateOfBirth.toISOString().slice(0, 10)

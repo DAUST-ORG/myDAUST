@@ -50,12 +50,12 @@ const AddChargeInput = z.object({
   description: z.string().min(1).max(160),
   amountXof: z.number().int().positive().max(100_000_000),
   costCenterCode: z.string().max(8).optional(),
-  dueDate: z.string().optional(),
+  dueDate: z.string().date().optional(),
   // Optional installment schedule (the design's New Billing); omitted = single charge.
   installments: z
     .array(
       z.object({
-        dueDate: z.string().min(8).max(40),
+        dueDate: z.string().date(),
         amountXof: z.number().int().positive().max(100_000_000),
         label: z.string().max(80).nullish(),
       }),
@@ -75,7 +75,7 @@ const ApplyDiscountInput = z.object({
 
 const UpdateFeePlanRowInput = z.object({
   label: z.string().min(1).max(80).optional(),
-  dueOn: z.string().optional(),
+  dueOn: z.string().date().optional(),
   amountFullXof: z.number().int().min(0).max(100_000_000).optional(),
   amountTuitionXof: z.number().int().min(0).max(100_000_000).optional(),
 });
@@ -85,7 +85,7 @@ const UpdatePlanInput = z.object({
     .array(
       z.object({
         id: z.string().min(1).max(64),
-        dueDate: z.string().min(8).max(40),
+        dueDate: z.string().date(),
         amountDue: z.number().int().min(0).max(100_000_000),
         label: z.string().max(80).nullish(),
       }),
@@ -99,7 +99,7 @@ const ReplacePlanInput = z.object({
       z.object({
         id: z.string().min(1).max(64).optional(),
         sequence: z.number().int().positive(),
-        dueDate: z.string().min(8).max(40),
+        dueDate: z.string().date(),
         amountDue: z.number().int().min(0).max(100_000_000),
         label: z.string().max(80).nullish(),
       }),
