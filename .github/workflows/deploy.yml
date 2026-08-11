@@ -188,6 +188,73 @@ jobs:
             echo "edge health check skipped ($API_ORIGIN not resolving yet); services are stable."
           fi
 
+      - name: Reconcile installment statuses (one-off ECS task)
+        run: |
+          CLUSTER="daust-$ENV_NAME"
+          SERVICE="daust-$ENV_NAME-api"
+          # Re-query after services-stable so this always uses the API task
+          # definition that was actually rolled out, including its secrets and logs.
+          TASK_DEF=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          NET=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].networkConfiguration' --output json)
+          LOG_OPTIONS=$(aws ecs describe-task-definition --task-definition "$TASK_DEF" \
+            --query "taskDefinition.containerDefinitions[?name=='api'] | [0].logConfiguration.options" \
+            --output json)
+          LOG_GROUP=$(jq -r '.["awslogs-group"]' <<<"$LOG_OPTIONS")
+          LOG_PREFIX=$(jq -r '.["awslogs-stream-prefix"]' <<<"$LOG_OPTIONS")
+
+          RUN_RESULT=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_DEF" \
+            --launch-type FARGATE --network-configuration "$NET" \
+            --overrides '{"containerOverrides":[{"name":"api","command":["node","dist/finance/reconcile-installment-statuses.cli.js"]}]}')
+          TASK=$(jq -r '.tasks[0].taskArn // empty' <<<"$RUN_RESULT")
+          if [ -z "$TASK" ]; then
+            echo "ECS did not start the reconciliation task:"
+            jq -c '.failures' <<<"$RUN_RESULT"
+            exit 1
+          fi
+          echo "reconciliation task: $TASK"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
+
+          TASK_RESULT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK")
+          EXIT=$(jq -r '.tasks[0].containers[] | select(.name == "api") | .exitCode // empty' <<<"$TASK_RESULT")
+          STOP_REASON=$(jq -r '.tasks[0].stoppedReason // "not reported"' <<<"$TASK_RESULT")
+          TASK_ID="${TASK##*/}"
+          LOG_STREAM="$LOG_PREFIX/api/$TASK_ID"
+
+          # CloudWatch stream creation and final log delivery are eventually consistent.
+          # Require the structured result line so a silent task cannot pass deployment.
+          printf '{"events":[]}' > reconciliation-logs.json
+          for attempt in $(seq 1 15); do
+            if aws logs get-log-events --log-group-name "$LOG_GROUP" \
+              --log-stream-name "$LOG_STREAM" --start-from-head \
+              --output json > reconciliation-logs.json 2>/dev/null \
+              && jq -e \
+                '[.events[].message | fromjson? | select(.event == "installment-status-reconciliation")] | length > 0' \
+                reconciliation-logs.json >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          echo "CloudWatch output ($LOG_GROUP / $LOG_STREAM):"
+          jq -r '.events[].message' reconciliation-logs.json
+          RESULT=$(jq -c \
+            '[.events[].message | fromjson? | select(.event == "installment-status-reconciliation")] | last // empty' \
+            reconciliation-logs.json)
+          echo "reconciliation exit code: ${EXIT:-not reported}"
+          if [ "$EXIT" != "0" ]; then
+            echo "reconciliation stopped unsuccessfully: $STOP_REASON"
+            exit 1
+          fi
+          if [ -z "$RESULT" ] || ! jq -e \
+            '.ok == true and (.changedCount | type == "number")' \
+            <<<"$RESULT" >/dev/null; then
+            echo "reconciliation did not emit a valid success result"
+            exit 1
+          fi
+          echo "reconciliation changed count: $(jq -r '.changedCount' <<<"$RESULT")"
+
   vitrine:
     needs: changes
     if: needs.changes.outputs.vitrine == 'true'
