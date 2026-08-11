@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
+import { DAKAR_TIME_ZONE } from "@mydaust/shared";
 import { FinanceService } from "./finance.service.js";
 
 /** Background finance jobs. (Wire Sentry cron monitors around these when Sentry lands.) */
@@ -9,10 +10,10 @@ export class FinanceTasks {
 
   constructor(private readonly finance: FinanceService) {}
 
-  @Cron(CronExpression.EVERY_DAY_AT_1AM)
+  @Cron(CronExpression.EVERY_DAY_AT_1AM, { timeZone: DAKAR_TIME_ZONE })
   async markOverdue(): Promise<void> {
     const n = await this.finance.markOverdueInstallments();
-    if (n > 0) this.log.log(`Marked ${n} installment(s) overdue`);
+    if (n > 0) this.log.log(`Reconciled ${n} installment status row(s)`);
   }
 
   // Surfaces stale pendings for bursar review — never auto-cancels (a lost IPN does not mean
@@ -20,7 +21,10 @@ export class FinanceTasks {
   @Cron(CronExpression.EVERY_30_MINUTES)
   async reconcile(): Promise<void> {
     const stale = await this.finance.listStalePendingPayments(60);
-    if (stale.length > 0) this.log.warn(`${stale.length} stale pending payment(s) need bursar review`);
+    if (stale.length > 0)
+      this.log.warn(
+        `${stale.length} stale pending payment(s) need bursar review`,
+      );
   }
 
   /**

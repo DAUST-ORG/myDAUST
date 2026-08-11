@@ -12,6 +12,7 @@ import {
   updatePaymentPlan,
 } from "@/lib/api";
 import { formatXof } from "@/lib/format";
+import { AccountBalanceText, AccountStandingBadge, AccountStatusLine, resolveAccountSummary } from "@/components/AccountBalance";
 import {
   Avatar,
   Badge,
@@ -71,6 +72,21 @@ interface BillingDraft {
   rows: DraftRow[];
 }
 
+function BalanceCells({ row }: { row: StudentAccountRow }) {
+  const summary = resolveAccountSummary(row.summary, { balanceXof: row.balance, billedXof: row.billed });
+  return (
+    <>
+      <td style={{ textAlign: "right" }}>
+        <span style={{ display: "grid", gap: 2, justifyItems: "end" }}>
+          <AccountBalanceText summary={summary} style={{ fontWeight: 700 }} />
+          {summary.standing === "overdue" && <AccountStatusLine summary={summary} />}
+        </span>
+      </td>
+      <td style={{ textAlign: "right" }}><AccountStandingBadge summary={summary} /></td>
+    </>
+  );
+}
+
 export default function FinanceAccounts() {
   const [rows, setRows] = useState<StudentAccountRow[] | null>(null);
   const [plan, setPlan] = useState<FeePlan | null>(null);
@@ -78,6 +94,7 @@ export default function FinanceAccounts() {
   const [tab, setTab] = useState<TabKey>("billings");
   const [fBill, setFBill] = useState("");
   const [fBal, setFBal] = useState("");
+  const [balanceFilter, setBalanceFilter] = useState("all");
   const { sort, toggle, apply } = useSort({ key: "balance", dir: "desc" });
 
   const [draft, setDraft] = useState<BillingDraft | null>(null);
@@ -116,7 +133,7 @@ export default function FinanceAccounts() {
   const balances = useMemo(() => {
     if (!rows) return [];
     const needle = fBal.trim().toLowerCase();
-    const matched = needle
+    const searched = needle
       ? rows.filter(
           (r) =>
             r.name.toLowerCase().includes(needle) ||
@@ -124,12 +141,17 @@ export default function FinanceAccounts() {
             (r.program ?? "").toLowerCase().includes(needle),
         )
       : rows;
+    const matched = searched.filter((row) => {
+      if (balanceFilter === "all") return true;
+      if (balanceFilter === "hold") return !!row.hasActiveHold;
+      return resolveAccountSummary(row.summary, { balanceXof: row.balance, billedXof: row.billed }).standing === balanceFilter;
+    });
     return apply(matched, {
       name: (r) => r.name,
       program: (r) => r.program,
       balance: (r) => r.balance,
     });
-  }, [rows, fBal, apply]);
+  }, [rows, fBal, balanceFilter, apply]);
 
   const studentOptions = useMemo(
     () => [
@@ -302,7 +324,15 @@ export default function FinanceAccounts() {
       {rows && tab === "balances" && (
         <Card
           title="Account balances"
-          action={<SearchInput value={fBal} onChange={setFBal} placeholder="Filter students…" width={260} />}
+          action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <SearchInput value={fBal} onChange={setFBal} placeholder="Filter students…" width={240} />
+            <Select ariaLabel="Filter by account standing" value={balanceFilter} onChange={setBalanceFilter} style={{ minWidth: 160 }} options={[
+              { value: "all", label: "All standings" }, { value: "on_time", label: "On time" },
+              { value: "overdue", label: "Overdue" }, { value: "cleared", label: "Cleared" },
+              { value: "credit", label: "In credit" }, { value: "unscheduled", label: "Needs a schedule" },
+              { value: "hold", label: "Active hold" },
+            ]} />
+          </div>}
         >
           {balances.length === 0 ? (
             <EmptyState title="No accounts match that search" />
@@ -331,23 +361,7 @@ export default function FinanceAccounts() {
                       </span>
                     </td>
                     <td style={{ fontSize: 12.5, color: "var(--fg2)" }}>{r.program ?? "—"}</td>
-                    <td
-                      style={{
-                        textAlign: "right",
-                        fontWeight: 700,
-                        fontVariantNumeric: "tabular-nums",
-                        color: r.balance > 0 ? "var(--danger)" : "var(--success-500)",
-                      }}
-                    >
-                      {r.balance > 0 ? formatXof(r.balance) : "Settled"}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {r.balance > 0 ? (
-                        <Badge tone="error">Outstanding</Badge>
-                      ) : (
-                        <Badge tone="success">Paid in full</Badge>
-                      )}
-                    </td>
+                    <BalanceCells row={r} />
                   </tr>
                 ))}
               </tbody>

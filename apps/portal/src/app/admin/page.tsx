@@ -37,7 +37,7 @@ export default function RegistrarDashboard() {
       <div className="kpi-grid" style={{ marginBottom: 24 }}>
         <Stat label="Total enrollment" value={dash(stats?.totalStudents)} sub="active students" />
         <Stat label="Programs" value={dash(programs.length)} sub="with enrollment" />
-        <Stat label="Accounts with holds" value={dash(stats?.holdsCount)} sub="unpaid balance" tone="var(--daust-orange)" />
+        <Stat label="Active student holds" value={dash(stats?.holdsCount)} sub="registration or account restrictions" tone="var(--daust-orange)" />
         <Stat label="Applications" value={dash(stats?.openApplications)} sub="in pipeline" />
       </div>
 

@@ -13,6 +13,16 @@ export function formatDate(iso: string): string {
     year: "numeric",
     month: "short",
     day: "numeric",
+    timeZone: "Africa/Dakar",
+  });
+}
+
+/** Compact Dakar-calendar date for due-date and schedule labels. */
+export function formatDateShort(iso: string): string {
+  return new Date(iso).toLocaleDateString("fr-SN", {
+    month: "short",
+    day: "numeric",
+    timeZone: "Africa/Dakar",
   });
 }
 
@@ -39,7 +49,8 @@ export function formatXofCompact(amount: number): string {
 export function formatXofAbbrev(amount: number): string {
   const abs = Math.abs(amount);
   const sign = amount < 0 ? "−" : "";
-  if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000_000)
+    return `${sign}${(abs / 1_000_000_000).toFixed(2)}B`;
   if (abs >= 1_000_000) return `${sign}${Math.round(abs / 1_000_000)}M`;
   if (abs >= 1_000) return `${sign}${Math.round(abs / 1_000)}K`;
   return `${sign}${abs}`;

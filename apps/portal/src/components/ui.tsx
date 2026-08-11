@@ -192,6 +192,7 @@ export function SearchInput({
     >
       <Search size={15} color="var(--daust-steel)" />
       <input
+        aria-label={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -211,14 +212,21 @@ export function Select({
   onChange,
   options,
   style,
+  ariaLabel,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: (SelectOption | string)[];
   style?: React.CSSProperties;
+  ariaLabel?: string;
 }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={style}>
+    <select
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={style}
+    >
       {options.map((o) => {
         const opt = typeof o === "string" ? { value: o, label: o } : o;
         return (

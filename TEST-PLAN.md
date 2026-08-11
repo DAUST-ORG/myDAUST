@@ -852,6 +852,23 @@ Login: `bursar@daust.edu` (or `admin@daust.edu`). Landing `/finance`. Class guar
 | FIN-DASH-001 | FUNC | Load page | Receivables KPIs + owing list. |
 | FIN-DASH-002 | FUNC | Click an owing student | Routes to `/finance/students/[id]` (finance shell, **not** `/admin/finance/...`); no registrar-nav 403. |
 
+#### 6.1.1 Payment-plan standing and receivables aging — `FIN-AGING`
+
+Use an injected Africa/Dakar business date. The same fixture must return an identical
+`AccountBalanceSummary` through student, parent, public bill, registrar, finance, and Billing Admin APIs.
+
+| ID | Tags | Steps | Expected |
+|---|---|---|---|
+| FIN-AGING-001 | FUNC | Compare installments due yesterday, today, and tomorrow | Yesterday's unpaid portion is overdue; today and tomorrow are not red. |
+| FIN-AGING-002 | FUNC | Test 1/30/31/60/61/90/91 days past due | Amount, unique-account count, and installment count land in exactly one standard bucket. |
+| FIN-AGING-003 | FUNC | Part-pay a past-due installment, then refund | The remaining portion stays overdue; refund restores the correct amount and age. |
+| FIN-AGING-004 | FUNC | Add a scholarship/credit and multiple invoices | Credit offsets that account's oldest obligations only; bucket totals reconcile to gross outstanding. |
+| FIN-AGING-005 | FUNC | Add a void invoice, no-plan invoice, and never-billed student | Void is excluded; no-plan debt is unscheduled; never billed is not counted as cleared. |
+| FIN-AGING-006 | FUNC | Compare active and archived students | Archived debt is reported; archived cleared/transcript-only profiles are excluded from receivables. |
+| FIN-AGING-007 | FUNC | Query active financial holds | Count distinct students with active `StudentHold` records; balances alone never create a hold. |
+| FIN-AGING-008 | RACE | Settle two different landed payments concurrently | Cash is recorded once, allocations are not lost, and excess becomes an auditable reversible credit. |
+| FIN-AGING-009 | MIGRATION | Apply all migrations to a fresh database and diff schema | Date-only migration succeeds and Prisma reports no schema drift. |
+
 ### 6.2 Fee Schedule — `/finance/fee-schedule` — `FIN-FEE`
 
 **Screen Spec:** "Tuition & Fees"; fee-plan rows; "Edit plan" (per-row edit). Data: `getFeePlan`, `updateFeePlanRow`.

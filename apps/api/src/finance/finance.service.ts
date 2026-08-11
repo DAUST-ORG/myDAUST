@@ -8,12 +8,15 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "@mydaust/db";
 import {
   COST_CENTER_TUITION,
   FEE_STRUCTURE,
   WirePaymentConfig as WirePaymentConfigSchema,
   splitEvenXof,
+  toDakarDateKey,
   type CreatePaymentPlanInput,
+  type AccountBalanceSummary,
   type InitiatePaymentInput,
   type WireApprovalInput,
   type WirePaymentConfig,
@@ -28,6 +31,16 @@ import {
 } from "./request-to-pay.provider.js";
 import { loadEnv } from "../config/env.js";
 import { WireProofStorage } from "./wire-proof.storage.js";
+import {
+  decorateInstallment,
+  deriveApiAccountPosition,
+  derivedInstallmentsById,
+  invoicePositionSummary,
+  legacyInstallmentStatus,
+  payableLinesOldestFirst,
+  projectedInstallmentStatus,
+  selectOldestPayableTarget,
+} from "./account-position.js";
 
 // Standard annual tuition, billed as the official 4-installment quarterly plan — mirrors
 // packages/db/prisma/import-students.ts so admin-created students match the imported roster.
@@ -53,6 +66,76 @@ const DEFAULT_WIRE_CONFIG: WirePaymentConfig = {
   notificationRecipients: ["finance@daust.edu.sn"],
 };
 
+/** Payment-plan dates are Dakar calendar dates, never arbitrary timestamps. */
+export function parseFinanceDateOnly(value: string, label = "Due date"): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new BadRequestException(`${label} must be YYYY-MM-DD`);
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== value
+  ) {
+    throw new BadRequestException(`${label} is not a valid calendar date`);
+  }
+  return parsed;
+}
+
+/** Roll up already-derived account positions without netting one student's credit against another. */
+function aggregateAccountReport(
+  summaries: readonly AccountBalanceSummary[],
+): AccountBalanceSummary {
+  const amount = (
+    key:
+      | "balanceXof"
+      | "outstandingXof"
+      | "creditXof"
+      | "overdueXof"
+      | "dueTodayXof"
+      | "notYetDueXof"
+      | "futureScheduledXof"
+      | "unscheduledXof",
+  ) => summaries.reduce((sum, summary) => sum + summary[key], 0);
+  const firstDate = (key: "nextDueDate" | "oldestOverdueDate") =>
+    summaries
+      .map((summary) => summary[key])
+      .filter((value): value is string => value !== null)
+      .sort()[0] ?? null;
+  const outstandingXof = amount("outstandingXof");
+  const creditXof = amount("creditXof");
+  const overdueXof = amount("overdueXof");
+  const unscheduledXof = amount("unscheduledXof");
+  return {
+    balanceXof: amount("balanceXof"),
+    outstandingXof,
+    creditXof,
+    overdueXof,
+    dueTodayXof: amount("dueTodayXof"),
+    notYetDueXof: amount("notYetDueXof"),
+    futureScheduledXof: amount("futureScheduledXof"),
+    unscheduledXof,
+    nextDueDate: firstDate("nextDueDate"),
+    oldestOverdueDate: firstDate("oldestOverdueDate"),
+    daysPastDue: summaries.reduce(
+      (oldest, summary) => Math.max(oldest, summary.daysPastDue),
+      0,
+    ),
+    standing:
+      summaries.length === 0 ||
+      summaries.every((summary) => summary.standing === "no_billing")
+        ? "no_billing"
+        : overdueXof > 0
+          ? "overdue"
+          : unscheduledXof > 0
+            ? "unscheduled"
+            : outstandingXof > 0
+              ? "on_time"
+              : creditXof > 0
+                ? "credit"
+                : "cleared",
+  };
+}
+
 @Injectable()
 export class FinanceService {
   constructor(
@@ -63,6 +146,86 @@ export class FinanceService {
     @Inject(REQUEST_TO_PAY_PROVIDERS)
     private readonly rtpRails: RequestToPayRegistry,
   ) {}
+
+  /** Retry serializable money mutations when PostgreSQL detects a concurrent write. */
+  private async serializableTransaction<T>(
+    work: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await this.prisma.$transaction(work, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 10_000,
+          timeout: 30_000,
+        });
+      } catch (error) {
+        const retryable =
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "P2034";
+        if (!retryable || attempt === 2) throw error;
+      }
+    }
+    throw new Error("Serializable transaction retry limit exhausted");
+  }
+
+  private async loadPayableAccount(
+    studentId: string,
+    client: Pick<Prisma.TransactionClient, "invoice"> = this.prisma,
+  ) {
+    const invoices = await client.invoice.findMany({
+      where: { studentId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      include: {
+        term: true,
+        plan: {
+          include: {
+            installments: { orderBy: [{ sequence: "asc" }, { id: "asc" }] },
+          },
+        },
+      },
+    });
+    const position = deriveApiAccountPosition(invoices);
+    const payableTarget = selectOldestPayableTarget(invoices, position);
+    return {
+      invoices,
+      position,
+      lines: payableLinesOldestFirst(invoices, position),
+      target: payableTarget,
+    };
+  }
+
+  private requirePayableTarget(
+    account: Awaited<ReturnType<FinanceService["loadPayableAccount"]>>,
+    amountXof: number,
+    requestedInvoiceId?: string,
+  ) {
+    const amount = Math.floor(amountXof);
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      throw new BadRequestException(
+        "Amount must be a positive whole number of XOF",
+      );
+    }
+    const target = account.target;
+    if (!target) {
+      throw new BadRequestException("This account has no outstanding balance");
+    }
+    if (requestedInvoiceId && requestedInvoiceId !== target.invoiceId) {
+      throw new BadRequestException(
+        "Payments must be applied to the account's oldest outstanding charge first",
+      );
+    }
+    if (amount > target.invoicePayableXof) {
+      throw new BadRequestException(
+        `Amount exceeds the current payable balance (${target.invoicePayableXof} XOF)`,
+      );
+    }
+    const invoice = account.invoices.find(
+      (candidate) => candidate.id === target.invoiceId,
+    )!;
+    return { amount, target, invoice };
+  }
 
   async getWirePaymentConfig(): Promise<WirePaymentConfig> {
     const row = await this.prisma.appSetting.findUnique({
@@ -176,13 +339,12 @@ export class FinanceService {
     });
     if (!invoice || invoice.studentId !== input.studentId)
       throw new NotFoundException("Invoice not found");
-    const balance = invoice.totalAmount - invoice.amountPaid;
-    const amount = Math.floor(input.amountXof);
-    if (!Number.isInteger(amount) || amount <= 0 || amount > balance) {
-      throw new BadRequestException(
-        `Wire amount must be between 1 and ${Math.max(0, balance)} XOF`,
-      );
-    }
+    const account = await this.loadPayableAccount(input.studentId);
+    const { amount } = this.requirePayableTarget(
+      account,
+      input.amountXof,
+      invoice.id,
+    );
     const active = await this.prisma.wireTransferSubmission.findFirst({
       where: { invoiceId: invoice.id, status: "submitted" },
     });
@@ -274,29 +436,12 @@ export class FinanceService {
     file: Express.Multer.File,
   ) {
     const student = await this.findStudentForBill(studentNo, dob);
-    const invoices = await this.prisma.invoice.findMany({
-      where: { studentId: student.id },
-      orderBy: { createdAt: "asc" },
-    });
-    const invoice = invoices.find(
-      (i) =>
-        (i.status === "open" || i.status === "partial") &&
-        i.totalAmount > i.amountPaid,
-    );
-    if (!invoice)
-      throw new BadRequestException("This account has no outstanding balance");
-    const netBalance = invoices.reduce(
-      (sum, i) => sum + i.totalAmount - i.amountPaid,
-      0,
-    );
+    const account = await this.loadPayableAccount(student.id);
+    const { amount, invoice } = this.requirePayableTarget(account, amountXof);
     return this.createInvoiceWire({
       invoiceId: invoice.id,
       studentId: student.id,
-      amountXof: Math.min(
-        amountXof,
-        invoice.totalAmount - invoice.amountPaid,
-        netBalance,
-      ),
+      amountXof: amount,
       contactEmail,
       source: "public_bill",
       file,
@@ -383,23 +528,52 @@ export class FinanceService {
         wireTransfers: { orderBy: { createdAt: "desc" } },
       },
     });
-    return invoices.map((inv) => ({
-      id: inv.id,
-      term: inv.term.name,
-      total: inv.totalAmount,
-      paid: inv.amountPaid,
-      balance: inv.totalAmount - inv.amountPaid,
-      status: inv.status,
-      installments: inv.plan?.installments ?? [],
-      payments: inv.payments.map((p) => ({
-        id: p.id,
-        amount: p.amount,
-        method: p.method,
-        status: p.status,
-        createdAt: p.createdAt,
-      })),
-      wireTransfers: inv.wireTransfers.map((w) => this.wireSummary(w)),
-    }));
+    const position = deriveApiAccountPosition(invoices);
+    const derived = derivedInstallmentsById(position);
+    return invoices.map((inv) => {
+      const summary = invoicePositionSummary(position, inv.id);
+      return {
+        id: inv.id,
+        createdAt: inv.createdAt,
+        term: inv.term.name,
+        total: inv.totalAmount,
+        paid: inv.amountPaid,
+        balance: inv.status === "void" ? 0 : inv.totalAmount - inv.amountPaid,
+        status:
+          inv.status === "void"
+            ? "void"
+            : inv.totalAmount - inv.amountPaid <= 0
+              ? "paid"
+              : inv.amountPaid > 0
+                ? "partial"
+                : "open",
+        summary,
+        effectiveOutstandingXof: summary.outstandingXof,
+        effectiveStatus: summary.standing,
+        installments: (inv.plan?.installments ?? []).map((installment) =>
+          decorateInstallment(installment, derived),
+        ),
+        payments: inv.payments.map((p) => ({
+          id: p.id,
+          amount: p.amount,
+          method: p.method,
+          status: p.status,
+          createdAt: p.createdAt,
+        })),
+        wireTransfers: inv.wireTransfers.map((w) => this.wireSummary(w)),
+      };
+    });
+  }
+
+  /** Additive account summary for the student portal; keeps `/my/billing` array-compatible. */
+  async getStudentBillingSummary(studentId: string) {
+    const invoices = await this.prisma.invoice.findMany({
+      where: { studentId },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    return deriveApiAccountPosition(invoices).summary;
   }
 
   /** Admin (bursar/finance) configures an installment schedule for an invoice. */
@@ -412,12 +586,21 @@ export class FinanceService {
     if (invoice.plan)
       throw new BadRequestException("Invoice already has a payment plan");
 
-    const lines = input.installments.map((l) => ({
-      sequence: l.sequence,
-      dueDate: new Date(l.dueDate),
-      amountDue:
-        l.amount ?? Math.round((invoice.totalAmount * (l.percent ?? 0)) / 100),
-    }));
+    const now = new Date();
+    const lines = input.installments.map((l) => {
+      const dueDate = parseFinanceDateOnly(l.dueDate);
+      const amountDue =
+        l.amount ?? Math.round((invoice.totalAmount * (l.percent ?? 0)) / 100);
+      return {
+        sequence: l.sequence,
+        dueDate,
+        amountDue,
+        status: projectedInstallmentStatus(
+          { dueDate, amountDue, amountPaid: 0 },
+          now,
+        ),
+      };
+    });
     const sum = lines.reduce((acc, l) => acc + l.amountDue, 0);
     if (sum !== invoice.totalAmount) {
       throw new BadRequestException(
@@ -500,7 +683,9 @@ export class FinanceService {
       where: { id },
       data: {
         label: input.label ?? row.label,
-        dueOn: input.dueOn ? new Date(input.dueOn) : row.dueOn,
+        dueOn: input.dueOn
+          ? parseFinanceDateOnly(input.dueOn, "Fee-plan due date")
+          : row.dueOn,
         amountFullXof: input.amountFullXof ?? row.amountFullXof,
         amountTuitionXof: input.amountTuitionXof ?? row.amountTuitionXof,
       },
@@ -541,52 +726,52 @@ export class FinanceService {
   ) {
     if (rows.length === 0)
       throw new BadRequestException("At least one installment is required");
-
-    const invoice = await this.prisma.invoice.findUnique({
-      where: { id: invoiceId },
-      include: { plan: { include: { installments: true } } },
-    });
-    if (!invoice) throw new NotFoundException("Invoice not found");
-    if (invoice.totalAmount < 0)
-      throw new BadRequestException("Cannot edit a credit memo");
-    if (!invoice.plan)
-      throw new BadRequestException("Invoice has no payment plan to edit");
-
-    const byId = new Map(invoice.plan.installments.map((i) => [i.id, i]));
     for (const r of rows) {
-      const inst = byId.get(r.id);
-      if (!inst)
-        throw new BadRequestException(
-          `Installment ${r.id} does not belong to this plan`,
-        );
       if (!Number.isInteger(r.amountDue) || r.amountDue < 0) {
         throw new BadRequestException(
           "Installment amount must be a non-negative integer",
         );
       }
-      if (r.amountDue < inst.amountPaid) {
-        throw new BadRequestException(
-          `Installment ${inst.sequence} already has ${inst.amountPaid} paid; cannot set below that`,
-        );
-      }
-      if (Number.isNaN(new Date(r.dueDate).getTime())) {
-        throw new BadRequestException("Invalid due date");
-      }
+      parseFinanceDateOnly(r.dueDate);
     }
 
-    const now = Date.now();
-    await this.prisma.$transaction(async (tx) => {
+    return this.serializableTransaction(async (tx) => {
+      // Paid totals and plan membership must be read inside the same transaction that
+      // writes the schedule. A concurrent settlement either wins first and is observed
+      // here, or forces this transaction to retry before a stale plan can be committed.
+      const invoice = await tx.invoice.findUnique({
+        where: { id: invoiceId },
+        include: { plan: { include: { installments: true } } },
+      });
+      if (!invoice) throw new NotFoundException("Invoice not found");
+      if (invoice.totalAmount < 0)
+        throw new BadRequestException("Cannot edit a credit memo");
+      if (!invoice.plan)
+        throw new BadRequestException("Invoice has no payment plan to edit");
+
+      const byId = new Map(invoice.plan.installments.map((i) => [i.id, i]));
+      for (const row of rows) {
+        const installment = byId.get(row.id);
+        if (!installment) {
+          throw new BadRequestException(
+            `Installment ${row.id} does not belong to this plan`,
+          );
+        }
+        if (row.amountDue < installment.amountPaid) {
+          throw new BadRequestException(
+            `Installment ${installment.sequence} already has ${installment.amountPaid} paid; cannot set below that`,
+          );
+        }
+      }
+
+      const now = new Date();
       for (const r of rows) {
         const inst = byId.get(r.id)!;
-        const due = new Date(r.dueDate);
-        const status: "paid" | "partial" | "overdue" | "pending" =
-          inst.amountPaid >= r.amountDue
-            ? "paid"
-            : inst.amountPaid > 0
-              ? "partial"
-              : due.getTime() < now
-                ? "overdue"
-                : "pending";
+        const due = parseFinanceDateOnly(r.dueDate);
+        const status = projectedInstallmentStatus(
+          { dueDate: due, amountDue: r.amountDue, amountPaid: inst.amountPaid },
+          now,
+        );
         await tx.installment.update({
           where: { id: r.id },
           data: {
@@ -628,9 +813,8 @@ export class FinanceService {
           },
         },
       });
+      return { ok: true };
     });
-
-    return { ok: true };
   }
 
   async replacePaymentPlan(
@@ -662,51 +846,52 @@ export class FinanceService {
           "Installment sequence and amount must be non-negative integers",
         );
       }
-      if (Number.isNaN(new Date(row.dueDate).getTime()))
-        throw new BadRequestException("Invalid due date");
+      parseFinanceDateOnly(row.dueDate);
     }
-    const invoice = await this.prisma.invoice.findUnique({
-      where: { id: invoiceId },
-      include: { plan: { include: { installments: true } } },
-    });
-    if (!invoice) throw new NotFoundException("Invoice not found");
-    if (invoice.totalAmount < 0)
-      throw new BadRequestException("Cannot plan a credit memo");
-
     const newTotal = rows.reduce((sum, row) => sum + row.amountDue, 0);
-    if (newTotal < invoice.amountPaid)
-      throw new BadRequestException(
-        "Plan total cannot be below the amount already paid",
-      );
-    const existing = new Map(
-      (invoice.plan?.installments ?? []).map((row) => [row.id, row]),
-    );
-    const protectedIds = new Set(
-      (invoice.plan?.installments ?? [])
-        .filter((row) => row.amountPaid > 0)
-        .map((row) => row.id),
-    );
-    for (const id of protectedIds) {
-      const replacement = rows.find((row) => row.id === id);
-      const current = existing.get(id)!;
-      if (!replacement)
+    return this.serializableTransaction(async (tx) => {
+      const invoice = await tx.invoice.findUnique({
+        where: { id: invoiceId },
+        include: { plan: { include: { installments: true } } },
+      });
+      if (!invoice) throw new NotFoundException("Invoice not found");
+      if (invoice.totalAmount < 0)
+        throw new BadRequestException("Cannot plan a credit memo");
+      if (newTotal < invoice.amountPaid) {
         throw new BadRequestException(
-          `Paid installment ${current.sequence} cannot be removed`,
-        );
-      if (replacement.amountDue < current.amountPaid) {
-        throw new BadRequestException(
-          `Installment ${current.sequence} cannot be reduced below ${current.amountPaid} XOF already paid`,
+          "Plan total cannot be below the amount already paid",
         );
       }
-    }
-    for (const row of rows) {
-      if (row.id && !existing.has(row.id))
-        throw new BadRequestException(
-          "An installment does not belong to this plan",
-        );
-    }
+      const existing = new Map(
+        (invoice.plan?.installments ?? []).map((row) => [row.id, row]),
+      );
+      const protectedIds = new Set(
+        (invoice.plan?.installments ?? [])
+          .filter((row) => row.amountPaid > 0)
+          .map((row) => row.id),
+      );
+      for (const id of protectedIds) {
+        const replacement = rows.find((row) => row.id === id);
+        const current = existing.get(id)!;
+        if (!replacement) {
+          throw new BadRequestException(
+            `Paid installment ${current.sequence} cannot be removed`,
+          );
+        }
+        if (replacement.amountDue < current.amountPaid) {
+          throw new BadRequestException(
+            `Installment ${current.sequence} cannot be reduced below ${current.amountPaid} XOF already paid`,
+          );
+        }
+      }
+      for (const row of rows) {
+        if (row.id && !existing.has(row.id)) {
+          throw new BadRequestException(
+            "An installment does not belong to this plan",
+          );
+        }
+      }
 
-    await this.prisma.$transaction(async (tx) => {
       const plan =
         invoice.plan ??
         (await tx.paymentPlan.create({
@@ -730,19 +915,15 @@ export class FinanceService {
           });
         }
       }
-      const now = Date.now();
+      const now = new Date();
       for (const row of rows) {
         const current = row.id ? existing.get(row.id) : undefined;
         const amountPaid = current?.amountPaid ?? 0;
-        const dueDate = new Date(row.dueDate);
-        const status: "paid" | "partial" | "overdue" | "pending" =
-          amountPaid >= row.amountDue
-            ? "paid"
-            : amountPaid > 0
-              ? "partial"
-              : dueDate.getTime() < now
-                ? "overdue"
-                : "pending";
+        const dueDate = parseFinanceDateOnly(row.dueDate);
+        const status = projectedInstallmentStatus(
+          { dueDate, amountDue: row.amountDue, amountPaid },
+          now,
+        );
         if (current) {
           await tx.installment.update({
             where: { id: current.id },
@@ -793,8 +974,8 @@ export class FinanceService {
           },
         },
       });
+      return { ok: true };
     });
-    return { ok: true };
   }
 
   /** Student initiates a payment toward an invoice they own. Returns the gateway redirect. */
@@ -804,13 +985,19 @@ export class FinanceService {
         "Wire transfers must include a proof of payment",
       );
     }
-    const invoice = await this.prisma.invoice.findUnique({
+    const requested = await this.prisma.invoice.findUnique({
       where: { id: input.invoiceId },
-      include: { term: true },
+      select: { id: true, studentId: true },
     });
-    if (!invoice) throw new NotFoundException("Invoice not found");
-    if (invoice.studentId !== studentId)
+    if (!requested) throw new NotFoundException("Invoice not found");
+    if (requested.studentId !== studentId)
       throw new ForbiddenException("Not your invoice");
+    const account = await this.loadPayableAccount(studentId);
+    const { amount, invoice } = this.requirePayableTarget(
+      account,
+      input.amount,
+      input.invoiceId,
+    );
     if (
       await this.prisma.wireTransferSubmission.findFirst({
         where: { invoiceId: invoice.id, status: "submitted" },
@@ -821,19 +1008,12 @@ export class FinanceService {
       );
     }
 
-    const balance = invoice.totalAmount - invoice.amountPaid;
-    if (input.amount > balance) {
-      throw new BadRequestException(
-        `Amount exceeds outstanding balance (${balance} XOF)`,
-      );
-    }
-
     const ref = `MD-${randomUUID()}`;
     const payment = await this.prisma.payment.create({
       data: {
         invoiceId: invoice.id,
         studentId,
-        amount: input.amount,
+        amount,
         method: input.method,
         status: "pending",
         providerRef: ref,
@@ -842,7 +1022,7 @@ export class FinanceService {
 
     const { redirectUrl } = await this.provider.requestPayment({
       ref,
-      amount: input.amount,
+      amount,
       itemName: `Tuition — ${invoice.term.name}`,
       customField: { invoiceId: invoice.id, studentId, paymentId: payment.id },
     });
@@ -853,7 +1033,7 @@ export class FinanceService {
         entityId: payment.id,
         action: "initiated",
         actorId: studentId,
-        data: { amount: input.amount, method: input.method },
+        data: { amount, method: input.method },
       },
     });
 
@@ -871,13 +1051,19 @@ export class FinanceService {
     const v = this.provider.verifyIpn(payload);
     if (!v.valid || !v.ref || !v.token) return { valid: v.valid };
 
-    // Idempotency: record this delivery once. A duplicate token is a no-op.
+    // Record each delivery once. A duplicate still runs the idempotent downstream
+    // settler: a prior delivery may have inserted this row before settlement failed.
     try {
       await this.prisma.webhookEvent.create({
         data: { token: v.token, paymentRef: v.ref, payload: payload as object },
       });
-    } catch {
-      return { valid: true }; // already processed
+    } catch (error) {
+      const duplicate =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "P2002";
+      if (!duplicate) throw error;
     }
 
     // Non-tuition charges ride the same verified rail, routed by ref prefix.
@@ -953,142 +1139,239 @@ export class FinanceService {
       };
     },
   ) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: paymentId },
-      include: {
-        invoice: { include: { plan: { include: { installments: true } } } },
-      },
-    });
-    if (!payment) throw new NotFoundException("Payment not found");
-    if (payment.status === "success") return; // already applied
-    if (payment.status !== "pending")
-      throw new BadRequestException(`Payment is ${payment.status}`);
-    const amount = opts.confirmedAmount ?? payment.amount;
-
-    const didSettle = await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.payment.updateMany({
-        where: { id: payment.id, status: "pending" },
-        data: {
-          status: "success",
-          amount,
-          ...(opts.payload ? { ipnPayload: opts.payload } : {}),
-        },
-      });
-      if (claimed.count === 0) return false;
-
-      // Allocate to installments oldest-due-first (when a plan exists).
-      let remaining = amount;
-      const installments = (payment.invoice.plan?.installments ?? [])
-        .filter((i) => i.amountPaid < i.amountDue)
-        .sort(
-          (a, b) =>
-            a.dueDate.getTime() - b.dueDate.getTime() ||
-            a.sequence - b.sequence,
-        );
-
-      for (const inst of installments) {
-        if (remaining <= 0) break;
-        const owed = inst.amountDue - inst.amountPaid;
-        const apply = Math.min(owed, remaining);
-        const newPaid = inst.amountPaid + apply;
-        await tx.paymentAllocation.create({
-          data: {
-            paymentId: payment.id,
-            installmentId: inst.id,
-            amount: apply,
-          },
-        });
-        await tx.installment.update({
-          where: { id: inst.id },
-          data: {
-            amountPaid: newPaid,
-            status: newPaid >= inst.amountDue ? "paid" : "partial",
-          },
-        });
-        remaining -= apply;
-      }
-
-      const newInvoicePaid = payment.invoice.amountPaid + amount;
-      await tx.invoice.update({
-        where: { id: payment.invoice.id },
-        data: {
-          amountPaid: newInvoicePaid,
-          status:
-            newInvoicePaid >= payment.invoice.totalAmount ? "paid" : "partial",
-        },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          entity: "Payment",
-          entityId: payment.id,
-          action:
-            opts.via === "ipn"
-              ? "succeeded"
-              : opts.via === "wire"
-                ? "wire-confirmed"
-                : opts.via === "pi_spi"
-                  ? "pi-spi-settled"
-                  : "manually-confirmed",
-          actorId: opts.actorId,
-          data: { amount, method: opts.method ?? payment.method },
-        },
-      });
-
-      if (opts.piSpiReview) {
-        await tx.piSpiRequest.update({
-          where: { id: opts.piSpiReview.id },
-          data: {
-            status: "settled",
-            settledAmountXof: amount,
-            settledAt: new Date(),
-          },
-        });
-        if (opts.piSpiReview.paymentLinkId) {
-          await tx.paymentLink.update({
-            where: { id: opts.piSpiReview.paymentLinkId },
-            data: { status: "paid", method: "pi_spi", paidAt: new Date() },
+    const runSettlement = () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          const payment = await tx.payment.findUnique({
+            where: { id: paymentId },
           });
-        }
-      }
+          if (!payment) throw new NotFoundException("Payment not found");
+          if (payment.status === "success") return false;
+          if (payment.status !== "pending") {
+            throw new BadRequestException(`Payment is ${payment.status}`);
+          }
+          const amount = opts.confirmedAmount ?? payment.amount;
+          if (!Number.isSafeInteger(amount) || amount <= 0) {
+            throw new BadRequestException(
+              "Settled amount must be a positive whole number of XOF",
+            );
+          }
 
-      if (opts.wireReview) {
-        await tx.wireTransferSubmission.update({
-          where: { id: opts.wireReview.id },
-          data: {
-            status: "approved",
-            confirmedAmountXof: amount,
-            bankReference: opts.wireReview.bankReference,
-            confirmationNote: opts.wireReview.confirmationNote,
-            reviewedById: opts.actorId,
-            reviewedByName: opts.wireReview.reviewedByName,
-            reviewedByEmail: opts.wireReview.reviewedByEmail,
-            reviewedAt: new Date(),
-          },
-        });
-        if (opts.wireReview.paymentLinkId) {
-          await tx.paymentLink.update({
-            where: { id: opts.wireReview.paymentLinkId },
-            data: { status: "paid", method: "wire", paidAt: new Date() },
-          });
-        }
-        await tx.auditLog.create({
-          data: {
-            entity: "WireTransferSubmission",
-            entityId: opts.wireReview.id,
-            action: "approved",
-            actorId: opts.actorId,
+          // Re-read the whole account inside the serializable transaction. Two different
+          // payments may both have been valid when initiated; only one may consume a given
+          // payable line, and the retrying transaction must see the winner's new balance.
+          const account = await this.loadPayableAccount(payment.studentId, tx);
+          const originalInvoice = account.invoices.find(
+            (invoice) => invoice.id === payment.invoiceId,
+          );
+          if (!originalInvoice) {
+            throw new BadRequestException(
+              "Payment accounting target no longer exists",
+            );
+          }
+          if (opts.via === "wire") {
+            this.requirePayableTarget(account, amount, payment.invoiceId);
+          }
+
+          const claimed = await tx.payment.updateMany({
+            where: { id: payment.id, status: "pending" },
             data: {
-              confirmedAmountXof: amount,
-              bankReference: opts.wireReview.bankReference ?? null,
+              status: "success",
+              amount,
+              ...(opts.payload ? { ipnPayload: opts.payload } : {}),
             },
-          },
-        });
-      }
-      return true;
-    });
+          });
+          if (claimed.count === 0) return false;
 
-    if (didSettle) await this.emailReceipt(payment.id);
+          const payableBeforeXof = account.position.summary.outstandingXof;
+          const directlyPayableLines = [] as typeof account.lines;
+          if (originalInvoice.status !== "void") {
+            for (const line of account.lines) {
+              // Never leapfrog another invoice (A-Aug / B-Sep / A-Dec). Once a
+              // different invoice is next, the remainder becomes an account credit.
+              if (line.invoiceId !== originalInvoice.id) break;
+              directlyPayableLines.push(line);
+            }
+          }
+          const directCapacityXof = directlyPayableLines.reduce(
+            (sum, line) => sum + line.outstandingXof,
+            0,
+          );
+          const directAppliedXof = Math.min(amount, directCapacityXof);
+          const creditMemoXof = amount - directAppliedXof;
+
+          // Allocation rows record actual cash only. Account/invoice credits stay in
+          // creditAppliedXof, so a receipt never pretends that a scholarship was cash.
+          let remainingDirect = directAppliedXof;
+          const installmentsById = new Map(
+            (originalInvoice.plan?.installments ?? []).map(
+              (installment) => [installment.id, installment] as const,
+            ),
+          );
+          for (const line of directlyPayableLines) {
+            if (remainingDirect <= 0) break;
+            if (!line.installmentId) {
+              remainingDirect -= Math.min(line.outstandingXof, remainingDirect);
+              continue;
+            }
+            const installment = installmentsById.get(line.installmentId);
+            if (!installment) continue;
+            const apply = Math.min(line.outstandingXof, remainingDirect);
+            if (apply <= 0) continue;
+            const newPaid = installment.amountPaid + apply;
+            await tx.paymentAllocation.create({
+              data: {
+                paymentId: payment.id,
+                installmentId: installment.id,
+                amount: apply,
+              },
+            });
+            await tx.installment.update({
+              where: { id: installment.id },
+              data: {
+                amountPaid: newPaid,
+                status: projectedInstallmentStatus({
+                  dueDate: installment.dueDate,
+                  amountDue: installment.amountDue,
+                  amountPaid: newPaid,
+                }),
+              },
+            });
+            remainingDirect -= apply;
+          }
+
+          if (directAppliedXof > 0) {
+            const newInvoicePaid =
+              originalInvoice.amountPaid + directAppliedXof;
+            await tx.invoice.update({
+              where: { id: originalInvoice.id },
+              data: {
+                amountPaid: newInvoicePaid,
+                status:
+                  newInvoicePaid >= originalInvoice.totalAmount
+                    ? "paid"
+                    : "partial",
+              },
+            });
+          }
+
+          const creditMemo =
+            creditMemoXof > 0
+              ? await tx.invoice.create({
+                  data: {
+                    number: `CR-PAY-${payment.id}`,
+                    studentId: payment.studentId,
+                    termId: originalInvoice.termId,
+                    totalAmount: -creditMemoXof,
+                    amountPaid: 0,
+                    status: "paid",
+                    description: `Unapplied payment credit — ${payment.providerRef}`,
+                    costCenterCode: originalInvoice.costCenterCode,
+                  },
+                })
+              : null;
+
+          await tx.auditLog.create({
+            data: {
+              entity: "Payment",
+              entityId: payment.id,
+              action:
+                opts.via === "ipn"
+                  ? "succeeded"
+                  : opts.via === "wire"
+                    ? "wire-confirmed"
+                    : opts.via === "pi_spi"
+                      ? "pi-spi-settled"
+                      : "manually-confirmed",
+              actorId: opts.actorId,
+              data: {
+                amount,
+                method: opts.method ?? payment.method,
+                payableBeforeXof,
+                appliedXof: directAppliedXof,
+                unappliedCreditXof: creditMemoXof,
+                directAppliedXof,
+                creditMemoXof,
+                creditMemoInvoiceId: creditMemo?.id ?? null,
+              },
+            },
+          });
+
+          if (opts.piSpiReview) {
+            await tx.piSpiRequest.update({
+              where: { id: opts.piSpiReview.id },
+              data: {
+                status: "settled",
+                settledAmountXof: amount,
+                settledAt: new Date(),
+              },
+            });
+            if (opts.piSpiReview.paymentLinkId) {
+              await tx.paymentLink.update({
+                where: { id: opts.piSpiReview.paymentLinkId },
+                data: { status: "paid", method: "pi_spi", paidAt: new Date() },
+              });
+            }
+          }
+
+          if (opts.wireReview) {
+            await tx.wireTransferSubmission.update({
+              where: { id: opts.wireReview.id },
+              data: {
+                status: "approved",
+                confirmedAmountXof: amount,
+                bankReference: opts.wireReview.bankReference,
+                confirmationNote: opts.wireReview.confirmationNote,
+                reviewedById: opts.actorId,
+                reviewedByName: opts.wireReview.reviewedByName,
+                reviewedByEmail: opts.wireReview.reviewedByEmail,
+                reviewedAt: new Date(),
+              },
+            });
+            if (opts.wireReview.paymentLinkId) {
+              await tx.paymentLink.update({
+                where: { id: opts.wireReview.paymentLinkId },
+                data: { status: "paid", method: "wire", paidAt: new Date() },
+              });
+            }
+            await tx.auditLog.create({
+              data: {
+                entity: "WireTransferSubmission",
+                entityId: opts.wireReview.id,
+                action: "approved",
+                actorId: opts.actorId,
+                data: {
+                  confirmedAmountXof: amount,
+                  bankReference: opts.wireReview.bankReference ?? null,
+                },
+              },
+            });
+          }
+          return true;
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 10_000,
+          timeout: 30_000,
+        },
+      );
+
+    let didSettle = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        didSettle = await runSettlement();
+        break;
+      } catch (error) {
+        const retryable =
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "P2034";
+        if (!retryable || attempt === 2) throw error;
+      }
+    }
+
+    if (didSettle) await this.emailReceipt(paymentId);
   }
 
   /** Bursar verified the money in the PayTech dashboard but the IPN never arrived. */
@@ -1228,12 +1511,12 @@ export class FinanceService {
     }
 
     if (wire.payment && wire.invoice) {
-      const remaining = wire.invoice.totalAmount - wire.invoice.amountPaid;
-      if (input.confirmedAmountXof > remaining) {
-        throw new BadRequestException(
-          `Confirmed amount exceeds the current remaining balance (${remaining} XOF)`,
-        );
-      }
+      const account = await this.loadPayableAccount(wire.invoice.studentId);
+      this.requirePayableTarget(
+        account,
+        input.confirmedAmountXof,
+        wire.invoice.id,
+      );
       await this.settlePayment(wire.payment.id, {
         via: "wire",
         actorId: reviewer.personId,
@@ -1367,7 +1650,8 @@ export class FinanceService {
    */
   async verifyPiSpiAlias(alias: string) {
     const found = await this.piSpiRail().verifyAlias(alias);
-    if (!found) throw new NotFoundException("That payment alias was not recognised");
+    if (!found)
+      throw new NotFoundException("That payment alias was not recognised");
     return found;
   }
 
@@ -1402,7 +1686,8 @@ export class FinanceService {
    * rejected and retried.
    */
   private async createPiSpiRequest(input: {
-    source: "student_portal" | "public_bill" | "payment_link" | "application_fee";
+    source:
+      "student_portal" | "public_bill" | "payment_link" | "application_fee";
     alias: string;
     amountXof: number;
     motif: string;
@@ -1416,7 +1701,9 @@ export class FinanceService {
     const rail = this.piSpiRail();
     const amount = Math.floor(input.amountXof);
     if (!Number.isInteger(amount) || amount <= 0) {
-      throw new BadRequestException("Amount must be a positive whole number of XOF");
+      throw new BadRequestException(
+        "Amount must be a positive whole number of XOF",
+      );
     }
 
     // Only one payable request per target at a time, matching the DB partial unique index.
@@ -1541,20 +1828,26 @@ export class FinanceService {
   async submitStudentPiSpi(
     studentId: string,
     actorId: string,
-    input: { invoiceId: string; alias: string; amountXof: number; saveAlias?: boolean },
+    input: {
+      invoiceId: string;
+      alias: string;
+      amountXof: number;
+      saveAlias?: boolean;
+    },
   ) {
-    const invoice = await this.prisma.invoice.findUnique({
+    const requested = await this.prisma.invoice.findUnique({
       where: { id: input.invoiceId },
+      select: { id: true, studentId: true },
     });
-    if (!invoice || invoice.studentId !== studentId) {
+    if (!requested || requested.studentId !== studentId) {
       throw new NotFoundException("Invoice not found");
     }
-    const balance = invoice.totalAmount - invoice.amountPaid;
-    if (input.amountXof > balance) {
-      throw new BadRequestException(
-        `Amount exceeds the outstanding balance of ${Math.max(0, balance)} XOF`,
-      );
-    }
+    const account = await this.loadPayableAccount(studentId);
+    const { amount, invoice } = this.requirePayableTarget(
+      account,
+      input.amountXof,
+      input.invoiceId,
+    );
     if (input.saveAlias) {
       await this.prisma.student.update({
         where: { id: studentId },
@@ -1564,7 +1857,7 @@ export class FinanceService {
     return this.createPiSpiRequest({
       source: "student_portal",
       alias: input.alias,
-      amountXof: input.amountXof,
+      amountXof: amount,
       motif: `DAUST ${invoice.description ?? "tuition"}`,
       documentRef: invoice.number ?? undefined,
       studentId,
@@ -1581,13 +1874,11 @@ export class FinanceService {
     amountXof: number;
   }) {
     const student = await this.findStudentForBill(input.studentNo, input.dob);
-    const invoice = await this.prisma.invoice.findFirst({
-      where: { studentId: student.id, status: { in: ["open", "partial"] } },
-      orderBy: { createdAt: "asc" },
-    });
-    if (!invoice) throw new NotFoundException("No outstanding charge found");
-    const balance = invoice.totalAmount - invoice.amountPaid;
-    const amount = Math.min(Math.floor(input.amountXof), balance);
+    const account = await this.loadPayableAccount(student.id);
+    const { amount, invoice } = this.requirePayableTarget(
+      account,
+      input.amountXof,
+    );
     return this.createPiSpiRequest({
       source: "public_bill",
       alias: input.alias,
@@ -1602,10 +1893,34 @@ export class FinanceService {
   /** Bursar-generated one-off payment link. */
   async submitPaymentLinkPiSpi(token: string, alias: string) {
     const link = await this.prisma.paymentLink.findUnique({ where: { token } });
-    if (!link) throw new NotFoundException("Payment link not found");
-    if (link.status === "paid") throw new BadRequestException("This link is already paid");
+    if (!link || link.status === "cancelled")
+      throw new NotFoundException("Payment link not found");
+    if (link.status === "paid")
+      throw new BadRequestException("This link is already paid");
     if (link.expiresAt && link.expiresAt < new Date()) {
       throw new BadRequestException("This payment link has expired");
+    }
+    if (link.invoiceId) {
+      const linkedInvoice = await this.prisma.invoice.findUniqueOrThrow({
+        where: { id: link.invoiceId },
+        select: { studentId: true },
+      });
+      const studentId = link.studentId ?? linkedInvoice.studentId;
+      const account = await this.loadPayableAccount(studentId);
+      const { amount, invoice } = this.requirePayableTarget(
+        account,
+        link.amountXof,
+        link.invoiceId,
+      );
+      return this.createPiSpiRequest({
+        source: "payment_link",
+        alias,
+        amountXof: amount,
+        motif: link.purpose || "DAUST payment",
+        studentId,
+        invoiceId: invoice.id,
+        paymentLinkId: link.id,
+      });
     }
     return this.createPiSpiRequest({
       source: "payment_link",
@@ -1629,7 +1944,11 @@ export class FinanceService {
    * Application fee via instant payment. The applicant id is the capability (same model
    * as the PayTech fee checkout); there is no invoice, so settlement flips `feePaid`.
    */
-  async submitApplicantPiSpi(applicantId: string, alias: string, amountXof: number) {
+  async submitApplicantPiSpi(
+    applicantId: string,
+    alias: string,
+    amountXof: number,
+  ) {
     const applicant = await this.prisma.applicant.findUnique({
       where: { id: applicantId },
     });
@@ -1649,7 +1968,9 @@ export class FinanceService {
 
   /** Poll an application-fee request; the applicant id scopes it. */
   async getApplicantPiSpiStatus(applicantId: string, txId: string) {
-    const request = await this.prisma.piSpiRequest.findUnique({ where: { txId } });
+    const request = await this.prisma.piSpiRequest.findUnique({
+      where: { txId },
+    });
     if (!request || request.applicantId !== applicantId) {
       throw new NotFoundException("Payment request not found");
     }
@@ -1657,7 +1978,10 @@ export class FinanceService {
   }
 
   /** Poll a request. `scope` narrows it so one payer cannot read another's request. */
-  async getPiSpiRequest(txId: string, scope?: { studentId?: string; token?: string }) {
+  async getPiSpiRequest(
+    txId: string,
+    scope?: { studentId?: string; token?: string },
+  ) {
     const request = await this.prisma.piSpiRequest.findUnique({
       where: { txId },
       include: { paymentLink: { select: { token: true } } },
@@ -1675,11 +1999,13 @@ export class FinanceService {
   /**
    * Apply a verified rail notification.
    *
-   * Idempotency is the WebhookEvent unique token (the rail's end2endId): a replayed
-   * delivery hits the unique constraint and returns without touching money. Settlement
-   * itself then goes through the same `settlePayment` allocator every other method uses.
+   * WebhookEvent records the rail's end2endId once. Replays still reach the terminal,
+   * idempotent state transition so an earlier post-insert failure can recover.
    */
-  async handlePiSpiWebhook(rawBody: Buffer | string, signature: string | undefined) {
+  async handlePiSpiWebhook(
+    rawBody: Buffer | string,
+    signature: string | undefined,
+  ) {
     const rail = this.rtpRails.get("pi_spi");
     if (!rail) return { valid: false };
     const { valid, events } = rail.verifyWebhook(rawBody, signature);
@@ -1696,8 +2022,13 @@ export class FinanceService {
             payload: event.raw as never,
           },
         });
-      } catch {
-        continue; // already processed — replay is a no-op
+      } catch (error) {
+        const duplicate =
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "P2002";
+        if (!duplicate) throw error;
       }
       await this.applyPiSpiEvent(event);
     }
@@ -1723,7 +2054,10 @@ export class FinanceService {
     if (event.status === "settled") {
       // Trust our own recorded amount over the notification's, and never credit more
       // than was requested.
-      const amount = Math.min(event.amount ?? request.amountXof, request.amountXof);
+      const amount = Math.min(
+        event.amount ?? request.amountXof,
+        request.amountXof,
+      );
       // Record the rail-wide id before settling — support and the reconciliation sweep
       // both trace by it, and it is the only handle the rail recognises.
       if (event.end2endId && !request.end2endId) {
@@ -1745,7 +2079,11 @@ export class FinanceService {
         await this.prisma.$transaction(async (tx) => {
           await tx.piSpiRequest.update({
             where: { id: request.id },
-            data: { status: "settled", settledAmountXof: amount, settledAt: new Date() },
+            data: {
+              status: "settled",
+              settledAmountXof: amount,
+              settledAt: new Date(),
+            },
           });
           if (request.applicantId) {
             await tx.applicant.update({
@@ -1952,30 +2290,83 @@ export class FinanceService {
 
   /** Director/bursar money-in view: billed vs collected vs outstanding, plus method mix. */
   async getCollectionSummary() {
-    const [billed, collectedAgg, byMethod, counts] = await Promise.all([
-      this.prisma.invoice.aggregate({
-        _sum: { totalAmount: true, amountPaid: true },
-      }),
+    const invoices = await this.prisma.invoice.findMany({
+      include: {
+        student: { select: { recordStatus: true } },
+        plan: { include: { installments: true } },
+      },
+    });
+
+    const byStudent = new Map<string, typeof invoices>();
+    for (const invoice of invoices) {
+      const account = byStudent.get(invoice.studentId) ?? [];
+      account.push(invoice);
+      byStudent.set(invoice.studentId, account);
+    }
+    const reportAccounts = [...byStudent.entries()]
+      .map(([studentId, accountInvoices]) => ({
+        studentId,
+        invoices: accountInvoices,
+        summary: deriveApiAccountPosition(accountInvoices).summary,
+      }))
+      .filter(
+        (account) =>
+          account.invoices[0]?.student.recordStatus !== "archived" ||
+          account.summary.outstandingXof > 0,
+      );
+    const includedStudentIds = reportAccounts.map(
+      (account) => account.studentId,
+    );
+    const [collectedAgg, byMethod] = await Promise.all([
       this.prisma.payment.aggregate({
-        where: { status: "success" },
+        where: {
+          status: "success",
+          studentId: { in: includedStudentIds },
+          invoice: { status: { not: "void" } },
+        },
         _sum: { amount: true },
       }),
       this.prisma.payment.groupBy({
         by: ["method"],
-        where: { status: "success" },
+        where: {
+          status: "success",
+          studentId: { in: includedStudentIds },
+          invoice: { status: { not: "void" } },
+        },
         _sum: { amount: true },
         _count: true,
       }),
-      this.prisma.invoice.groupBy({ by: ["status"], _count: true }),
     ]);
-
-    const totalBilled = billed._sum.totalAmount ?? 0;
+    const reportInvoices = reportAccounts.flatMap(
+      (account) => account.invoices,
+    );
+    const accountSummaries = reportAccounts.map((account) => account.summary);
+    const summary = aggregateAccountReport(accountSummaries);
+    const totalBilled = reportInvoices
+      .filter((invoice) => invoice.status !== "void" && invoice.totalAmount > 0)
+      .reduce((sum, invoice) => sum + invoice.totalAmount, 0);
     const totalCollected = collectedAgg._sum.amount ?? 0;
+    const invoiceCounts = new Map<string, number>();
+    for (const invoice of reportInvoices) {
+      invoiceCounts.set(
+        invoice.status,
+        (invoiceCounts.get(invoice.status) ?? 0) + 1,
+      );
+    }
     return {
       currency: "XOF",
       billed: totalBilled,
       collected: totalCollected,
-      outstanding: totalBilled - (billed._sum.amountPaid ?? 0),
+      outstanding: summary.outstandingXof,
+      credit: summary.creditXof,
+      overdue: summary.overdueXof,
+      summary,
+      accountCount: accountSummaries.filter(
+        (account) => account.standing !== "no_billing",
+      ).length,
+      overdueAccountCount: accountSummaries.filter(
+        (account) => account.overdueXof > 0,
+      ).length,
       collectionRate:
         totalBilled === 0
           ? 0
@@ -1985,9 +2376,9 @@ export class FinanceService {
         amount: m._sum.amount ?? 0,
         count: m._count,
       })),
-      invoicesByStatus: counts.map((c) => ({
-        status: c.status,
-        count: c._count,
+      invoicesByStatus: [...invoiceCounts].map(([status, count]) => ({
+        status,
+        count,
       })),
     };
   }
@@ -1995,51 +2386,74 @@ export class FinanceService {
   /** All student accounts with derived balances + status. Powers the standalone billing admin. */
   async listStudentAccounts() {
     const students = await this.prisma.student.findMany({
-      where: { recordStatus: "active" },
       orderBy: { studentNo: "asc" },
       include: {
         person: true,
         program: true,
-        invoices: { include: { plan: { include: { installments: true } } } },
+        holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
+        invoices: {
+          orderBy: { createdAt: "desc" },
+          include: { plan: { include: { installments: true } } },
+        },
       },
     });
-    const now = Date.now();
-    return students.map((s) => {
-      const billed = s.invoices.reduce((a, i) => a + i.totalAmount, 0);
-      const paid = s.invoices.reduce((a, i) => a + i.amountPaid, 0);
-      const balance = billed - paid;
+    return students.flatMap((s) => {
+      const position = deriveApiAccountPosition(s.invoices);
+      const summary = position.summary;
+      if (s.recordStatus === "archived" && summary.outstandingXof <= 0)
+        return [];
+      const chargeInvoices = s.invoices.filter(
+        (invoice) => invoice.status !== "void" && invoice.totalAmount > 0,
+      );
+      const billed = chargeInvoices.reduce((a, i) => a + i.totalAmount, 0);
+      const paid = chargeInvoices.reduce((a, i) => a + i.amountPaid, 0);
       // The billing row represents a real charge, so skip negative credit memos
       // (discounts/reversals) when picking which invoice the row stands for.
+      const payableTarget = selectOldestPayableTarget(s.invoices, position);
       const primary =
-        s.invoices.find((i) => i.totalAmount > 0) ?? s.invoices[0];
-      const installments = s.invoices.flatMap(
-        (i) => i.plan?.installments ?? [],
-      );
-      const openCharges = installments.filter(
-        (i) => i.amountPaid < i.amountDue,
+        s.invoices.find((invoice) => invoice.id === payableTarget?.invoiceId) ??
+        chargeInvoices[0] ??
+        s.invoices.find((invoice) => invoice.status !== "void");
+      const openCharges = position.installments.filter(
+        (installment) => installment.outstandingXof > 0,
       ).length;
-      const overdue = installments.some(
-        (i) => i.amountPaid < i.amountDue && i.dueDate.getTime() < now,
-      );
-      return {
-        id: s.id,
-        studentNo: s.studentNo,
-        name: `${s.person.firstName} ${s.person.lastName}`
-          .replace(/\s+/g, " ")
-          .trim(),
-        program: s.program?.name ?? null,
-        photoUrl: s.photoUrl,
-        billed,
-        paid,
-        balance,
-        openCharges,
-        overdue,
-        status: balance <= 0 ? "paid" : overdue ? "overdue" : "due",
-        invoiceId: primary?.id ?? null,
-        // Human handle + description drive the design's "Billing" and "Plan" columns.
-        billingNumber: primary?.number ?? null,
-        billingDescription: primary?.description ?? null,
-      };
+      const status =
+        summary.standing === "overdue"
+          ? "overdue"
+          : summary.outstandingXof > 0
+            ? "due"
+            : "paid";
+      return [
+        {
+          id: s.id,
+          studentNo: s.studentNo,
+          name: `${s.person.firstName} ${s.person.lastName}`
+            .replace(/\s+/g, " ")
+            .trim(),
+          program: s.program?.name ?? null,
+          photoUrl: s.photoUrl,
+          billed,
+          paid,
+          balance: summary.balanceXof,
+          openCharges,
+          overdue: summary.overdueXof > 0,
+          status,
+          summary,
+          recordStatus: s.recordStatus,
+          hasActiveHold: s.holds.length > 0,
+          activeHoldCount: s.holds.length,
+          activeHolds: s.holds.map((hold) => ({
+            id: hold.id,
+            type: hold.type,
+            reason: hold.reason,
+            placedAt: hold.placedAt,
+          })),
+          invoiceId: primary?.id ?? null,
+          // Human handle + description drive the design's "Billing" and "Plan" columns.
+          billingNumber: primary?.number ?? null,
+          billingDescription: primary?.description ?? null,
+        },
+      ];
     });
   }
 
@@ -2062,8 +2476,17 @@ export class FinanceService {
       },
     });
 
-    const billed = invoices.reduce((s, i) => s + i.totalAmount, 0);
-    const paid = invoices.reduce((s, i) => s + i.amountPaid, 0);
+    const position = deriveApiAccountPosition(invoices);
+    const derived = derivedInstallmentsById(position);
+    const activeHolds = await this.prisma.studentHold.findMany({
+      where: { studentId, active: true },
+      orderBy: { placedAt: "asc" },
+    });
+    const chargeInvoices = invoices.filter(
+      (invoice) => invoice.status !== "void" && invoice.totalAmount > 0,
+    );
+    const billed = chargeInvoices.reduce((s, i) => s + i.totalAmount, 0);
+    const paid = chargeInvoices.reduce((s, i) => s + i.amountPaid, 0);
     return {
       student: {
         studentNo: student.studentNo,
@@ -2071,26 +2494,48 @@ export class FinanceService {
         program: student.program?.name ?? "—",
         email: student.person.email,
       },
-      totals: { billed, paid, balance: billed - paid },
-      invoices: invoices.map((inv) => ({
-        id: inv.id,
-        term: inv.term.name,
-        description: inv.description,
-        total: inv.totalAmount,
-        paid: inv.amountPaid,
-        balance: inv.totalAmount - inv.amountPaid,
-        status: inv.status,
-        hasPlan: !!inv.plan,
-        installments: inv.plan?.installments ?? [],
-        payments: inv.payments.map((p) => ({
-          id: p.id,
-          amount: p.amount,
-          method: p.method,
-          status: p.status,
-          createdAt: p.createdAt,
-        })),
-        wireTransfers: inv.wireTransfers.map((w) => this.wireSummary(w)),
+      totals: { billed, paid, balance: position.summary.balanceXof },
+      summary: position.summary,
+      activeHolds: activeHolds.map((hold) => ({
+        id: hold.id,
+        type: hold.type,
+        reason: hold.reason,
+        placedAt: hold.placedAt,
       })),
+      invoices: invoices.map((inv) => {
+        const summary = invoicePositionSummary(position, inv.id);
+        return {
+          id: inv.id,
+          term: inv.term.name,
+          description: inv.description,
+          total: inv.totalAmount,
+          paid: inv.amountPaid,
+          balance: inv.status === "void" ? 0 : inv.totalAmount - inv.amountPaid,
+          status:
+            inv.status === "void"
+              ? "void"
+              : inv.totalAmount - inv.amountPaid <= 0
+                ? "paid"
+                : inv.amountPaid > 0
+                  ? "partial"
+                  : "open",
+          summary,
+          effectiveOutstandingXof: summary.outstandingXof,
+          effectiveStatus: summary.standing,
+          hasPlan: !!inv.plan,
+          installments: (inv.plan?.installments ?? []).map((installment) =>
+            decorateInstallment(installment, derived),
+          ),
+          payments: inv.payments.map((p) => ({
+            id: p.id,
+            amount: p.amount,
+            method: p.method,
+            status: p.status,
+            createdAt: p.createdAt,
+          })),
+          wireTransfers: inv.wireTransfers.map((w) => this.wireSummary(w)),
+        };
+      }),
     };
   }
 
@@ -2135,10 +2580,19 @@ export class FinanceService {
       STANDARD_TUITION_XOF,
       TUITION_INSTALLMENT_DUE.length,
     );
+    const now = new Date();
     const installments = TUITION_INSTALLMENT_DUE.map((d, idx) => ({
       sequence: idx + 1,
       dueDate: new Date(`${d}T00:00:00Z`),
       amountDue: amounts[idx] ?? 0,
+      status: projectedInstallmentStatus(
+        {
+          dueDate: d,
+          amountDue: amounts[idx] ?? 0,
+          amountPaid: 0,
+        },
+        now,
+      ),
     }));
     const year = new Date().getUTCFullYear();
     const invoice = await this.prisma.invoice.create({
@@ -2298,17 +2752,19 @@ export class FinanceService {
       throw new BadRequestException(
         `Term "${TUITION_TERM_NAME}" is not set up`,
       );
-    const dueDate = input.dueDate ? new Date(input.dueDate) : new Date();
-    if (Number.isNaN(dueDate.getTime()))
-      throw new BadRequestException("Invalid due date");
+    const dueDate = parseFinanceDateOnly(
+      input.dueDate ?? toDakarDateKey(new Date()),
+    );
 
     // A billing may carry its own installment schedule; without one it stays the
     // single-installment charge the bulk "charge all" path has always created.
+    const now = new Date();
     const schedule = input.installments?.length
       ? input.installments.map((line, idx) => {
-          const due = new Date(line.dueDate);
-          if (Number.isNaN(due.getTime()))
-            throw new BadRequestException("Invalid installment due date");
+          const due = parseFinanceDateOnly(
+            line.dueDate,
+            "Installment due date",
+          );
           const amountDue = Math.floor(line.amountXof);
           if (!Number.isFinite(amountDue) || amountDue <= 0) {
             throw new BadRequestException(
@@ -2320,9 +2776,24 @@ export class FinanceService {
             dueDate: due,
             amountDue,
             label: line.label?.trim() || null,
+            status: projectedInstallmentStatus(
+              { dueDate: due, amountDue, amountPaid: 0 },
+              now,
+            ),
           };
         })
-      : [{ sequence: 1, dueDate, amountDue: amount, label: null }];
+      : [
+          {
+            sequence: 1,
+            dueDate,
+            amountDue: amount,
+            label: null,
+            status: projectedInstallmentStatus(
+              { dueDate, amountDue: amount, amountPaid: 0 },
+              now,
+            ),
+          },
+        ];
     const scheduled = schedule.reduce((sum, line) => sum + line.amountDue, 0);
     if (scheduled !== amount) {
       throw new BadRequestException(
@@ -2570,47 +3041,52 @@ export class FinanceService {
 
   /** Installments past due and not fully paid, across all students (bursar collections view). */
   async listOverdue() {
-    const overdue = await this.prisma.installment.findMany({
-      where: {
-        dueDate: { lt: new Date() },
-        status: { in: ["pending", "partial", "overdue"] },
-      },
-      orderBy: { dueDate: "asc" },
-      include: {
-        plan: {
-          include: {
-            invoice: {
-              include: { student: { include: { person: true } }, term: true },
-            },
-          },
-        },
-      },
-    });
-    return overdue
-      .filter((i) => i.amountPaid < i.amountDue)
-      .map((i) => ({
-        installmentId: i.id,
-        student: `${i.plan.invoice.student.person.firstName} ${i.plan.invoice.student.person.lastName}`,
-        studentNo: i.plan.invoice.student.studentNo,
-        term: i.plan.invoice.term.name,
-        sequence: i.sequence,
-        dueDate: i.dueDate,
-        amountDue: i.amountDue,
-        amountPaid: i.amountPaid,
-        outstanding: i.amountDue - i.amountPaid,
+    const aging = await this.arAging();
+    return aging.rows
+      .filter((row) => row.dueState === "overdue" && row.installmentId !== null)
+      .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""))
+      .map((row) => ({
+        installmentId: row.installmentId!,
+        student: row.student,
+        studentNo: row.studentNo,
+        term: row.term,
+        sequence: row.sequence,
+        dueDate: row.dueDate,
+        amountDue: row.amountDue,
+        amountPaid: row.amountPaid,
+        outstanding: row.outstanding,
+        daysPastDue: row.daysOverdue,
       }));
   }
 
-  /** Scheduled: flag installments overdue once their due date passes. Returns count updated. */
+  /** Scheduled reconciliation of the legacy status column against Dakar calendar semantics. */
   async markOverdueInstallments(): Promise<number> {
-    const res = await this.prisma.installment.updateMany({
-      where: {
-        dueDate: { lt: new Date() },
-        status: { in: ["pending", "partial"] },
+    const installments = await this.prisma.installment.findMany({
+      select: {
+        id: true,
+        dueDate: true,
+        amountDue: true,
+        amountPaid: true,
+        status: true,
       },
-      data: { status: "overdue" },
     });
-    return res.count;
+    const now = new Date();
+    const changes = installments.flatMap((installment) => {
+      const status = projectedInstallmentStatus(installment, now);
+      return status === installment.status
+        ? []
+        : [{ id: installment.id, status }];
+    });
+    if (changes.length === 0) return 0;
+    await this.prisma.$transaction(
+      changes.map((change) =>
+        this.prisma.installment.update({
+          where: { id: change.id },
+          data: { status: change.status },
+        }),
+      ),
+    );
+    return changes.length;
   }
 
   /**
@@ -2915,50 +3391,129 @@ export class FinanceService {
     if (payment.status !== "success")
       throw new BadRequestException("Only successful payments can be refunded");
 
-    await this.prisma.$transaction(async (tx) => {
-      for (const alloc of payment.allocations) {
-        const inst = await tx.installment.findUniqueOrThrow({
-          where: { id: alloc.installmentId },
-        });
-        const newPaid = Math.max(0, inst.amountPaid - alloc.amount);
-        await tx.installment.update({
-          where: { id: inst.id },
-          data: {
-            amountPaid: newPaid,
-            status:
-              newPaid <= 0
-                ? "pending"
-                : newPaid >= inst.amountDue
-                  ? "paid"
-                  : "partial",
-          },
-        });
-      }
-      const newInvoicePaid = Math.max(
-        0,
-        payment.invoice.amountPaid - payment.amount,
+    // Re-read the payment, invoice, allocations and credit memo inside the same
+    // serializable transaction that performs the reversal. A different payment may
+    // settle this invoice after the refund screen loads; subtracting from the stale
+    // pre-transaction invoice total would otherwise erase that newer payment.
+    const runRefund = () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          const current = await tx.payment.findUnique({
+            where: { id: payment.id },
+            include: { allocations: true, invoice: true },
+          });
+          if (!current) throw new NotFoundException("Payment not found");
+          if (current.status === "refunded") return false;
+          if (current.status !== "success") {
+            throw new BadRequestException(
+              "Only successful payments can be refunded",
+            );
+          }
+
+          const creditMemo = await tx.invoice.findUnique({
+            where: { number: `CR-PAY-${current.id}` },
+          });
+          const creditMemoXof =
+            creditMemo && creditMemo.status !== "void"
+              ? Math.max(0, -creditMemo.totalAmount)
+              : 0;
+          const directAppliedXof = Math.max(0, current.amount - creditMemoXof);
+
+          const claimed = await tx.payment.updateMany({
+            where: { id: current.id, status: "success" },
+            data: { status: "refunded" },
+          });
+          if (claimed.count === 0) return false;
+
+          for (const allocation of current.allocations) {
+            const installment = await tx.installment.findUniqueOrThrow({
+              where: { id: allocation.installmentId },
+            });
+            const newPaid = Math.max(
+              0,
+              installment.amountPaid - allocation.amount,
+            );
+            await tx.installment.update({
+              where: { id: installment.id },
+              data: {
+                amountPaid: newPaid,
+                status: projectedInstallmentStatus({
+                  dueDate: installment.dueDate,
+                  amountDue: installment.amountDue,
+                  amountPaid: newPaid,
+                }),
+              },
+            });
+          }
+
+          const newInvoicePaid = Math.max(
+            0,
+            current.invoice.amountPaid - directAppliedXof,
+          );
+          if (directAppliedXof > 0) {
+            await tx.invoice.update({
+              where: { id: current.invoice.id },
+              data: {
+                amountPaid: newInvoicePaid,
+                status:
+                  current.invoice.status === "void"
+                    ? "void"
+                    : newInvoicePaid >= current.invoice.totalAmount
+                      ? "paid"
+                      : newInvoicePaid > 0
+                        ? "partial"
+                        : "open",
+              },
+            });
+          }
+          if (creditMemo && creditMemo.status !== "void") {
+            await tx.invoice.update({
+              where: { id: creditMemo.id },
+              data: { status: "void" },
+            });
+          }
+          await tx.auditLog.create({
+            data: {
+              entity: "Payment",
+              entityId: current.id,
+              action: "refunded",
+              actorId,
+              data: {
+                amount: current.amount,
+                directAppliedXof,
+                creditMemoXof,
+                creditMemoInvoiceId: creditMemo?.id ?? null,
+                reason: reason ?? null,
+              },
+            },
+          });
+          return true;
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 10_000,
+          timeout: 30_000,
+        },
       );
-      await tx.invoice.update({
-        where: { id: payment.invoice.id },
-        data: {
-          amountPaid: newInvoicePaid,
-          status: newInvoicePaid <= 0 ? "open" : "partial",
-        },
-      });
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: "refunded" },
-      });
-      await tx.auditLog.create({
-        data: {
-          entity: "Payment",
-          entityId: payment.id,
-          action: "refunded",
-          actorId,
-          data: { amount: payment.amount, reason: reason ?? null },
-        },
-      });
-    });
+
+    let didRefund = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        didRefund = await runRefund();
+        break;
+      } catch (error) {
+        const retryable =
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "P2034";
+        if (!retryable || attempt === 2) throw error;
+      }
+    }
+
+    if (!didRefund) {
+      return { ok: true, refundedAmount: payment.amount, gatewayRefund: false };
+    }
 
     let gateway: { ok: boolean; ref?: string } = { ok: false };
     if (this.provider.refund) {
@@ -2985,89 +3540,170 @@ export class FinanceService {
     };
   }
 
-  /** Accounts-receivable aging: outstanding installment balances bucketed by days overdue. */
+  /** Accounts-receivable aging from the canonical per-account position (credits never cross accounts). */
   async arAging() {
-    const installments = await this.prisma.installment.findMany({
-      where: { status: { in: ["pending", "partial", "overdue"] } },
+    const students = await this.prisma.student.findMany({
       include: {
-        plan: {
+        person: true,
+        holds: { where: { active: true }, select: { id: true } },
+        invoices: {
           include: {
-            invoice: {
-              include: { student: { include: { person: true } }, term: true },
-            },
+            term: true,
+            plan: { include: { installments: true } },
           },
         },
       },
     });
-    const now = Date.now();
+    const now = new Date();
     const buckets = [
       {
         key: "current",
-        label: "Not yet due",
-        min: -Infinity,
-        max: 0,
+        label: "Current / not yet due",
         amount: 0,
         count: 0,
+        accounts: new Set<string>(),
+        installments: new Set<string>(),
       },
-      { key: "1-30", label: "1–30 days", min: 0, max: 30, amount: 0, count: 0 },
+      {
+        key: "1-30",
+        label: "1–30 days",
+        amount: 0,
+        count: 0,
+        accounts: new Set<string>(),
+        installments: new Set<string>(),
+      },
       {
         key: "31-60",
         label: "31–60 days",
-        min: 30,
-        max: 60,
         amount: 0,
         count: 0,
+        accounts: new Set<string>(),
+        installments: new Set<string>(),
       },
       {
         key: "61-90",
         label: "61–90 days",
-        min: 60,
-        max: 90,
         amount: 0,
         count: 0,
+        accounts: new Set<string>(),
+        installments: new Set<string>(),
       },
       {
         key: "90+",
         label: "Over 90 days",
-        min: 90,
-        max: Infinity,
         amount: 0,
         count: 0,
+        accounts: new Set<string>(),
+        installments: new Set<string>(),
+      },
+      {
+        key: "unscheduled",
+        label: "Unscheduled",
+        amount: 0,
+        count: 0,
+        accounts: new Set<string>(),
+        installments: new Set<string>(),
       },
     ];
     const rows: {
+      studentId: string;
       student: string;
       studentNo: string;
       term: string;
+      invoiceId: string;
+      installmentId: string | null;
+      sequence: number | null;
+      dueDate: string | null;
+      dueState: "unscheduled" | "not_yet_due" | "due_today" | "overdue";
+      amountDue: number;
+      amountPaid: number;
       daysOverdue: number;
       outstanding: number;
     }[] = [];
-    for (const inst of installments) {
-      const outstanding = inst.amountDue - inst.amountPaid;
-      if (outstanding <= 0) continue;
-      const days = Math.floor((now - inst.dueDate.getTime()) / 86_400_000);
-      const b =
-        buckets.find((x) => days > x.min && days <= x.max) ?? buckets[0]!;
-      b.amount += outstanding;
-      b.count += 1;
-      const inv = inst.plan.invoice;
-      rows.push({
-        student: `${inv.student.person.firstName} ${inv.student.person.lastName}`,
-        studentNo: inv.student.studentNo,
-        term: inv.term.name,
-        daysOverdue: Math.max(0, days),
-        outstanding,
-      });
+    const summaries: AccountBalanceSummary[] = [];
+    const includedAccountIds = new Set<string>();
+    const heldAccountIds = new Set<string>();
+    for (const student of students) {
+      const position = deriveApiAccountPosition(student.invoices, now);
+      if (
+        student.recordStatus === "archived" &&
+        position.summary.outstandingXof <= 0
+      ) {
+        continue;
+      }
+      summaries.push(position.summary);
+      includedAccountIds.add(student.id);
+      if (student.holds.length > 0) heldAccountIds.add(student.id);
+      if (position.summary.outstandingXof <= 0) continue;
+      const invoicesById = new Map(
+        student.invoices.map((invoice) => [invoice.id, invoice] as const),
+      );
+      for (const line of position.installments) {
+        if (line.outstandingXof <= 0) continue;
+        const bucketKey =
+          line.dueState === "unscheduled"
+            ? "unscheduled"
+            : line.dueState !== "overdue"
+              ? "current"
+              : line.daysPastDue <= 30
+                ? "1-30"
+                : line.daysPastDue <= 60
+                  ? "31-60"
+                  : line.daysPastDue <= 90
+                    ? "61-90"
+                    : "90+";
+        const bucket = buckets.find(({ key }) => key === bucketKey)!;
+        bucket.amount += line.outstandingXof;
+        bucket.count += 1;
+        bucket.accounts.add(student.id);
+        if (line.installmentId) bucket.installments.add(line.installmentId);
+        const invoice = invoicesById.get(line.invoiceId);
+        rows.push({
+          studentId: student.id,
+          student: `${student.person.firstName} ${student.person.lastName}`,
+          studentNo: student.studentNo,
+          term: invoice?.term.name ?? "—",
+          invoiceId: line.invoiceId,
+          installmentId: line.installmentId,
+          sequence: line.sequence,
+          dueDate: line.dueDate,
+          dueState: line.dueState,
+          amountDue: line.amountDueXof,
+          amountPaid: line.amountPaidXof + line.creditAppliedXof,
+          daysOverdue: line.daysPastDue,
+          outstanding: line.outstandingXof,
+        });
+      }
     }
     rows.sort((a, b) => b.daysOverdue - a.daysOverdue);
+    const summary = aggregateAccountReport(summaries);
     return {
-      buckets: buckets.map(({ key, label, amount, count }) => ({
-        key,
-        label,
-        amount,
-        count,
-      })),
-      totalOutstanding: buckets.reduce((s, b) => s + b.amount, 0),
+      buckets: buckets.map(
+        ({ key, label, amount, count, accounts, installments }) => ({
+          key,
+          label,
+          amount,
+          count,
+          accountCount: accounts.size,
+          installmentCount: installments.size,
+        }),
+      ),
+      totalOutstanding: summary.outstandingXof,
+      accountCount: includedAccountIds.size,
+      installmentCount: new Set(rows.flatMap((row) => row.installmentId ?? []))
+        .size,
+      accountCounts: {
+        noBilling: summaries.filter((item) => item.standing === "no_billing")
+          .length,
+        credit: summaries.filter((item) => item.standing === "credit").length,
+        cleared: summaries.filter((item) => item.standing === "cleared").length,
+        onTime: summaries.filter((item) => item.standing === "on_time").length,
+        unscheduled: summaries.filter((item) => item.standing === "unscheduled")
+          .length,
+        overdue: summaries.filter((item) => item.standing === "overdue").length,
+      },
+      activeHoldAccountCount: heldAccountIds.size,
+      summary,
       rows,
     };
   }
@@ -3147,9 +3783,11 @@ export class FinanceService {
       expiresAt?: string;
     },
   ) {
+    let linkedStudentId = input.studentId;
     if (input.invoiceId) {
       const invoice = await this.prisma.invoice.findUnique({
         where: { id: input.invoiceId },
+        select: { id: true, studentId: true },
       });
       if (!invoice) throw new NotFoundException("Invoice not found");
       if (input.studentId && invoice.studentId !== input.studentId) {
@@ -3157,12 +3795,9 @@ export class FinanceService {
           "Invoice does not belong to that student",
         );
       }
-      const balance = invoice.totalAmount - invoice.amountPaid;
-      if (input.amountXof > balance) {
-        throw new BadRequestException(
-          `Amount exceeds the invoice balance (${balance} XOF)`,
-        );
-      }
+      linkedStudentId = invoice.studentId;
+      const account = await this.loadPayableAccount(invoice.studentId);
+      this.requirePayableTarget(account, input.amountXof, invoice.id);
     }
     if (input.costCenterCode) {
       const cc = await this.prisma.costCenter.findUnique({
@@ -3178,7 +3813,7 @@ export class FinanceService {
         purpose: input.purpose,
         payeeName: input.payeeName,
         payeeMeta: input.payeeMeta ?? null,
-        studentId: input.studentId ?? null,
+        studentId: linkedStudentId ?? null,
         invoiceId: input.invoiceId ?? null,
         costCenterCode: input.costCenterCode ?? "9100",
         dueDate: input.dueDate ? new Date(input.dueDate) : null,
@@ -3244,18 +3879,19 @@ export class FinanceService {
       throw new BadRequestException(`Link is ${link.status}`);
 
     if (link.invoiceId) {
+      const linkedInvoice = await this.prisma.invoice.findUniqueOrThrow({
+        where: { id: link.invoiceId },
+        select: { studentId: true },
+      });
+      const studentId = link.studentId ?? linkedInvoice.studentId;
+      const account = await this.loadPayableAccount(studentId);
+      this.requirePayableTarget(account, link.amountXof, link.invoiceId);
       const payment = await this.prisma.payment.upsert({
         where: { providerRef: `PLINK-${link.id}` },
         update: {},
         create: {
           invoiceId: link.invoiceId,
-          studentId:
-            link.studentId ??
-            (
-              await this.prisma.invoice.findUniqueOrThrow({
-                where: { id: link.invoiceId },
-              })
-            ).studentId,
+          studentId,
           amount: link.amountXof,
           method: "card", // schema enum has no bank type; the link record carries method="manual"
           status: "pending",
@@ -3332,14 +3968,22 @@ export class FinanceService {
     if (link.invoiceId) {
       const invoice = await this.prisma.invoice.findUniqueOrThrow({
         where: { id: link.invoiceId },
+        select: { id: true, studentId: true },
       });
+      const studentId = link.studentId ?? invoice.studentId;
+      const account = await this.loadPayableAccount(studentId);
+      const { amount } = this.requirePayableTarget(
+        account,
+        link.amountXof,
+        invoice.id,
+      );
       await this.prisma.payment.upsert({
         where: { providerRef: ref },
         update: {},
         create: {
           invoiceId: invoice.id,
-          studentId: link.studentId ?? invoice.studentId,
-          amount: link.amountXof,
+          studentId,
+          amount,
           method: (["wave", "orange_money", "card"].includes(method)
             ? method
             : "card") as never,
@@ -3439,25 +4083,34 @@ export class FinanceService {
         },
       },
     });
-    const balanceXof = invoices.reduce(
-      (s, i) => s + (i.totalAmount - i.amountPaid),
-      0,
+    const position = deriveApiAccountPosition(invoices);
+    const payableTarget = selectOldestPayableTarget(invoices, position);
+    const grossCreditXof = invoices
+      .filter((invoice) => invoice.totalAmount < 0)
+      .reduce((sum, invoice) => sum - invoice.totalAmount, 0);
+    const invoicesById = new Map(
+      invoices.map((invoice) => [invoice.id, invoice] as const),
     );
-    // Account credits are negative-total invoices; surface them as a positive figure for display.
-    const creditXof = invoices
-      .filter((i) => i.totalAmount < 0)
-      .reduce((s, i) => s - i.totalAmount, 0);
-    const charges = invoices.flatMap((inv) =>
-      (inv.plan?.installments ?? []).map((i) => ({
-        // Ad-hoc charges carry a description; tuition installments fall back to term + sequence.
+    const charges = position.installments.map((line) => {
+      const invoice = invoicesById.get(line.invoiceId)!;
+      return {
         label:
-          inv.description ?? `${inv.term.name} · installment ${i.sequence}`,
-        dueDate: i.dueDate,
-        amountXof: i.amountDue,
-        paidXof: i.amountPaid,
-        status: i.status,
-      })),
-    );
+          invoice.description ??
+          (line.sequence
+            ? `${invoice.term.name} · installment ${line.sequence}`
+            : invoice.term.name),
+        dueDate: line.dueDate,
+        amountXof: line.amountDueXof,
+        paidXof: line.amountPaidXof,
+        creditAppliedXof: line.creditAppliedXof,
+        effectiveSettledXof: line.amountPaidXof + line.creditAppliedXof,
+        outstandingXof: line.outstandingXof,
+        status: legacyInstallmentStatus(line),
+        paymentProgress: line.paymentProgress,
+        dueState: line.dueState,
+        daysPastDue: line.daysPastDue,
+      };
+    });
     return {
       studentName: `${student.person.firstName} ${student.person.lastName}`
         .replace(/\s+/g, " ")
@@ -3465,9 +4118,13 @@ export class FinanceService {
       studentNo: student.studentNo,
       program: student.program?.name ?? null,
       term: invoices[0]?.term.name ?? null,
-      balanceXof,
-      creditXof,
-      dueDate: charges.find((c) => c.status !== "paid")?.dueDate ?? null,
+      balanceXof: position.summary.balanceXof,
+      outstandingXof: position.summary.outstandingXof,
+      payableXof: payableTarget?.invoicePayableXof ?? 0,
+      creditXof: grossCreditXof,
+      dueDate:
+        position.summary.oldestOverdueDate ?? position.summary.nextDueDate,
+      summary: position.summary,
       charges,
       pendingWires: invoices.flatMap((invoice) =>
         invoice.wireTransfers.map((wire) => this.publicWireSummary(wire)),
@@ -3483,24 +4140,8 @@ export class FinanceService {
     method: string,
   ) {
     const student = await this.findStudentForBill(studentNo, dob);
-    const invoices = await this.prisma.invoice.findMany({
-      where: { studentId: student.id },
-      orderBy: { createdAt: "asc" },
-    });
-    // Net of any account credits (negative-total credit-memo invoices).
-    const netBalance = invoices.reduce(
-      (s, i) => s + (i.totalAmount - i.amountPaid),
-      0,
-    );
-    if (netBalance <= 0)
-      throw new BadRequestException("This account has no outstanding balance");
-    const invoice = invoices.find(
-      (i) =>
-        (i.status === "open" || i.status === "partial") &&
-        i.totalAmount - i.amountPaid > 0,
-    );
-    if (!invoice)
-      throw new BadRequestException("This account has no outstanding balance");
+    const account = await this.loadPayableAccount(student.id);
+    const { amount, invoice } = this.requirePayableTarget(account, amountXof);
     if (
       await this.prisma.wireTransferSubmission.findFirst({
         where: { invoiceId: invoice.id, status: "submitted" },
@@ -3510,14 +4151,6 @@ export class FinanceService {
         "A wire transfer is already under review for this charge",
       );
     }
-    const invoiceBalance = invoice.totalAmount - invoice.amountPaid;
-    // Clamp to the invoice's own balance AND the net account balance (so a credit can't be overpaid).
-    const amount = Math.min(
-      Math.max(1, Math.floor(amountXof)),
-      invoiceBalance,
-      netBalance,
-    );
-
     const ref = `BILL-${randomUUID()}`;
     await this.prisma.payment.create({
       data: {

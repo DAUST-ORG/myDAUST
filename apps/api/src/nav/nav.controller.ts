@@ -1,10 +1,14 @@
 import { Controller, Get } from "@nestjs/common";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { deriveApiAccountPosition } from "../finance/account-position.js";
 
 /** Class standing by year of study, for the student's sidebar identity line. */
 const STANDING_BY_YEAR: Record<number, string> = {
-  1: "Freshman", 2: "Sophomore", 3: "Junior", 4: "Senior",
+  1: "Freshman",
+  2: "Sophomore",
+  3: "Junior",
+  4: "Senior",
 };
 
 /** Applicant stages still awaiting a decision — what the Admissions badge counts. */
@@ -41,7 +45,10 @@ export class NavController {
         include: { program: true },
       });
       if (!student) return null;
-      const parts = [STANDING_BY_YEAR[student.yearLevel ?? 0], student.program?.name].filter(Boolean);
+      const parts = [
+        STANDING_BY_YEAR[student.yearLevel ?? 0],
+        student.program?.name,
+      ].filter(Boolean);
       return parts.length > 0 ? parts.join(" · ") : null;
     }
 
@@ -52,7 +59,9 @@ export class NavController {
       });
       const names = links.map((l) => l.student.person.firstName);
       if (names.length === 0) return null;
-      return names.length === 1 ? `Guardian of ${names[0]}` : `Guardian · ${names.length} children`;
+      return names.length === 1
+        ? `Guardian of ${names[0]}`
+        : `Guardian · ${names.length} children`;
     }
 
     if (roles.includes("faculty")) return "Faculty";
@@ -67,7 +76,9 @@ export class NavController {
 
     if (roles.includes("admin") || roles.includes("registrar")) {
       const [applicants, approvals] = await Promise.all([
-        this.prisma.applicant.count({ where: { stage: { in: OPEN_APPLICANT_STAGES } } }),
+        this.prisma.applicant.count({
+          where: { stage: { in: OPEN_APPLICANT_STAGES } },
+        }),
         this.prisma.gradeSubmission.count({ where: { status: "submitted" } }),
       ]);
       if (applicants > 0) out.admissions = String(applicants);
@@ -79,13 +90,14 @@ export class NavController {
         this.prisma.section.count({ where: { status: "open" } }),
         this.prisma.invoice.findMany({
           where: { studentId: user.studentId },
-          select: { totalAmount: true, amountPaid: true },
+          include: { plan: { include: { installments: true } } },
         }),
       ]);
       if (openSections > 0) out.register = String(openSections);
       // A balance is a call to action, not a quantity — the design shows "!" for it.
-      const balance = invoices.reduce((sum, i) => sum + (i.totalAmount - i.amountPaid), 0);
-      if (balance > 0) out.billing = "!";
+      if (deriveApiAccountPosition(invoices).summary.outstandingXof > 0) {
+        out.billing = "!";
+      }
     }
 
     const unread = await this.unreadThreads(user.personId);

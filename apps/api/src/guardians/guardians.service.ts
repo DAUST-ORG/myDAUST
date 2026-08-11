@@ -11,6 +11,7 @@ import { MailService } from "../mail/mail.service.js";
 import { FinanceService } from "../finance/finance.service.js";
 import { standingLabel } from "../academics/academics.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
+import { deriveApiAccountPosition } from "../finance/account-position.js";
 
 /** Password-setup invites are short-lived; the registrar can always re-issue one. */
 const INVITE_TTL_HOURS = 72;
@@ -525,7 +526,9 @@ export class GuardiansService {
           include: {
             person: true,
             program: true,
-            invoices: true,
+            invoices: {
+              include: { plan: { include: { installments: true } } },
+            },
             transcriptEntries: { where: { voidedAt: null } },
             enrollments: {
               include: {
@@ -552,8 +555,7 @@ export class GuardiansService {
       const { gpa, completedCredits } = summarizeTranscriptRows(
         student.transcriptEntries,
       );
-      const billed = student.invoices.reduce((s, i) => s + i.totalAmount, 0);
-      const paid = student.invoices.reduce((s, i) => s + i.amountPaid, 0);
+      const summary = deriveApiAccountPosition(student.invoices).summary;
       return {
         studentId: student.id,
         studentNo: student.studentNo,
@@ -565,7 +567,8 @@ export class GuardiansService {
         gpa,
         completedCredits,
         standing: student.standing ?? standingLabel(gpa),
-        balance: billed - paid,
+        balance: summary.balanceXof,
+        summary,
         requiredCredits: student.programId
           ? (requiredByProgram.get(student.programId) ?? null)
           : null,

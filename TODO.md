@@ -6,6 +6,8 @@ Synthesized 2026-06-28 from a full 9-agent completion audit of the codebase vs t
 
 Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 design-parity gap · ⚪ decision needed
 
+- [ ] 🟠 **Deploy payment-plan-aware balances and A/R aging (release candidate 2026-08-11)** — implementation, disposable-PostgreSQL tests, production builds, migration drift check, local cross-portal smoke, and read-only production audit are complete. Promote `codex/payment-plan-aging` to `develop`, run reconciliation and staging smoke, then promote the identical revision to `main`, reconcile, and record task revisions here and in `docs/production-status.md`.
+
 ## 0 · SIS redesign — remaining backend gaps (audited 2026-07-21)
 
 All five portals now follow `design/Student information system design (1)`. These are
