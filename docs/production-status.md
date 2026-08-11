@@ -1,6 +1,6 @@
 # Production and Delivery Status
 
-Production last verified: **2026-08-10**. This page is the operational handoff for recent production data work and deployments. `TODO.md` remains the broader product backlog.
+Production last verified: **2026-08-11**. This page is the operational handoff for recent production data work and deployments. `TODO.md` remains the broader product backlog.
 
 ## Status Definitions
 
@@ -41,9 +41,9 @@ Catalog decisions still needed: `EE 3513` is “Control Systems” in production
 
 ## Payments: Wire Disabled; Offline Ledger Partially Reconciled
 
-### Payment-plan-aware balances (release candidate; not deployed)
+### Payment-plan-aware balances (production deployed 2026-08-11)
 
-The 2026-08-11 release candidate replaces amount-based delinquency with one Dakar-calendar account-position calculation shared by student, parent, public-payment, bursar, Billing Admin, registrar, and program-roster APIs.
+The 2026-08-11 release replaces amount-based delinquency with one Dakar-calendar account-position calculation shared by student, parent, public-payment, bursar, Billing Admin, registrar, and program-roster APIs.
 
 - A positive balance is red only when an unpaid portion is past its installment date. Due-today and future balances remain current; no-plan debt is labeled **Schedule needed**.
 - Scholarships and account credits offset the oldest obligations within the same student account. Void invoices are excluded, and one student's credit never offsets another account.
@@ -51,7 +51,7 @@ The 2026-08-11 release candidate replaces amount-based delinquency with one Daka
 - Payment settlement now re-reads and locks the account in a serializable transaction. Concurrent landed payments cannot lose allocations; genuine excess gateway cash becomes an explicit reversible credit memo.
 - Migration `20260810130000_finance_due_dates_as_dates` converts installment and fee-plan dates to PostgreSQL `date`, preserving the Africa/Dakar calendar date.
 
-Release status: local tests and builds are green, but this change is **not yet on staging or production**. The production read-only preflight found 298 non-void positive invoices, no unscheduled/credit/overpaid/archived-debt discrepancies, and 16 stale stored installment statuses. Run the reconciliation job after each deployment and replace this note with the deployed revisions after production smoke testing.
+Release status: deployed through PRs `#16`, `#17`, and `#18`. Staging runs commit `6935a05` at API revision 90 and portal revision 49; production runs commit `7016794` at API revision 85 and portal revision 46. Migration and reference-data tasks exited 0, both edge health checks passed, and the post-rollout reconciliation gate reported `changedCount: 0` in both environments. Production smoke verified `/finance`, `/finance/accounts`, `/billing-admin`, and `/admin/students`; canonical overdue/on-time labels, overdue portions, aging, KPIs, and account filters rendered without browser errors. The gate now runs after every API rollout and fails deployment if reconciliation cannot complete.
 
 The wire-transfer workflow is deployed across authenticated student billing, public bill lookup, payment links, Billing Admin, and the Finance portal.
 
@@ -117,21 +117,21 @@ Validation on 2026-08-10: **22 shared tests**, **104 API tests**, and all **8 da
 
 ## Validation and Repository State
 
-Latest local validation on 2026-08-10:
+Latest local validation on 2026-08-11:
 
-- `pnpm test`: **22 shared and 107 API tests passed**. All 8 database settlement tests and the new full faculty-grading integration test also passed separately against PostgreSQL.
+- `pnpm test`: **35 shared tests passed**; the complete API suite passed **135/135** against disposable PostgreSQL, including settlement races and cross-portal account-summary parity.
 - `pnpm typecheck`: passed across all workspaces.
 - `pnpm build`: API, portal, database package, shared package, and vitrine passed.
-- Fresh PostgreSQL 16 validation applied all 41 migrations successfully.
+- Fresh PostgreSQL 16 validation applied all 42 migrations successfully, and Prisma migration diff was empty.
 - Prisma reports a non-blocking warning that `package.json#prisma` must eventually move to `prisma.config.ts` before Prisma 7.
 
-Latest deployment verified on 2026-08-10:
+Latest deployment verified on 2026-08-11:
 
-- Staging: commit `edfa4fb`, API task definition `daust-staging-api:86`, portal `daust-staging-portal:47`; migration/reference tasks, rollout, and health checks passed.
-- Production: commit `deae83a`, API task definition `daust-prod-api:81`, portal `daust-prod-portal:44`; migration/reference tasks, rollout, and health checks passed. A signed-in production smoke rendered `/faculty/schedule` with the expected navigation/empty state and no console warnings or errors.
+- Staging: commit `6935a05`, API task definition `daust-staging-api:90`, portal `daust-staging-portal:49`, deploy run `31462548833`; migration/reference tasks, rollout, edge health, and reconciliation passed. Reconciliation changed 0 rows.
+- Production: commit `7016794`, API task definition `daust-prod-api:85`, portal `daust-prod-portal:46`, deploy run `31463149312`; migration/reference tasks, rollout, edge health, and reconciliation passed. Reconciliation changed 0 rows, `/api/health` returned OK, and signed-in Finance, Billing Admin, account-list, and registrar balance smoke tests produced no browser errors.
 - The `material-delete-reorder` work was merged and deployed with the transcript release. Exact reorder validation, deletion audit metadata, split-origin file links, and accurate destructive-action copy are included.
 
-All intended transcript/material application and infrastructure changes are committed and reproducible from Git. Unrelated local screenshots and design references remain untracked and must be preserved. Never commit AWS sessions, passwords, bank details, or provider secrets.
+All intended transcript, material, and payment-aging application and infrastructure changes are committed and reproducible from Git. Unrelated local screenshots and design references remain untracked and must be preserved. Never commit AWS sessions, passwords, bank details, or provider secrets.
 
 ## Next Actions
 

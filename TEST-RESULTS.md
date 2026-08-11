@@ -12,8 +12,9 @@ All 10 seeded logins work (password `daust-dev-2026`).
 - PASS: all 42 migrations applied to a fresh database; Prisma schema validation and migration diff reported no difference.
 - PASS: local UI smoke across `/finance`, `/finance/accounts`, `/billing-admin`, student billing/dashboard, parent billing/dashboard, and registrar students. Overdue, due-today, on-time, unscheduled, credit, cleared, never-billed, and active-hold fixtures rendered with the intended labels; browser console had no warnings/errors.
 - PASS: public bill API returned the same canonical summary and preserved legacy cash-paid fields while exposing additive effective-settlement fields.
-- READ-ONLY PRODUCTION PREFLIGHT: 298 positive non-void invoices; no unscheduled, credit, overpaid, plan-total, installment-paid, or archived-debt discrepancies. Sixteen stored installment statuses are stale and must be repaired by the post-deploy reconciliation job.
-- DEPLOYMENT: not yet on `develop` or `main` at the time of this entry; staging smoke and production promotion remain required.
+- READ-ONLY PRODUCTION PREFLIGHT: 298 positive non-void invoices; no unscheduled, credit, overpaid, plan-total, installment-paid, or archived-debt discrepancies. The preflight identified 16 potentially stale stored statuses; the authoritative post-rollout reconciliation later found 0 rows requiring repair.
+- PASS: deployed to `develop`/staging at commit `6935a05` (API 90, portal 49; run `31462548833`) and to `main`/production at commit `7016794` (API 85, portal 46; run `31463149312`). Both migration and reference-data tasks exited 0, edge health passed, and the permanent reconciliation gate exited 0 with `changedCount: 0`.
+- PASS: signed-in production smoke across `/finance`, `/finance/accounts`, `/billing-admin`, and `/admin/students`; canonical KPI, aging, standing-filter, on-time, and overdue-portion views rendered with no browser errors. Production `/api/health` returned OK.
 
 ## Seed ground-truth (staging, differs from plan assumptions — NOT bugs)
 
