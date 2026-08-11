@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   Banknote,
   Check,
   Copy,
@@ -10,18 +9,18 @@ import {
   Link2,
   LogOut,
   Plus,
-  Receipt,
   Search,
   Settings,
   Trash2,
   UserPlus,
   Users,
-  Wallet,
   X,
 } from "lucide-react";
 import {
   type AccountInvoice,
   type AdminWireTransfer,
+  type ArAging,
+  type AccountBalanceSummary,
   type Me,
   type StudentAccount,
   type StudentAccountRow,
@@ -30,6 +29,7 @@ import {
   approveWireTransfer,
   createStudent,
   getAdminWireConfig,
+  getArAging,
   getMe,
   getStudentAccount,
   getWireProof,
@@ -42,6 +42,20 @@ import {
   replacePaymentPlan,
   updateAdminWireConfig,
 } from "@/lib/api";
+import {
+  AccountBalanceText,
+  AccountStandingBadge,
+  AccountStatusLine,
+  AgingBuckets,
+  InstallmentStandingBadge,
+  ReceivablesKpis,
+  accountBalanceLabel,
+  accountPresentation,
+  installmentEffectiveSettled,
+  invoiceEffectiveOutstanding,
+  resolveAccountSummary,
+} from "@/components/AccountBalance";
+import { formatDate } from "@/lib/format";
 
 const fcfa = (n: number) => n.toLocaleString("fr-FR");
 const digits = (s: string) => Number(s.replace(/[^\d]/g, "")) || 0;
@@ -295,6 +309,7 @@ function LoginView({
 // ---------------------------------------------------------------- Dashboard
 function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [rows, setRows] = useState<StudentAccountRow[] | null>(null);
+  const [aging, setAging] = useState<ArAging | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [drawerId, setDrawerId] = useState<string | null>(null);
@@ -304,7 +319,12 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     null,
   );
   const [links, setLinks] = useState<
-    { studentNo: string; name: string; balance: number }[] | null
+    {
+      studentNo: string;
+      name: string;
+      balance: number;
+      summary: AccountBalanceSummary;
+    }[] | null
   >(null);
   const [toast, setToast] = useState<string | null>(null);
   const [wireOpen, setWireOpen] = useState(false);
@@ -314,6 +334,9 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     listStudentAccounts()
       .then(setRows)
       .catch(() => setRows([]));
+    getArAging()
+      .then(setAging)
+      .catch(() => setAging(null));
   }, []);
   useEffect(() => load(), [load]);
 
@@ -322,31 +345,65 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     setTimeout(() => setToast(null), 2400);
   }, []);
 
-  const kpis = useMemo(() => {
-    const r = rows ?? [];
-    return {
-      students: r.length,
-      outstanding: r.reduce((a, s) => a + s.balance, 0),
-      withBalance: r.filter((s) => s.balance > 0).length,
-      overdue: r.filter((s) => s.status === "overdue").length,
-    };
+  const positioned = useMemo(() => {
+    return (rows ?? []).map((row) => ({
+      row,
+      summary: resolveAccountSummary(row.summary, {
+        balanceXof: row.balance,
+        billedXof: row.billed,
+      }),
+    }));
   }, [rows]);
+
+  const metrics = useMemo(
+    () => ({
+      grossOutstandingXof:
+        aging?.summary?.outstandingXof ??
+        positioned.reduce((sum, item) => sum + item.summary.outstandingXof, 0),
+      overdueXof:
+        aging?.summary?.overdueXof ??
+        positioned.reduce((sum, item) => sum + item.summary.overdueXof, 0),
+      onTimeCount:
+        aging?.accountCounts?.onTime ??
+        positioned.filter((item) => item.summary.standing === "on_time").length,
+      overdueCount:
+        aging?.accountCounts?.overdue ??
+        positioned.filter((item) => item.summary.standing === "overdue").length,
+      clearedCount:
+        aging?.accountCounts?.cleared ??
+        positioned.filter((item) => item.summary.standing === "cleared").length,
+      activeHoldCount:
+        aging?.activeHoldAccountCount ??
+        positioned.filter((item) => item.row.hasActiveHold).length,
+    }),
+    [aging, positioned],
+  );
 
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return (rows ?? []).filter((s) => {
-      if (filter === "due" && s.balance <= 0) return false;
-      if (filter === "paid" && s.balance > 0) return false;
-      if (filter === "over" && s.status !== "overdue") return false;
-      if (
-        q &&
-        !s.name.toLowerCase().includes(q) &&
-        !s.studentNo.toLowerCase().includes(q)
-      )
-        return false;
-      return true;
-    });
-  }, [rows, search, filter]);
+    return positioned
+      .map(({ row, summary }) => ({ ...row, summary }))
+      .filter((s) => {
+        if (filter === "on_time" && s.summary.standing !== "on_time")
+          return false;
+        if (filter === "overdue" && s.summary.standing !== "overdue")
+          return false;
+        if (filter === "cleared" && s.summary.standing !== "cleared")
+          return false;
+        if (filter === "credit" && s.summary.standing !== "credit")
+          return false;
+        if (filter === "unscheduled" && s.summary.standing !== "unscheduled")
+          return false;
+        if (filter === "holds" && !s.hasActiveHold) return false;
+        if (
+          q &&
+          !s.name.toLowerCase().includes(q) &&
+          !s.studentNo.toLowerCase().includes(q)
+        )
+          return false;
+        return true;
+      });
+  }, [positioned, search, filter]);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -370,14 +427,23 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     [rows],
   );
   const linksFor = (ids: string[]) =>
-    ids
-      .map((id) => rowsById.get(id))
-      .filter((s): s is StudentAccountRow => !!s && s.balance > 0)
-      .map((s) => ({
-        studentNo: s.studentNo,
-        name: s.name,
-        balance: s.balance,
-      }));
+    ids.flatMap((id) => {
+      const student = rowsById.get(id);
+      if (!student) return [];
+      const summary = resolveAccountSummary(student.summary, {
+        balanceXof: student.balance,
+        billedXof: student.billed,
+      });
+      if (summary.outstandingXof <= 0) return [];
+      return [
+        {
+          studentNo: student.studentNo,
+          name: student.name,
+          balance: summary.outstandingXof,
+          summary,
+        },
+      ];
+    });
 
   return (
     <main
@@ -527,7 +593,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               onClick={() =>
                 setCharge({
                   ids: (rows ?? []).map((s) => s.id),
-                  label: `all ${kpis.students} students`,
+                  label: `all ${(rows ?? []).length} students`,
                 })
               }
               style={navBtn}
@@ -537,40 +603,10 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           </div>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))",
-            gap: 14,
-            marginBottom: 22,
-          }}
-        >
-          <Kpi
-            icon={<Users size={15} />}
-            label="Students"
-            value={String(kpis.students)}
-          />
-          <Kpi
-            icon={<Wallet size={15} />}
-            label="Total outstanding"
-            value={fcfa(kpis.outstanding)}
-            unit="FCFA"
-            accent
-          />
-          <Kpi
-            icon={<Receipt size={15} />}
-            label="With a balance"
-            value={String(kpis.withBalance)}
-            unit={`of ${kpis.students}`}
-          />
-          <Kpi
-            icon={<AlertTriangle size={15} />}
-            label="Overdue"
-            value={String(kpis.overdue)}
-            unit="accounts"
-            danger
-          />
-        </div>
+        <ReceivablesKpis metrics={metrics} />
+        {aging?.buckets?.length ? (
+          <AgingBuckets buckets={aging.buckets} />
+        ) : null}
 
         <div
           style={{
@@ -615,6 +651,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             />
           </div>
           <select
+            aria-label="Filter by account standing"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             style={{
@@ -629,9 +666,12 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             }}
           >
             <option value="all">All accounts</option>
-            <option value="due">With balance</option>
-            <option value="paid">Fully paid</option>
-            <option value="over">Overdue</option>
+            <option value="on_time">On time</option>
+            <option value="overdue">Overdue</option>
+            <option value="unscheduled">Needs a schedule</option>
+            <option value="cleared">Cleared</option>
+            <option value="credit">In credit</option>
+            <option value="holds">Active holds</option>
           </select>
           <div style={{ flex: 1 }} />
           <button
@@ -825,21 +865,18 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                         {s.openCharges} open
                       </td>
                       <td style={tdStyle}>
-                        <span
-                          style={{
-                            fontWeight: 700,
-                            color: s.balance <= 0 ? "#2e7d52" : "#141a21",
-                            fontVariantNumeric: "tabular-nums",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {s.balance <= 0
-                            ? "Cleared"
-                            : `${fcfa(s.balance)} FCFA`}
+                        <span style={{ display: "grid", gap: 2 }}>
+                          <AccountBalanceText
+                            summary={s.summary}
+                            style={{ fontWeight: 700, whiteSpace: "nowrap" }}
+                          />
+                          {s.summary.standing === "overdue" && (
+                            <AccountStatusLine summary={s.summary} />
+                          )}
                         </span>
                       </td>
                       <td style={tdStyle}>
-                        <StatusPill status={s.status} />
+                        <AccountStandingBadge summary={s.summary} />
                       </td>
                       <td style={{ ...tdStyle, textAlign: "right" }}>
                         <button
@@ -955,96 +992,6 @@ function CheckBox({ on, onClick }: { on: boolean; onClick: () => void }) {
     >
       {on && <Check size={12} color="#fff" strokeWidth={3} />}
     </span>
-  );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const map: Record<string, { bg: string; fg: string; label: string }> = {
-    paid: { bg: "rgba(46,125,82,.13)", fg: "#2e7d52", label: "Paid" },
-    overdue: { bg: "rgba(192,57,43,.1)", fg: "#c0392b", label: "Overdue" },
-    due: { bg: "rgba(237,132,37,.14)", fg: "#d6731a", label: "Due" },
-  };
-  const s = map[status] ?? {
-    bg: "rgba(237,132,37,.14)",
-    fg: "#d6731a",
-    label: "Due",
-  };
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        fontSize: 11,
-        fontWeight: 700,
-        padding: "3px 10px",
-        borderRadius: 999,
-        background: s.bg,
-        color: s.fg,
-      }}
-    >
-      {s.label}
-    </span>
-  );
-}
-
-function Kpi({
-  icon,
-  label,
-  value,
-  unit,
-  accent,
-  danger,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  unit?: string;
-  accent?: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        background: "#fff",
-        border: "1px solid #d7dee6",
-        borderRadius: 14,
-        padding: "16px 18px",
-        boxShadow: "0 1px 3px rgba(15,44,80,.1)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 12,
-          color: "#6c7884",
-          fontWeight: 600,
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-        }}
-      >
-        <span style={{ color: "var(--daust-navy)", display: "inline-flex" }}>
-          {icon}
-        </span>
-        {label}
-      </div>
-      <div
-        style={{
-          fontFamily: "var(--font-display)",
-          fontWeight: 800,
-          fontSize: 24,
-          marginTop: 8,
-          color: danger ? "#c0392b" : accent ? "#d6731a" : "#141a21",
-        }}
-      >
-        {value}
-        {unit && (
-          <small style={{ fontSize: 12, fontWeight: 600, color: "#6c7884" }}>
-            {" "}
-            {unit}
-          </small>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -1398,7 +1345,12 @@ function LinksModal({
   items,
   onClose,
 }: {
-  items: { studentNo: string; name: string; balance: number }[];
+  items: {
+    studentNo: string;
+    name: string;
+    balance: number;
+    summary: AccountBalanceSummary;
+  }[];
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
@@ -1496,12 +1448,16 @@ function LinksModal({
                   <span
                     style={{
                       marginLeft: "auto",
-                      fontWeight: 700,
-                      color: "#d6731a",
-                      fontVariantNumeric: "tabular-nums",
+                      display: "grid",
+                      justifyItems: "end",
+                      gap: 2,
                     }}
                   >
-                    {fcfa(s.balance)} FCFA
+                    <AccountBalanceText
+                      summary={s.summary}
+                      style={{ fontWeight: 700 }}
+                    />
+                    <AccountStatusLine summary={s.summary} />
                   </span>
                 </div>
                 <div style={linkBox}>
@@ -1592,7 +1548,15 @@ function ManageDrawer({
   }, [studentId]);
   useEffect(() => reload(), [reload]);
 
-  const balance = acct?.totals.balance ?? 0;
+  const summary = acct
+    ? resolveAccountSummary(acct.summary, {
+        balanceXof: acct.totals.balance,
+        billedXof: acct.totals.billed,
+        installments: acct.invoices.flatMap((invoice) => invoice.installments),
+      })
+    : null;
+  const balance = summary?.balanceXof ?? 0;
+  const balanceMeta = summary ? accountPresentation(summary) : null;
   const payments = acct?.invoices.flatMap((i) => i.payments) ?? [];
   const link = acct ? payBillLink(acct.student.studentNo) : "";
 
@@ -1752,8 +1716,20 @@ function ManageDrawer({
                   marginBottom: 20,
                 }}
               >
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,.72)" }}>
-                  {balance < 0 ? "Account credit" : "Outstanding balance"}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
+                  <span
+                    style={{ fontSize: 12, color: "rgba(255,255,255,.72)" }}
+                  >
+                    Account position
+                  </span>
+                  {summary && <AccountStandingBadge summary={summary} />}
                 </div>
                 <div
                   style={{
@@ -1761,19 +1737,32 @@ function ManageDrawer({
                     fontWeight: 800,
                     fontSize: 30,
                     marginTop: 4,
+                    color:
+                      summary?.standing === "overdue"
+                        ? "#ffb4aa"
+                        : summary?.standing === "unscheduled"
+                          ? "#ffd59c"
+                          : summary?.standing === "cleared" ||
+                              summary?.standing === "credit"
+                            ? "#b7efd0"
+                            : "#fff",
                   }}
                 >
-                  {fcfa(Math.abs(balance))}
-                  <small
+                  {summary
+                    ? accountBalanceLabel(summary)
+                    : `${fcfa(Math.abs(balance))} FCFA`}
+                </div>
+                {balanceMeta && (
+                  <div
                     style={{
-                      fontSize: ".4em",
-                      color: "rgba(255,255,255,.72)",
-                      marginLeft: 5,
+                      fontSize: 11.5,
+                      color: "rgba(255,255,255,.82)",
+                      marginTop: 4,
                     }}
                   >
-                    FCFA{balance < 0 ? " credit" : ""}
-                  </small>
-                </div>
+                    {balanceMeta.description}
+                  </div>
+                )}
                 <div
                   style={{
                     fontSize: 11.5,
@@ -1794,6 +1783,16 @@ function ManageDrawer({
               ) : (
                 acct.invoices.map((inv) => {
                   const isCredit = inv.total < 0;
+                  const invoiceOutstanding = invoiceEffectiveOutstanding(inv);
+                  const invoiceSummary = resolveAccountSummary(inv.summary, {
+                    balanceXof: invoiceOutstanding,
+                    billedXof: inv.total,
+                    installments: inv.installments,
+                  });
+                  const invoiceSettled = Math.max(
+                    0,
+                    inv.total - invoiceOutstanding,
+                  );
                   return (
                     <div
                       key={inv.id}
@@ -1822,10 +1821,10 @@ function ManageDrawer({
                           <div style={{ fontSize: 11.5, color: "#6c7884" }}>
                             {isCredit
                               ? "Reversal credit — offsets other charges"
-                              : inv.paid > 0 && inv.balance > 0
-                                ? `Partly paid · ${fcfa(inv.paid)} of ${fcfa(inv.total)}`
-                                : inv.balance <= 0
-                                  ? `Paid · ${fcfa(inv.paid)} FCFA`
+                              : invoiceSettled > 0 && invoiceOutstanding > 0
+                                ? `Partly settled · ${fcfa(invoiceSettled)} of ${fcfa(inv.total)}`
+                                : invoiceOutstanding <= 0
+                                  ? `Settled · ${fcfa(invoiceSettled)} FCFA`
                                   : `${inv.installments.length || 1} installment${(inv.installments.length || 1) > 1 ? "s" : ""}`}
                           </div>
                         </div>
@@ -1841,30 +1840,22 @@ function ManageDrawer({
                           </span>
                         ) : (
                           <>
-                            {inv.balance <= 0 ? (
-                              <span
-                                style={{
-                                  fontSize: 10,
-                                  fontWeight: 700,
-                                  color: "#2e7d52",
-                                  background: "rgba(46,125,82,.12)",
-                                  padding: "2px 8px",
-                                  borderRadius: 999,
-                                }}
-                              >
-                                Paid
-                              </span>
-                            ) : (
-                              <span
-                                style={{
-                                  fontWeight: 700,
-                                  color: "#141a21",
-                                  fontVariantNumeric: "tabular-nums",
-                                }}
-                              >
-                                {fcfa(inv.balance)} FCFA
-                              </span>
-                            )}
+                            <span
+                              style={{
+                                display: "grid",
+                                justifyItems: "end",
+                                gap: 3,
+                              }}
+                            >
+                              <AccountBalanceText
+                                summary={invoiceSummary}
+                                style={{ fontWeight: 700 }}
+                              />
+                              {invoiceSummary.standing === "overdue" && (
+                                <AccountStatusLine summary={invoiceSummary} />
+                              )}
+                              <AccountStandingBadge summary={invoiceSummary} />
+                            </span>
                             <button
                               onClick={() => setPlanInvoice(inv)}
                               style={{
@@ -1918,20 +1909,24 @@ function ManageDrawer({
                           >
                             <thead>
                               <tr>
-                                {["#", "Due", "Amount", "Paid", "Status"].map(
-                                  (h) => (
-                                    <th
-                                      key={h}
-                                      style={{
-                                        textAlign: "left",
-                                        color: "#6c7884",
-                                        padding: "5px 4px",
-                                      }}
-                                    >
-                                      {h}
-                                    </th>
-                                  ),
-                                )}
+                                {[
+                                  "#",
+                                  "Due",
+                                  "Amount",
+                                  "Settled",
+                                  "Status",
+                                ].map((h) => (
+                                  <th
+                                    key={h}
+                                    style={{
+                                      textAlign: "left",
+                                      color: "#6c7884",
+                                      padding: "5px 4px",
+                                    }}
+                                  >
+                                    {h}
+                                  </th>
+                                ))}
                               </tr>
                             </thead>
                             <tbody>
@@ -1941,23 +1936,18 @@ function ManageDrawer({
                                     {line.sequence}
                                   </td>
                                   <td style={{ padding: 4 }}>
-                                    {new Date(line.dueDate).toLocaleDateString(
-                                      "en-GB",
-                                    )}
+                                    {formatDate(line.dueDate)}
                                   </td>
                                   <td style={{ padding: 4 }}>
                                     {fcfa(line.amountDue)}
                                   </td>
                                   <td style={{ padding: 4 }}>
-                                    {fcfa(line.amountPaid)}
+                                    {fcfa(installmentEffectiveSettled(line))}
                                   </td>
-                                  <td
-                                    style={{
-                                      padding: 4,
-                                      textTransform: "capitalize",
-                                    }}
-                                  >
-                                    {line.status}
+                                  <td style={{ padding: 4 }}>
+                                    <InstallmentStandingBadge
+                                      installment={line}
+                                    />
                                   </td>
                                 </tr>
                               ))}
@@ -1973,7 +1963,7 @@ function ManageDrawer({
               <SectionKick style={{ marginTop: 22 }}>Add a charge</SectionKick>
               <AddChargeForm busy={busy} onSubmit={onAddCharge} />
 
-              {balance > 0 && (
+              {(summary?.outstandingXof ?? Math.max(0, balance)) > 0 && (
                 <>
                   <SectionKick style={{ marginTop: 22 }}>
                     Payment link

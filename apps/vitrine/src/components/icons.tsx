@@ -3,7 +3,7 @@ import {
   Cpu, Cog, Zap, Check, ArrowLeft, MapPin, Mail, GraduationCap, Phone, Sprout,
   Bot, Atom, BrainCircuit, HeartPulse, Hexagon, Satellite, Home, HeartHandshake,
   UsersRound, Plane, Handshake, Wrench, Hammer, TrendingUp, Coins, Scale, Award,
-  MessageCircle, Send, type LucideIcon,
+  MessageCircle, Send, Landmark, Utensils, type LucideIcon,
 } from "lucide-react";
 
 const MAP: Record<string, LucideIcon> = {
@@ -15,6 +15,7 @@ const MAP: Record<string, LucideIcon> = {
   home: Home, "heart-handshake": HeartHandshake, "users-round": UsersRound, plane: Plane,
   handshake: Handshake, wrench: Wrench, hammer: Hammer, "trending-up": TrendingUp, coins: Coins,
   scale: Scale, award: Award, "message-circle": MessageCircle, send: Send,
+  landmark: Landmark, utensils: Utensils,
 };
 
 export function Icon({ name, size = 24, color, style }: { name: string; size?: number; color?: string; style?: React.CSSProperties }) {

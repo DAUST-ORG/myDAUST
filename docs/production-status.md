@@ -41,6 +41,18 @@ Catalog decisions still needed: `EE 3513` is “Control Systems” in production
 
 ## Payments: Wire Disabled; Offline Ledger Partially Reconciled
 
+### Payment-plan-aware balances (release candidate; not deployed)
+
+The 2026-08-11 release candidate replaces amount-based delinquency with one Dakar-calendar account-position calculation shared by student, parent, public-payment, bursar, Billing Admin, registrar, and program-roster APIs.
+
+- A positive balance is red only when an unpaid portion is past its installment date. Due-today and future balances remain current; no-plan debt is labeled **Schedule needed**.
+- Scholarships and account credits offset the oldest obligations within the same student account. Void invoices are excluded, and one student's credit never offsets another account.
+- `/finance` and `/billing-admin` now show gross outstanding, overdue amount, on-time/overdue/cleared account counts, real active hold counts, and standard current/1–30/31–60/61–90/90+ aging with unique-account and installment counts.
+- Payment settlement now re-reads and locks the account in a serializable transaction. Concurrent landed payments cannot lose allocations; genuine excess gateway cash becomes an explicit reversible credit memo.
+- Migration `20260810130000_finance_due_dates_as_dates` converts installment and fee-plan dates to PostgreSQL `date`, preserving the Africa/Dakar calendar date.
+
+Release status: local tests and builds are green, but this change is **not yet on staging or production**. The production read-only preflight found 298 non-void positive invoices, no unscheduled/credit/overpaid/archived-debt discrepancies, and 16 stale stored installment statuses. Run the reconciliation job after each deployment and replace this note with the deployed revisions after production smoke testing.
+
 The wire-transfer workflow is deployed across authenticated student billing, public bill lookup, payment links, Billing Admin, and the Finance portal.
 
 - Bursar/admin users can configure the global bank account and notification recipients from **Billing Admin → Bank settings** or use **Finance → Wire Transfers**.

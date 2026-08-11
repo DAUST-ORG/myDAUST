@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, BookOpen, ChevronRight, GraduationCap, Layers, Pencil, TrendingUp, Users, Wallet } from "lucide-react";
 import { type AdminPrograms, type ProgramDetail, type ProgramRow, getAdminPrograms, getProgramDetail } from "@/lib/api";
 import { formatXof, formatXofCompact } from "@/lib/format";
+import { AccountBalanceText, AccountStatusLine, resolveAccountSummary } from "@/components/AccountBalance";
 import { Avatar, Badge, type BadgeTone, Tabs } from "@/components/ui";
 import { ProgramEditModal } from "../ProgramEditModal";
 import { CurriculumEditor } from "./CurriculumEditor";
@@ -17,6 +18,20 @@ function gpaColor(gpa: number): string {
   if (gpa >= 3.5) return "var(--success)";
   if (gpa > 0 && gpa < 2) return "var(--danger)";
   return "var(--fg1)";
+}
+
+function ProgramBalance({ student }: { student: ProgramDetail["students"][number] }) {
+  const summary = resolveAccountSummary(student.summary, { balanceXof: student.balance });
+  return (
+    <td style={{ textAlign: "right" }}>
+      <span style={{ display: "grid", gap: 2, justifyItems: "end" }}>
+        <AccountBalanceText summary={summary} style={{ fontWeight: 600 }} />
+        {(summary.standing === "overdue" ||
+          summary.standing === "unscheduled" ||
+          summary.dueTodayXof > 0) && <AccountStatusLine summary={summary} />}
+      </span>
+    </td>
+  );
 }
 
 export default function ProgramDetailPage() {
@@ -152,9 +167,7 @@ export default function ProgramDetailPage() {
                     <td>{s.yearLevel ? `Year ${s.yearLevel}` : "—"}</td>
                     <td><span style={{ fontWeight: 700, color: gpaColor(s.gpa) }}>{s.gpa > 0 ? s.gpa.toFixed(2) : "—"}</span></td>
                     <td>{s.completedCredits}</td>
-                    <td style={{ textAlign: "right", fontWeight: s.balance > 0 ? 600 : 400, color: s.balance > 0 ? "var(--danger)" : s.balance < 0 ? "var(--success)" : "var(--fg3)" }}>
-                      {s.balance > 0 ? formatXof(s.balance) : s.balance < 0 ? `Credit ${formatXof(-s.balance)}` : "Cleared"}
-                    </td>
+                    <ProgramBalance student={s} />
                     <td><Badge tone={STATUS_TONE[s.status] ?? "neutral"}>{STATUS_LABEL[s.status] ?? s.status}</Badge></td>
                     <td style={{ textAlign: "right" }}><ChevronRight size={16} color="var(--fg3)" /></td>
                   </tr>

@@ -343,7 +343,8 @@ model Installment {
   sequence    Int
   // Staff-facing name for this installment, e.g. "Inscription"; null falls back to the sequence.
   label       String?
-  dueDate     DateTime
+  /// Inclusive payment-plan calendar date in Africa/Dakar (not a timestamp).
+  dueDate     DateTime          @db.Date
   amountDue   Int
   amountPaid  Int               @default(0)
   status      InstallmentStatus @default(pending)
@@ -1674,7 +1675,8 @@ model FeePlanInstallment {
   semester          String
   label             String
   sequence          Int
-  dueOn             DateTime?
+  /// Inclusive template calendar date in Africa/Dakar (not a timestamp).
+  dueOn             DateTime? @db.Date
   /// Tuition + cafeteria + housing, integer XOF.
   amountFullXof     Int
   /// Tuition only, integer XOF.

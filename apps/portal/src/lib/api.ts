@@ -1,5 +1,17 @@
 "use client";
 
+import type {
+  AccountBalanceSummary,
+  InstallmentDueState,
+  InstallmentPaymentProgress,
+} from "@mydaust/shared";
+export type {
+  AccountBalanceSummary,
+  AccountStanding,
+  InstallmentDueState,
+  InstallmentPaymentProgress,
+} from "@mydaust/shared";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 /** HTTP error carrying the status so callers can branch; `message` is always human-readable. */
@@ -239,6 +251,17 @@ export interface BillingInstallment {
   amountDue: number;
   amountPaid: number;
   status: string;
+  /** Additive derived fields; optional while older API tasks roll forward. */
+  outstanding?: number;
+  outstandingXof?: number;
+  creditApplied?: number;
+  creditAppliedXof?: number;
+  effectiveSettledXof?: number;
+  amountDueXof?: number;
+  amountPaidXof?: number;
+  paymentProgress?: InstallmentPaymentProgress;
+  dueState?: InstallmentDueState;
+  daysPastDue?: number;
 }
 export interface BillingPayment {
   id: string;
@@ -272,10 +295,15 @@ export interface WireConfig extends PublicWireConfig {
 }
 export interface BillingInvoice {
   id: string;
+  /** Additive canonical tie-breaker; absent while an older API task drains. */
+  createdAt?: string;
   term: string;
   total: number;
   paid: number;
   balance: number;
+  summary?: AccountBalanceSummary;
+  effectiveOutstandingXof?: number;
+  effectiveStatus?: AccountBalanceSummary["standing"];
   status: string;
   installments: BillingInstallment[];
   payments: BillingPayment[];
@@ -283,6 +311,8 @@ export interface BillingInvoice {
 }
 export const getMyBilling = () =>
   request<BillingInvoice[]>("/finance/my/billing");
+export const getMyBillingSummary = () =>
+  request<AccountBalanceSummary>("/finance/my/billing-summary");
 export const initiatePayment = (
   invoiceId: string,
   amount: number,
@@ -767,7 +797,7 @@ export const getMyGrades = () => request<GradeRow[]>("/academics/my/grades");
 export interface AdminStats {
   totalStudents: number;
   totalEnrolled: number;
-  /** Students carrying an unpaid balance — a headcount, not an amount. */
+  /** Active students with at least one real hold record. */
   holdsCount: number;
   openApplications: number;
   byProgram: { code: string; name: string; students: number }[];
@@ -785,6 +815,7 @@ export interface AdminStudent {
   gpa: number;
   completedCredits: number;
   balance: number;
+  summary?: AccountBalanceSummary;
   status: string;
   hasLogin: boolean;
   mustChangePassword: boolean;
@@ -877,6 +908,7 @@ export interface ProgramDetail {
     gpa: number;
     completedCredits: number;
     balance: number;
+    summary?: AccountBalanceSummary;
     status: string;
   }[];
   courses: { code: string; title: string; credits: number }[];
@@ -1006,6 +1038,7 @@ export interface AdminStudentDetail {
   standing: string;
   status: string;
   balance: number;
+  summary?: AccountBalanceSummary;
   dateOfBirth: string | null;
   gender: string | null;
   phone: string | null;
@@ -1721,6 +1754,17 @@ export interface AccountInstallment {
   amountDue: number;
   amountPaid: number;
   status: string;
+  /** Additive derived fields; optional while older API tasks roll forward. */
+  outstanding?: number;
+  outstandingXof?: number;
+  creditApplied?: number;
+  creditAppliedXof?: number;
+  effectiveSettledXof?: number;
+  amountDueXof?: number;
+  amountPaidXof?: number;
+  paymentProgress?: InstallmentPaymentProgress;
+  dueState?: InstallmentDueState;
+  daysPastDue?: number;
 }
 export interface AccountInvoice {
   id: string;
@@ -1729,6 +1773,9 @@ export interface AccountInvoice {
   total: number;
   paid: number;
   balance: number;
+  summary?: AccountBalanceSummary;
+  effectiveOutstandingXof?: number;
+  effectiveStatus?: AccountBalanceSummary["standing"];
   status: string;
   hasPlan: boolean;
   installments: AccountInstallment[];
@@ -1744,6 +1791,13 @@ export interface AccountInvoice {
 export interface StudentAccount {
   student: { studentNo: string; name: string; program: string; email: string };
   totals: { billed: number; paid: number; balance: number };
+  summary?: AccountBalanceSummary;
+  activeHolds?: {
+    id: string;
+    type: string;
+    reason: string | null;
+    placedAt: string;
+  }[];
   invoices: AccountInvoice[];
 }
 export const getStudentAccount = (studentId: string) =>
@@ -1759,9 +1813,19 @@ export interface StudentAccountRow {
   billed: number;
   paid: number;
   balance: number;
+  summary?: AccountBalanceSummary;
   openCharges: number;
   overdue: boolean;
   status: string; // paid | due | overdue
+  recordStatus?: string;
+  hasActiveHold?: boolean;
+  activeHoldCount?: number;
+  activeHolds?: {
+    id: string;
+    type: string;
+    reason: string | null;
+    placedAt: string;
+  }[];
   invoiceId: string | null;
   billingNumber: string | null;
   billingDescription: string | null;
@@ -1974,12 +2038,40 @@ export interface OverdueRow {
 export const getOverdue = () => request<OverdueRow[]>("/finance/admin/overdue");
 
 export interface ArAging {
-  buckets: { key: string; label: string; amount: number; count: number }[];
+  buckets: {
+    key: string;
+    label: string;
+    amount: number;
+    /** Unpaid schedule lines in the bucket, including a synthetic unscheduled line. */
+    count: number;
+    accountCount?: number;
+    installmentCount?: number;
+  }[];
   totalOutstanding: number;
+  accountCount?: number;
+  installmentCount?: number;
+  accountCounts?: {
+    onTime: number;
+    overdue: number;
+    cleared: number;
+    credit: number;
+    noBilling: number;
+    unscheduled: number;
+  };
+  activeHoldAccountCount?: number;
+  summary?: AccountBalanceSummary;
   rows: {
+    studentId: string;
     student: string;
     studentNo: string;
     term: string;
+    invoiceId: string;
+    installmentId: string | null;
+    sequence: number | null;
+    dueDate: string | null;
+    dueState: "unscheduled" | "not_yet_due" | "due_today" | "overdue";
+    amountDue: number;
+    amountPaid: number;
     daysOverdue: number;
     outstanding: number;
   }[];
@@ -2443,7 +2535,15 @@ export interface BillCharge {
   label: string;
   dueDate: string | null;
   amountXof: number;
+  /** Cash actually posted against the charge. */
   paidXof: number;
+  /** Additive canonical position fields; optional for a rolling API deployment. */
+  creditAppliedXof?: number;
+  effectiveSettledXof?: number;
+  outstandingXof?: number;
+  paymentProgress?: InstallmentPaymentProgress;
+  dueState?: InstallmentDueState;
+  daysPastDue?: number;
   status: string; // pending | partial | paid | overdue
 }
 export interface BillLookup {
@@ -2452,6 +2552,11 @@ export interface BillLookup {
   program: string | null;
   term: string | null;
   balanceXof: number;
+  /** Canonical account amount remaining after credits. */
+  outstandingXof?: number;
+  /** Maximum that can currently post to the oldest invoice without leapfrogging. */
+  payableXof?: number;
+  summary?: AccountBalanceSummary;
   creditXof: number;
   dueDate: string | null;
   charges: BillCharge[];
@@ -2504,6 +2609,7 @@ export interface ChildSummary {
   completedCredits: number;
   standing: string;
   balance: number;
+  summary?: AccountBalanceSummary;
   /** Credits the programme requires, summed from its requirement categories. */
   requiredCredits: number | null;
   /** Percentage; a late counts as half a present. Null when nothing is recorded. */

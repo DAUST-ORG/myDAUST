@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   type BillingInvoice,
+  type AccountBalanceSummary,
   type MyProfile,
   type PublicWireConfig,
   getCurrentTerm,
   getMyBilling,
+  getMyBillingSummary,
   getMyProfile,
   getMyPiSpiRequest,
   getPiSpiConfig,
@@ -21,6 +23,15 @@ import { Card, EmptyState, PageHeader, Select } from "@/components/ui";
 import { PiSpiPayForm } from "@/components/PiSpiPayForm";
 import { WireTransferForm } from "@/components/WireTransferForm";
 import { formatDate, formatXof } from "@/lib/format";
+import {
+  AccountStandingBadge,
+  accountPresentation,
+  fallbackAccountSummary,
+  installmentOutstanding,
+  invoiceEffectiveOutstanding,
+  resolveAccountSummary,
+  type InstallmentPositionLike,
+} from "@/components/AccountBalance";
 
 const METHODS = [
   { value: "wave", label: "Wave" },
@@ -28,37 +39,73 @@ const METHODS = [
   { value: "card", label: "Bank card" },
 ];
 
-interface ChargeRow {
-  id: string;
+interface ChargeRow extends InstallmentPositionLike {
+  id: string | null;
   invoiceId: string;
+  invoiceCreatedAt: string | null;
+  invoiceOrder: number;
+  sequence: number | null;
   description: string;
   note: string;
   amount: number;
   outstanding: number;
-  dueDate: string;
+  dueDate: string | null;
   status: string;
 }
 
-function statusStyle(status: string): {
+function statusStyle(charge: ChargeRow): {
   bg: string;
   fg: string;
   label: string;
 } {
-  if (status === "paid")
+  if (charge.outstanding <= 0)
     return { bg: "rgba(46,125,82,.12)", fg: "#1f6b42", label: "Paid" };
-  if (status === "overdue")
+  if (charge.dueState === "overdue")
     return {
       bg: "rgba(192,57,43,.10)",
       fg: "var(--error-500)",
       label: "Overdue",
     };
-  if (status === "partial")
-    return { bg: "rgba(237,132,37,.14)", fg: "#a85f16", label: "Partial" };
-  return { bg: "rgba(237,132,37,.14)", fg: "#a85f16", label: "Due" };
+  if (charge.dueState === "due_today")
+    return { bg: "rgba(237,132,37,.14)", fg: "#a85f16", label: "Due today" };
+  if (charge.dueState === "unscheduled")
+    return {
+      bg: "rgba(237,132,37,.14)",
+      fg: "#a85f16",
+      label: "Schedule needed",
+    };
+  const summary = fallbackAccountSummary({
+    balanceXof: charge.outstanding,
+    billedXof: charge.amount,
+    installments: [
+      {
+        dueDate: charge.dueDate,
+        amountDue: charge.amount,
+        amountPaid: charge.amount - charge.outstanding,
+      },
+    ],
+  });
+  if (summary.standing === "overdue")
+    return {
+      bg: "rgba(192,57,43,.10)",
+      fg: "var(--error-500)",
+      label: "Overdue",
+    };
+  if (summary.dueTodayXof > 0)
+    return { bg: "rgba(237,132,37,.14)", fg: "#a85f16", label: "Due today" };
+  if (charge.paymentProgress === "partial" || charge.status === "partial")
+    return {
+      bg: "var(--bg-tint)",
+      fg: "var(--daust-navy)",
+      label: "Partly paid",
+    };
+  return { bg: "var(--bg-tint)", fg: "var(--daust-navy)", label: "Scheduled" };
 }
 
 export default function BillingPage() {
   const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
+  const [billingSummary, setBillingSummary] =
+    useState<AccountBalanceSummary | null>(null);
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [term, setTerm] = useState("");
   const [method, setMethod] = useState("wave");
@@ -67,13 +114,18 @@ export default function BillingPage() {
   const [loaded, setLoaded] = useState(false);
   const [wireConfig, setWireConfig] = useState<PublicWireConfig | null>(null);
   const [piSpiEnabled, setPiSpiEnabled] = useState(false);
-  const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(null);
+  const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(
+    null,
+  );
 
   useEffect(() => {
     getMyBilling()
       .then(setInvoices)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoaded(true));
+    getMyBillingSummary()
+      .then(setBillingSummary)
+      .catch(() => {});
     getMyProfile()
       .then(setProfile)
       .catch(() => {});
@@ -91,23 +143,85 @@ export default function BillingPage() {
   const charges: ChargeRow[] = useMemo(
     () =>
       invoices
-        .flatMap((inv) =>
-          inv.installments.map<ChargeRow>((i) => ({
+        .flatMap((inv, invoiceIndex) => {
+          // `/my/billing` is returned newest-first. The index keeps the portal
+          // compatible with an older API task while `createdAt` rolls out.
+          const invoiceOrder = invoices.length - 1 - invoiceIndex;
+          const scheduled = inv.installments.map<ChargeRow>((i) => ({
+            ...i,
             id: i.id,
             invoiceId: inv.id,
+            invoiceCreatedAt: inv.createdAt ?? null,
+            invoiceOrder,
+            sequence: i.sequence,
             description: `Installment ${i.sequence} — ${inv.term}`,
             note: `Installment ${i.sequence} of ${inv.installments.length}`,
             amount: i.amountDue,
-            outstanding: i.amountDue - i.amountPaid,
+            outstanding: installmentOutstanding(i),
             dueDate: i.dueDate,
             status: i.status,
-          })),
-        )
-        .sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
+          }));
+          const effectiveOutstanding =
+            inv.summary?.outstandingXof ?? invoiceEffectiveOutstanding(inv);
+          const unscheduled = Math.max(
+            0,
+            effectiveOutstanding -
+              scheduled.reduce((sum, line) => sum + line.outstanding, 0),
+          );
+          if (unscheduled <= 0) return scheduled;
+          return [
+            ...scheduled,
+            {
+              id: null,
+              invoiceId: inv.id,
+              invoiceCreatedAt: inv.createdAt ?? null,
+              invoiceOrder,
+              sequence: null,
+              description: `Unscheduled charge — ${inv.term}`,
+              note: "Finance has not assigned a payment date",
+              amount: unscheduled,
+              amountDue: unscheduled,
+              amountPaid: 0,
+              outstanding: unscheduled,
+              outstandingXof: unscheduled,
+              dueDate: null,
+              dueState: "unscheduled" as const,
+              paymentProgress: "unpaid" as const,
+              status: "pending",
+              daysPastDue: 0,
+            },
+          ];
+        })
+        .sort((a, b) => {
+          if (a.dueDate && b.dueDate) {
+            const dueOrder = a.dueDate.localeCompare(b.dueDate);
+            if (dueOrder !== 0) return dueOrder;
+          } else if (a.dueDate) return -1;
+          else if (b.dueDate) return 1;
+          const sequenceOrder =
+            (a.sequence ?? Number.MAX_SAFE_INTEGER) -
+            (b.sequence ?? Number.MAX_SAFE_INTEGER);
+          if (sequenceOrder !== 0) return sequenceOrder;
+          const invoiceOrder =
+            a.invoiceCreatedAt && b.invoiceCreatedAt
+              ? a.invoiceCreatedAt.localeCompare(b.invoiceCreatedAt)
+              : a.invoiceOrder - b.invoiceOrder;
+          if (invoiceOrder !== 0) return invoiceOrder;
+          return (
+            a.invoiceId.localeCompare(b.invoiceId) ||
+            (a.id ?? "").localeCompare(b.id ?? "")
+          );
+        }),
     [invoices],
   );
 
   const balance = invoices.reduce((s, i) => s + i.balance, 0);
+  const accountSummary = resolveAccountSummary(billingSummary, {
+    balanceXof: balance,
+    billedXof: invoices.reduce((sum, invoice) => sum + invoice.total, 0),
+    installments: invoices.flatMap((invoice) => invoice.installments),
+  });
+  const accountMeta = accountPresentation(accountSummary);
   const nextCharge = charges.find((c) => c.outstanding > 0);
   const nextInvoice = nextCharge
     ? invoices.find((invoice) => invoice.id === nextCharge.invoiceId)
@@ -115,7 +229,16 @@ export default function BillingPage() {
   const pendingWire =
     nextInvoice?.wireTransfers.find((wire) => wire.status === "submitted") ??
     null;
-  const settled = balance <= 0;
+  const settled = accountSummary.outstandingXof <= 0;
+
+  async function refreshBilling() {
+    const [nextInvoices, nextSummary] = await Promise.all([
+      getMyBilling(),
+      getMyBillingSummary().catch(() => null),
+    ]);
+    setInvoices(nextInvoices);
+    setBillingSummary(nextSummary);
+  }
 
   async function pay() {
     if (!nextCharge || method === "wire" || method === "pi_spi") return;
@@ -150,7 +273,7 @@ export default function BillingPage() {
   async function pollPiSpi(txId: string) {
     const summary = await getMyPiSpiRequest(txId);
     setPiSpiRequest(summary);
-    if (summary.status === "settled") setInvoices(await getMyBilling());
+    if (summary.status === "settled") await refreshBilling();
     return summary;
   }
 
@@ -161,7 +284,7 @@ export default function BillingPage() {
       nextCharge.outstanding,
       proof,
     );
-    setInvoices(await getMyBilling());
+    await refreshBilling();
   }
 
   return (
@@ -205,29 +328,53 @@ export default function BillingPage() {
               boxShadow: "var(--shadow-navy)",
             }}
           >
-            <div style={{ fontSize: 13, opacity: 0.8 }}>Current balance</div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <span style={{ fontSize: 13, opacity: 0.8 }}>
+                Account position
+              </span>
+              <AccountStandingBadge summary={accountSummary} />
+            </div>
             <div
               style={{
                 fontFamily: "var(--font-display)",
                 fontSize: 32,
                 fontWeight: 800,
-                marginTop: 4,
+                marginTop: 7,
+                color:
+                  accountSummary.standing === "overdue"
+                    ? "#ffb4aa"
+                    : accountSummary.standing === "credit" ||
+                        accountSummary.standing === "cleared"
+                      ? "#b7efd0"
+                      : accountSummary.standing === "unscheduled"
+                        ? "#ffd59c"
+                        : "#fff",
               }}
             >
-              {formatXof(balance)}
+              {accountSummary.standing === "credit"
+                ? `Credit ${formatXof(accountSummary.creditXof)}`
+                : formatXof(accountSummary.outstandingXof)}
             </div>
             <div
               style={{
                 fontSize: 12.5,
                 marginTop: 4,
-                color: settled ? "rgba(180,240,200,.9)" : "#ffb3a8",
+                color:
+                  accountSummary.standing === "overdue"
+                    ? "#ffb4aa"
+                    : settled
+                      ? "rgba(183,239,208,.95)"
+                      : "rgba(255,255,255,.82)",
               }}
             >
-              {settled
-                ? "Account settled — thank you"
-                : nextCharge
-                  ? `${nextCharge.note} due`
-                  : "Payment outstanding"}
+              {accountMeta.description}
             </div>
 
             {!settled && nextCharge && (
@@ -310,7 +457,9 @@ export default function BillingPage() {
             >
               <span style={{ opacity: 0.8 }}>Next due date</span>
               <strong>
-                {nextCharge ? formatDate(nextCharge.dueDate) : "—"}
+                {nextCharge?.dueDate
+                  ? formatDate(nextCharge.dueDate)
+                  : "Not scheduled"}
               </strong>
             </div>
             <p style={{ fontSize: 11, opacity: 0.7, margin: "12px 0 0" }}>
@@ -341,10 +490,10 @@ export default function BillingPage() {
               <span style={{ textAlign: "right" }}>Status</span>
             </div>
             {charges.map((c, i) => {
-              const s = statusStyle(c.status);
+              const s = statusStyle(c);
               return (
                 <div
-                  key={c.id}
+                  key={`${c.invoiceId}:${c.id ?? "unscheduled"}`}
                   style={{
                     display: "grid",
                     gridTemplateColumns: "minmax(0,2fr) 130px 120px 90px",
@@ -378,7 +527,7 @@ export default function BillingPage() {
                     className="muted"
                     style={{ textAlign: "right", fontSize: 12.5 }}
                   >
-                    {formatDate(c.dueDate)}
+                    {c.dueDate ? formatDate(c.dueDate) : "Not scheduled"}
                   </span>
                   <span style={{ textAlign: "right" }}>
                     <span

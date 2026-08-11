@@ -4,6 +4,17 @@ Environment confirmed: portal+API `https://daust-staging.azt.dev`; vitrine `http
 pay-bill/billing-admin reachable as routes on the portal host (payment.* vanity host not in staging tunnel).
 All 10 seeded logins work (password `daust-dev-2026`).
 
+## 2026-08-11 payment-plan aging release-candidate validation
+
+- PASS: shared account-position suite, 35/35 tests. Includes Dakar yesterday/today/tomorrow behavior, partial payments, credits, void/no-plan invoices, and aging boundaries.
+- PASS: API suite against disposable PostgreSQL, 135/135 tests. Includes cross-surface summary parity, archived-debt scope, distinct real-hold counts, concurrent different-payment settlement, settlement-versus-plan-edit races, excess-credit handling, refund reversal, and webhook idempotency.
+- PASS: workspace `pnpm typecheck` and `pnpm build`; portal generated all 68 routes and vitrine all 5 routes.
+- PASS: all 42 migrations applied to a fresh database; Prisma schema validation and migration diff reported no difference.
+- PASS: local UI smoke across `/finance`, `/finance/accounts`, `/billing-admin`, student billing/dashboard, parent billing/dashboard, and registrar students. Overdue, due-today, on-time, unscheduled, credit, cleared, never-billed, and active-hold fixtures rendered with the intended labels; browser console had no warnings/errors.
+- PASS: public bill API returned the same canonical summary and preserved legacy cash-paid fields while exposing additive effective-settlement fields.
+- READ-ONLY PRODUCTION PREFLIGHT: 298 positive non-void invoices; no unscheduled, credit, overpaid, plan-total, installment-paid, or archived-debt discrepancies. Sixteen stored installment statuses are stale and must be repaired by the post-deploy reconciliation job.
+- DEPLOYMENT: not yet on `develop` or `main` at the time of this entry; staging smoke and production promotion remain required.
+
 ## Seed ground-truth (staging, differs from plan assumptions — NOT bugs)
 
 - Aïssatou (stu_demo_aissatou): GPA 4.0 (only CSC 101=A, Spring 2026), 4 current enrollments / 11 credits, register badge=6.

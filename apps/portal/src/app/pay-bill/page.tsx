@@ -25,6 +25,16 @@ import {
 } from "@/lib/api";
 import { PiSpiPayForm } from "@/components/PiSpiPayForm";
 import { WireTransferForm } from "@/components/WireTransferForm";
+import { formatDate } from "@/lib/format";
+import {
+  AccountStandingBadge,
+  InstallmentStandingBadge,
+  accountPresentation,
+  fallbackAccountSummary,
+  installmentCreditApplied,
+  installmentOutstanding,
+  resolveAccountSummary,
+} from "@/components/AccountBalance";
 
 const fcfa = (n: number) => n.toLocaleString("fr-FR");
 const STORE_KEY = "daust-pay-bill";
@@ -87,7 +97,9 @@ function PayBillInner() {
   const [err, setErr] = useState<string | null>(null);
   const [wireConfig, setWireConfig] = useState<PublicWireConfig | null>(null);
   const [piSpiEnabled, setPiSpiEnabled] = useState(false);
-  const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(null);
+  const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(
+    null,
+  );
 
   useEffect(() => {
     getPiSpiConfig()
@@ -102,7 +114,13 @@ function PayBillInner() {
     const data = await lookupBill(c.studentNo, c.dob);
     setBill(data);
     setCreds(c);
-    setAmount(String(data.balanceXof));
+    setAmount(
+      String(
+        data.payableXof ??
+          data.summary?.outstandingXof ??
+          Math.max(0, data.balanceXof),
+      ),
+    );
     sessionStorage.setItem(STORE_KEY, JSON.stringify(c));
   }, []);
 
@@ -205,6 +223,43 @@ function PayBillInner() {
     color: "#141a21",
     outline: "none",
   };
+  const accountSummary = bill
+    ? resolveAccountSummary(bill.summary, {
+        balanceXof: bill.balanceXof,
+        billedXof: bill.charges.reduce(
+          (sum, charge) => sum + charge.amountXof,
+          0,
+        ),
+        installments: bill.charges.flatMap((charge) =>
+          charge.dueDate
+            ? [
+                {
+                  dueDate: charge.dueDate,
+                  amountDue: charge.amountXof,
+                  amountPaid: charge.paidXof,
+                  outstandingXof: charge.outstandingXof,
+                  creditAppliedXof: charge.creditAppliedXof,
+                  effectiveSettledXof: charge.effectiveSettledXof,
+                  paymentProgress: charge.paymentProgress,
+                  dueState: charge.dueState,
+                  daysPastDue: charge.daysPastDue,
+                },
+              ]
+            : [],
+        ),
+      })
+    : null;
+  const accountMeta = accountSummary
+    ? accountPresentation(accountSummary)
+    : null;
+  const payableXof = bill
+    ? Math.min(
+        accountSummary?.outstandingXof ?? Math.max(0, bill.balanceXof),
+        bill.payableXof ??
+          accountSummary?.outstandingXof ??
+          Math.max(0, bill.balanceXof),
+      )
+    : 0;
 
   return (
     <main
@@ -478,10 +533,13 @@ function PayBillInner() {
               </div>
               <div style={{ marginTop: 22, position: "relative" }}>
                 <div style={{ fontSize: 12, color: "rgba(255,255,255,.72)" }}>
-                  {bill.balanceXof < 0
-                    ? "Account credit"
-                    : "Outstanding balance"}
+                  Account position
                 </div>
+                {accountSummary && (
+                  <div style={{ position: "absolute", top: -4, right: 0 }}>
+                    <AccountStandingBadge summary={accountSummary} />
+                  </div>
+                )}
                 <div
                   style={{
                     fontFamily: "var(--font-display)",
@@ -489,9 +547,23 @@ function PayBillInner() {
                     fontSize: "clamp(30px,7vw,40px)",
                     lineHeight: 1,
                     marginTop: 5,
+                    color:
+                      accountSummary?.standing === "overdue"
+                        ? "#ffb4aa"
+                        : accountSummary?.standing === "credit" ||
+                            accountSummary?.standing === "cleared"
+                          ? "#b7efd0"
+                          : accountSummary?.standing === "unscheduled"
+                            ? "#ffd59c"
+                            : "#fff",
                   }}
                 >
-                  {fcfa(Math.abs(bill.balanceXof))}{" "}
+                  {fcfa(
+                    accountSummary?.standing === "credit"
+                      ? accountSummary.creditXof
+                      : (accountSummary?.outstandingXof ??
+                          Math.abs(bill.balanceXof)),
+                  )}{" "}
                   <span
                     style={{
                       fontSize: 16,
@@ -499,10 +571,21 @@ function PayBillInner() {
                       color: "rgba(255,255,255,.72)",
                     }}
                   >
-                    FCFA{bill.balanceXof < 0 ? " credit" : ""}
+                    FCFA{accountSummary?.standing === "credit" ? " credit" : ""}
                   </span>
                 </div>
-                {bill.dueDate && (
+                {accountMeta && (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "rgba(255,255,255,.78)",
+                      marginTop: 8,
+                    }}
+                  >
+                    {accountMeta.description}
+                  </div>
+                )}
+                {accountSummary?.nextDueDate && (
                   <span
                     style={{
                       display: "inline-flex",
@@ -517,11 +600,7 @@ function PayBillInner() {
                     }}
                   >
                     <CalendarDays size={13} /> Next due{" "}
-                    {new Date(bill.dueDate).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
+                    {formatDate(accountSummary.nextDueDate)}
                   </span>
                 )}
               </div>
@@ -558,44 +637,73 @@ function PayBillInner() {
                         {c.label}
                       </div>
                       <div style={{ fontSize: 11.5, color: "#6c7884" }}>
-                        {c.dueDate
-                          ? `Due ${new Date(c.dueDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`
-                          : ""}
+                        {c.dueDate ? `Due ${formatDate(c.dueDate)}` : ""}
                       </div>
                     </div>
-                    {c.status === "paid" ? (
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 4,
-                          fontSize: 10.5,
-                          fontWeight: 700,
-                          color: "#2e7d52",
-                          background: "rgba(46,125,82,.12)",
-                          padding: "2px 8px",
-                          borderRadius: 999,
-                        }}
-                      >
-                        <CheckCircle2 size={11} /> Paid
-                      </span>
-                    ) : (
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          color: "#141a21",
-                          fontVariantNumeric: "tabular-nums",
-                        }}
-                      >
-                        {fcfa(c.amountXof - c.paidXof)} FCFA
-                      </div>
-                    )}
+                    {(() => {
+                      const installment = {
+                        dueDate: c.dueDate,
+                        amountDue: c.amountXof,
+                        amountPaid: c.paidXof,
+                        outstandingXof: c.outstandingXof,
+                        creditAppliedXof: c.creditAppliedXof,
+                        effectiveSettledXof: c.effectiveSettledXof,
+                        paymentProgress: c.paymentProgress,
+                        dueState: c.dueState,
+                        daysPastDue: c.daysPastDue,
+                      };
+                      const outstanding = installmentOutstanding(installment);
+                      if (outstanding <= 0)
+                        return (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                              color: "#2e7d52",
+                              background: "rgba(46,125,82,.12)",
+                              padding: "2px 8px",
+                              borderRadius: 999,
+                            }}
+                          >
+                            <CheckCircle2 size={11} />
+                            {installmentCreditApplied(installment) > 0
+                              ? "Settled"
+                              : "Paid"}
+                          </span>
+                        );
+                      const lineSummary = fallbackAccountSummary({
+                        balanceXof: outstanding,
+                        billedXof: c.amountXof,
+                        installments: [installment],
+                      });
+                      const lineMeta = accountPresentation(lineSummary);
+                      return (
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            color: lineMeta.color,
+                            fontVariantNumeric: "tabular-nums",
+                            textAlign: "right",
+                          }}
+                        >
+                          {fcfa(outstanding)} FCFA
+                          <div style={{ marginTop: 2 }}>
+                            <InstallmentStandingBadge
+                              installment={installment}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
             )}
 
-            {bill.balanceXof > 0 ? (
+            {(accountSummary?.outstandingXof ?? bill.balanceXof) > 0 ? (
               <div style={{ padding: "16px 30px 30px" }}>
                 <div
                   style={{
@@ -625,7 +733,7 @@ function PayBillInner() {
                     onChange={(e) => {
                       const n = Math.min(
                         Number(e.target.value.replace(/[^\d]/g, "")) || 0,
-                        bill.balanceXof,
+                        payableXof,
                       );
                       setAmount(n ? String(n) : "");
                     }}
@@ -654,8 +762,14 @@ function PayBillInner() {
                 </div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
                   {[
-                    ["Full balance", bill.balanceXof],
-                    ["Half", Math.round(bill.balanceXof / 2)],
+                    [
+                      payableXof <
+                      (accountSummary?.outstandingXof ?? bill.balanceXof)
+                        ? "Current charge"
+                        : "Full balance",
+                      payableXof,
+                    ],
+                    ["Half", Math.round(payableXof / 2)],
                   ].map(([label, val]) => (
                     <button
                       key={label as string}
@@ -842,13 +956,13 @@ function PayBillInner() {
                     fontSize: 20,
                   }}
                 >
-                  {bill.balanceXof < 0
+                  {accountSummary?.standing === "credit"
                     ? "Credit on account"
                     : "Balance cleared"}
                 </div>
                 <p style={{ color: "#6c7884", fontSize: 13.5, marginTop: 6 }}>
-                  {bill.balanceXof < 0
-                    ? `You have a credit of ${fcfa(-bill.balanceXof)} FCFA that will apply to future charges. Nothing is due right now.`
+                  {accountSummary?.standing === "credit"
+                    ? `You have a credit of ${fcfa(accountSummary.creditXof)} FCFA that will apply to future charges. Nothing is due right now.`
                     : "This account is fully paid. Thank you!"}
                 </p>
                 <button

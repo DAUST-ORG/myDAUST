@@ -26,6 +26,7 @@ import {
 } from "@/lib/api";
 import { PiSpiPayForm } from "@/components/PiSpiPayForm";
 import { WireTransferForm } from "@/components/WireTransferForm";
+import { formatDate } from "@/lib/format";
 
 const fcfa = (n: number) => n.toLocaleString("fr-FR").replace(/ /g, " ");
 
@@ -82,7 +83,9 @@ export default function PayLinkPage() {
   const [err, setErr] = useState<string | null>(null);
   const [wireConfig, setWireConfig] = useState<PublicWireConfig | null>(null);
   const [piSpiEnabled, setPiSpiEnabled] = useState(false);
-  const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(null);
+  const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(
+    null,
+  );
   const polls = useRef(0);
 
   const load = useCallback(() => {
@@ -391,12 +394,7 @@ export default function PayLinkPage() {
                     alignSelf: "flex-start",
                   }}
                 >
-                  <CalendarDays size={13} /> Due{" "}
-                  {new Date(link.dueDate).toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                  })}
+                  <CalendarDays size={13} /> Due {formatDate(link.dueDate)}
                 </span>
               )}
 

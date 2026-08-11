@@ -78,7 +78,9 @@ export const PI_SPI_REASONS: Record<string, string> = {
 
 export function piSpiReasonText(code: string | null | undefined): string {
   if (!code) return "The payment request was not completed.";
-  return PI_SPI_REASONS[code] ?? `The payment request was declined (code ${code}).`;
+  return (
+    PI_SPI_REASONS[code] ?? `The payment request was declined (code ${code}).`
+  );
 }
 
 export const WireTransferStatus = z.enum(["submitted", "approved", "rejected"]);
@@ -204,7 +206,7 @@ export const PLAN_TEMPLATES = [
   },
   {
     key: "quarterly",
-    label: "4 installments — official (Inscription, Nov 5, Jan 5, Mar 5)",
+    label: "4 installments · official (Inscription, Nov 5, Jan 5, Mar 5)",
     installments: 4,
     dueMonthDays: ["enrolment", "11-05", "01-05", "03-05"],
   },
@@ -225,3 +227,6 @@ export function splitEvenXof(total: number, parts: number): number[] {
     (_, i) => base + (i < remainder ? 1 : 0),
   );
 }
+
+// Canonical account standing, schedule due-state, and Dakar business-date helpers.
+export * from "./account-position.js";
