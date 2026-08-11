@@ -6,7 +6,7 @@ Synthesized 2026-06-28 from a full 9-agent completion audit of the codebase vs t
 
 Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 design-parity gap · ⚪ decision needed
 
-- [ ] 🟠 **Deploy payment-plan-aware balances and A/R aging (release candidate 2026-08-11)** — implementation, disposable-PostgreSQL tests, production builds, migration drift check, local cross-portal smoke, and read-only production audit are complete. Promote `codex/payment-plan-aging` to `develop`, run reconciliation and staging smoke, then promote the identical revision to `main`, reconcile, and record task revisions here and in `docs/production-status.md`.
+- [x] **Deploy payment-plan-aware balances and A/R aging (production 2026-08-11)** — promoted through PRs `#16`–`#18`. Staging runs commit `6935a05` at API 90 / portal 49; production runs commit `7016794` at API 85 / portal 46. Migration, reference loading, health checks, signed-in smoke tests, and the permanent post-rollout reconciliation gate passed in both environments with 0 stale rows remaining.
 
 ## 0 · SIS redesign — remaining backend gaps (audited 2026-07-21)
 
