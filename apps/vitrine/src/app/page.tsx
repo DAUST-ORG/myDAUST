@@ -7,10 +7,18 @@ import { Hover } from "@/components/Hover";
 import { ImageSlot } from "@/components/ImageSlot";
 import { AiPanel } from "@/components/AiPanel";
 import { ApplyModal } from "@/components/ApplyModal";
+import { CookieBanner } from "@/components/CookieBanner";
 import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type PublicFacultyMember, type PublicNewsArticle, type PublicNewsArticleFull, type SiteOverrides, slugify } from "@/lib/content";
 import { assetUrl, getNews, getNewsArticle, getPreviewContent, getPublicFaculty, getPublishedContent, submitContact } from "@/lib/api";
 
 const WRAP: React.CSSProperties = { maxWidth: 1240, margin: "0 auto", padding: "0 40px" };
+
+/** Partner logos rendered on the Startups & Partners cards (keyed by venture name). */
+const VENTURE_LOGOS: Record<string, string> = {
+  "Caytu Robotics": "/images/caytu-logo.png",
+  SolarBox: "/images/solarbox-logo.png",
+  Jawji: "/images/jawji-logo.png",
+};
 
 /* ---- shared bits ---- */
 function Dash({ label, onDark }: { label: string; onDark?: boolean }) {
@@ -91,6 +99,29 @@ export default function Site() {
       if (match) { setPage("faculty"); setFacultyId(match.id); }
     });
   }, []);
+
+  // Reveal-on-scroll for `.reveal` cards; re-armed whenever the active view changes.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const els = Array.from(document.querySelectorAll<HTMLElement>(".reveal"));
+    if (!("IntersectionObserver" in window)) {
+      els.forEach((el) => el.classList.add("in"));
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const el = e.target as HTMLElement;
+          el.classList.add("in");
+          io.unobserve(el);
+        }
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -36px 0px" },
+    );
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [page, lang, articleSlug]);
 
   const c = buildSiteContent(lang, overrides ?? undefined);
   const { tx } = c;
@@ -208,9 +239,6 @@ export default function Site() {
           <Hover as="button" onClick={() => go("research")} base={utilLink} hover={{ color: "#fff" }}>{tx.uResearch}</Hover>
           <Hover as="button" onClick={() => go("portal")} base={utilLink} hover={{ color: "#fff" }}>{tx.uPortal}</Hover>
           <Hover as="button" onClick={() => go("contact")} base={utilLink} hover={{ color: "#fff" }}>{tx.uContact}</Hover>
-          <Hover as="button" onClick={openAI} base={{ ...utilLink, display: "inline-flex", alignItems: "center", gap: 6 }} hover={{ color: "#fff" }}>
-            <Icon name="sparkles" size={14} color="var(--daust-orange)" />{tx.askAI}
-          </Hover>
           <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
             <button onClick={() => setLang("en")} style={hdrLang(!fr)}>EN</button>
             <span style={{ color: "var(--fg-on-navy-muted)", fontSize: 11 }}>/</span>
@@ -302,7 +330,7 @@ export default function Site() {
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36, marginTop: 52 }}>
             {newsList.length > 0
               ? newsList.slice(0, 3).map((n) => (
-                <button key={n.id} onClick={() => openNews(n)} style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
+                <button key={n.id} onClick={() => openNews(n)} className="reveal card-lift" style={{ textAlign: "left", background: "#fff", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0, borderRadius: 4, overflow: "hidden" }}>
                   <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={fr ? n.titleFr : n.titleEn} src={n.imageUrl ?? undefined} /></div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
                     {n.tag && <><span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span><span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} /></>}
@@ -313,7 +341,7 @@ export default function Site() {
                 </button>
               ))
               : c.news.slice(0, 3).map((n, i) => (
-                <button key={n.slot} onClick={() => go("news")} style={{ display: "flex", flexDirection: "column", color: "inherit", minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+                <button key={n.slot} onClick={() => go("news")} className="reveal card-lift" style={{ display: "flex", flexDirection: "column", color: "inherit", minWidth: 0, textAlign: "left", background: "#fff", border: "none", padding: 0, cursor: "pointer", borderRadius: 4, overflow: "hidden" }}>
                   <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={n.title} src={IMG.news[i % IMG.news.length]} /></div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
                     <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span>
@@ -352,7 +380,7 @@ export default function Site() {
           </div>
           <div className="tbl-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)", marginTop: 48 }}>
             {c.programs.map((p) => (
-              <Hover key={p.slot} onClick={() => go("academics")} base={{ background: "#fff", padding: "30px 26px", cursor: "pointer", display: "flex", flexDirection: "column", minHeight: 260 }} hover={{ background: "var(--bg-subtle)" }}>
+              <Hover key={p.slot} onClick={() => go("academics")} className="reveal card-lift" base={{ background: "#fff", padding: "30px 26px", cursor: "pointer", display: "flex", flexDirection: "column", minHeight: 260 }} hover={{ background: "var(--bg-subtle)" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12, letterSpacing: ".14em", color: "var(--daust-orange)" }}>0{p.no}</span>
                   <Icon name={p.icon} size={24} color="var(--daust-navy)" />
@@ -402,7 +430,7 @@ export default function Site() {
           <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,3.8vw,50px)", lineHeight: 1.02, letterSpacing: "-.01em", color: "var(--fg1)", margin: "26px 0 0", maxWidth: 820 }}>{tx.whyTitle}</h2>
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 0, marginTop: 56, borderTop: "1px solid var(--border)" }}>
             {c.pillars.map((p) => (
-              <div key={p.title} style={{ padding: "32px 28px 32px 0", borderBottom: "1px solid var(--border)" }}>
+              <div key={p.title} className="reveal" style={{ padding: "32px 28px 32px 0", borderBottom: "1px solid var(--border)" }}>
                 <Icon name={p.icon} size={26} color="var(--daust-navy)" />
                 <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 21, color: "var(--fg1)", margin: "18px 0 0" }}>{p.title}</h3>
                 <p style={{ fontFamily: "var(--font-body)", fontSize: 14.5, lineHeight: 1.65, color: "var(--fg2)", margin: "10px 0 0" }}>{p.desc}</p>
@@ -457,7 +485,7 @@ export default function Site() {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "var(--border)", border: "1px solid var(--border)" }}>
             {c.model.map((m) => (
-              <div key={m.title} style={{ background: "#fff", padding: 24 }}>
+              <div key={m.title} className="reveal card-lift" style={{ background: "#fff", padding: 24 }}>
                 <Icon name={m.icon} size={24} color="var(--daust-orange)" />
                 <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16, color: "var(--fg1)", margin: "14px 0 0" }}>{m.title}</h3>
                 <p style={{ fontFamily: "var(--font-body)", fontSize: 13.5, lineHeight: 1.55, color: "var(--fg2)", margin: "8px 0 0" }}>{m.desc}</p>
@@ -479,7 +507,7 @@ export default function Site() {
           <SectionHead num="01" label={tx.procKicker} />
           <div className="tbl-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)", marginTop: 44 }}>
             {c.admSteps.map((s) => (
-              <div key={s.n} style={{ background: "#fff", padding: "30px 26px" }}>
+              <div key={s.n} className="reveal card-lift" style={{ background: "#fff", padding: "30px 26px" }}>
                 <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 44, color: "var(--bg-tint)", WebkitTextStroke: "1.5px var(--daust-navy)", lineHeight: 1 }}>{s.n}</div>
                 <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--fg1)", margin: "18px 0 0" }}>{s.title}</h3>
                 <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "9px 0 0" }}>{s.desc}</p>
@@ -557,7 +585,7 @@ export default function Site() {
           <SectionHead num="01" label={tx.centersKicker} />
           <div className="grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "var(--border)", border: "1px solid var(--border)", marginTop: 44 }}>
             {c.researchAreas.map((a) => (
-              <Hover key={a.title} base={{ background: "#fff", padding: "34px 30px", display: "flex", gap: 22 }} hover={{ background: "var(--bg-subtle)" }}>
+              <Hover key={a.title} className="reveal card-lift" base={{ background: "#fff", padding: "34px 30px", display: "flex", gap: 22 }} hover={{ background: "var(--bg-subtle)" }}>
                 <Icon name={a.icon} size={28} color="var(--daust-navy)" style={{ flexShrink: 0 }} />
                 <div>
                   <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 21, color: "var(--fg1)", margin: 0, letterSpacing: "-.01em" }}>{a.title}</h3>
@@ -636,7 +664,7 @@ export default function Site() {
         <div style={{ ...WRAP, padding: "72px 40px" }}>
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)" }}>
             {facultyList.map((f) => (
-              <Hover key={f.id} onClick={() => openFacultyMember(f)} base={{ background: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", minWidth: 0 }} hover={{ background: "var(--bg-subtle)" }}>
+              <Hover key={f.id} onClick={() => openFacultyMember(f)} className="reveal card-lift" base={{ background: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", minWidth: 0 }} hover={{ background: "var(--bg-subtle)" }}>
                 <div style={{ position: "relative", height: 300, minWidth: 0 }}><ImageSlot label={f.name} mono={f.initials} src={f.image} /></div>
                 <div style={{ padding: "24px 26px 28px" }}>
                   <div style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{f.dept}</div>
@@ -662,7 +690,7 @@ export default function Site() {
           <p style={{ fontFamily: "var(--font-body)", fontSize: 15.5, lineHeight: 1.7, color: "var(--fg2)", margin: "24px 0 0", maxWidth: 760 }}>{tx.deepBody}</p>
           <div className="tbl-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)", marginTop: 44 }}>
             {c.ventureSteps.map((s) => (
-              <div key={s.no} style={{ background: "#fff", padding: "30px 28px" }}>
+              <div key={s.no} className="reveal card-lift" style={{ background: "#fff", padding: "30px 28px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12, letterSpacing: ".12em", color: "var(--daust-orange)" }}>0{s.no}</span>
                   <Icon name={s.icon} size={24} color="var(--daust-navy)" />
@@ -678,14 +706,25 @@ export default function Site() {
         <div style={{ ...WRAP, padding: "88px 40px" }}>
           <SectionHead num="02" label={tx.startKicker} />
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)", marginTop: 40 }}>
-            {c.ventures.map((v) => (
-              <a key={v.name} href={v.href} target="_blank" rel="noopener" style={{ background: "#fff", padding: "32px 28px", display: "block", color: "inherit" }}>
-                <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{v.tag}</span>
-                <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "16px 0 0", letterSpacing: "-.01em" }}>{v.name}</h3>
-                <p style={{ fontFamily: "var(--font-body)", fontSize: 14.5, lineHeight: 1.65, color: "var(--fg2)", margin: "10px 0 16px" }}>{v.desc}</p>
-                <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--daust-navy)" }}>{v.cta}</span>
-              </a>
-            ))}
+            {c.ventures.map((v) => {
+              const logo = VENTURE_LOGOS[v.name];
+              return (
+                <a key={v.name} href={v.href} target="_blank" rel="noopener" className="card-lift reveal" style={{ background: "#fff", padding: "32px 28px", display: "block", color: "inherit" }}>
+                  {logo ? (
+                    <div style={{ height: 56, display: "flex", alignItems: "center", marginBottom: 18 }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element -- static export, plain img by design */}
+                      <img src={logo} alt={`${v.name} logo`} loading="lazy" style={{ maxHeight: 46, maxWidth: 180, objectFit: "contain" }} />
+                    </div>
+                  ) : (
+                    <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{v.tag}</span>
+                  )}
+                  {logo && <span style={{ display: "block", fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)", marginBottom: 16 }}>{v.tag}</span>}
+                  <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: "16px 0 0", letterSpacing: "-.01em" }}>{v.name}</h3>
+                  <p style={{ fontFamily: "var(--font-body)", fontSize: 14.5, lineHeight: 1.65, color: "var(--fg2)", margin: "10px 0 16px" }}>{v.desc}</p>
+                  <span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--daust-navy)" }}>{v.cta}</span>
+                </a>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -708,7 +747,7 @@ export default function Site() {
         <div style={{ ...WRAP, padding: "88px 40px" }}>
           <div className="tbl-4" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)" }}>
             {c.campusFeatures.map((cf) => (
-              <div key={cf.title} style={{ background: "#fff", padding: "30px 26px" }}>
+              <div key={cf.title} className="reveal card-lift" style={{ background: "#fff", padding: "30px 26px" }}>
                 <Icon name={cf.icon} size={26} color="var(--daust-navy)" />
                 <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18, color: "var(--fg1)", margin: "18px 0 0" }}>{cf.title}</h3>
                 <p style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.6, color: "var(--fg2)", margin: "9px 0 0" }}>{cf.desc}</p>
@@ -882,7 +921,7 @@ export default function Site() {
           {newsList.length > 0 ? (
             <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 36 }}>
               {newsList.map((n) => (
-                <button key={n.id} onClick={() => openNews(n)} style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0 }}>
+                <button key={n.id} onClick={() => openNews(n)} className="reveal card-lift" style={{ textAlign: "left", background: "#fff", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", color: "inherit", minWidth: 0, borderRadius: 4, overflow: "hidden" }}>
                   <div style={{ height: 220, position: "relative", overflow: "hidden", minWidth: 0 }}><ImageSlot label={fr ? n.titleFr : n.titleEn} src={n.imageUrl ?? undefined} /></div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 20 }}>
                     {n.tag && <><span style={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{n.tag}</span><span style={{ width: 4, height: 4, borderRadius: "50%", background: "var(--border-strong)" }} /></>}
@@ -901,7 +940,35 @@ export default function Site() {
     </>
   );
 
-  const views: Record<PageKey, React.ReactNode> = { home, academics, admissions, research, faculty, innovation, campus, about, portal, contact, news: newsView };
+  /* ---------------- PRIVACY ---------------- */
+  const privacy = (
+    <>
+      <PageHero kicker={tx.privacyKicker} title={tx.privacyTitle} sub={tx.privacySub} />
+      <section style={{ background: "#fff" }}>
+        <div style={{ ...WRAP, padding: "40px 40px 104px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, borderBottom: "1px solid var(--border)", paddingBottom: 18 }}>
+            <span style={{ fontFamily: "var(--font-body)", fontSize: 12.5, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--fg3)" }}>{tx.privacyUpdated}</span>
+            <Hover as="button" onClick={() => go("contact")} base={{ fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 12.5, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--daust-navy)", background: "none", border: "none", cursor: "pointer", padding: 0, borderBottom: "2px solid var(--daust-orange)", paddingBottom: 3 }} hover={{ color: "var(--daust-orange)" }}>{tx.uContact}</Hover>
+          </div>
+          <div style={{ maxWidth: 820, display: "flex", flexDirection: "column", marginTop: 44 }}>
+            {c.privacySections.map((s, i) => (
+              <div key={s.title} className="reveal" style={{ padding: "26px 0", borderBottom: "1px solid var(--divider)" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 18 }}>
+                  <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 15, color: "var(--daust-orange)", flexShrink: 0, width: 30 }}>0{i + 1}</span>
+                  <div>
+                    <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", letterSpacing: "-.01em" }}>{s.title}</h2>
+                    <p style={{ fontFamily: "var(--font-body)", fontSize: 15, lineHeight: 1.75, color: "var(--fg2)", margin: "10px 0 0", maxWidth: 720 }}>{s.body}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </>
+  );
+
+  const views: Record<PageKey, React.ReactNode> = { home, academics, admissions, research, faculty, innovation, campus, about, portal, contact, news: newsView, privacy };
 
   /* ---------------- NEWS ARTICLE ---------------- */
   const articleView = (
@@ -1027,6 +1094,7 @@ export default function Site() {
       </footer>
 
       <AiPanel open={aiOpen} onOpen={openAI} onClose={() => setAiOpen(false)} tx={tx} suggestions={c.suggestions} lang={lang} kb={c.chatKb} fallback={c.chatFallback} />
+      <CookieBanner text={tx.cookieText} accept={tx.cookieAccept} decline={tx.cookieDecline} more={tx.cookieMore} onMore={() => go("privacy")} />
       {applyOpen && <ApplyModal tx={tx} lang={lang} onClose={() => setApplyOpen(false)} onOpenAI={() => { setApplyOpen(false); setAiOpen(true); }} />}
     </div>
   );
