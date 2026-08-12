@@ -21,6 +21,9 @@ import {
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { FinanceService } from "./finance.service.js";
+import { FinanceApprovalsService } from "./finance-approvals.service.js";
+
+const RequestReason = z.string().trim().min(1).max(1000);
 
 // Local zod (api's own instance): keeps the ESM/CJS dual-package hazard away from shared.
 const CreatePaymentLinkInput = z.object({
@@ -42,7 +45,6 @@ const CreateStudentInput = z.object({
   studentNo: z.string().min(1).max(64).optional(),
   email: z.string().email().max(160).optional(),
   programCode: z.string().min(1).max(16).optional(),
-  billTuition: z.boolean().optional(),
 });
 
 const AddChargeInput = z.object({
@@ -63,6 +65,7 @@ const AddChargeInput = z.object({
     .min(1)
     .max(24)
     .optional(),
+  requestReason: RequestReason,
 });
 
 const ApplyDiscountInput = z.object({
@@ -71,6 +74,7 @@ const ApplyDiscountInput = z.object({
   amountXof: z.number().int().positive().max(100_000_000),
   kind: z.enum(["discount", "scholarship"]).optional(),
   costCenterCode: z.string().max(8).optional(),
+  requestReason: RequestReason,
 });
 
 const UpdateFeePlanRowInput = z.object({
@@ -78,6 +82,28 @@ const UpdateFeePlanRowInput = z.object({
   dueOn: z.string().date().optional(),
   amountFullXof: z.number().int().min(0).max(100_000_000).optional(),
   amountTuitionXof: z.number().int().min(0).max(100_000_000).optional(),
+  amountHousingXof: z.number().int().min(0).max(100_000_000).optional(),
+  amountCafeteriaXof: z.number().int().min(0).max(100_000_000).optional(),
+  requestReason: RequestReason,
+});
+
+const ReplaceFeePlanInput = z.object({
+  academicYearLabel: z.string().min(4).max(20).optional(),
+  reason: z.string().trim().min(1).max(1000),
+  rows: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(80),
+        dueOn: z.string().date(),
+        amountFullXof: z.number().int().min(0).max(100_000_000),
+        amountTuitionXof: z.number().int().min(0).max(100_000_000),
+        amountHousingXof: z.number().int().min(0).max(100_000_000),
+        amountCafeteriaXof: z.number().int().min(0).max(100_000_000),
+      }),
+    )
+    .min(1)
+    .max(24),
 });
 
 const UpdatePlanInput = z.object({
@@ -92,6 +118,7 @@ const UpdatePlanInput = z.object({
     )
     .min(1)
     .max(24),
+  requestReason: RequestReason,
 });
 const ReplacePlanInput = z.object({
   installments: z
@@ -106,16 +133,24 @@ const ReplacePlanInput = z.object({
     )
     .min(1)
     .max(24),
+  requestReason: RequestReason,
+});
+const CreatePlanRequestInput = CreatePaymentPlanInput.extend({
+  requestReason: RequestReason,
 });
 const RejectWireInput = z.object({
   reason: z.string().trim().min(1).max(1000),
 });
+const RemoveChargeInput = z.object({ reason: RequestReason });
 const WireStatusInput = z.enum(["submitted", "approved", "rejected"]);
 
 @Controller("finance/admin")
 @Roles("bursar", "admin")
 export class AdminFinanceController {
-  constructor(private readonly finance: FinanceService) {}
+  constructor(
+    private readonly finance: FinanceService,
+    private readonly approvals: FinanceApprovalsService,
+  ) {}
 
   @Get("summary")
   summary() {
@@ -251,17 +286,39 @@ export class AdminFinanceController {
     );
   }
 
+  @Post("students/:studentId/standard-package")
+  assignStandardPackage(
+    @CurrentUser() user: AuthUser,
+    @Param("studentId") studentId: string,
+  ) {
+    return this.finance.assignStandardPackage(studentId, user.personId);
+  }
+
   @Post("charges")
   addCharge(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    return this.finance.addCharge(user.personId, AddChargeInput.parse(body));
+    const { requestReason, ...input } = AddChargeInput.parse(body);
+    return this.approvals.request(user, {
+      kind: "custom_charge",
+      targetType: "Invoice",
+      reason: requestReason,
+      after: input,
+    });
   }
 
   @Delete("charges/:invoiceId")
   removeCharge(
     @CurrentUser() user: AuthUser,
     @Param("invoiceId") invoiceId: string,
+    @Body() body: unknown,
   ) {
-    return this.finance.removeCharge(user.personId, invoiceId);
+    const { reason } = RemoveChargeInput.parse(body);
+    return this.approvals.request(user, {
+      kind: "charge_removal",
+      targetType: "Invoice",
+      targetId: invoiceId,
+      reason,
+      after: { invoiceId },
+    });
   }
 
   @Get("fee-plan")
@@ -275,25 +332,57 @@ export class AdminFinanceController {
     @Param("id") id: string,
     @Body() body: unknown,
   ) {
-    return this.finance.updateFeePlanRow(
-      user.personId,
-      id,
-      UpdateFeePlanRowInput.parse(body),
+    const { requestReason, ...input } = UpdateFeePlanRowInput.parse(body);
+    return this.finance.getFeePlan().then((schedule) =>
+      this.approvals.request(user, {
+        kind: "global_fee_schedule",
+        targetType: "FeeSchedule",
+        targetId: id,
+        academicYearLabel: schedule.academicYearLabel ?? undefined,
+        reason: requestReason,
+        after: { rowId: id, input },
+      }),
+    );
+  }
+
+  /** One approval request for a whole schedule edit session. */
+  @Put("fee-plan")
+  replaceFeePlan(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const input = ReplaceFeePlanInput.parse(body);
+    return this.finance.getFeePlan(input.academicYearLabel).then((schedule) =>
+      this.approvals.request(user, {
+        kind: "global_fee_schedule",
+        targetType: "FeeSchedule",
+        targetId: schedule.scheduleId ?? undefined,
+        academicYearLabel: schedule.academicYearLabel ?? undefined,
+        reason: input.reason,
+        after: { rows: input.rows },
+      }),
     );
   }
 
   @Post("discounts")
   applyDiscount(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    return this.finance.applyDiscount(
-      user.personId,
-      ApplyDiscountInput.parse(body),
-    );
+    const { requestReason, ...input } = ApplyDiscountInput.parse(body);
+    return this.approvals.request(user, {
+      kind: input.kind === "scholarship" ? "scholarship" : "discount",
+      targetType: "Student",
+      targetId: input.studentId,
+      reason: requestReason,
+      after: input,
+    });
   }
 
   @Post("plans")
   createPlan(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    const input = CreatePaymentPlanInput.parse(body);
-    return this.finance.createPaymentPlan(input, user.personId);
+    const { requestReason, ...input } = CreatePlanRequestInput.parse(body);
+    return this.approvals.request(user, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: input.invoiceId,
+      reason: requestReason,
+      after: { mode: "create", installments: input.installments },
+    });
   }
 
   @Patch("plans/:invoiceId")
@@ -303,11 +392,13 @@ export class AdminFinanceController {
     @Body() body: unknown,
   ) {
     const input = UpdatePlanInput.parse(body);
-    return this.finance.updatePaymentPlan(
-      user.personId,
-      invoiceId,
-      input.installments,
-    );
+    return this.approvals.request(user, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoiceId,
+      reason: input.requestReason,
+      after: { mode: "update", installments: input.installments },
+    });
   }
 
   @Put("plans/:invoiceId")
@@ -317,11 +408,18 @@ export class AdminFinanceController {
     @Body() body: unknown,
   ) {
     const input = ReplacePlanInput.parse(body);
-    return this.finance.replacePaymentPlan(
-      user.personId,
-      invoiceId,
-      input.installments,
-    );
+    return this.approvals.request(user, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoiceId,
+      reason: input.requestReason,
+      after: { mode: "replace", installments: input.installments },
+    });
+  }
+
+  @Get("collections-timeline")
+  collectionsTimeline(@Query("academicYear") academicYear?: string) {
+    return this.finance.collectionsTimeline(academicYear);
   }
 
   @Post("reconcile")

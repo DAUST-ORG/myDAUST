@@ -1,18 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { CalendarClock, Check, FilePlus, Pencil } from "lucide-react";
 import {
   type FeePlan,
   type StudentAccountRow,
-  addCharge,
+  assignStandardPackage,
   getFeePlan,
   getStudentAccount,
   listStudentAccounts,
   updatePaymentPlan,
 } from "@/lib/api";
 import { formatXof } from "@/lib/format";
-import { AccountBalanceText, AccountStandingBadge, AccountStatusLine, resolveAccountSummary } from "@/components/AccountBalance";
+import {
+  AccountBalanceText,
+  AccountStandingBadge,
+  AccountStatusLine,
+  resolveAccountSummary,
+} from "@/components/AccountBalance";
 import {
   Avatar,
   Badge,
@@ -73,16 +79,23 @@ interface BillingDraft {
 }
 
 function BalanceCells({ row }: { row: StudentAccountRow }) {
-  const summary = resolveAccountSummary(row.summary, { balanceXof: row.balance, billedXof: row.billed });
+  const summary = resolveAccountSummary(row.summary, {
+    balanceXof: row.balance,
+    billedXof: row.billed,
+  });
   return (
     <>
       <td style={{ textAlign: "right" }}>
         <span style={{ display: "grid", gap: 2, justifyItems: "end" }}>
           <AccountBalanceText summary={summary} style={{ fontWeight: 700 }} />
-          {summary.standing === "overdue" && <AccountStatusLine summary={summary} />}
+          {summary.standing === "overdue" && (
+            <AccountStatusLine summary={summary} />
+          )}
         </span>
       </td>
-      <td style={{ textAlign: "right" }}><AccountStandingBadge summary={summary} /></td>
+      <td style={{ textAlign: "right" }}>
+        <AccountStandingBadge summary={summary} />
+      </td>
     </>
   );
 }
@@ -100,13 +113,18 @@ export default function FinanceAccounts() {
   const [draft, setDraft] = useState<BillingDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [requestReason, setRequestReason] = useState("");
 
   const load = useCallback(() => {
-    listStudentAccounts().then(setRows).catch((e: Error) => setError(e.message));
+    listStudentAccounts()
+      .then(setRows)
+      .catch((e: Error) => setError(e.message));
   }, []);
   useEffect(load, [load]);
   useEffect(() => {
-    getFeePlan().then(setPlan).catch(() => setPlan(null));
+    getFeePlan()
+      .then(setPlan)
+      .catch(() => setPlan(null));
   }, []);
 
   const year = plan?.academicYearLabel ?? "";
@@ -144,7 +162,12 @@ export default function FinanceAccounts() {
     const matched = searched.filter((row) => {
       if (balanceFilter === "all") return true;
       if (balanceFilter === "hold") return !!row.hasActiveHold;
-      return resolveAccountSummary(row.summary, { balanceXof: row.balance, billedXof: row.billed }).standing === balanceFilter;
+      return (
+        resolveAccountSummary(row.summary, {
+          balanceXof: row.balance,
+          billedXof: row.billed,
+        }).standing === balanceFilter
+      );
     });
     return apply(matched, {
       name: (r) => r.name,
@@ -156,7 +179,10 @@ export default function FinanceAccounts() {
   const studentOptions = useMemo(
     () => [
       { value: "", label: "— Select student —" },
-      ...(rows ?? []).map((r) => ({ value: r.id, label: `${r.name} · ${r.studentNo}` })),
+      ...(rows ?? []).map((r) => ({
+        value: r.id,
+        label: `${r.name} · ${r.studentNo}`,
+      })),
     ],
     [rows],
   );
@@ -175,18 +201,31 @@ export default function FinanceAccounts() {
   function openCreate() {
     setNote(null);
     setError(null);
+    setRequestReason("");
     setDraft({ studentId: "", plan: "full", rows: seedRows("full") });
   }
 
   async function openEdit(row: StudentAccountRow) {
     if (!row.invoiceId) return;
+    if (row.packageType === "standard_full") {
+      setNote(
+        "This billing follows the approved global Fee Schedule. Update that schedule to change every linked student consistently.",
+      );
+      return;
+    }
     setNote(null);
     setError(null);
     setBusy(true);
+    setRequestReason("");
     try {
       const account = await getStudentAccount(row.id);
       const invoice = account.invoices.find((i) => i.id === row.invoiceId);
       if (!invoice) throw new Error("That billing no longer exists.");
+      if (invoice.packageType === "standard_full") {
+        throw new Error(
+          "This billing follows the approved global Fee Schedule and cannot be edited per student.",
+        );
+      }
       setDraft({
         invoiceId: invoice.id,
         studentId: row.id,
@@ -211,7 +250,12 @@ export default function FinanceAccounts() {
 
   function editRow(index: number, patch: Partial<DraftRow>) {
     setDraft((d) =>
-      d ? { ...d, rows: d.rows.map((r, i) => (i === index ? { ...r, ...patch } : r)) } : d,
+      d
+        ? {
+            ...d,
+            rows: d.rows.map((r, i) => (i === index ? { ...r, ...patch } : r)),
+          }
+        : d,
     );
   }
 
@@ -221,7 +265,8 @@ export default function FinanceAccounts() {
     draft.studentId !== "" &&
     draft.rows.length > 0 &&
     draft.rows.every((r) => r.dueDate !== "" && r.amountXof > 0) &&
-    total > 0;
+    total > 0 &&
+    (!draft.invoiceId || requestReason.trim().length > 0);
 
   async function save() {
     if (!draft || !valid) return;
@@ -229,21 +274,30 @@ export default function FinanceAccounts() {
     setError(null);
     try {
       if (draft.invoiceId) {
-        await updatePaymentPlan(
+        const result = await updatePaymentPlan(
           draft.invoiceId,
           draft.rows
             .filter((r): r is DraftRow & { id: string } => !!r.id)
-            .map((r) => ({ id: r.id, dueDate: r.dueDate, amountDue: r.amountXof, label: r.label })),
+            .map((r) => ({
+              id: r.id,
+              dueDate: r.dueDate,
+              amountDue: r.amountXof,
+              label: r.label,
+            })),
+          requestReason.trim(),
         );
-        setNote("Billing updated.");
+        setNote(
+          result.applied
+            ? "Payment-plan change approved and applied."
+            : "Payment-plan change submitted for administrator approval.",
+        );
       } else {
-        await addCharge({
-          studentIds: [draft.studentId],
-          description: planLabel(draft.plan),
-          amountXof: total,
-          installments: draft.rows.map((r) => ({ dueDate: r.dueDate, amountXof: r.amountXof, label: r.label })),
-        });
-        setNote("Billing created.");
+        const result = await assignStandardPackage(draft.studentId);
+        setNote(
+          result.created
+            ? "The approved full annual package was assigned."
+            : "This student already has the approved full annual package.",
+        );
       }
       setDraft(null);
       load();
@@ -254,7 +308,12 @@ export default function FinanceAccounts() {
     }
   }
 
-  if (error && !rows) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
+  if (error && !rows)
+    return (
+      <p className="card" style={{ color: "var(--danger)" }}>
+        {error}
+      </p>
+    );
 
   return (
     <>
@@ -262,14 +321,26 @@ export default function FinanceAccounts() {
         title="Student Accounts"
         subtitle={`Billing status across all students${year ? ` · ${year}` : ""}`}
         actions={
-          <Button variant="primary" icon={<FilePlus size={15} />} onClick={openCreate}>
+          <Button
+            variant="primary"
+            icon={<FilePlus size={15} />}
+            onClick={openCreate}
+          >
             New billing
           </Button>
         }
       />
 
-      {note && <p className="card" style={{ color: "var(--success-500)" }}>{note}</p>}
-      {error && rows && <p className="card" style={{ color: "var(--danger)" }}>{error}</p>}
+      {note && (
+        <p className="card" style={{ color: "var(--success-500)" }}>
+          {note}
+        </p>
+      )}
+      {error && rows && (
+        <p className="card" style={{ color: "var(--danger)" }}>
+          {error}
+        </p>
+      )}
 
       <Tabs tabs={TABS} active={tab} onChange={(v) => setTab(v as TabKey)} />
 
@@ -278,7 +349,14 @@ export default function FinanceAccounts() {
       {rows && tab === "billings" && (
         <Card
           title="Billings"
-          action={<SearchInput value={fBill} onChange={setFBill} placeholder="Filter billings…" width={260} />}
+          action={
+            <SearchInput
+              value={fBill}
+              onChange={setFBill}
+              placeholder="Filter billings…"
+              width={260}
+            />
+          }
         >
           {billings.length === 0 ? (
             <EmptyState
@@ -300,18 +378,60 @@ export default function FinanceAccounts() {
               <tbody>
                 {billings.map((r) => (
                   <tr key={r.id} className="sis-row">
-                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--daust-navy)" }}>
+                    <td
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 12,
+                        color: "var(--daust-navy)",
+                      }}
+                    >
                       {r.billingNumber ?? (r.invoiceId ?? "").slice(0, 8)}
                     </td>
                     <td style={{ fontWeight: 600 }}>{r.name}</td>
-                    <td style={{ fontSize: 12.5, color: "var(--fg2)" }}>{r.billingDescription ?? "—"}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                    <td style={{ fontSize: 12.5, color: "var(--fg2)" }}>
+                      <span style={{ display: "grid", gap: 2 }}>
+                        <span>{r.billingDescription ?? "—"}</span>
+                        {r.packageType === "standard_full" && (
+                          <span style={{ color: "var(--fg3)", fontSize: 11.5 }}>
+                            Global schedule
+                            {r.feeScheduleRevision
+                              ? ` · revision ${r.feeScheduleRevision}`
+                              : ""}
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontWeight: 700,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
                       {formatXof(r.billed)}
                     </td>
                     <td style={{ textAlign: "right" }}>
-                      <IconButton label={`Edit billing for ${r.name}`} onClick={() => openEdit(r)}>
-                        <Pencil size={15} />
-                      </IconButton>
+                      {r.packageType === "standard_full" ? (
+                        <Link
+                          href="/finance/fee-schedule"
+                          title="Standard packages are changed from the global Fee Schedule"
+                          style={{
+                            color: "var(--daust-navy)",
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Fee Schedule
+                        </Link>
+                      ) : (
+                        <IconButton
+                          label={`Edit billing for ${r.name}`}
+                          onClick={() => openEdit(r)}
+                        >
+                          <Pencil size={15} />
+                        </IconButton>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -324,15 +444,31 @@ export default function FinanceAccounts() {
       {rows && tab === "balances" && (
         <Card
           title="Account balances"
-          action={<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <SearchInput value={fBal} onChange={setFBal} placeholder="Filter students…" width={240} />
-            <Select ariaLabel="Filter by account standing" value={balanceFilter} onChange={setBalanceFilter} style={{ minWidth: 160 }} options={[
-              { value: "all", label: "All standings" }, { value: "on_time", label: "On time" },
-              { value: "overdue", label: "Overdue" }, { value: "cleared", label: "Cleared" },
-              { value: "credit", label: "In credit" }, { value: "unscheduled", label: "Needs a schedule" },
-              { value: "hold", label: "Active hold" },
-            ]} />
-          </div>}
+          action={
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <SearchInput
+                value={fBal}
+                onChange={setFBal}
+                placeholder="Filter students…"
+                width={240}
+              />
+              <Select
+                ariaLabel="Filter by account standing"
+                value={balanceFilter}
+                onChange={setBalanceFilter}
+                style={{ minWidth: 160 }}
+                options={[
+                  { value: "all", label: "All standings" },
+                  { value: "on_time", label: "On time" },
+                  { value: "overdue", label: "Overdue" },
+                  { value: "cleared", label: "Cleared" },
+                  { value: "credit", label: "In credit" },
+                  { value: "unscheduled", label: "Needs a schedule" },
+                  { value: "hold", label: "Active hold" },
+                ]}
+              />
+            </div>
+          }
         >
           {balances.length === 0 ? (
             <EmptyState title="No accounts match that search" />
@@ -340,9 +476,25 @@ export default function FinanceAccounts() {
             <table>
               <thead>
                 <tr>
-                  <SortTh label="Student" sortKey="name" sort={sort} onSort={toggle} />
-                  <SortTh label="Program" sortKey="program" sort={sort} onSort={toggle} />
-                  <SortTh label="Balance" sortKey="balance" sort={sort} onSort={toggle} align="right" />
+                  <SortTh
+                    label="Student"
+                    sortKey="name"
+                    sort={sort}
+                    onSort={toggle}
+                  />
+                  <SortTh
+                    label="Program"
+                    sortKey="program"
+                    sort={sort}
+                    onSort={toggle}
+                  />
+                  <SortTh
+                    label="Balance"
+                    sortKey="balance"
+                    sort={sort}
+                    onSort={toggle}
+                    align="right"
+                  />
                   <th style={{ textAlign: "right", width: 130 }}>Status</th>
                 </tr>
               </thead>
@@ -350,17 +502,33 @@ export default function FinanceAccounts() {
                 {balances.map((r) => (
                   <tr key={r.id} className="sis-row">
                     <td>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <span
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 9,
+                        }}
+                      >
                         <Avatar name={r.name} size={34} src={r.photoUrl} />
                         <span style={{ minWidth: 0 }}>
-                          <span style={{ display: "block", fontWeight: 600 }}>{r.name}</span>
-                          <span style={{ fontSize: 11.5, fontFamily: "var(--font-mono)", color: "var(--fg3)" }}>
+                          <span style={{ display: "block", fontWeight: 600 }}>
+                            {r.name}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11.5,
+                              fontFamily: "var(--font-mono)",
+                              color: "var(--fg3)",
+                            }}
+                          >
                             {r.studentNo}
                           </span>
                         </span>
                       </span>
                     </td>
-                    <td style={{ fontSize: 12.5, color: "var(--fg2)" }}>{r.program ?? "—"}</td>
+                    <td style={{ fontSize: 12.5, color: "var(--fg2)" }}>
+                      {r.program ?? "—"}
+                    </td>
                     <BalanceCells row={r} />
                   </tr>
                 ))}
@@ -378,15 +546,32 @@ export default function FinanceAccounts() {
           width={560}
           footer={
             <>
-              <Button variant="ghost" onClick={() => setDraft(null)} disabled={busy}>Cancel</Button>
-              <Button variant="primary" icon={<Check size={15} />} disabled={busy || !valid} onClick={save}>
-                {busy ? "Saving…" : draft.invoiceId ? "Save changes" : "Create billing"}
+              <Button
+                variant="ghost"
+                onClick={() => setDraft(null)}
+                disabled={busy}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                icon={<Check size={15} />}
+                disabled={busy || !valid}
+                onClick={save}
+              >
+                {busy
+                  ? "Saving…"
+                  : draft.invoiceId
+                    ? "Submit change"
+                    : "Assign full package"}
               </Button>
             </>
           }
         >
           <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>
-            Set up billing for a student · invoices generate automatically on each due date
+            {draft.invoiceId
+              ? "Changes to individual dates or amounts require administrator approval."
+              : "Assign the administrator-approved tuition, housing, and cafeteria package."}
           </p>
 
           <div
@@ -400,8 +585,19 @@ export default function FinanceAccounts() {
               background: "var(--accent-bg)",
             }}
           >
-            <CalendarClock size={16} style={{ color: "var(--daust-navy)", flexShrink: 0 }} />
-            <span style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 700, color: "var(--fg3)" }}>
+            <CalendarClock
+              size={16}
+              style={{ color: "var(--daust-navy)", flexShrink: 0 }}
+            />
+            <span
+              style={{
+                fontSize: 11,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                fontWeight: 700,
+                color: "var(--fg3)",
+              }}
+            >
               Academic year
             </span>
             <strong style={{ fontSize: 13.5 }}>{year || "—"}</strong>
@@ -412,7 +608,14 @@ export default function FinanceAccounts() {
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Field label="Student *">
               {draft.invoiceId ? (
-                <Input value={studentOptions.find((o) => o.value === draft.studentId)?.label ?? ""} onChange={() => {}} disabled />
+                <Input
+                  value={
+                    studentOptions.find((o) => o.value === draft.studentId)
+                      ?.label ?? ""
+                  }
+                  onChange={() => {}}
+                  disabled
+                />
               ) : (
                 <Select
                   value={draft.studentId}
@@ -422,42 +625,85 @@ export default function FinanceAccounts() {
               )}
             </Field>
 
-            <Field label="Tuition plan">
-              {draft.invoiceId ? (
-                <Input value={planLabel(draft.plan)} onChange={() => {}} disabled />
-              ) : (
-                <Select
-                  value={draft.plan}
-                  onChange={(v) => editDraft({ plan: v, rows: seedRows(v) })}
-                  options={PLAN_OPTIONS}
-                />
-              )}
+            <Field label="Billing package">
+              <Input
+                value={
+                  draft.invoiceId
+                    ? planLabel(draft.plan)
+                    : "Tuition + cafeteria + housing"
+                }
+                onChange={() => {}}
+                disabled
+              />
             </Field>
 
-            <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <span style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 700, color: "var(--daust-navy)" }}>
+            <div
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-md)",
+                padding: 14,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 10,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    letterSpacing: ".08em",
+                    textTransform: "uppercase",
+                    fontWeight: 700,
+                    color: "var(--daust-navy)",
+                  }}
+                >
                   Installments
                 </span>
-                <span className="muted" style={{ fontSize: 12 }}>Editable · customize for this student</span>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {draft.invoiceId
+                    ? "Proposed custom schedule"
+                    : "From the approved global revision"}
+                </span>
               </div>
 
               {draft.rows.length === 0 && (
                 <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
-                  No fee schedule for the active year — seed the institution fee plan first.
+                  No fee schedule for the active year — seed the institution fee
+                  plan first.
                 </p>
               )}
 
               {draft.rows.map((r, i) => (
                 <div
                   key={r.id ?? i}
-                  style={{ display: "grid", gridTemplateColumns: "1fr 150px 150px", gap: 10, alignItems: "center", marginBottom: 8 }}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 150px 150px",
+                    gap: 10,
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
                 >
-                  <Input value={r.label} onChange={(v) => editRow(i, { label: v })} placeholder={`Installment ${i + 1}`} />
-                  <Input type="date" value={r.dueDate} onChange={(v) => editRow(i, { dueDate: v })} />
+                  <Input
+                    value={r.label}
+                    onChange={(v) => editRow(i, { label: v })}
+                    disabled={!draft.invoiceId}
+                    placeholder={`Installment ${i + 1}`}
+                  />
+                  <Input
+                    type="date"
+                    value={r.dueDate}
+                    onChange={(v) => editRow(i, { dueDate: v })}
+                    disabled={!draft.invoiceId}
+                  />
                   <Input
                     value={r.amountXof}
                     onChange={(v) => editRow(i, { amountXof: toInt(v) })}
+                    disabled={!draft.invoiceId}
                     align="right"
                     inputMode="numeric"
                   />
@@ -474,10 +720,27 @@ export default function FinanceAccounts() {
                   paddingTop: 10,
                 }}
               >
-                <span className="muted" style={{ fontSize: 12.5 }}>Billing total</span>
-                <strong style={{ fontVariantNumeric: "tabular-nums" }}>{formatXof(total)}</strong>
+                <span className="muted" style={{ fontSize: 12.5 }}>
+                  Billing total
+                </span>
+                <strong style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {formatXof(total)}
+                </strong>
               </div>
             </div>
+            {draft.invoiceId && (
+              <Field
+                label="Reason for change"
+                hint="Sent to the administrator with the before/after schedule."
+              >
+                <textarea
+                  value={requestReason}
+                  onChange={(event) => setRequestReason(event.target.value)}
+                  rows={3}
+                  maxLength={1000}
+                />
+              </Field>
+            )}
           </div>
         </Modal>
       )}

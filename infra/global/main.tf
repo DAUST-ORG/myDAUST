@@ -113,6 +113,15 @@ data "aws_iam_policy_document" "deploy" {
     actions   = ["logs:GetLogEvents"]
     resources = ["arn:aws:logs:us-east-1:${local.account_id}:log-group:/ecs/daust-*:*"]
   }
+
+  statement {
+    sid = "ReadRdsBackupMetadata"
+    actions = [
+      "rds:DescribeDBInstances",
+      "rds:DescribeDBSnapshots",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "deploy" {

@@ -2,10 +2,12 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Param,
   Patch,
   Post,
   Query,
+  StreamableFile,
 } from "@nestjs/common";
 import { z } from "zod";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
@@ -43,6 +45,29 @@ export class StudentTranscriptController {
   transcriptForStudent(@CurrentUser() user: AuthUser) {
     return this.transcript.list(user.studentId!);
   }
+
+  @Get("my/transcript/view")
+  @Roles("student")
+  transcriptViewForStudent(@CurrentUser() user: AuthUser) {
+    return this.transcript.view(user.studentId!);
+  }
+
+  @Get("my/transcript/pdf")
+  @Roles("student")
+  @Header("Cache-Control", "private, no-store")
+  @Header("X-Content-Type-Options", "nosniff")
+  async transcriptPdfForStudent(@CurrentUser() user: AuthUser) {
+    const pdf = await this.transcript.generatePdf(
+      user,
+      user.studentId!,
+      "student",
+    );
+    return new StreamableFile(pdf.data, {
+      type: "application/pdf",
+      disposition: `attachment; filename="${pdf.fileName}"`,
+      length: pdf.data.length,
+    });
+  }
 }
 
 @Controller("registrar")
@@ -56,6 +81,26 @@ export class RegistrarTranscriptController {
     @Query("includeVoided") includeVoided?: string,
   ) {
     return this.transcript.list(studentId, includeVoided === "true", true);
+  }
+
+  @Get("students/:studentId/transcript/view")
+  view(@Param("studentId") studentId: string) {
+    return this.transcript.view(studentId);
+  }
+
+  @Get("students/:studentId/transcript/pdf")
+  @Header("Cache-Control", "private, no-store")
+  @Header("X-Content-Type-Options", "nosniff")
+  async pdf(
+    @CurrentUser() user: AuthUser,
+    @Param("studentId") studentId: string,
+  ) {
+    const pdf = await this.transcript.generatePdf(user, studentId, "staff");
+    return new StreamableFile(pdf.data, {
+      type: "application/pdf",
+      disposition: `attachment; filename="${pdf.fileName}"`,
+      length: pdf.data.length,
+    });
   }
 
   @Post("students/:studentId/transcript")

@@ -1,22 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
 import {
-  type GradeRow,
-  type MyProfile,
   type MySummary,
-  getMyGrades,
-  getMyProfile,
+  type TranscriptView,
+  getMyTranscriptPdf,
+  getMyTranscriptView,
   getMySummary,
 } from "@/lib/api";
-import { Card, EmptyState, PageHeader, Stat } from "@/components/ui";
-
-interface TermBlock {
-  term: string;
-  rows: GradeRow[];
-  credits: number;
-  gpa: number | null;
-}
+import { Button, Card, EmptyState, PageHeader, Stat } from "@/components/ui";
 
 /** A-range green, B-range navy, C-range amber, everything else neutral. */
 function gradeTone(grade: string | null): { bg: string; fg: string } {
@@ -27,61 +20,102 @@ function gradeTone(grade: string | null): { bg: string; fg: string } {
   return { bg: "var(--bg-subtle)", fg: "var(--fg3)" };
 }
 
-/** Term GPA is derived from the same points the cumulative figure uses; never stored. */
-function termGpa(rows: GradeRow[]): number | null {
-  const graded = rows.filter(
-    (r) => r.countsTowardGpa && r.points !== null,
-  );
-  const credits = graded.reduce((s, r) => s + r.credits, 0);
-  if (credits === 0) return null;
-  return graded.reduce((s, r) => s + r.points! * r.credits, 0) / credits;
-}
-
 export default function GradesPage() {
-  const [grades, setGrades] = useState<GradeRow[]>([]);
+  const [transcript, setTranscript] = useState<TranscriptView | null>(null);
   const [summary, setSummary] = useState<MySummary | null>(null);
-  const [profile, setProfile] = useState<MyProfile | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
-    getMyGrades().then(setGrades).catch(() => {});
-    getMySummary().then(setSummary).catch(() => {});
-    getMyProfile().then(setProfile).catch(() => {});
+    getMyTranscriptView()
+      .then(setTranscript)
+      .catch((err: Error) => setError(err.message));
+    getMySummary()
+      .then(setSummary)
+      .catch(() => {});
   }, []);
 
-  const blocks: TermBlock[] = useMemo(() => {
-    const byTerm = new Map<string, GradeRow[]>();
-    for (const g of grades) {
-      const list = byTerm.get(g.term);
-      if (list) list.push(g);
-      else byTerm.set(g.term, [g]);
+  async function downloadTranscript() {
+    if (!transcript) return;
+    setDownloading(true);
+    setError(null);
+    try {
+      const blob = await getMyTranscriptPdf();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `unofficial-transcript-${transcript.student.studentNo.replace(/[^A-Za-z0-9_-]+/g, "-")}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "The transcript could not be downloaded.",
+      );
+    } finally {
+      setDownloading(false);
     }
-    return [...byTerm.entries()].map(([term, rows]) => ({
-      term,
-      rows,
-      credits: rows.reduce((s, r) => s + r.credits, 0),
-      gpa: termGpa(rows),
-    }));
-  }, [grades]);
+  }
 
   return (
     <>
       <PageHeader
         title="Grades & Transcript"
-        subtitle={`Unofficial academic record${profile?.program ? ` · ${profile.program}` : ""}`}
+        subtitle={`Unofficial academic record${transcript?.student.program ? ` · ${transcript.student.program.code} — ${transcript.student.program.name}` : ""}`}
+        actions={
+          <Button
+            variant="secondary"
+            icon={<Download size={15} aria-hidden="true" />}
+            disabled={!transcript || downloading}
+            onClick={() => void downloadTranscript()}
+          >
+            {downloading ? "Generating…" : "Download unofficial transcript"}
+          </Button>
+        }
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, marginBottom: 20 }}>
-        <Stat label="Cumulative GPA" value={summary ? summary.gpa.toFixed(2) : "—"} tone="var(--daust-navy)" />
-        <Stat label="Credits earned" value={summary?.completedCredits ?? "—"} />
-        <Stat label="Credits in progress" value={summary?.credits ?? "—"} tone="var(--daust-orange)" />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 16,
+          marginBottom: 20,
+        }}
+      >
+        <Stat
+          label="Cumulative GPA"
+          value={transcript?.totals.gpa?.toFixed(2) ?? "—"}
+          tone="var(--daust-navy)"
+        />
+        <Stat
+          label="Credits earned"
+          value={transcript?.totals.earnedCredits ?? "—"}
+        />
+        <Stat
+          label="Credits in progress"
+          value={summary?.credits ?? "—"}
+          tone="var(--daust-orange)"
+        />
       </div>
 
-      {blocks.length === 0 ? (
-        <EmptyState title="No graded courses yet" note="Grades appear here after the registrar approves the final results." />
-      ) : (
+      {error && (
+        <Card>
+          <div role="alert" style={{ color: "var(--error-500)" }}>
+            {error}
+          </div>
+        </Card>
+      )}
+
+      {transcript && transcript.semesters.length === 0 ? (
+        <EmptyState
+          title="No graded courses yet"
+          note="Grades appear here after the registrar approves the final results."
+        />
+      ) : transcript ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {blocks.map((b) => (
-            <Card key={b.term} pad={false}>
+          {transcript.semesters.map((semester) => (
+            <Card key={semester.termId ?? semester.label} pad={false}>
               <div
                 style={{
                   display: "flex",
@@ -95,34 +129,69 @@ export default function GradesPage() {
                   borderRadius: "var(--radius-lg) var(--radius-lg) 0 0",
                 }}
               >
-                <h3 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 700 }}>{b.term}</h3>
-                <div className="muted" style={{ fontSize: 12.5, display: "flex", gap: 16 }}>
+                <h3
+                  style={{
+                    margin: 0,
+                    fontFamily: "var(--font-display)",
+                    fontSize: 16,
+                    fontWeight: 700,
+                  }}
+                >
+                  {semester.label}
+                </h3>
+                <div
+                  className="muted"
+                  style={{ fontSize: 12.5, display: "flex", gap: 16 }}
+                >
                   <span>
-                    Term GPA <strong style={{ color: "var(--fg1)" }}>{b.gpa === null ? "—" : b.gpa.toFixed(2)}</strong>
+                    Semester GPA{" "}
+                    <strong style={{ color: "var(--fg1)" }}>
+                      {semester.gpa === null ? "—" : semester.gpa.toFixed(2)}
+                    </strong>
                   </span>
-                  <span>{b.credits} credits</span>
+                  <span>{semester.attemptedCredits} attempted</span>
+                  <span>{semester.earnedCredits} earned</span>
                 </div>
               </div>
 
               <div>
-                {b.rows.map((r, i) => {
+                {semester.entries.map((r, i) => {
                   const tone = gradeTone(r.grade);
                   return (
                     <div
-                      key={`${r.courseCode}-${i}`}
+                      key={r.id}
                       style={{
                         display: "flex",
                         alignItems: "center",
                         gap: 14,
                         padding: "11px 18px",
-                        borderBottom: i < b.rows.length - 1 ? "1px solid var(--divider)" : undefined,
+                        borderBottom:
+                          i < semester.entries.length - 1
+                            ? "1px solid var(--divider)"
+                            : undefined,
                       }}
                     >
-                      <span style={{ width: 78, fontSize: 12.5, fontWeight: 600, color: "var(--fg2)" }}>
+                      <span
+                        style={{
+                          width: 78,
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          color: "var(--fg2)",
+                        }}
+                      >
                         {r.courseCode}
                       </span>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 13.5 }}>{r.title}</span>
-                      <span className="muted" style={{ width: 56, textAlign: "center", fontSize: 12.5 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13.5 }}>
+                        {r.title}
+                      </span>
+                      <span
+                        className="muted"
+                        style={{
+                          width: 56,
+                          textAlign: "center",
+                          fontSize: 12.5,
+                        }}
+                      >
                         {r.credits} cr
                       </span>
                       <span
@@ -137,7 +206,7 @@ export default function GradesPage() {
                           color: tone.fg,
                         }}
                       >
-                        {r.grade ?? "—"}
+                        {r.grade}
                       </span>
                     </div>
                   );
@@ -146,7 +215,13 @@ export default function GradesPage() {
             </Card>
           ))}
         </div>
-      )}
+      ) : !error ? (
+        <Card>
+          <p className="muted" role="status" style={{ margin: 0 }}>
+            Loading transcript…
+          </p>
+        </Card>
+      ) : null}
     </>
   );
 }

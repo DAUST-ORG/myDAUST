@@ -437,6 +437,36 @@ describe.skipIf(noDb)("settlement money path", () => {
     expect(installment.amountPaid).toBe(100_000);
   });
 
+  it("resumes an internally claimed refund after a process interruption", async () => {
+    const { invoice, payments } = await makePlannedInvoiceWithPayments(
+      500_000,
+      [200_000],
+    );
+    await (finance as any).settlePayment(payments[0]!.id, { via: "ipn" });
+    await prisma.payment.update({
+      where: { id: payments[0]!.id },
+      data: { status: "refund_pending" },
+    });
+
+    await finance.refundPayment(
+      payments[0]!.id,
+      "resume interrupted internal refund",
+      ctx.reviewerId,
+    );
+
+    const [payment, afterInvoice, installment] = await Promise.all([
+      prisma.payment.findUniqueOrThrow({ where: { id: payments[0]!.id } }),
+      prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } }),
+      prisma.installment.findFirstOrThrow({
+        where: { plan: { invoiceId: invoice.id } },
+      }),
+    ]);
+    expect(payment.status).toBe("refunded");
+    expect(payment.refundedAt).not.toBeNull();
+    expect(afterInvoice.amountPaid).toBe(0);
+    expect(installment.amountPaid).toBe(0);
+  });
+
   it("cannot commit a stale plan edit below a concurrently settled amount", async () => {
     const { invoice, payments } = await makePlannedInvoiceWithPayments(
       500_000,

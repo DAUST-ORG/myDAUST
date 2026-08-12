@@ -1,10 +1,18 @@
-name: Full-package conversion
+name: Full-package billing operations
 
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Billing operation to run in the currently deployed API task
+        required: true
+        default: convert_full_package
+        type: choice
+        options:
+          - convert_full_package
+          - normalize_staging_demo
       target_environment:
-        description: Environment whose currently deployed API task should run the conversion
+        description: Environment whose currently deployed API task should run the operation
         required: true
         type: choice
         options:
@@ -16,7 +24,7 @@ on:
         default: 2026–2027
         type: string
       confirm:
-        description: Commit the conversion (unchecked is a read-only dry run)
+        description: Commit the operation (unchecked is a read-only dry run)
         required: true
         default: false
         type: boolean
@@ -43,11 +51,24 @@ jobs:
     steps:
       - name: Validate release and backup gate
         env:
+          OPERATION: ${{ inputs.operation }}
           TARGET_ENV: ${{ inputs.target_environment }}
           SHOULD_CONFIRM: ${{ inputs.confirm }}
           BACKUP_REFERENCE: ${{ inputs.backup_reference }}
         run: |
           set -euo pipefail
+          case "$OPERATION" in
+            convert_full_package|normalize_staging_demo) ;;
+            *)
+              echo "Unsupported billing operation: $OPERATION"
+              exit 1
+              ;;
+          esac
+          if [ "$OPERATION" = "normalize_staging_demo" ] \
+            && { [ "$TARGET_ENV" != "staging" ] || [ "$GITHUB_REF_NAME" != "develop" ]; }; then
+            echo "Legacy demo normalization may run only against staging from develop."
+            exit 1
+          fi
           if [ "$TARGET_ENV" = "staging" ] && [ "$GITHUB_REF_NAME" != "develop" ]; then
             echo "Staging conversion must run from develop, not $GITHUB_REF_NAME."
             exit 1
@@ -56,7 +77,10 @@ jobs:
             echo "Production conversion must run from main, not $GITHUB_REF_NAME."
             exit 1
           fi
-          if [ "$TARGET_ENV" = "prod" ] && [ "$SHOULD_CONFIRM" = "true" ] && [ -z "$BACKUP_REFERENCE" ]; then
+          if [ "$OPERATION" = "convert_full_package" ] \
+            && [ "$TARGET_ENV" = "prod" ] \
+            && [ "$SHOULD_CONFIRM" = "true" ] \
+            && [ -z "$BACKUP_REFERENCE" ]; then
             echo "A verified production RDS snapshot reference is required before commit."
             exit 1
           fi
@@ -66,8 +90,38 @@ jobs:
           role-to-assume: ${{ env.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Run conversion in the deployed API task
+      - name: Verify production backup snapshot
+        if: ${{ inputs.operation == 'convert_full_package' && inputs.target_environment == 'prod' && inputs.confirm }}
         env:
+          BACKUP_REFERENCE: ${{ inputs.backup_reference }}
+        run: |
+          set -euo pipefail
+          SNAPSHOT=$(aws rds describe-db-snapshots \
+            --db-snapshot-identifier "$BACKUP_REFERENCE" \
+            --snapshot-type manual \
+            --query 'DBSnapshots[0]' --output json)
+          jq -e \
+            --arg source "daust-prod-pg" \
+            '.DBInstanceIdentifier == $source
+             and .Status == "available"
+             and .Encrypted == true
+             and .SnapshotType == "manual"' \
+            <<<"$SNAPSHOT" >/dev/null || {
+              echo "The backup must be an available, encrypted, manual snapshot of daust-prod-pg."
+              exit 1
+            }
+          SNAPSHOT_TIME=$(jq -r '.SnapshotCreateTime' <<<"$SNAPSHOT")
+          SNAPSHOT_EPOCH=$(date -u -d "$SNAPSHOT_TIME" +%s)
+          NOW_EPOCH=$(date -u +%s)
+          if [ "$SNAPSHOT_EPOCH" -gt "$NOW_EPOCH" ] || [ $((NOW_EPOCH - SNAPSHOT_EPOCH)) -gt 86400 ]; then
+            echo "The production snapshot must have been created within the last 24 hours."
+            exit 1
+          fi
+          echo "Verified production snapshot: $BACKUP_REFERENCE"
+
+      - name: Run billing operation in the deployed API task
+        env:
+          OPERATION: ${{ inputs.operation }}
           TARGET_ENV: ${{ inputs.target_environment }}
           ACADEMIC_YEAR: ${{ inputs.academic_year }}
           SHOULD_CONFIRM: ${{ inputs.confirm }}
@@ -86,17 +140,36 @@ jobs:
           LOG_GROUP=$(jq -r '.["awslogs-group"]' <<<"$LOG_OPTIONS")
           LOG_PREFIX=$(jq -r '.["awslogs-stream-prefix"]' <<<"$LOG_OPTIONS")
 
+          case "$OPERATION" in
+            convert_full_package)
+              SCRIPT_PATH="node_modules/@mydaust/db/prisma/convert-full-package.ts"
+              EVENT_NAME="full-package-conversion"
+              ;;
+            normalize_staging_demo)
+              SCRIPT_PATH="node_modules/@mydaust/db/prisma/normalize-staging-legacy-demo.ts"
+              EVENT_NAME="staging-legacy-demo-normalizer"
+              ;;
+            *)
+              echo "Unsupported billing operation: $OPERATION"
+              exit 1
+              ;;
+          esac
+
           ENVIRONMENT=$(jq -nc \
             --arg year "$ACADEMIC_YEAR" \
+            --arg target "$TARGET_ENV" \
             --arg confirm "$SHOULD_CONFIRM" \
             --arg backup "$BACKUP_REFERENCE" \
             '[{"name":"ACADEMIC_YEAR","value":$year},
+              {"name":"TARGET_ENV","value":$target},
               {"name":"CONFIRM","value":(if $confirm == "true" then "1" else "0" end)},
               {"name":"BACKUP_REFERENCE","value":$backup}]')
-          OVERRIDES=$(jq -nc --argjson environment "$ENVIRONMENT" \
+          OVERRIDES=$(jq -nc \
+            --arg script "$SCRIPT_PATH" \
+            --argjson environment "$ENVIRONMENT" \
             '{containerOverrides:[{
               name:"api",
-              command:["node","node_modules/tsx/dist/cli.mjs","node_modules/@mydaust/db/prisma/convert-full-package.ts"],
+              command:["node","node_modules/tsx/dist/cli.mjs",$script],
               environment:$environment
             }]}')
           RUN_RESULT=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_DEF" \
@@ -106,44 +179,57 @@ jobs:
             jq -c '.failures' <<<"$RUN_RESULT"
             exit 1
           fi
-          echo "conversion task: $TASK"
+          echo "$OPERATION task: $TASK"
           aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
 
           TASK_RESULT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK")
           EXIT=$(jq -r '.tasks[0].containers[] | select(.name == "api") | .exitCode // empty' <<<"$TASK_RESULT")
           TASK_ID="${TASK##*/}"
           LOG_STREAM="$LOG_PREFIX/api/$TASK_ID"
-          printf '{"events":[]}' > conversion-logs.json
+          printf '{"events":[]}' > operation-logs.json
           for attempt in $(seq 1 20); do
             if aws logs get-log-events --log-group-name "$LOG_GROUP" \
               --log-stream-name "$LOG_STREAM" --start-from-head \
-              --output json > conversion-logs.json 2>/dev/null \
+              --output json > operation-logs.json 2>/dev/null \
               && jq -e \
-                '[.events[].message | fromjson? | select(.event == "full-package-conversion")] | length > 0' \
-                conversion-logs.json >/dev/null; then
+                --arg event "$EVENT_NAME" \
+                '[.events[].message | fromjson? | select(.event == $event)] | length > 0' \
+                operation-logs.json >/dev/null; then
               break
             fi
             sleep 2
           done
-          jq -r '.events[].message' conversion-logs.json
+          jq -r '.events[].message' operation-logs.json
           RESULT=$(jq -c \
-            '[.events[].message | fromjson? | select(.event == "full-package-conversion")] | last // empty' \
-            conversion-logs.json)
+            --arg event "$EVENT_NAME" \
+            '[.events[].message | fromjson? | select(.event == $event)] | last // empty' \
+            operation-logs.json)
           if [ "$EXIT" != "0" ]; then
-            echo "Conversion task failed with exit code ${EXIT:-not reported}."
+            echo "$OPERATION task failed with exit code ${EXIT:-not reported}."
             exit 1
           fi
           if [ -z "$RESULT" ] || ! jq -e \
-            '.ok == true and .counts.unresolved == 0' <<<"$RESULT" >/dev/null; then
-            echo "Conversion did not produce a clean result."
+            --arg event "$EVENT_NAME" \
+            '.event == $event and .ok == true and .counts.unresolved == 0' \
+            <<<"$RESULT" >/dev/null; then
+            echo "$OPERATION did not produce a clean result."
+            exit 1
+          fi
+          if [ "$OPERATION" = "normalize_staging_demo" ] && ! jq -e \
+            --arg year "$ACADEMIC_YEAR" \
+            '.academicYear == $year
+             and .counts.targets == 3
+             and (.counts.normalize + .counts.unchanged) == 3' \
+            <<<"$RESULT" >/dev/null; then
+            echo "Legacy demo normalization did not report all three exact targets."
             exit 1
           fi
           EXPECTED_MODE=$([ "$SHOULD_CONFIRM" = "true" ] && echo commit || echo dry-run)
           if [ "$(jq -r '.mode' <<<"$RESULT")" != "$EXPECTED_MODE" ]; then
-            echo "Conversion mode did not match the requested mode."
+            echo "$OPERATION mode did not match the requested mode."
             exit 1
           fi
-          echo "conversion_result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "operation_result=$RESULT" >> "$GITHUB_OUTPUT"
 
           if [ "$SHOULD_CONFIRM" != "true" ]; then
             exit 0
@@ -162,6 +248,6 @@ jobs:
           RECON_EXIT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$RECON_TASK" \
             --query "tasks[0].containers[?name=='api'] | [0].exitCode" --output text)
           if [ "$RECON_EXIT" != "0" ]; then
-            echo "Post-conversion reconciliation failed with exit code $RECON_EXIT."
+            echo "Post-operation reconciliation failed with exit code $RECON_EXIT."
             exit 1
           fi

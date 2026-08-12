@@ -26,7 +26,9 @@
     "import:students": "tsx prisma/import-students.ts",
     "attach-photos": "tsx prisma/attach-photos.ts",
     "load:sis-reference": "tsx prisma/load-sis-reference.ts",
-    "load:news": "tsx prisma/load-news.ts"
+    "load:news": "tsx prisma/load-news.ts",
+    "convert:full-package": "tsx prisma/convert-full-package.ts",
+    "normalize:staging-demo": "tsx prisma/normalize-staging-legacy-demo.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

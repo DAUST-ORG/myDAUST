@@ -74,11 +74,6 @@ const payBillLink = (studentNo: string) =>
 // Preset charges (label + amount + cost center). Frontend convenience — the API accepts any
 // description/amount/cost-center, so staff can also type a custom charge.
 const CHARGE_CATALOG = [
-  {
-    label: "Tuition — Fall 2026",
-    amountXof: 2_975_000,
-    costCenterCode: "9100",
-  },
   { label: "Lab & technology fee", amountXof: 180_000, costCenterCode: "9100" },
   { label: "Student services fee", amountXof: 95_000, costCenterCode: "9100" },
   { label: "Housing — semester", amountXof: 340_000, costCenterCode: "3700" },
@@ -319,12 +314,13 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     null,
   );
   const [links, setLinks] = useState<
-    {
-      studentNo: string;
-      name: string;
-      balance: number;
-      summary: AccountBalanceSummary;
-    }[] | null
+    | {
+        studentNo: string;
+        name: string;
+        balance: number;
+        summary: AccountBalanceSummary;
+      }[]
+    | null
   >(null);
   const [toast, setToast] = useState<string | null>(null);
   const [wireOpen, setWireOpen] = useState(false);
@@ -938,18 +934,26 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         <BulkChargeModal
           scopeLabel={charge.label}
           onClose={() => setCharge(null)}
-          onApply={async (description, amountXof, costCenterCode) => {
+          onApply={async (
+            description,
+            amountXof,
+            costCenterCode,
+            requestReason,
+          ) => {
             const res = await addCharge({
               studentIds: charge.ids,
               description,
               amountXof,
               costCenterCode,
+              requestReason,
             });
             setCharge(null);
             setSelected(new Set());
-            load();
+            if (res.applied) load();
             flash(
-              `Charge added to ${res.count} student${res.count > 1 ? "s" : ""}`,
+              res.applied
+                ? "Charge approved and added"
+                : "Charge request submitted for administrator approval",
             );
           }}
         />
@@ -1004,6 +1008,7 @@ function AddChargeForm({
     description: string,
     amountXof: number,
     costCenterCode: string,
+    requestReason: string,
   ) => void;
   busy: boolean;
 }) {
@@ -1011,6 +1016,7 @@ function AddChargeForm({
   const [amount, setAmount] = useState("");
   const [cc, setCc] = useState("9100");
   const [picked, setPicked] = useState<number | null>(null);
+  const [reason, setReason] = useState("");
 
   return (
     <>
@@ -1090,16 +1096,30 @@ function AddChargeForm({
           FCFA
         </span>
       </div>
+      <label style={{ fontSize: 12.5, fontWeight: 600, color: "#4d5965" }}>
+        Reason for charge
+      </label>
+      <textarea
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder="Explain why this charge should be added"
+        rows={3}
+        maxLength={1000}
+        style={{ ...inputStyle, resize: "vertical" }}
+      />
       <button
-        disabled={busy || !name.trim() || digits(amount) <= 0}
-        onClick={() => onSubmit(name.trim(), digits(amount), cc)}
+        disabled={busy || !name.trim() || digits(amount) <= 0 || !reason.trim()}
+        onClick={() => onSubmit(name.trim(), digits(amount), cc, reason.trim())}
         style={{
           ...primaryBtn,
           width: "100%",
-          opacity: busy || !name.trim() || digits(amount) <= 0 ? 0.5 : 1,
+          opacity:
+            busy || !name.trim() || digits(amount) <= 0 || !reason.trim()
+              ? 0.5
+              : 1,
         }}
       >
-        <Plus size={16} /> {busy ? "Adding…" : "Add charge"}
+        <Plus size={16} /> {busy ? "Submitting…" : "Submit charge request"}
       </button>
     </>
   );
@@ -1118,7 +1138,6 @@ function AddStudentModal({
   const [programCode, setProgramCode] = useState("");
   const [studentNo, setStudentNo] = useState("");
   const [email, setEmail] = useState("");
-  const [billTuition, setBillTuition] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -1133,7 +1152,6 @@ function AddStudentModal({
         studentNo: studentNo.trim() || undefined,
         email: email.trim() || undefined,
         programCode: programCode || undefined,
-        billTuition,
       });
       onCreated(id);
     } catch (e) {
@@ -1154,8 +1172,9 @@ function AddStudentModal({
           style={{ flexShrink: 0 }}
         />
         <span>
-          Creates a real student on the platform. Leave the ID blank to
-          auto-generate one.
+          Creates a real student on the platform and assigns the current
+          administrator-approved tuition, housing, and cafeteria package. Leave
+          the ID blank to auto-generate one.
         </span>
       </div>
       {err && (
@@ -1231,7 +1250,7 @@ function AddStudentModal({
         placeholder="auto-generated from ID"
         style={inputStyle}
       />
-      <label
+      <div
         style={{
           display: "flex",
           alignItems: "center",
@@ -1239,18 +1258,16 @@ function AddStudentModal({
           fontSize: 13,
           fontWeight: 600,
           color: "#4d5965",
-          cursor: "pointer",
+          background: "#eef2f8",
+          border: "1px solid #ccd7e4",
+          borderRadius: 8,
+          padding: "10px 12px",
           marginTop: 2,
         }}
       >
-        <input
-          type="checkbox"
-          checked={billTuition}
-          onChange={(e) => setBillTuition(e.target.checked)}
-          style={{ width: 16, height: 16, accentColor: "var(--daust-navy)" }}
-        />
-        Bill standard tuition ({fcfa(2_975_000)} FCFA, 4 installments)
-      </label>
+        <Check size={16} color="#2e7d52" aria-hidden="true" />
+        The approved full package is assigned automatically.
+      </div>
       <div
         style={{
           display: "flex",
@@ -1289,6 +1306,7 @@ function BulkChargeModal({
     description: string,
     amountXof: number,
     costCenterCode: string,
+    requestReason: string,
   ) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
@@ -1322,11 +1340,11 @@ function BulkChargeModal({
       )}
       <AddChargeForm
         busy={busy}
-        onSubmit={async (d, a, cc) => {
+        onSubmit={async (d, a, cc, reason) => {
           setBusy(true);
           setErr(null);
           try {
-            await onApply(d, a, cc);
+            await onApply(d, a, cc, reason);
           } catch (e) {
             setErr(
               (e as Error).message.replace(/^\d+:\s*/, "") ||
@@ -1539,6 +1557,7 @@ function ManageDrawer({
   const [pendingRemove, setPendingRemove] = useState<AccountInvoice | null>(
     null,
   );
+  const [removeReason, setRemoveReason] = useState("");
   const [planInvoice, setPlanInvoice] = useState<AccountInvoice | null>(null);
 
   const reload = useCallback(() => {
@@ -1564,35 +1583,54 @@ function ManageDrawer({
     description: string,
     amountXof: number,
     costCenterCode: string,
+    requestReason: string,
   ) {
     setBusy(true);
     try {
-      await addCharge({
+      const result = await addCharge({
         studentIds: [studentId],
         description,
         amountXof,
         costCenterCode,
+        requestReason,
       });
-      reload();
-      onChanged();
-      flash("Charge added");
+      if (result.applied) {
+        reload();
+        onChanged();
+      }
+      flash(
+        result.applied
+          ? "Charge approved and added"
+          : "Charge request submitted for administrator approval",
+      );
     } finally {
       setBusy(false);
     }
   }
   async function confirmRemove() {
-    if (!pendingRemove) return;
+    if (!pendingRemove || !removeReason.trim()) return;
+    if (pendingRemove.packageType === "standard_full") {
+      setPendingRemove(null);
+      setRemoveReason("");
+      flash("Standard packages are managed from the global Fee Schedule");
+      return;
+    }
     const wasPaid = pendingRemove.paid > 0;
     setBusy(true);
     try {
-      await removeCharge(pendingRemove.id);
+      const result = await removeCharge(pendingRemove.id, removeReason.trim());
       setPendingRemove(null);
-      reload();
-      onChanged();
+      setRemoveReason("");
+      if (result.applied) {
+        reload();
+        onChanged();
+      }
       flash(
-        wasPaid
-          ? "Charge removed — paid amount reversed to account credit"
-          : "Charge removed",
+        result.applied
+          ? wasPaid
+            ? "Removal approved — paid amount reversed to account credit"
+            : "Removal approved and applied"
+          : "Charge-removal request submitted for administrator approval",
       );
     } finally {
       setBusy(false);
@@ -1783,6 +1821,7 @@ function ManageDrawer({
               ) : (
                 acct.invoices.map((inv) => {
                   const isCredit = inv.total < 0;
+                  const isGlobalPackage = inv.packageType === "standard_full";
                   const invoiceOutstanding = invoiceEffectiveOutstanding(inv);
                   const invoiceSummary = resolveAccountSummary(inv.summary, {
                     balanceXof: invoiceOutstanding,
@@ -1827,6 +1866,23 @@ function ManageDrawer({
                                   ? `Settled · ${fcfa(invoiceSettled)} FCFA`
                                   : `${inv.installments.length || 1} installment${(inv.installments.length || 1) > 1 ? "s" : ""}`}
                           </div>
+                          {isGlobalPackage && (
+                            <div
+                              style={{
+                                fontSize: 11.5,
+                                color: "#6c7884",
+                                marginTop: 2,
+                              }}
+                            >
+                              Global Fee Schedule
+                              {inv.academicYearLabel
+                                ? ` · ${inv.academicYearLabel}`
+                                : ""}
+                              {inv.feeScheduleRevision
+                                ? ` · revision ${inv.feeScheduleRevision}`
+                                : ""}
+                            </div>
+                          )}
                         </div>
                         {isCredit ? (
                           <span
@@ -1856,45 +1912,71 @@ function ManageDrawer({
                               )}
                               <AccountStandingBadge summary={invoiceSummary} />
                             </span>
-                            <button
-                              onClick={() => setPlanInvoice(inv)}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 5,
-                                padding: "5px 11px",
-                                borderRadius: 8,
-                                color: "var(--daust-navy)",
-                                background: "#eef2f8",
-                                border: "1px solid #ccd7e4",
-                                fontSize: 12,
-                                fontWeight: 700,
-                                cursor: "pointer",
-                              }}
-                            >
-                              {inv.installments.length
-                                ? "Edit plan"
-                                : "Create plan"}
-                            </button>
-                            <button
-                              onClick={() => setPendingRemove(inv)}
-                              title="Remove charge"
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 5,
-                                padding: "5px 11px",
-                                borderRadius: 8,
-                                color: "#c0392b",
-                                background: "#fdeeeb",
-                                border: "1px solid #f1c9c1",
-                                fontSize: 12,
-                                fontWeight: 700,
-                                cursor: "pointer",
-                              }}
-                            >
-                              <Trash2 size={13} /> Remove
-                            </button>
+                            {isGlobalPackage ? (
+                              <a
+                                href="/finance/fee-schedule"
+                                title="Change dates and amounts for every linked standard package"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  padding: "5px 11px",
+                                  borderRadius: 8,
+                                  color: "var(--daust-navy)",
+                                  background: "#eef2f8",
+                                  border: "1px solid #ccd7e4",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Manage Fee Schedule
+                              </a>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => setPlanInvoice(inv)}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 5,
+                                    padding: "5px 11px",
+                                    borderRadius: 8,
+                                    color: "var(--daust-navy)",
+                                    background: "#eef2f8",
+                                    border: "1px solid #ccd7e4",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {inv.installments.length
+                                    ? "Edit plan"
+                                    : "Create plan"}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setRemoveReason("");
+                                    setPendingRemove(inv);
+                                  }}
+                                  title="Remove charge"
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 5,
+                                    padding: "5px 11px",
+                                    borderRadius: 8,
+                                    color: "#c0392b",
+                                    background: "#fdeeeb",
+                                    border: "1px solid #f1c9c1",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  <Trash2 size={13} /> Remove
+                                </button>
+                              </>
+                            )}
                           </>
                         )}
                       </div>
@@ -2137,9 +2219,24 @@ function ManageDrawer({
                   or future charges.
                 </>
               ) : (
-                <> — this charge is unpaid and will be deleted.</>
+                <>
+                  {" "}
+                  — this charge is unpaid and will be voided after administrator
+                  approval.
+                </>
               )}
             </p>
+            <label style={{ ...fieldLabel, display: "block", marginTop: 16 }}>
+              Reason for removal
+            </label>
+            <textarea
+              value={removeReason}
+              onChange={(event) => setRemoveReason(event.target.value)}
+              rows={3}
+              maxLength={1000}
+              placeholder="Explain why this charge should be removed"
+              style={{ ...inputStyle, resize: "vertical" }}
+            />
             <div
               style={{
                 display: "flex",
@@ -2153,7 +2250,7 @@ function ManageDrawer({
               </button>
               <button
                 onClick={confirmRemove}
-                disabled={busy}
+                disabled={busy || !removeReason.trim()}
                 style={{
                   background: "var(--danger, #c0392b)",
                   color: "#fff",
@@ -2161,10 +2258,10 @@ function ManageDrawer({
                 }}
               >
                 {busy
-                  ? "Removing…"
+                  ? "Submitting…"
                   : pendingRemove.paid > 0
-                    ? "Reverse to credit"
-                    : "Remove"}
+                    ? "Request reversal"
+                    : "Request removal"}
               </button>
             </div>
           </div>
@@ -2174,11 +2271,11 @@ function ManageDrawer({
         <PlanEditorModal
           invoice={planInvoice}
           onClose={() => setPlanInvoice(null)}
-          onSaved={() => {
+          onSaved={(message) => {
             setPlanInvoice(null);
             reload();
             onChanged();
-            flash("Payment plan saved");
+            flash(message);
           }}
         />
       )}
@@ -2193,7 +2290,7 @@ function PlanEditorModal({
 }: {
   invoice: AccountInvoice;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (message: string) => void;
 }) {
   const [rows, setRows] = useState(() =>
     invoice.installments.length
@@ -2218,6 +2315,7 @@ function PlanEditorModal({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
   const total = rows.reduce((sum, row) => sum + row.amountDue, 0);
   const edit = (index: number, patch: Partial<(typeof rows)[number]>) =>
     setRows((current) =>
@@ -2246,7 +2344,17 @@ function PlanEditorModal({
     setBusy(true);
     setError(null);
     try {
-      await replacePaymentPlan(
+      if (invoice.packageType === "standard_full") {
+        setError(
+          "This package follows the global Fee Schedule and cannot be changed per student.",
+        );
+        return;
+      }
+      if (!reason.trim()) {
+        setError("Explain why this payment plan is changing.");
+        return;
+      }
+      const result = await replacePaymentPlan(
         invoice.id,
         rows.map((row, index) => ({
           id: row.id,
@@ -2255,8 +2363,13 @@ function PlanEditorModal({
           amountDue: row.amountDue,
           label: row.label,
         })),
+        reason.trim(),
       );
-      onSaved();
+      onSaved(
+        result.applied
+          ? "Payment-plan change approved and applied"
+          : "Payment-plan change submitted for administrator approval",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save payment plan.");
     } finally {
@@ -2269,8 +2382,8 @@ function PlanEditorModal({
       onClose={onClose}
     >
       <p style={{ color: "#6c7884", fontSize: 13, marginTop: 0 }}>
-        Paid installments are preserved and cannot be reduced below the amount
-        already received.
+        Paid installments are preserved. Your proposed change is applied only
+        after administrator approval.
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {rows.map((row, index) => (
@@ -2326,6 +2439,17 @@ function PlanEditorModal({
       <button onClick={add} style={{ ...outlineBtn, marginTop: 12 }}>
         <Plus size={14} /> Add installment
       </button>
+      <label style={{ ...fieldLabel, display: "block", marginTop: 16 }}>
+        Reason for change
+      </label>
+      <textarea
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        rows={3}
+        maxLength={1000}
+        placeholder="Explain why this student plan should change"
+        style={{ ...inputStyle, resize: "vertical" }}
+      />
       <div
         style={{
           display: "flex",
@@ -2341,11 +2465,12 @@ function PlanEditorModal({
           onClick={save}
           disabled={
             busy ||
+            !reason.trim() ||
             rows.some((row) => !row.dueDate || row.amountDue < row.amountPaid)
           }
           style={primaryBtn}
         >
-          {busy ? "Saving…" : "Save complete plan"}
+          {busy ? "Submitting…" : "Submit plan change"}
         </button>
       </div>
       {error && <p style={{ color: "#c0392b", fontSize: 13 }}>{error}</p>}

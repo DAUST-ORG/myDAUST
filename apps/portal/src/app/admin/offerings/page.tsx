@@ -67,9 +67,9 @@ export default function AdminOfferingsPage() {
     <>
       <PageHeader
         eyebrow="Academic structure"
-        title="Course Enrollment"
-        subtitle={`${openCount} open · ${closedCount} closed sections offered${term ? ` · ${term.name}` : ""}`}
-        actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => setAdding(true)}>Add course</Button>}
+        title="Course Sections"
+        subtitle={`${openCount} open · ${closedCount} closed course sections${term ? ` · ${term.name}` : ""}`}
+        actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => setAdding(true)}>New section</Button>}
       />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
@@ -97,7 +97,7 @@ export default function AdminOfferingsPage() {
         ))}
         {rows.length === 0 && (
           <div className="card" style={{ margin: 0 }}>
-            <EmptyState icon={<ListChecks size={26} />} title="No sections offered." note="Add a catalog course to this term to open it for enrollment." />
+            <EmptyState icon={<ListChecks size={26} />} title="No course sections yet." note="Create a section for a catalog course and term to make registration available." />
           </div>
         )}
       </div>
@@ -148,7 +148,7 @@ function OfferingCard({
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <ToggleButton section={section} onChanged={onChanged} />
-        <IconButton label="Edit offering" onClick={onEdit}><Pencil size={15} /></IconButton>
+        <IconButton label="Edit section" onClick={onEdit}><Pencil size={15} /></IconButton>
         <DeleteSectionButton section={section} onDeleted={onDeleted} />
       </div>
     </div>
@@ -313,7 +313,7 @@ function OfferingModal({ section, onClose, onSaved }: { section?: Section; onClo
       }
       onSaved();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not save the offering.");
+      setErr(e instanceof Error ? e.message : "Could not save the section.");
       setBusy(false);
     }
   }
@@ -322,17 +322,17 @@ function OfferingModal({ section, onClose, onSaved }: { section?: Section; onClo
     <Modal
       open
       onClose={onClose}
-      title={editing ? "Edit Course Offering" : "Add Course to Enrollment"}
+      title={editing ? "Edit Course Section" : "Create Course Section"}
       width={520}
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Saving…" : editing ? "Save changes" : "Add to enrollment"}</button>
+          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Saving…" : editing ? "Save changes" : "Create section"}</button>
         </>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>Offer a catalog course for a given term.</p>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>Create a catalog course section for a given term.</p>
         {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
         <Field label="Course" hint={editing ? "Not editable" : undefined}>
           {editing ? (

@@ -30,7 +30,9 @@ enum PaymentMethod {
   pi_spi
 }
 
-/** Lifecycle of a PI-SPI request-to-pay ("demande de paiement"). */
+/**
+ * Lifecycle of a PI-SPI request-to-pay ("demande de paiement").
+ */
 enum PiSpiRequestStatus {
   initiated
   sent
@@ -43,6 +45,7 @@ enum PiSpiRequestStatus {
 enum PaymentStatus {
   pending
   success
+  refund_pending
   failed
   cancelled
   refunded
@@ -66,6 +69,36 @@ enum InvoiceStatus {
   partial
   paid
   void
+}
+
+enum InvoicePackageType {
+  standard_full
+  standard_tuition_legacy
+  custom
+  credit
+}
+
+enum FeeScheduleStatus {
+  draft
+  approved
+  superseded
+}
+
+enum ApprovalRequestStatus {
+  pending
+  approved
+  rejected
+  cancelled
+  stale
+}
+
+enum ApprovalRequestKind {
+  global_fee_schedule
+  custom_charge
+  charge_removal
+  payment_plan
+  discount
+  scholarship
 }
 
 enum EnrollmentStatus {
@@ -109,15 +142,16 @@ enum CostCenterType {
 }
 
 model CostCenter {
-  code       String         @id
-  name       String
-  type       CostCenterType
-  parentCode String?
-  parent     CostCenter?    @relation("CostCenterTree", fields: [parentCode], references: [code])
-  children   CostCenter[]   @relation("CostCenterTree")
-  invoices   Invoice[]
-  expenses   Expense[]
-  budgets    Budget[]
+  code              String             @id
+  name              String
+  type              CostCenterType
+  parentCode        String?
+  parent            CostCenter?        @relation("CostCenterTree", fields: [parentCode], references: [code])
+  children          CostCenter[]       @relation("CostCenterTree")
+  invoices          Invoice[]
+  invoiceComponents InvoiceComponent[]
+  expenses          Expense[]
+  budgets           Budget[]
 
   @@index([parentCode])
 }
@@ -154,105 +188,112 @@ model Budget {
 }
 
 model Person {
-  id        String     @id @default(uuid())
-  email     String     @unique
-  firstName String
-  lastName  String
-  kind      PersonKind
+  id                       String                    @id @default(uuid())
+  email                    String                    @unique
+  firstName                String
+  lastName                 String
+  kind                     PersonKind
   // App RBAC roles (a person can hold several). Validated against AppRole in code.
-  roles     String[]   @default([])
+  roles                    String[]                  @default([])
   // bcrypt hash; null until a password is set.
-  passwordHash String?
+  passwordHash             String?
   // Set when a temp password was assigned; forces a change on next login.
-  mustChangePassword Boolean @default(false)
-  createdAt DateTime   @default(now())
-  student   Student?
-  taughtSections Section[] @relation("Instructor")
-  threadParticipations ThreadParticipant[]
-  messagesSent Message[]
-  projectMemberships ProjectMember[]
+  mustChangePassword       Boolean                   @default(false)
+  createdAt                DateTime                  @default(now())
+  student                  Student?
+  taughtSections           Section[]                 @relation("Instructor")
+  threadParticipations     ThreadParticipant[]
+  messagesSent             Message[]
+  projectMemberships       ProjectMember[]
   // --- SIS redesign ---
-  guardianOf      GuardianStudent[] @relation("GuardianOf")
-  guardianInvites GuardianInvite[]  @relation("GuardianInvites")
-  studentInvites  StudentInvite[]   @relation("StudentInvites")
-  broadcasts      Broadcast[]       @relation("BroadcastSender")
+  guardianOf               GuardianStudent[]         @relation("GuardianOf")
+  guardianInvites          GuardianInvite[]          @relation("GuardianInvites")
+  studentInvites           StudentInvite[]           @relation("StudentInvites")
+  broadcasts               Broadcast[]               @relation("BroadcastSender")
   // Public website profile for faculty (see FacultyProfile).
-  facultyProfile  FacultyProfile?
-  wireTransfersSubmitted WireTransferSubmission[] @relation("WireTransferSubmitter")
-  wireTransfersReviewed  WireTransferSubmission[] @relation("WireTransferReviewer")
-  transcriptImportBatches TranscriptImportBatch[] @relation("TranscriptImportBatchCreator")
-  transcriptEntriesCreated TranscriptEntry[] @relation("TranscriptEntryCreator")
-  transcriptEntriesUpdated TranscriptEntry[] @relation("TranscriptEntryUpdater")
-  transcriptEntriesVoided  TranscriptEntry[] @relation("TranscriptEntryVoider")
+  facultyProfile           FacultyProfile?
+  wireTransfersSubmitted   WireTransferSubmission[]  @relation("WireTransferSubmitter")
+  wireTransfersReviewed    WireTransferSubmission[]  @relation("WireTransferReviewer")
+  transcriptImportBatches  TranscriptImportBatch[]   @relation("TranscriptImportBatchCreator")
+  transcriptEntriesCreated TranscriptEntry[]         @relation("TranscriptEntryCreator")
+  transcriptEntriesUpdated TranscriptEntry[]         @relation("TranscriptEntryUpdater")
+  transcriptEntriesVoided  TranscriptEntry[]         @relation("TranscriptEntryVoider")
+  paymentsInitiated        Payment[]                 @relation("PaymentInitiator")
+  feeSchedulesCreated      FeeSchedule[]             @relation("FeeScheduleCreator")
+  feeSchedulesApproved     FeeSchedule[]             @relation("FeeScheduleApprover")
+  approvalRequestsCreated  ApprovalRequest[]         @relation("ApprovalRequester")
+  approvalRequestsReviewed ApprovalRequest[]         @relation("ApprovalReviewer")
+  approvalEvents           ApprovalEvent[]           @relation("ApprovalEventActor")
+  directorWidgetPreference DirectorWidgetPreference?
 }
 
 model Student {
-  id          String       @id @default(uuid())
-  personId    String       @unique
-  person      Person       @relation(fields: [personId], references: [id])
-  studentNo   String       @unique
-  programId   String?
-  program     Program?     @relation(fields: [programId], references: [id])
+  id                   String                   @id @default(uuid())
+  personId             String                   @unique
+  person               Person                   @relation(fields: [personId], references: [id])
+  studentNo            String                   @unique
+  programId            String?
+  program              Program?                 @relation(fields: [programId], references: [id])
   // Date of birth (date only). Second factor for the public bill-payment lookup.
-  dateOfBirth DateTime?
+  dateOfBirth          DateTime?
   // Roster photo, resolved to an absolute URL (served from the vitrine bucket).
-  photoUrl    String?
+  photoUrl             String?
   // --- Extended SIS profile (all optional; captured via the admin Edit-record form) ---
-  gender           String?
-  phone            String?
-  address          String?
-  city             String?
-  nationality      String?
-  guardianName     String?
-  guardianRelation String?
-  guardianPhone    String?
-  advisor          String? // free-text advisor name (no faculty FK yet)
-  yearLevel        Int? // year of study 1..N
-  cohort           String? // e.g. "Class of 2028"
-  enrolledAt       DateTime? // first enrolment date
+  gender               String?
+  phone                String?
+  address              String?
+  city                 String?
+  nationality          String?
+  guardianName         String?
+  guardianRelation     String?
+  guardianPhone        String?
+  advisor              String? // free-text advisor name (no faculty FK yet)
+  yearLevel            Int? // year of study 1..N
+  cohort               String? // e.g. "Class of 2028"
+  enrolledAt           DateTime? // first enrolment date
   // --- Remaining SIS profile fields (SIS redesign; all optional) ---
-  preferredName    String?
-  nationalId       String?
-  maritalStatus    String?
-  personalEmail    String? // non-institutional address
+  preferredName        String?
+  nationalId           String?
+  maritalStatus        String?
+  personalEmail        String? // non-institutional address
   // Saved PI-SPI payment alias, so a returning payer does not retype it. Always
   // overridable at pay time; never used without the payer confirming the resolved name.
-  piSpiAlias       String?
-  language         String? // preferred language, e.g. "French"
-  bloodType        String?
-  allergies        String?
-  insurance        String? // provider + policy number
-  physician        String? // campus physician
-  emergencyName2   String?
-  emergencyPhone2  String?
-  major            String?
-  minor            String?
-  admitTerm        String?
-  expectedGrad     String?
-  enrollmentStatus String? // full-time | part-time | leave
-  catalogYear      String? // requirement set the student is audited against
-  standing         String? // Good Standing | Probation | ...
+  piSpiAlias           String?
+  language             String? // preferred language, e.g. "French"
+  bloodType            String?
+  allergies            String?
+  insurance            String? // provider + policy number
+  physician            String? // campus physician
+  emergencyName2       String?
+  emergencyPhone2      String?
+  major                String?
+  minor                String?
+  admitTerm            String?
+  expectedGrad         String?
+  enrollmentStatus     String? // full-time | part-time | leave
+  catalogYear          String? // requirement set the student is audited against
+  standing             String? // Good Standing | Probation | ...
   // Lifecycle of the SIS record itself. Archiving hides a student from active
   // rosters without deleting their academic or financial history.
-  recordStatus     StudentRecordStatus @default(active)
-  holds            StudentHold[]
-  alerts           StudentAlert[]
-  watchers         StaffWatch[]
-  guardians        GuardianStudent[]
-  invoices    Invoice[]
-  payments    Payment[]
-  wireTransfers WireTransferSubmission[]
-  piSpiRequests PiSpiRequest[]
-  enrollments Enrollment[]
-  transcriptEntries TranscriptEntry[]
+  recordStatus         StudentRecordStatus      @default(active)
+  holds                StudentHold[]
+  alerts               StudentAlert[]
+  watchers             StaffWatch[]
+  guardians            GuardianStudent[]
+  invoices             Invoice[]
+  payments             Payment[]
+  wireTransfers        WireTransferSubmission[]
+  piSpiRequests        PiSpiRequest[]
+  enrollments          Enrollment[]
+  transcriptEntries    TranscriptEntry[]
   gradeSubmissionItems GradeSubmissionItem[]
-  mealPlan    MealPlan?
-  diningOrders DiningOrder[]
-  diningScans DiningScan[]
-  housing     HousingAssignment?
-  roommateProfile RoommateProfile?
-  documents   StudentDocument[]
-  createdAt   DateTime     @default(now())
+  mealPlan             MealPlan?
+  diningOrders         DiningOrder[]
+  diningScans          DiningScan[]
+  housing              HousingAssignment?
+  roommateProfile      RoommateProfile?
+  documents            StudentDocument[]
+  createdAt            DateTime                 @default(now())
 
   @@index([recordStatus])
 }
@@ -260,16 +301,16 @@ model Student {
 /// A faculty member's public-website profile. Only people whose roles include
 /// "faculty" get one; `publicProfile` gates whether they appear on the site.
 model FacultyProfile {
-  id        String   @id @default(uuid())
-  personId  String   @unique
-  person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  id            String   @id @default(uuid())
+  personId      String   @unique
+  person        Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
   // Professional profile (displayed on the public Faculty page).
-  title     String? // e.g. "Associate Professor of Mechanical Engineering"
-  dept      String? // department / research center
-  bio       String? // short paragraph
-  interests String[] @default([]) // research interests
-  scholar   String? // publications / research profile link
-  photoUrl  String? // roster photo, resolved to an absolute URL (/uploads/...)
+  title         String? // e.g. "Associate Professor of Mechanical Engineering"
+  dept          String? // department / research center
+  bio           String? // short paragraph
+  interests     String[] @default([]) // research interests
+  scholar       String? // publications / research profile link
+  photoUrl      String? // roster photo, resolved to an absolute URL (/uploads/...)
   // Site visibility — toggled from the comms Faculty manager.
   publicProfile Boolean  @default(false)
   createdAt     DateTime @default(now())
@@ -279,52 +320,61 @@ model FacultyProfile {
 }
 
 model Term {
-  id        String    @id @default(uuid())
-  name      String    @unique
-  startDate DateTime
-  endDate   DateTime
+  id                   String                @id @default(uuid())
+  name                 String                @unique
+  startDate            DateTime
+  endDate              DateTime
   // Registration windows. Null = falls back to endDate (add) / unbounded (drop).
-  addDeadline  DateTime?
-  dropDeadline DateTime?
+  addDeadline          DateTime?
+  dropDeadline         DateTime?
   // Which catalog year this term belongs to (e.g. Fall 2026 -> 2026-2027).
-  academicYearId String?
-  academicYear   AcademicYear? @relation(fields: [academicYearId], references: [id])
+  academicYearId       String?
+  academicYear         AcademicYear?         @relation(fields: [academicYearId], references: [id])
   // Fall | Spring | Summer — the semester slot a curriculum entry maps onto.
-  semester       String?
+  semester             String?
   // active | planning | draft — the registrar's term lifecycle. Only one active.
-  status         String?
-  invoices  Invoice[]
-  sections  Section[]
-  transcriptEntries TranscriptEntry[]
+  status               String?
+  invoices             Invoice[]
+  sections             Section[]
+  transcriptEntries    TranscriptEntry[]
   gradeSubmissionItems GradeSubmissionItem[]
 }
 
 model Invoice {
-  id             String        @id @default(uuid())
+  id                  String                   @id @default(uuid())
   // Human-readable billing handle shown to staff, e.g. "BILL-2026-001".
-  number         String?       @unique
-  studentId      String
-  student        Student       @relation(fields: [studentId], references: [id])
-  termId         String
-  term           Term          @relation(fields: [termId], references: [id])
-  totalAmount    Int
-  amountPaid     Int           @default(0)
-  status         InvoiceStatus @default(open)
+  number              String?                  @unique
+  studentId           String
+  student             Student                  @relation(fields: [studentId], references: [id])
+  termId              String
+  term                Term                     @relation(fields: [termId], references: [id])
+  totalAmount         Int
+  amountPaid          Int                      @default(0)
+  status              InvoiceStatus            @default(open)
   // Human label for an ad-hoc charge (e.g. "Lab & technology fee"); null for tuition.
-  description    String?
+  description         String?
   // Revenue dimension for the director dashboard (tuition -> 9100).
-  costCenterCode String        @default("9100")
-  costCenter     CostCenter    @relation(fields: [costCenterCode], references: [code])
-  plan           PaymentPlan?
-  payments       Payment[]
-  wireTransfers  WireTransferSubmission[]
-  piSpiRequests  PiSpiRequest[]
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  costCenterCode      String                   @default("9100")
+  costCenter          CostCenter               @relation(fields: [costCenterCode], references: [code])
+  packageType         InvoicePackageType       @default(custom)
+  academicYearLabel   String?
+  feeScheduleId       String?
+  feeScheduleRevision Int?
+  feeSchedule         FeeSchedule?             @relation(fields: [feeScheduleId], references: [id], onDelete: SetNull)
+  revision            Int                      @default(0)
+  components          InvoiceComponent[]
+  plan                PaymentPlan?
+  payments            Payment[]
+  wireTransfers       WireTransferSubmission[]
+  piSpiRequests       PiSpiRequest[]
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
 
   @@index([studentId])
   @@index([termId])
   @@index([status])
+  @@index([feeScheduleId])
+  @@index([packageType, academicYearLabel])
 }
 
 model PaymentPlan {
@@ -337,17 +387,17 @@ model PaymentPlan {
 }
 
 model Installment {
-  id          String            @id @default(uuid())
+  id          String              @id @default(uuid())
   planId      String
-  plan        PaymentPlan       @relation(fields: [planId], references: [id])
+  plan        PaymentPlan         @relation(fields: [planId], references: [id])
   sequence    Int
   // Staff-facing name for this installment, e.g. "Inscription"; null falls back to the sequence.
   label       String?
   /// Inclusive payment-plan calendar date in Africa/Dakar (not a timestamp).
-  dueDate     DateTime          @db.Date
+  dueDate     DateTime            @db.Date
   amountDue   Int
-  amountPaid  Int               @default(0)
-  status      InstallmentStatus @default(pending)
+  amountPaid  Int                 @default(0)
+  status      InstallmentStatus   @default(pending)
   allocations PaymentAllocation[]
 
   @@unique([planId, sequence])
@@ -356,63 +406,106 @@ model Installment {
 }
 
 model Payment {
-  id          String              @id @default(uuid())
-  invoiceId   String
-  invoice     Invoice             @relation(fields: [invoiceId], references: [id])
-  studentId   String
-  student     Student             @relation(fields: [studentId], references: [id])
-  amount      Int
-  method      PaymentMethod
-  status      PaymentStatus       @default(pending)
-  provider    String              @default("paytech")
+  id                   String                       @id @default(uuid())
+  invoiceId            String
+  invoice              Invoice                      @relation(fields: [invoiceId], references: [id])
+  studentId            String
+  student              Student                      @relation(fields: [studentId], references: [id])
+  amount               Int
+  method               PaymentMethod
+  status               PaymentStatus                @default(pending)
+  provider             String                       @default("paytech")
   // Idempotency anchor: the gateway transaction reference is unique.
-  providerRef String              @unique
-  ipnPayload  Json?
-  allocations PaymentAllocation[]
-  wireTransfer WireTransferSubmission?
-  piSpiRequest PiSpiRequest?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  providerRef          String                       @unique
+  /// Durable origin of the payment attempt (student_portal, parent_portal, public_bill, ...).
+  source               String                       @default("legacy")
+  initiatedById        String?
+  initiatedBy          Person?                      @relation("PaymentInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+  initiatedByEmail     String?
+  settledAt            DateTime?
+  refundedAt           DateTime?
+  ipnPayload           Json?
+  allocations          PaymentAllocation[]
+  componentAllocations PaymentComponentAllocation[]
+  wireTransfer         WireTransferSubmission?
+  piSpiRequest         PiSpiRequest?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
 
   @@index([invoiceId])
   @@index([status])
+  @@index([settledAt])
+  @@index([initiatedById])
+}
+
+/// Authoritative package component carried by one invoice. Amounts always reconcile
+/// to Invoice.totalAmount for positive standard/custom charges.
+model InvoiceComponent {
+  id             String                       @id @default(uuid())
+  invoiceId      String
+  invoice        Invoice                      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  kind           String
+  costCenterCode String
+  costCenter     CostCenter                   @relation(fields: [costCenterCode], references: [code])
+  amountXof      Int
+  allocations    PaymentComponentAllocation[]
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+
+  @@unique([invoiceId, kind])
+  @@index([costCenterCode])
+}
+
+/// Exact component split frozen at settlement. A refund reverses these same rows
+/// via refundedAmountXof instead of recalculating from current package proportions.
+model PaymentComponentAllocation {
+  id                 String           @id @default(uuid())
+  paymentId          String
+  payment            Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceComponentId String
+  invoiceComponent   InvoiceComponent @relation(fields: [invoiceComponentId], references: [id], onDelete: Restrict)
+  amountXof          Int
+  refundedAmountXof  Int              @default(0)
+  createdAt          DateTime         @default(now())
+
+  @@unique([paymentId, invoiceComponentId])
+  @@index([invoiceComponentId])
 }
 
 /**
  * A PI-SPI request-to-pay we pushed at a payer's alias.
- *
  * Mirrors WireTransferSubmission's polymorphic target (invoice | payment link | applicant
  * fee). `txId` is our own reference and `end2endId` is the rail-wide one carried on
  * webhooks — both are unique so a replayed notification can never settle twice.
  */
 model PiSpiRequest {
-  id            String             @id @default(uuid())
-  txId          String             @unique
-  end2endId     String?            @unique
-  status        PiSpiRequestStatus @default(initiated)
-  statusReason  String?
-  source        String             // student_portal | public_bill | payment_link | application_fee
-  payerAlias    String
-  payerName     String?
-  payerCountry  String?
-  amountXof     Int
+  id               String             @id @default(uuid())
+  txId             String             @unique
+  end2endId        String?            @unique
+  status           PiSpiRequestStatus @default(initiated)
+  statusReason     String?
+  source           String // student_portal | public_bill | payment_link | application_fee
+  payerAlias       String
+  payerName        String?
+  payerCountry     String?
+  amountXof        Int
   settledAmountXof Int?
-  motif         String
-  studentId     String?
-  student       Student?           @relation(fields: [studentId], references: [id])
-  invoiceId     String?
-  invoice       Invoice?           @relation(fields: [invoiceId], references: [id])
-  paymentId     String?            @unique
-  payment       Payment?           @relation(fields: [paymentId], references: [id])
-  paymentLinkId String?
-  paymentLink   PaymentLink?       @relation(fields: [paymentLinkId], references: [id])
-  applicantId   String?
-  applicant     Applicant?         @relation(fields: [applicantId], references: [id])
-  expiresAt     DateTime?
-  settledAt     DateTime?
-  lastCheckedAt DateTime?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  motif            String
+  studentId        String?
+  student          Student?           @relation(fields: [studentId], references: [id])
+  invoiceId        String?
+  invoice          Invoice?           @relation(fields: [invoiceId], references: [id])
+  paymentId        String?            @unique
+  payment          Payment?           @relation(fields: [paymentId], references: [id])
+  paymentLinkId    String?
+  paymentLink      PaymentLink?       @relation(fields: [paymentLinkId], references: [id])
+  applicantId      String?
+  applicant        Applicant?         @relation(fields: [applicantId], references: [id])
+  expiresAt        DateTime?
+  settledAt        DateTime?
+  lastCheckedAt    DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
   @@index([status, createdAt])
   @@index([studentId])
@@ -424,7 +517,7 @@ model PiSpiRequest {
 model WireTransferSubmission {
   id                 String             @id @default(uuid())
   status             WireTransferStatus @default(submitted)
-  source             String             // student_portal | public_bill | payment_link
+  source             String // student_portal | public_bill | payment_link
   studentId          String?
   student            Student?           @relation(fields: [studentId], references: [id])
   invoiceId          String?
@@ -432,12 +525,12 @@ model WireTransferSubmission {
   paymentId          String?            @unique
   payment            Payment?           @relation(fields: [paymentId], references: [id])
   paymentLinkId      String?
-  paymentLink        PaymentLink?        @relation(fields: [paymentLinkId], references: [id])
+  paymentLink        PaymentLink?       @relation(fields: [paymentLinkId], references: [id])
   submittedAmountXof Int
   confirmedAmountXof Int?
   contactEmail       String
   submittedById      String?
-  submittedBy        Person?            @relation("WireTransferSubmitter", fields: [submittedById], references: [id])
+  submittedBy        Person?            @relation("WireTransferSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
   submittedByEmail   String?
   proofObjectKey     String
   proofFileName      String
@@ -447,7 +540,7 @@ model WireTransferSubmission {
   bankReference      String?
   confirmationNote   String?
   reviewedById       String?
-  reviewedBy         Person?            @relation("WireTransferReviewer", fields: [reviewedById], references: [id])
+  reviewedBy         Person?            @relation("WireTransferReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   reviewedByName     String?
   reviewedByEmail    String?
   reviewedAt         DateTime?
@@ -516,23 +609,23 @@ model SiteContent {
 
 // CMS-authored news articles, published to the public site's News section + article pages.
 model NewsArticle {
-  id        String   @id @default(uuid())
-  slug      String   @unique
-  titleEn   String
-  titleFr   String
-  excerptEn String
-  excerptFr String
-  bodyEn    String
-  bodyFr    String
-  imageUrl  String?
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  titleEn     String
+  titleFr     String
+  excerptEn   String
+  excerptFr   String
+  bodyEn      String
+  bodyFr      String
+  imageUrl    String?
   // Optional outbound link — when set, the card opens this instead of the in-app article.
   externalUrl String?
-  tag       String?
-  date      String
-  published Boolean  @default(false)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  tag         String?
+  date        String
+  published   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([published, sortOrder])
 }
@@ -557,37 +650,37 @@ model ContactMessage {
 }
 
 model Applicant {
-  id          String   @id @default(uuid())
-  firstName   String
-  lastName    String
-  email       String
-  programCode String?
-  stage       String   @default("submitted") // submitted|review|interview|offer|accepted|rejected
-  score       Int? // BAC score (0–20)
-  country     String?
+  id            String         @id @default(uuid())
+  firstName     String
+  lastName      String
+  email         String
+  programCode   String?
+  stage         String         @default("submitted") // submitted|review|interview|offer|accepted|rejected
+  score         Int? // BAC score (0–20)
+  country       String?
   // 30k FCFA application fee, settled via the PayTech rail (IPN ref APPFEE-<id>).
-  feePaid     Boolean  @default(false)
+  feePaid       Boolean        @default(false)
   // --- Full application intake (SIS redesign; all optional) ---
-  phone       String?
-  dateOfBirth DateTime?
-  gender      String?
-  nationality String?
-  city        String?
+  phone         String?
+  dateOfBirth   DateTime?
+  gender        String?
+  nationality   String?
+  city          String?
   // "high-school" | "transfer" — decides whether `school` reads as HS or prior university.
-  origin      String?
-  school      String?
-  priorGpa    String? // free text: "17.2/20" (BAC) or "3.4/4" (transfer)
+  origin        String?
+  school        String?
+  priorGpa      String? // free text: "17.2/20" (BAC) or "3.4/4" (transfer)
   // Guardian contact captured on the application. NOT a portal Guardian account —
   // that is provisioned separately by the registrar after enrolment.
-  parentName  String?
-  parentPhone String?
-  parentEmail String?
-  allergies   String?
-  source      String? // how they heard about DAUST
-  essay       String?
-  term        String? // intake term, e.g. "Fall 2026"
+  parentName    String?
+  parentPhone   String?
+  parentEmail   String?
+  allergies     String?
+  source        String? // how they heard about DAUST
+  essay         String?
+  term          String? // intake term, e.g. "Fall 2026"
   piSpiRequests PiSpiRequest[]
-  createdAt   DateTime @default(now())
+  createdAt     DateTime       @default(now())
 
   @@index([stage])
 }
@@ -616,11 +709,11 @@ model Department {
 }
 
 model Program {
-  id           String     @id @default(uuid())
-  code         String     @unique
+  id           String               @id @default(uuid())
+  code         String               @unique
   name         String
   departmentId String
-  department   Department @relation(fields: [departmentId], references: [id])
+  department   Department           @relation(fields: [departmentId], references: [id])
   students     Student[]
   // Display/reference metadata (editable via admin). `tuition` is reference only —
   // actual billing uses the standard FEE_STRUCTURE amount, not this.
@@ -634,80 +727,80 @@ model Program {
 }
 
 model Course {
-  id            String     @id @default(uuid())
-  code          String     @unique
-  title         String
-  credits       Int
+  id                   String                @id @default(uuid())
+  code                 String                @unique
+  title                String
+  credits              Int
   // Catalog lifecycle + presentation (SIS design's Course modal).
-  status        String?    // active | draft
-  description   String?
-  semestersOffered String? // comma-joined subset of fall,spring,summer
-  departmentId  String
-  department    Department @relation(fields: [departmentId], references: [id])
-  sections      Section[]
+  status               String? // active | draft
+  description          String?
+  semestersOffered     String? // comma-joined subset of fall,spring,summer
+  departmentId         String
+  department           Department            @relation(fields: [departmentId], references: [id])
+  sections             Section[]
   /// Which degree-audit requirement bucket this course satisfies (e.g. "Mathematics").
   /// Distinct from the owning department: one department teaches courses that count
   /// toward several different requirements. Null falls back to the department name,
   /// then to the elective bucket.
-  requirementCategory String?
+  requirementCategory  String?
   // Self many-to-many: a course's prerequisite courses.
   // Superseded by CoursePrerequisite (which carries a minimum grade); kept until the
   // enrolment prereq check is migrated over, then dropped.
-  prerequisites Course[]   @relation("CoursePrereq")
-  requiredFor   Course[]   @relation("CoursePrereq")
+  prerequisites        Course[]              @relation("CoursePrereq")
+  requiredFor          Course[]              @relation("CoursePrereq")
   // --- Rule engine (SIS redesign) ---
-  rule            CourseRule?
-  prereqRules     CoursePrerequisite[] @relation("RuleCourse")
-  prereqFor       CoursePrerequisite[] @relation("PrereqCourse")
-  coreqRules      CourseCorequisite[]  @relation("CoreqRuleCourse")
-  coreqFor        CourseCorequisite[]  @relation("CoreqCourse")
-  curriculumSlots CurriculumEntry[]
-  transcriptEntries TranscriptEntry[]
+  rule                 CourseRule?
+  prereqRules          CoursePrerequisite[]  @relation("RuleCourse")
+  prereqFor            CoursePrerequisite[]  @relation("PrereqCourse")
+  coreqRules           CourseCorequisite[]   @relation("CoreqRuleCourse")
+  coreqFor             CourseCorequisite[]   @relation("CoreqCourse")
+  curriculumSlots      CurriculumEntry[]
+  transcriptEntries    TranscriptEntry[]
   gradeSubmissionItems GradeSubmissionItem[]
 }
 
 model Section {
-  id           String       @id @default(uuid())
-  courseId     String
-  course       Course       @relation(fields: [courseId], references: [id])
-  termId       String
-  term         Term         @relation(fields: [termId], references: [id])
-  instructorId String?
-  instructor   Person?      @relation("Instructor", fields: [instructorId], references: [id])
-  sectionCode  String
-  capacity     Int
-  days         String // e.g. "MWF"
-  startTime    String // "10:00"
-  endTime      String // "11:00"
-  room         String?
-  enrollments  Enrollment[]
-  assignments  Assignment[]
-  materials    SectionMaterial[]
-  posts        SectionPost[]
+  id              String            @id @default(uuid())
+  courseId        String
+  course          Course            @relation(fields: [courseId], references: [id])
+  termId          String
+  term            Term              @relation(fields: [termId], references: [id])
+  instructorId    String?
+  instructor      Person?           @relation("Instructor", fields: [instructorId], references: [id])
+  sectionCode     String
+  capacity        Int
+  days            String // e.g. "MWF"
+  startTime       String // "10:00"
+  endTime         String // "11:00"
+  room            String?
+  enrollments     Enrollment[]
+  assignments     Assignment[]
+  materials       SectionMaterial[]
+  posts           SectionPost[]
   // --- SIS redesign ---
   // Which scale this section is graded on. Null = the institution default (letter).
   gradingSchemeId String?
-  gradingScheme   GradingScheme?   @relation(fields: [gradingSchemeId], references: [id])
+  gradingScheme   GradingScheme?    @relation(fields: [gradingSchemeId], references: [id])
   gradeSubmission GradeSubmission?
   // Registration gate: closed sections are not offered to students.
-  status          String           @default("open") // open | closed
+  status          String            @default("open") // open | closed
 
   @@unique([courseId, termId, sectionCode])
   @@index([termId])
 }
 
 model Enrollment {
-  id         String           @id @default(uuid())
-  studentId  String
-  student    Student          @relation(fields: [studentId], references: [id])
-  sectionId  String
-  section    Section          @relation(fields: [sectionId], references: [id])
-  status     EnrollmentStatus @default(enrolled)
-  grade      String?
-  enrolledAt DateTime         @default(now())
-  attendance AttendanceRecord[]
-  submissions Submission[]
-  transcriptEntry TranscriptEntry?
+  id                   String                @id @default(uuid())
+  studentId            String
+  student              Student               @relation(fields: [studentId], references: [id])
+  sectionId            String
+  section              Section               @relation(fields: [sectionId], references: [id])
+  status               EnrollmentStatus      @default(enrolled)
+  grade                String?
+  enrolledAt           DateTime              @default(now())
+  attendance           AttendanceRecord[]
+  submissions          Submission[]
+  transcriptEntry      TranscriptEntry?
   gradeSubmissionItems GradeSubmissionItem[]
 
   @@unique([studentId, sectionId])
@@ -981,14 +1074,14 @@ model RoommateProfile {
 }
 
 model ConductCase {
-  id        String          @id @default(uuid())
-  subject   String
-  type      String
-  stage     ConductStage    @default(intake)
-  severity  ConductSeverity @default(med)
-  officer   String?
-  openedAt  DateTime        @default(now())
-  slaDueAt  DateTime?
+  id       String          @id @default(uuid())
+  subject  String
+  type     String
+  stage    ConductStage    @default(intake)
+  severity ConductSeverity @default(med)
+  officer  String?
+  openedAt DateTime        @default(now())
+  slaDueAt DateTime?
 
   @@index([stage])
 }
@@ -1025,17 +1118,17 @@ enum ProjectPhase {
 }
 
 model Project {
-  id          String         @id @default(uuid())
-  name        String
-  description String?
-  phase       ProjectPhase   @default(proposal)
-  advisor     String?
-  status      String         @default("active") // active | graded | archived
-  grade       String?
-  createdAt   DateTime       @default(now())
-  members     ProjectMember[]
-  tasks       ProjectTask[]
-  submissions ProjectSubmission[]
+  id                 String              @id @default(uuid())
+  name               String
+  description        String?
+  phase              ProjectPhase        @default(proposal)
+  advisor            String?
+  status             String              @default("active") // active | graded | archived
+  grade              String?
+  createdAt          DateTime            @default(now())
+  members            ProjectMember[]
+  tasks              ProjectTask[]
+  submissions        ProjectSubmission[]
   globalTaskStatuses ProjectGlobalTask[]
 }
 
@@ -1138,18 +1231,18 @@ model ScholarshipTier {
 // --- Track D additions: course materials/posts, SA boards, innovation global tasks. ---
 
 model SectionMaterial {
-  id        String   @id @default(uuid())
+  id        String           @id @default(uuid())
   sectionId String
-  section   Section  @relation(fields: [sectionId], references: [id])
+  section   Section          @relation(fields: [sectionId], references: [id])
   title     String
-  kind      String   @default("Document") // Document | Slides | Video | Link
+  kind      String           @default("Document") // Document | Slides | Video | Link
   // Taxonomy the course-materials screens group by.
   category  MaterialCategory @default(resources)
   fileUrl   String?
   fileName  String?
-  published Boolean  @default(true)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
+  published Boolean          @default(true)
+  sortOrder Int              @default(0)
+  createdAt DateTime         @default(now())
 
   @@index([sectionId, sortOrder])
 }
@@ -1227,22 +1320,22 @@ model ProjectGlobalTask {
 // Bursar-generated payment link: any amount/purpose, PayTech or manual settlement.
 // Optional invoiceId puts the money on the normal tuition rail (Payment + allocations).
 model PaymentLink {
-  id             String    @id @default(uuid())
-  token          String    @unique // unguessable public slug
+  id             String                   @id @default(uuid())
+  token          String                   @unique // unguessable public slug
   amountXof      Int
   purpose        String
   payeeName      String
   payeeMeta      String? // e.g. "DA24003 · Computer Science"
   studentId      String?
   invoiceId      String?
-  costCenterCode String    @default("9100")
+  costCenterCode String                   @default("9100")
   dueDate        DateTime?
   expiresAt      DateTime?
-  status         String    @default("active") // active | paid | cancelled
+  status         String                   @default("active") // active | paid | cancelled
   method         String? // how it was settled (wave | orange_money | card | manual)
   paidAt         DateTime?
   createdById    String?
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime                 @default(now())
   wireTransfers  WireTransferSubmission[]
   piSpiRequests  PiSpiRequest[]
 
@@ -1271,15 +1364,16 @@ enum AcademicYearStatus {
 /// Catalog year (e.g. "2026-2027"). Exactly one is `active` at a time; activating
 /// another archives the previous one.
 model AcademicYear {
-  id        String             @id @default(uuid())
-  label     String             @unique
-  status    AcademicYearStatus @default(draft)
-  startsOn  DateTime?
-  endsOn    DateTime?
-  terms     Term[]
-  curricula Curriculum[]
-  events    CalendarEvent[]
-  createdAt DateTime           @default(now())
+  id           String             @id @default(uuid())
+  label        String             @unique
+  status       AcademicYearStatus @default(draft)
+  startsOn     DateTime?
+  endsOn       DateTime?
+  terms        Term[]
+  curricula    Curriculum[]
+  events       CalendarEvent[]
+  feeSchedules FeeSchedule[]
+  createdAt    DateTime           @default(now())
 
   @@index([status])
 }
@@ -1385,19 +1479,19 @@ model GradingScheme {
 }
 
 model GradeScaleRow {
-  id       String        @id @default(uuid())
-  schemeId String
-  scheme   GradingScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
-  grade    String
+  id                  String        @id @default(uuid())
+  schemeId            String
+  scheme              GradingScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  grade               String
   /// Null for non-numeric scales (Pass/Fail, IEP) which carry no GPA weight.
-  points   Float?
-  minScore Int?
-  maxScore Int?
-  position Int           @default(0)
+  points              Float?
+  minScore            Int?
+  maxScore            Int?
+  position            Int           @default(0)
   // Explicit policy keeps non-letter grades such as P/I/W from being inferred
   // from whether a numeric point value happens to be present.
-  countsTowardGpa     Boolean @default(true)
-  countsTowardCredits Boolean @default(true)
+  countsTowardGpa     Boolean       @default(true)
+  countsTowardCredits Boolean       @default(true)
 
   @@index([schemeId])
 }
@@ -1445,27 +1539,27 @@ model GradeSubmission {
 /// Immutable per-student snapshot of a submitted section-grade version. The
 /// registrar approves these values rather than mutable Enrollment rows.
 model GradeSubmissionItem {
-  id                  String          @id @default(uuid())
+  id                  String           @id @default(uuid())
   gradeSubmissionId   String
-  gradeSubmission     GradeSubmission @relation(fields: [gradeSubmissionId], references: [id], onDelete: Cascade)
+  gradeSubmission     GradeSubmission  @relation(fields: [gradeSubmissionId], references: [id], onDelete: Cascade)
   version             Int
   enrollmentId        String
-  enrollment          Enrollment      @relation(fields: [enrollmentId], references: [id])
+  enrollment          Enrollment       @relation(fields: [enrollmentId], references: [id])
   studentId           String
-  student             Student         @relation(fields: [studentId], references: [id])
+  student             Student          @relation(fields: [studentId], references: [id])
   courseId            String?
-  course              Course?         @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  course              Course?          @relation(fields: [courseId], references: [id], onDelete: SetNull)
   termId              String?
-  term                Term?           @relation(fields: [termId], references: [id], onDelete: SetNull)
+  term                Term?            @relation(fields: [termId], references: [id], onDelete: SetNull)
   courseCode          String
   courseTitle         String
   termLabel           String
   credits             Int
   grade               String?
   gradePoints         Float?
-  countsTowardGpa     Boolean         @default(false)
-  countsTowardCredits Boolean         @default(false)
-  createdAt           DateTime        @default(now())
+  countsTowardGpa     Boolean          @default(false)
+  countsTowardCredits Boolean          @default(false)
+  createdAt           DateTime         @default(now())
   transcriptEntry     TranscriptEntry?
 
   @@unique([gradeSubmissionId, version, enrollmentId])
@@ -1479,23 +1573,23 @@ model GradeSubmissionItem {
 /// One idempotent source workbook load. The source hash prevents the same file
 /// from being imported twice while entry-level source keys protect row retries.
 model TranscriptImportBatch {
-  id             String                      @id @default(uuid())
-  sourceFileName String
-  sourceSha256   String                      @unique
+  id              String                      @id @default(uuid())
+  sourceFileName  String
+  sourceSha256    String                      @unique
   sourceObjectKey String?
-  status         TranscriptImportBatchStatus @default(pending)
-  totalRows      Int                         @default(0)
-  importedRows   Int                         @default(0)
-  skippedRows    Int                         @default(0)
-  errorRows      Int                         @default(0)
-  errorSummary   Json?
-  note           String?
-  createdById    String?
-  createdBy      Person?                     @relation("TranscriptImportBatchCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt      DateTime                    @default(now())
-  updatedAt      DateTime                    @updatedAt
-  importedAt     DateTime?
-  entries        TranscriptEntry[]
+  status          TranscriptImportBatchStatus @default(pending)
+  totalRows       Int                         @default(0)
+  importedRows    Int                         @default(0)
+  skippedRows     Int                         @default(0)
+  errorRows       Int                         @default(0)
+  errorSummary    Json?
+  note            String?
+  createdById     String?
+  createdBy       Person?                     @relation("TranscriptImportBatchCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  importedAt      DateTime?
+  entries         TranscriptEntry[]
 
   @@index([status, createdAt])
 }
@@ -1504,18 +1598,18 @@ model TranscriptImportBatch {
 /// when catalog courses or terms are renamed; nullable links add context when a
 /// legacy row can be matched to current SIS entities.
 model TranscriptEntry {
-  id                    String                @id @default(uuid())
+  id                    String                 @id @default(uuid())
   studentId             String
-  student               Student               @relation(fields: [studentId], references: [id])
+  student               Student                @relation(fields: [studentId], references: [id])
   source                TranscriptEntrySource
-  sourceKey             String?               @unique
+  sourceKey             String?                @unique
   importBatchId         String?
   importBatch           TranscriptImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
   importRowNumber       Int?
-  gradeSubmissionItemId String?               @unique
-  gradeSubmissionItem   GradeSubmissionItem?  @relation(fields: [gradeSubmissionItemId], references: [id], onDelete: SetNull)
-  enrollmentId          String?               @unique
-  enrollment            Enrollment?           @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  gradeSubmissionItemId String?                @unique
+  gradeSubmissionItem   GradeSubmissionItem?   @relation(fields: [gradeSubmissionItemId], references: [id], onDelete: SetNull)
+  enrollmentId          String?                @unique
+  enrollment            Enrollment?            @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
   courseId              String?
   course                Course?                @relation(fields: [courseId], references: [id], onDelete: SetNull)
   termId                String?
@@ -1528,25 +1622,25 @@ model TranscriptEntry {
   credits               Int
   earnedCredits         Int
   gradePoints           Float?
-  countsTowardGpa       Boolean               @default(true)
-  countsTowardCredits   Boolean               @default(true)
+  countsTowardGpa       Boolean                @default(true)
+  countsTowardCredits   Boolean                @default(true)
   requirementCategory   String?
   note                  String?
   createdById           String?
-  createdBy             Person?               @relation("TranscriptEntryCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy             Person?                @relation("TranscriptEntryCreator", fields: [createdById], references: [id], onDelete: SetNull)
   updatedById           String?
-  updatedBy             Person?               @relation("TranscriptEntryUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedBy             Person?                @relation("TranscriptEntryUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
   voidedById            String?
-  voidedBy              Person?               @relation("TranscriptEntryVoider", fields: [voidedById], references: [id], onDelete: SetNull)
+  voidedBy              Person?                @relation("TranscriptEntryVoider", fields: [voidedById], references: [id], onDelete: SetNull)
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   voidedAt              DateTime?
   voidReason            String?
 
+  @@unique([importBatchId, importRowNumber])
   @@index([studentId, voidedAt, termSortKey])
   @@index([studentId, voidedAt, courseCode])
   @@index([importBatchId])
-  @@unique([importBatchId, importRowNumber])
   @@index([courseId])
   @@index([termId])
 }
@@ -1670,17 +1764,97 @@ model Broadcast {
 /// across Fall/Spring, each with a full-package and a tuition-only amount.
 /// Seeds new student invoices; the money itself still rides Invoice/Installment.
 model FeePlanInstallment {
-  id                String    @id @default(uuid())
-  academicYearLabel String
-  semester          String
-  label             String
-  sequence          Int
+  id                 String      @id @default(uuid())
+  scheduleId         String
+  schedule           FeeSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  academicYearLabel  String
+  semester           String
+  label              String
+  sequence           Int
   /// Inclusive template calendar date in Africa/Dakar (not a timestamp).
-  dueOn             DateTime? @db.Date
+  dueOn              DateTime?   @db.Date
   /// Tuition + cafeteria + housing, integer XOF.
-  amountFullXof     Int
+  amountFullXof      Int
   /// Tuition only, integer XOF.
-  amountTuitionXof  Int
+  amountTuitionXof   Int
+  /// Housing component for this installment, integer XOF.
+  amountHousingXof   Int         @default(0)
+  /// Cafeteria component for this installment, integer XOF.
+  amountCafeteriaXof Int         @default(0)
 
-  @@unique([academicYearLabel, sequence])
+  @@unique([scheduleId, sequence])
+  @@index([academicYearLabel, sequence])
+}
+
+/// Immutable revision of the institution-wide annual fee schedule. Exactly one
+/// approved revision per academic year is treated as active by application code.
+model FeeSchedule {
+  id                String               @id @default(uuid())
+  academicYearLabel String
+  academicYear      AcademicYear         @relation(fields: [academicYearLabel], references: [label])
+  revision          Int
+  status            FeeScheduleStatus    @default(draft)
+  reason            String?
+  createdById       String?
+  createdBy         Person?              @relation("FeeScheduleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedById      String?
+  approvedBy        Person?              @relation("FeeScheduleApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt        DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  rows              FeePlanInstallment[]
+  invoices          Invoice[]
+
+  @@unique([academicYearLabel, revision])
+  @@index([academicYearLabel, status])
+}
+
+/// Generic, version-checked request for a protected finance mutation.
+model ApprovalRequest {
+  id                String                @id @default(uuid())
+  kind              ApprovalRequestKind
+  status            ApprovalRequestStatus @default(pending)
+  targetType        String
+  targetId          String?
+  academicYearLabel String?
+  reason            String
+  beforeJson        Json?
+  afterJson         Json
+  baseRevision      Int
+  requestedById     String
+  requestedBy       Person                @relation("ApprovalRequester", fields: [requestedById], references: [id])
+  reviewedById      String?
+  reviewedBy        Person?               @relation("ApprovalReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt        DateTime?
+  appliedAt         DateTime?
+  decisionNote      String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  events            ApprovalEvent[]
+
+  @@index([status, createdAt])
+  @@index([requestedById, createdAt])
+  @@index([kind, targetId])
+}
+
+model ApprovalEvent {
+  id        String          @id @default(uuid())
+  requestId String
+  request   ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  action    String
+  actorId   String?
+  actor     Person?         @relation("ApprovalEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+  data      Json?
+  createdAt DateTime        @default(now())
+
+  @@index([requestId, createdAt])
+}
+
+/// Validated, curated Director dashboard layout. Widget keys are checked in the API.
+model DirectorWidgetPreference {
+  id         String   @id @default(uuid())
+  personId   String   @unique
+  person     Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  widgetKeys String[]
+  updatedAt  DateTime @updatedAt
 }

@@ -4,12 +4,14 @@ import type {
   AccountBalanceSummary,
   InstallmentDueState,
   InstallmentPaymentProgress,
+  TranscriptView,
 } from "@mydaust/shared";
 export type {
   AccountBalanceSummary,
   AccountStanding,
   InstallmentDueState,
   InstallmentPaymentProgress,
+  TranscriptView,
 } from "@mydaust/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -268,6 +270,11 @@ export interface BillingPayment {
   amount: number;
   method: string;
   status: string;
+  providerRef?: string;
+  source?: string;
+  initiatedByEmail?: string | null;
+  settledAt?: string | null;
+  refundedAt?: string | null;
   createdAt: string;
 }
 export interface WireTransferSummary {
@@ -570,7 +577,7 @@ export interface Advisee {
   studentNo: string;
   name: string;
   program: string;
-  gpa: number;
+  gpa: number | null;
   atRisk: boolean;
   deansList: boolean;
 }
@@ -1145,6 +1152,23 @@ export const getRegistrarTranscript = (
   request<TranscriptEntryRow[]>(
     `/registrar/students/${studentId}/transcript?includeVoided=${includeVoided}`,
   );
+export const getMyTranscriptView = () =>
+  request<TranscriptView>("/academics/my/transcript/view");
+export const getRegistrarTranscriptView = (studentId: string) =>
+  request<TranscriptView>(`/registrar/students/${studentId}/transcript/view`);
+
+async function transcriptPdf(path: string): Promise<Blob> {
+  const res = await fetch(`${API_URL}/api${path}`, {
+    credentials: "include",
+  });
+  if (!res.ok) throw await toApiError(res);
+  return res.blob();
+}
+
+export const getMyTranscriptPdf = () =>
+  transcriptPdf("/academics/my/transcript/pdf");
+export const getRegistrarTranscriptPdf = (studentId: string) =>
+  transcriptPdf(`/registrar/students/${studentId}/transcript/pdf`);
 export const createTranscriptEntry = (
   studentId: string,
   input: TranscriptEntryInput,
@@ -1766,10 +1790,18 @@ export interface AccountInstallment {
   dueState?: InstallmentDueState;
   daysPastDue?: number;
 }
+export type InvoicePackageType =
+  "standard_full" | "standard_tuition_legacy" | "custom" | "credit";
+
 export interface AccountInvoice {
   id: string;
+  /** Canonical cash-application tie-breaker for mixed-version fallback clients. */
+  createdAt?: string;
   term: string;
   description: string | null;
+  packageType: InvoicePackageType;
+  academicYearLabel: string | null;
+  feeScheduleRevision: number | null;
   total: number;
   paid: number;
   balance: number;
@@ -1779,19 +1811,20 @@ export interface AccountInvoice {
   status: string;
   hasPlan: boolean;
   installments: AccountInstallment[];
-  payments: {
-    id: string;
-    amount: number;
-    method: string;
-    status: string;
-    createdAt: string;
-  }[];
+  payments: BillingPayment[];
   wireTransfers: WireTransferSummary[];
 }
 export interface StudentAccount {
   student: { studentNo: string; name: string; program: string; email: string };
   totals: { billed: number; paid: number; balance: number };
   summary?: AccountBalanceSummary;
+  /** Selected by the API's due-date-first cash-application algorithm. */
+  payableTarget?: {
+    invoiceId: string;
+    installmentId: string | null;
+    outstandingXof: number;
+    invoicePayableXof: number;
+  } | null;
   activeHolds?: {
     id: string;
     type: string;
@@ -1802,6 +1835,16 @@ export interface StudentAccount {
 }
 export const getStudentAccount = (studentId: string) =>
   request<StudentAccount>(`/finance/admin/students/${studentId}/account`);
+
+export const assignStandardPackage = (studentId: string) =>
+  request<{
+    created: boolean;
+    invoiceId: string;
+    feeScheduleId: string;
+    feeScheduleRevision: number;
+  }>(`/finance/admin/students/${studentId}/standard-package`, {
+    method: "POST",
+  });
 
 // --- Standalone billing admin: all accounts with derived balances ---
 export interface StudentAccountRow {
@@ -1829,6 +1872,9 @@ export interface StudentAccountRow {
   invoiceId: string | null;
   billingNumber: string | null;
   billingDescription: string | null;
+  packageType: InvoicePackageType | null;
+  academicYearLabel: string | null;
+  feeScheduleRevision: number | null;
 }
 export const listStudentAccounts = () =>
   request<StudentAccountRow[]>("/finance/admin/accounts");
@@ -1907,7 +1953,6 @@ export const createStudent = (input: {
   studentNo?: string;
   email?: string;
   programCode?: string;
-  billTuition?: boolean;
 }) =>
   request<{ id: string; studentNo: string }>("/finance/admin/students", {
     method: "POST",
@@ -1924,14 +1969,16 @@ export const addCharge = (input: {
     amountXof: number;
     label?: string | null;
   }[];
+  requestReason: string;
 }) =>
-  request<{ ok: boolean; count: number }>("/finance/admin/charges", {
+  request<FinanceChangeResult>("/finance/admin/charges", {
     method: "POST",
     body: JSON.stringify(input),
   });
-export const removeCharge = (invoiceId: string) =>
-  request<{ ok: boolean }>(`/finance/admin/charges/${invoiceId}`, {
+export const removeCharge = (invoiceId: string, reason: string) =>
+  request<FinanceChangeResult>(`/finance/admin/charges/${invoiceId}`, {
     method: "DELETE",
+    body: JSON.stringify({ reason }),
   });
 export const applyDiscount = (input: {
   studentId: string;
@@ -1939,8 +1986,9 @@ export const applyDiscount = (input: {
   amountXof: number;
   kind?: "discount" | "scholarship";
   costCenterCode?: string;
+  requestReason: string;
 }) =>
-  request<{ ok: boolean; creditId: string }>("/finance/admin/discounts", {
+  request<FinanceChangeResult>("/finance/admin/discounts", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -1952,10 +2000,11 @@ export const updatePaymentPlan = (
     amountDue: number;
     label?: string | null;
   }[],
+  requestReason: string,
 ) =>
-  request<{ ok: boolean }>(`/finance/admin/plans/${invoiceId}`, {
+  request<FinanceChangeResult>(`/finance/admin/plans/${invoiceId}`, {
     method: "PATCH",
-    body: JSON.stringify({ installments }),
+    body: JSON.stringify({ installments, requestReason }),
   });
 export const replacePaymentPlan = (
   invoiceId: string,
@@ -1966,10 +2015,11 @@ export const replacePaymentPlan = (
     amountDue: number;
     label?: string | null;
   }[],
+  requestReason: string,
 ) =>
-  request<{ ok: boolean }>(`/finance/admin/plans/${invoiceId}`, {
+  request<FinanceChangeResult>(`/finance/admin/plans/${invoiceId}`, {
     method: "PUT",
-    body: JSON.stringify({ installments }),
+    body: JSON.stringify({ installments, requestReason }),
   });
 
 export interface AdminWireTransfer extends WireTransferSummary {
@@ -2078,6 +2128,155 @@ export interface ArAging {
 }
 export const getArAging = () => request<ArAging>("/finance/admin/aging");
 
+export interface CollectionsTimelinePoint {
+  date: string;
+  expectedCumulativeXof: number;
+  actualCumulativeXof: number | null;
+  forecastCumulativeXof: number | null;
+}
+
+export interface CollectionsTimeline {
+  academicYear: string;
+  asOfDate: string;
+  currency: "XOF";
+  summary: {
+    scheduledXof: number;
+    collectedXof: number;
+    varianceXof: number;
+    collectibleBalanceXof: number;
+    unscheduledDebtXof: number;
+  };
+  forecast: {
+    status: "trailing_30_days" | "academic_year_to_date" | "insufficient_data";
+    dailyRateXof: number | null;
+    settlementDayCount: number;
+    cappedAtXof: number;
+  };
+  points: CollectionsTimelinePoint[];
+}
+
+export const getCollectionsTimeline = (academicYear?: string) =>
+  request<CollectionsTimeline>(
+    `/finance/admin/collections-timeline${academicYear ? `?academicYear=${encodeURIComponent(academicYear)}` : ""}`,
+  );
+
+export type ApprovalRequestKind =
+  | "global_fee_schedule"
+  | "custom_charge"
+  | "charge_removal"
+  | "payment_plan"
+  | "discount"
+  | "scholarship";
+export type ApprovalRequestStatus =
+  "pending" | "approved" | "rejected" | "cancelled" | "stale";
+
+export interface ApprovalRequestRow {
+  id: string;
+  kind: ApprovalRequestKind;
+  status: ApprovalRequestStatus;
+  targetType: string;
+  targetId: string | null;
+  academicYearLabel: string | null;
+  reason: string;
+  beforeJson: unknown;
+  afterJson: unknown;
+  baseRevision: number;
+  requester: { name: string; email: string } | null;
+  reviewer: { name: string; email: string } | null;
+  decisionNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  reviewedAt: string | null;
+  appliedAt: string | null;
+  events?: unknown[];
+}
+
+export const listApprovalRequests = (
+  view: "pending" | "history" | "mine",
+  search?: string,
+) =>
+  request<ApprovalRequestRow[]>(
+    `/approvals?view=${view}${search?.trim() ? `&search=${encodeURIComponent(search.trim())}` : ""}`,
+  );
+
+export const approveApprovalRequest = (id: string, note?: string) =>
+  request<{
+    ok: boolean;
+    id: string;
+    status: ApprovalRequestStatus;
+    reason?: string;
+  }>(`/approvals/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
+
+export const rejectApprovalRequest = (id: string, reason: string) =>
+  request<{ ok: boolean; id: string; status: ApprovalRequestStatus }>(
+    `/approvals/${id}/reject`,
+    { method: "POST", body: JSON.stringify({ reason }) },
+  );
+
+export const cancelApprovalRequest = (id: string, note?: string) =>
+  request<{ ok: boolean; id: string; status: ApprovalRequestStatus }>(
+    `/approvals/${id}/cancel`,
+    { method: "POST", body: JSON.stringify({ note }) },
+  );
+
+export type DirectorWidgetKey =
+  | "people"
+  | "academics"
+  | "admissions"
+  | "approvals"
+  | "holds"
+  | "receivables"
+  | "collections"
+  | "cost_centers";
+
+export interface DirectorPortalOverview {
+  generatedAt: string;
+  people: { activeStudents: number; faculty: number; staff: number };
+  academics: { programs: number };
+  admissions: { applicants: number };
+  approvals: { pending: number };
+  holds: { activeStudents: number };
+  receivables: {
+    overdueAccounts: number;
+    overdueXof: number;
+    outstandingXof: number;
+  };
+  collections: {
+    collectedXof: number;
+    expensesXof: number;
+    netCashXof: number;
+  };
+  costCenters: {
+    code: string;
+    name: string;
+    revenueXof: number;
+    expenseXof: number;
+    netXof: number;
+  }[];
+}
+
+export interface DirectorWidgetPreferences {
+  available: {
+    key: DirectorWidgetKey;
+    label: string;
+    description: string;
+  }[];
+  selected: DirectorWidgetKey[];
+}
+
+export const getDirectorPortalOverview = () =>
+  request<DirectorPortalOverview>("/director/overview");
+export const getDirectorWidgets = () =>
+  request<DirectorWidgetPreferences>("/director/widgets");
+export const updateDirectorWidgets = (widgetKeys: DirectorWidgetKey[]) =>
+  request<DirectorWidgetPreferences>("/director/widgets", {
+    method: "PUT",
+    body: JSON.stringify({ widgetKeys }),
+  });
+
 export interface FinanceReports {
   collections: CollectionSummary;
   aging: ArAging;
@@ -2119,6 +2318,9 @@ export interface Receipt {
   status: string;
   providerRef: string;
   paidAt: string;
+  refundedAt?: string | null;
+  source?: string;
+  initiatedByEmail?: string | null;
   allocations: { sequence: number; amount: number }[];
 }
 export const getReceipt = (paymentId: string) =>
@@ -2617,20 +2819,7 @@ export interface ChildSummary {
 }
 export const getMyChildren = () => request<ChildSummary[]>("/parent/children");
 
-export interface ChildTranscript {
-  cumulativeGpa: number;
-  terms: {
-    term: string;
-    gpa: number;
-    credits: number;
-    courses: {
-      code: string;
-      title: string;
-      credits: number;
-      grade: string | null;
-    }[];
-  }[];
-}
+export type ChildTranscript = TranscriptView;
 export const getChildGrades = (studentId: string) =>
   request<ChildTranscript>(`/parent/children/${studentId}/grades`);
 
@@ -2650,6 +2839,82 @@ export const getChildAttendance = (studentId: string) =>
 
 export const getChildAccount = (studentId: string) =>
   request<StudentAccount>(`/parent/children/${studentId}/account`);
+
+export const initiateChildPayment = (
+  studentId: string,
+  invoiceId: string,
+  amount: number,
+  method: "wave" | "orange_money" | "card",
+) =>
+  request<{ paymentId: string; redirectUrl: string }>(
+    `/parent/children/${encodeURIComponent(studentId)}/payments`,
+    {
+      method: "POST",
+      body: JSON.stringify({ invoiceId, amount, method }),
+    },
+  );
+
+export interface ChildPaymentStatus {
+  id: string;
+  invoiceId: string;
+  amount: number;
+  method: string;
+  status: string;
+  providerRef: string;
+  source?: string;
+  settledAt?: string | null;
+  refundedAt?: string | null;
+  createdAt: string;
+}
+
+export const getChildPaymentStatus = (studentId: string, paymentId: string) =>
+  request<ChildPaymentStatus>(
+    `/parent/children/${encodeURIComponent(studentId)}/payments/${encodeURIComponent(paymentId)}/status`,
+  );
+
+export const getChildReceipt = (studentId: string, paymentId: string) =>
+  request<Receipt>(
+    `/parent/children/${encodeURIComponent(studentId)}/payments/${encodeURIComponent(paymentId)}/receipt`,
+  );
+
+export const submitChildPiSpi = (input: {
+  studentId: string;
+  invoiceId: string;
+  alias: string;
+  amountXof: number;
+}) =>
+  request<PiSpiRequestSummary>(
+    `/parent/children/${encodeURIComponent(input.studentId)}/pi-spi`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        invoiceId: input.invoiceId,
+        alias: input.alias,
+        amountXof: input.amountXof,
+      }),
+    },
+  );
+
+export const getChildPiSpiRequest = (studentId: string, txId: string) =>
+  request<PiSpiRequestSummary>(
+    `/parent/children/${encodeURIComponent(studentId)}/pi-spi/${encodeURIComponent(txId)}`,
+  );
+
+export function submitChildWire(input: {
+  studentId: string;
+  invoiceId: string;
+  amountXof: number;
+  proof: File;
+}) {
+  const form = new FormData();
+  form.append("invoiceId", input.invoiceId);
+  form.append("amountXof", String(input.amountXof));
+  form.append("proof", input.proof);
+  return multipartRequest<WireTransferSummary>(
+    `/parent/children/${encodeURIComponent(input.studentId)}/wire-transfers`,
+    form,
+  );
+}
 
 // --- Registrar: guardian administration ---
 export interface GuardianRow {
@@ -2677,18 +2942,22 @@ export const createGuardian = (input: {
   studentIds: string[];
   relation?: string;
 }) =>
-  request<{ id: string; email: string; inviteExpiresAt: string | null }>(
-    "/guardians",
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
+  request<{
+    id: string;
+    email: string;
+    inviteExpiresAt: string | null;
+    inviteDelivery: "sent" | "not_sent" | "not_needed";
+  }>("/guardians", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 export const resendGuardianInvite = (id: string) =>
-  request<{ ok: boolean; inviteLink: string; inviteExpiresAt: string }>(
-    `/guardians/${id}/resend-invite`,
-    { method: "POST" },
-  );
+  request<{
+    ok: boolean;
+    inviteLink: string;
+    inviteExpiresAt: string;
+    inviteDelivery: "sent" | "not_sent";
+  }>(`/guardians/${id}/resend-invite`, { method: "POST" });
 export const setGuardianChildren = (id: string, studentIds: string[]) =>
   request<{ ok: boolean }>(`/guardians/${id}/children`, {
     method: "PATCH",
@@ -2698,7 +2967,13 @@ export const updateGuardian = (
   id: string,
   input: { fullName?: string; email?: string },
 ) =>
-  request<{ id: string; name: string; email: string }>(`/guardians/${id}`, {
+  request<{
+    id: string;
+    name: string;
+    email: string;
+    inviteDelivery: "sent" | "not_sent" | null;
+    inviteExpiresAt: string | null;
+  }>(`/guardians/${id}`, {
     method: "PATCH",
     body: JSON.stringify(input),
   });
@@ -2715,11 +2990,16 @@ export interface FeePlanRow {
   dueOn: string | null;
   amountFullXof: number;
   amountTuitionXof: number;
+  amountHousingXof: number;
+  amountCafeteriaXof: number;
 }
 export interface FeePlan {
+  scheduleId?: string | null;
   academicYearLabel: string | null;
+  revision?: number | null;
+  status?: "draft" | "approved" | "superseded" | null;
   rows: FeePlanRow[];
-  totals: { full: number; tuition: number };
+  totals: { full: number; tuition: number; housing: number; cafeteria: number };
 }
 export const getFeePlan = (year?: string) =>
   request<FeePlan>(
@@ -2732,10 +3012,37 @@ export const updateFeePlanRow = (
     dueOn?: string;
     amountFullXof?: number;
     amountTuitionXof?: number;
+    amountHousingXof?: number;
+    amountCafeteriaXof?: number;
+    requestReason: string;
   },
 ) =>
-  request<FeePlanRow>(`/finance/admin/fee-plan/${id}`, {
+  request<FinanceChangeResult>(`/finance/admin/fee-plan/${id}`, {
     method: "PATCH",
+    body: JSON.stringify(input),
+  });
+
+export interface FinanceChangeResult {
+  applied: boolean;
+  request: ApprovalRequestRow;
+  result: unknown;
+}
+
+export const replaceFeePlan = (input: {
+  academicYearLabel?: string;
+  reason: string;
+  rows: {
+    id: string;
+    label: string;
+    dueOn: string;
+    amountFullXof: number;
+    amountTuitionXof: number;
+    amountHousingXof: number;
+    amountCafeteriaXof: number;
+  }[];
+}) =>
+  request<FinanceChangeResult>("/finance/admin/fee-plan", {
+    method: "PUT",
     body: JSON.stringify(input),
   });
 
