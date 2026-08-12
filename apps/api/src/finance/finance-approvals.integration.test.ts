@@ -307,6 +307,464 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
     expect(stored.appliedAt === null).toBe(stored.status !== "approved");
   });
 
+  it("prevents duplicate pending plan changes for one student invoice", async () => {
+    const invoice = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    const installments = invoice.plan!.installments.map((row) => ({
+      id: row.id,
+      sequence: row.sequence,
+      dueDate: row.dueDate.toISOString().slice(0, 10),
+      amountDue: row.amountDue,
+      label: row.label,
+    }));
+    const first = await approvals.request(bursar, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoice.id,
+      reason: "Family requested a later first due date",
+      after: { mode: "replace", installments },
+    });
+    const [pendingAccount, pendingRows] = await Promise.all([
+      finance.getStudentAccount(studentId),
+      finance.listStudentAccounts(),
+    ]);
+    expect(pendingAccount.specialAccount).toMatchObject({
+      isSpecial: true,
+      hasPendingPlanChange: true,
+    });
+    expect(pendingRows.find((row) => row.id === studentId)).toMatchObject({
+      billed: invoice.totalAmount,
+      remaining: pendingAccount.summary.outstandingXof,
+      specialAccount: { hasPendingPlanChange: true },
+    });
+    await expect(
+      approvals.request(bursar, {
+        kind: "payment_plan",
+        targetType: "Invoice",
+        targetId: invoice.id,
+        reason: "Duplicate request",
+        after: { mode: "replace", installments },
+      }),
+    ).rejects.toThrow("already awaiting administrator approval");
+    await approvals.cancel(first.request.id, bursar, "Test cleanup");
+
+    const raced = await Promise.allSettled([
+      approvals.request(bursar, {
+        kind: "payment_plan",
+        targetType: "Invoice",
+        targetId: invoice.id,
+        reason: "Concurrent request A",
+        after: { mode: "replace", installments },
+      }),
+      approvals.request(bursar, {
+        kind: "payment_plan",
+        targetType: "Invoice",
+        targetId: invoice.id,
+        reason: "Concurrent request B",
+        after: { mode: "replace", installments },
+      }),
+    ]);
+    expect(
+      raced.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(raced.filter((result) => result.status === "rejected")).toHaveLength(
+      1,
+    );
+    const winner = raced.find(
+      (
+        result,
+      ): result is PromiseFulfilledResult<
+        Awaited<ReturnType<typeof approvals.request>>
+      > => result.status === "fulfilled",
+    )!;
+    await approvals.cancel(winner.value.request.id, bursar, "Race cleanup");
+  });
+
+  it("rejects an individual plan amount below the paid installment", async () => {
+    const invoice = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    const paid = invoice.plan!.installments[0]!;
+    await prisma.$transaction([
+      prisma.installment.update({
+        where: { id: paid.id },
+        data: { amountPaid: 100, status: "partial" },
+      }),
+      prisma.invoice.update({
+        where: { id: invoice.id },
+        data: { amountPaid: 100, status: "partial" },
+      }),
+    ]);
+    const request = await approvals.request(bursar, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoice.id,
+      reason: "Invalid paid-row reduction",
+      after: {
+        mode: "replace",
+        installments: invoice.plan!.installments.map((row) => ({
+          id: row.id,
+          sequence: row.sequence,
+          dueDate: row.dueDate.toISOString().slice(0, 10),
+          amountDue: row.id === paid.id ? 99 : row.amountDue,
+          label: row.label,
+        })),
+      },
+    });
+    await expect(approvals.approve(request.request.id, admin)).rejects.toThrow(
+      "below its paid amount",
+    );
+    await approvals.cancel(request.request.id, bursar, "Test cleanup");
+    await prisma.$transaction([
+      prisma.installment.update({
+        where: { id: paid.id },
+        data: { amountPaid: 0, status: "pending" },
+      }),
+      prisma.invoice.update({
+        where: { id: invoice.id },
+        data: { amountPaid: 0, status: "open" },
+      }),
+    ]);
+  });
+
+  it("cancels a failed admin self-approval so a corrected plan is not locked", async () => {
+    const invoice = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    const paid = invoice.plan!.installments[0]!;
+    await prisma.$transaction([
+      prisma.installment.update({
+        where: { id: paid.id },
+        data: { amountPaid: 100, status: "partial" },
+      }),
+      prisma.invoice.update({
+        where: { id: invoice.id },
+        data: { amountPaid: 100, status: "partial" },
+      }),
+    ]);
+    const invalidReason = `Invalid admin plan ${randomUUID()}`;
+    const rows = invoice.plan!.installments.map((row) => ({
+      id: row.id,
+      sequence: row.sequence,
+      dueDate: row.dueDate.toISOString().slice(0, 10),
+      amountDue: row.id === paid.id ? 99 : row.amountDue,
+      label: row.label,
+    }));
+    await expect(
+      approvals.request(admin, {
+        kind: "payment_plan",
+        targetType: "Invoice",
+        targetId: invoice.id,
+        reason: invalidReason,
+        after: { mode: "replace", installments: rows },
+      }),
+    ).rejects.toThrow("below its paid amount");
+    await expect(
+      prisma.approvalRequest.findFirstOrThrow({
+        where: { reason: invalidReason },
+      }),
+    ).resolves.toMatchObject({
+      status: "cancelled",
+      requestedById: admin.personId,
+      reviewedById: admin.personId,
+    });
+
+    const corrected = await approvals.request(admin, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoice.id,
+      reason: "Corrected admin plan",
+      after: {
+        mode: "replace",
+        installments: rows.map((row) => ({
+          ...row,
+          amountDue: row.id === paid.id ? paid.amountDue : row.amountDue,
+        })),
+      },
+    });
+    expect(corrected).toMatchObject({
+      applied: true,
+      request: { status: "approved" },
+    });
+    await prisma.$transaction([
+      prisma.installment.update({
+        where: { id: paid.id },
+        data: { amountPaid: 0, status: "pending" },
+      }),
+      prisma.invoice.update({
+        where: { id: invoice.id },
+        data: { amountPaid: 0, status: "open" },
+      }),
+    ]);
+  });
+
+  it("never resurrects a void invoice through an approved plan change", async () => {
+    const invoice = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: { status: "void" },
+    });
+    const request = await approvals.request(bursar, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoice.id,
+      reason: "Invalid change to a void charge",
+      after: {
+        mode: "replace",
+        installments: invoice.plan!.installments.map((row) => ({
+          id: row.id,
+          sequence: row.sequence,
+          dueDate: row.dueDate.toISOString().slice(0, 10),
+          amountDue: row.amountDue,
+          label: row.label,
+        })),
+      },
+    });
+    await expect(approvals.approve(request.request.id, admin)).rejects.toThrow(
+      "void invoice",
+    );
+    await expect(
+      prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } }),
+    ).resolves.toMatchObject({ status: "void" });
+    await approvals.cancel(request.request.id, bursar, "Test cleanup");
+    await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: { status: "open" },
+    });
+  });
+
+  it("marks a student plan request stale when billing changes after submission", async () => {
+    const invoice = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    const request = await approvals.request(bursar, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoice.id,
+      reason: "Plan submitted before another billing event",
+      after: {
+        mode: "replace",
+        installments: invoice.plan!.installments.map((row) => ({
+          id: row.id,
+          sequence: row.sequence,
+          dueDate: row.dueDate.toISOString().slice(0, 10),
+          amountDue: row.amountDue,
+          label: row.label,
+        })),
+      },
+    });
+    await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: { revision: { increment: 1 } },
+    });
+    await expect(
+      approvals.approve(request.request.id, admin),
+    ).resolves.toMatchObject({ ok: false, status: "stale" });
+  });
+
+  it("approves, flags, isolates, and restores an individual standard plan", async () => {
+    const invoice = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    const first = invoice.plan!.installments[0]!;
+    const individualDueDate = "2026-10-17";
+    const individualTotal = invoice.totalAmount + 10_000;
+    const request = await approvals.request(bursar, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoice.id,
+      reason: "Approved individual family arrangement",
+      after: {
+        mode: "replace",
+        installments: invoice.plan!.installments.map((row) => ({
+          id: row.id,
+          sequence: row.sequence,
+          dueDate:
+            row.id === first.id
+              ? individualDueDate
+              : row.dueDate.toISOString().slice(0, 10),
+          amountDue: row.amountDue + (row.id === first.id ? 10_000 : 0),
+          label: row.label,
+        })),
+      },
+    });
+    await expect(
+      approvals.approve(request.request.id, admin),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: "approved",
+      result: { individualOverride: true, total: individualTotal },
+    });
+    const customized = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoice.id },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    expect(customized.feeScheduleId).toBeNull();
+    expect(customized.totalAmount).toBe(individualTotal);
+    expect(
+      customized.plan!.installments[0]!.dueDate.toISOString().slice(0, 10),
+    ).toBe(individualDueDate);
+
+    const account = await finance.getStudentAccount(studentId);
+    expect(account.totals).toMatchObject({
+      billed: individualTotal,
+      remaining: account.summary.outstandingXof,
+    });
+    expect(account.specialAccount).toMatchObject({
+      isSpecial: true,
+      hasIndividualPlan: true,
+    });
+    expect(account.invoices.find((row) => row.id === invoice.id)).toMatchObject(
+      {
+        planType: "individual_override",
+      },
+    );
+
+    const currentSchedule = await prisma.feeSchedule.findFirstOrThrow({
+      where: { academicYearLabel: "2026–2027", status: "approved" },
+      orderBy: { revision: "desc" },
+      include: { rows: { orderBy: { sequence: "asc" } } },
+    });
+    const global = await approvals.request(admin, {
+      kind: "global_fee_schedule",
+      targetType: "FeeSchedule",
+      targetId: currentSchedule.id,
+      academicYearLabel: currentSchedule.academicYearLabel,
+      reason: "Global label update must skip individual arrangements",
+      after: {
+        rows: currentSchedule.rows.map((row) => ({
+          id: row.id,
+          label: row.sequence === 1 ? "Global registration" : row.label,
+          dueOn: row.dueOn!.toISOString().slice(0, 10),
+          amountFullXof: row.amountFullXof,
+          amountTuitionXof: row.amountTuitionXof,
+          amountHousingXof: row.amountHousingXof,
+          amountCafeteriaXof: row.amountCafeteriaXof,
+        })),
+      },
+    });
+    expect(global.applied).toBe(true);
+    expect(global.result).toMatchObject({ linkedPlansUpdated: 0 });
+    const isolated = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoice.id },
+      include: { plan: { include: { installments: true } } },
+    });
+    expect(isolated.totalAmount).toBe(individualTotal);
+    expect(isolated.feeScheduleId).toBeNull();
+    expect(
+      isolated
+        .plan!.installments.find((row) => row.sequence === 1)!
+        .dueDate.toISOString()
+        .slice(0, 10),
+    ).toBe(individualDueDate);
+
+    const restore = await approvals.request(admin, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoice.id,
+      reason: "Administrator restored the approved standard plan",
+      after: { mode: "restore_standard" },
+    });
+    expect(restore).toMatchObject({
+      applied: true,
+      request: { status: "approved" },
+      result: { restored: true, total: 4_285_000 },
+    });
+    const restored = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoice.id },
+      include: { plan: { include: { installments: true } } },
+    });
+    const latestSchedule = await prisma.feeSchedule.findFirstOrThrow({
+      where: { academicYearLabel: "2026–2027", status: "approved" },
+      orderBy: { revision: "desc" },
+    });
+    expect(restored).toMatchObject({
+      feeScheduleId: latestSchedule.id,
+      feeScheduleRevision: latestSchedule.revision,
+      totalAmount: 4_285_000,
+    });
+    expect(
+      (await finance.getStudentAccount(studentId)).specialAccount,
+    ).toMatchObject({ hasIndividualPlan: false });
+  });
+
+  it("preserves unspecified installments in a PATCH-style plan update", async () => {
+    const before = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    const changed = before.plan!.installments[0]!;
+    const response = await approvals.request(admin, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: before.id,
+      reason: "Change only the first due date",
+      after: {
+        mode: "update",
+        installments: [
+          {
+            id: changed.id,
+            sequence: changed.sequence,
+            dueDate: "2026-10-19",
+            amountDue: changed.amountDue,
+          },
+        ],
+      },
+    });
+    expect(response.applied).toBe(true);
+    const updated = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    expect(updated.plan!.installments.map((row) => row.id)).toEqual(
+      before.plan!.installments.map((row) => row.id),
+    );
+    expect(updated.plan!.installments).toHaveLength(
+      before.plan!.installments.length,
+    );
+    expect(updated.totalAmount).toBe(before.totalAmount);
+    expect(updated.plan!.installments[0]).toMatchObject({
+      id: changed.id,
+      label: changed.label,
+    });
+
+    const restore = await approvals.request(admin, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: before.id,
+      reason: "Restore after PATCH regression test",
+      after: { mode: "restore_standard" },
+    });
+    expect(restore.applied).toBe(true);
+  });
+
   it("assigns one standard package when concurrent bursar retries race", async () => {
     const person = await prisma.person.create({
       data: {

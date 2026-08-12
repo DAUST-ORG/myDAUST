@@ -135,6 +135,7 @@ const ReplacePlanInput = z.object({
     .max(24),
   requestReason: RequestReason,
 });
+const RestoreStandardPlanInput = z.object({ requestReason: RequestReason });
 const CreatePlanRequestInput = CreatePaymentPlanInput.extend({
   requestReason: RequestReason,
 });
@@ -414,6 +415,22 @@ export class AdminFinanceController {
       targetId: invoiceId,
       reason: input.requestReason,
       after: { mode: "replace", installments: input.installments },
+    });
+  }
+
+  @Post("plans/:invoiceId/restore-standard")
+  restoreStandardPlan(
+    @CurrentUser() user: AuthUser,
+    @Param("invoiceId") invoiceId: string,
+    @Body() body: unknown,
+  ) {
+    const input = RestoreStandardPlanInput.parse(body);
+    return this.approvals.request(user, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: invoiceId,
+      reason: input.requestReason,
+      after: { mode: "restore_standard" },
     });
   }
 

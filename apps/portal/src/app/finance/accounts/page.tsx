@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { CalendarClock, Check, FilePlus, Pencil } from "lucide-react";
 import {
   type FeePlan,
@@ -10,6 +9,7 @@ import {
   getFeePlan,
   getStudentAccount,
   listStudentAccounts,
+  restoreStandardPaymentPlan,
   updatePaymentPlan,
 } from "@/lib/api";
 import { formatXof } from "@/lib/format";
@@ -68,6 +68,8 @@ interface DraftRow {
   label: string;
   dueDate: string;
   amountXof: number;
+  /** Approved plans cannot reduce an installment below cash already settled. */
+  amountPaid?: number;
 }
 
 interface BillingDraft {
@@ -75,16 +77,27 @@ interface BillingDraft {
   invoiceId?: string;
   studentId: string;
   plan: string;
+  planType?: StudentAccountRow["planType"];
   rows: DraftRow[];
 }
 
 function BalanceCells({ row }: { row: StudentAccountRow }) {
   const summary = resolveAccountSummary(row.summary, {
-    balanceXof: row.balance,
+    balanceXof: row.remaining ?? row.remainingXof ?? row.balance,
     billedXof: row.billed,
   });
   return (
     <>
+      <td
+        style={{
+          textAlign: "right",
+          fontWeight: 600,
+          fontVariantNumeric: "tabular-nums",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {formatXof(row.billed)}
+      </td>
       <td style={{ textAlign: "right" }}>
         <span style={{ display: "grid", gap: 2, justifyItems: "end" }}>
           <AccountBalanceText summary={summary} style={{ fontWeight: 700 }} />
@@ -162,6 +175,7 @@ export default function FinanceAccounts() {
     const matched = searched.filter((row) => {
       if (balanceFilter === "all") return true;
       if (balanceFilter === "hold") return !!row.hasActiveHold;
+      if (balanceFilter === "special") return !!row.specialAccount?.isSpecial;
       return (
         resolveAccountSummary(row.summary, {
           balanceXof: row.balance,
@@ -172,7 +186,8 @@ export default function FinanceAccounts() {
     return apply(matched, {
       name: (r) => r.name,
       program: (r) => r.program,
-      balance: (r) => r.balance,
+      billed: (r) => r.billed,
+      balance: (r) => r.remaining ?? r.remainingXof ?? r.balance,
     });
   }, [rows, fBal, balanceFilter, apply]);
 
@@ -207,12 +222,6 @@ export default function FinanceAccounts() {
 
   async function openEdit(row: StudentAccountRow) {
     if (!row.invoiceId) return;
-    if (row.packageType === "standard_full") {
-      setNote(
-        "This billing follows the approved global Fee Schedule. Update that schedule to change every linked student consistently.",
-      );
-      return;
-    }
     setNote(null);
     setError(null);
     setBusy(true);
@@ -221,20 +230,22 @@ export default function FinanceAccounts() {
       const account = await getStudentAccount(row.id);
       const invoice = account.invoices.find((i) => i.id === row.invoiceId);
       if (!invoice) throw new Error("That billing no longer exists.");
-      if (invoice.packageType === "standard_full") {
+      if (invoice.hasPendingPlanChange) {
         throw new Error(
-          "This billing follows the approved global Fee Schedule and cannot be edited per student.",
+          "A payment-plan change for this billing is already awaiting administrator approval.",
         );
       }
       setDraft({
         invoiceId: invoice.id,
         studentId: row.id,
         plan: invoice.description === planLabel("tuition") ? "tuition" : "full",
+        planType: invoice.planType,
         rows: invoice.installments.map((i) => ({
           id: i.id,
           label: i.label ?? `Installment ${i.sequence}`,
           dueDate: toDateInput(i.dueDate),
           amountXof: i.amountDue,
+          amountPaid: i.amountPaid,
         })),
       });
     } catch (e) {
@@ -264,7 +275,12 @@ export default function FinanceAccounts() {
     draft !== null &&
     draft.studentId !== "" &&
     draft.rows.length > 0 &&
-    draft.rows.every((r) => r.dueDate !== "" && r.amountXof > 0) &&
+    draft.rows.every(
+      (r) =>
+        r.dueDate !== "" &&
+        r.amountXof > 0 &&
+        r.amountXof >= (r.amountPaid ?? 0),
+    ) &&
     total > 0 &&
     (!draft.invoiceId || requestReason.trim().length > 0);
 
@@ -303,6 +319,33 @@ export default function FinanceAccounts() {
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save the billing.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreStandard() {
+    if (!draft?.invoiceId || !requestReason.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await restoreStandardPaymentPlan(
+        draft.invoiceId,
+        requestReason.trim(),
+      );
+      setNote(
+        result.applied
+          ? "The approved standard plan was restored."
+          : "Restore-to-standard request submitted for administrator approval.",
+      );
+      setDraft(null);
+      load();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Could not request a standard-plan restoration.",
+      );
     } finally {
       setBusy(false);
     }
@@ -371,7 +414,8 @@ export default function FinanceAccounts() {
                   <th style={{ width: 140 }}>Billing</th>
                   <th>Student</th>
                   <th style={{ width: 230 }}>Plan</th>
-                  <th style={{ textAlign: "right", width: 140 }}>Total</th>
+                  <th style={{ textAlign: "right", width: 140 }}>Billed</th>
+                  <th style={{ textAlign: "right", width: 140 }}>Remaining</th>
                   <th style={{ textAlign: "right", width: 56 }}>Edit</th>
                 </tr>
               </thead>
@@ -391,14 +435,44 @@ export default function FinanceAccounts() {
                     <td style={{ fontSize: 12.5, color: "var(--fg2)" }}>
                       <span style={{ display: "grid", gap: 2 }}>
                         <span>{r.billingDescription ?? "—"}</span>
-                        {r.packageType === "standard_full" && (
-                          <span style={{ color: "var(--fg3)", fontSize: 11.5 }}>
-                            Global schedule
-                            {r.feeScheduleRevision
-                              ? ` · revision ${r.feeScheduleRevision}`
-                              : ""}
+                        {r.planType === "individual_override" ? (
+                          <span
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <Badge tone="warning">Individual plan</Badge>
+                            {r.specialAccount?.hasPendingPlanChange && (
+                              <Badge tone="info">Approval pending</Badge>
+                            )}
                           </span>
-                        )}
+                        ) : r.packageType === "standard_full" ? (
+                          <span
+                            style={{
+                              color: "var(--fg3)",
+                              fontSize: 11.5,
+                              display: "flex",
+                              gap: 6,
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span>
+                              Global schedule
+                              {r.feeScheduleRevision
+                                ? ` · revision ${r.feeScheduleRevision}`
+                                : ""}
+                            </span>
+                            {r.specialAccount?.hasPendingPlanChange && (
+                              <Badge tone="info">Approval pending</Badge>
+                            )}
+                          </span>
+                        ) : r.specialAccount?.isSpecial ? (
+                          <Badge tone="warning">Special account</Badge>
+                        ) : null}
                       </span>
                     </td>
                     <td
@@ -411,27 +485,22 @@ export default function FinanceAccounts() {
                       {formatXof(r.billed)}
                     </td>
                     <td style={{ textAlign: "right" }}>
-                      {r.packageType === "standard_full" ? (
-                        <Link
-                          href="/finance/fee-schedule"
-                          title="Standard packages are changed from the global Fee Schedule"
-                          style={{
-                            color: "var(--daust-navy)",
-                            fontSize: 11.5,
-                            fontWeight: 700,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          Fee Schedule
-                        </Link>
-                      ) : (
-                        <IconButton
-                          label={`Edit billing for ${r.name}`}
-                          onClick={() => openEdit(r)}
-                        >
-                          <Pencil size={15} />
-                        </IconButton>
-                      )}
+                      <AccountBalanceText
+                        summary={resolveAccountSummary(r.summary, {
+                          balanceXof: r.remaining ?? r.balance,
+                          billedXof: r.billed,
+                        })}
+                        style={{ fontWeight: 700 }}
+                      />
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <IconButton
+                        label={`Request an individual payment-plan change for ${r.name}`}
+                        disabled={busy}
+                        onClick={() => openEdit(r)}
+                      >
+                        <Pencil size={15} />
+                      </IconButton>
                     </td>
                   </tr>
                 ))}
@@ -464,6 +533,7 @@ export default function FinanceAccounts() {
                   { value: "cleared", label: "Cleared" },
                   { value: "credit", label: "In credit" },
                   { value: "unscheduled", label: "Needs a schedule" },
+                  { value: "special", label: "Special accounts" },
                   { value: "hold", label: "Active hold" },
                 ]}
               />
@@ -489,7 +559,14 @@ export default function FinanceAccounts() {
                     onSort={toggle}
                   />
                   <SortTh
-                    label="Balance"
+                    label="Billed"
+                    sortKey="billed"
+                    sort={sort}
+                    onSort={toggle}
+                    align="right"
+                  />
+                  <SortTh
+                    label="Remaining"
                     sortKey="balance"
                     sort={sort}
                     onSort={toggle}
@@ -523,6 +600,25 @@ export default function FinanceAccounts() {
                           >
                             {r.studentNo}
                           </span>
+                          {r.specialAccount?.isSpecial && (
+                            <span
+                              style={{
+                                display: "flex",
+                                gap: 5,
+                                marginTop: 4,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <Badge tone="warning">
+                                {r.specialAccount.hasIndividualPlan
+                                  ? "Individual plan"
+                                  : "Special account"}
+                              </Badge>
+                              {r.specialAccount.hasPendingPlanChange && (
+                                <Badge tone="info">Approval pending</Badge>
+                              )}
+                            </span>
+                          )}
                         </span>
                       </span>
                     </td>
@@ -570,7 +666,7 @@ export default function FinanceAccounts() {
         >
           <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>
             {draft.invoiceId
-              ? "Changes to individual dates or amounts require administrator approval."
+              ? "This changes only this student. Dates or amounts are applied after administrator approval and no longer follow future global schedule revisions."
               : "Assign the administrator-approved tuition, housing, and cafeteria package."}
           </p>
 
@@ -637,6 +733,35 @@ export default function FinanceAccounts() {
               />
             </Field>
 
+            {draft.planType === "individual_override" && (
+              <div
+                style={{
+                  padding: 12,
+                  border: "1px solid var(--warning-400)",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--surface-2)",
+                }}
+              >
+                <strong style={{ display: "block", fontSize: 13 }}>
+                  Individual plan override
+                </strong>
+                <p
+                  className="muted"
+                  style={{ margin: "4px 0 9px", fontSize: 12 }}
+                >
+                  Use the reason below to request the current approved global
+                  dates and amounts for this student.
+                </p>
+                <Button
+                  variant="ghost"
+                  disabled={busy || !requestReason.trim()}
+                  onClick={restoreStandard}
+                >
+                  Restore approved standard plan
+                </Button>
+              </div>
+            )}
+
             <div
               style={{
                 border: "1px solid var(--border)",
@@ -665,7 +790,7 @@ export default function FinanceAccounts() {
                 </span>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {draft.invoiceId
-                    ? "Proposed custom schedule"
+                    ? "Proposed individual schedule"
                     : "From the approved global revision"}
                 </span>
               </div>
@@ -682,7 +807,8 @@ export default function FinanceAccounts() {
                   key={r.id ?? i}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 150px 150px",
+                    gridTemplateColumns:
+                      "repeat(auto-fit, minmax(min(145px, 100%), 1fr))",
                     gap: 10,
                     alignItems: "center",
                     marginBottom: 8,
@@ -700,13 +826,21 @@ export default function FinanceAccounts() {
                     onChange={(v) => editRow(i, { dueDate: v })}
                     disabled={!draft.invoiceId}
                   />
-                  <Input
-                    value={r.amountXof}
-                    onChange={(v) => editRow(i, { amountXof: toInt(v) })}
-                    disabled={!draft.invoiceId}
-                    align="right"
-                    inputMode="numeric"
-                  />
+                  <span style={{ display: "grid", gap: 3 }}>
+                    <Input
+                      value={r.amountXof}
+                      onChange={(v) => editRow(i, { amountXof: toInt(v) })}
+                      disabled={!draft.invoiceId}
+                      invalid={r.amountXof < (r.amountPaid ?? 0)}
+                      align="right"
+                      inputMode="numeric"
+                    />
+                    {(r.amountPaid ?? 0) > 0 && (
+                      <span className="muted" style={{ fontSize: 10.5 }}>
+                        Minimum {formatXof(r.amountPaid ?? 0)} already paid
+                      </span>
+                    )}
+                  </span>
                 </div>
               ))}
 
