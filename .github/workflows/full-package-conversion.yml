@@ -66,6 +66,35 @@ jobs:
           role-to-assume: ${{ env.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Verify production backup snapshot
+        if: ${{ inputs.target_environment == 'prod' && inputs.confirm }}
+        env:
+          BACKUP_REFERENCE: ${{ inputs.backup_reference }}
+        run: |
+          set -euo pipefail
+          SNAPSHOT=$(aws rds describe-db-snapshots \
+            --db-snapshot-identifier "$BACKUP_REFERENCE" \
+            --snapshot-type manual \
+            --query 'DBSnapshots[0]' --output json)
+          jq -e \
+            --arg source "daust-prod-pg" \
+            '.DBInstanceIdentifier == $source
+             and .Status == "available"
+             and .Encrypted == true
+             and .SnapshotType == "manual"' \
+            <<<"$SNAPSHOT" >/dev/null || {
+              echo "The backup must be an available, encrypted, manual snapshot of daust-prod-pg."
+              exit 1
+            }
+          SNAPSHOT_TIME=$(jq -r '.SnapshotCreateTime' <<<"$SNAPSHOT")
+          SNAPSHOT_EPOCH=$(date -u -d "$SNAPSHOT_TIME" +%s)
+          NOW_EPOCH=$(date -u +%s)
+          if [ "$SNAPSHOT_EPOCH" -gt "$NOW_EPOCH" ] || [ $((NOW_EPOCH - SNAPSHOT_EPOCH)) -gt 86400 ]; then
+            echo "The production snapshot must have been created within the last 24 hours."
+            exit 1
+          fi
+          echo "Verified production snapshot: $BACKUP_REFERENCE"
+
       - name: Run conversion in the deployed API task
         env:
           TARGET_ENV: ${{ inputs.target_environment }}
@@ -88,9 +117,11 @@ jobs:
 
           ENVIRONMENT=$(jq -nc \
             --arg year "$ACADEMIC_YEAR" \
+            --arg target "$TARGET_ENV" \
             --arg confirm "$SHOULD_CONFIRM" \
             --arg backup "$BACKUP_REFERENCE" \
             '[{"name":"ACADEMIC_YEAR","value":$year},
+              {"name":"TARGET_ENV","value":$target},
               {"name":"CONFIRM","value":(if $confirm == "true" then "1" else "0" end)},
               {"name":"BACKUP_REFERENCE","value":$backup}]')
           OVERRIDES=$(jq -nc --argjson environment "$ENVIRONMENT" \

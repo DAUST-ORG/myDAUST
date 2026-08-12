@@ -573,6 +573,13 @@ async function updatePackage(
 
 async function main() {
   const commit = process.env.CONFIRM === "1";
+  const targetEnvironment = process.env.TARGET_ENV?.trim() ?? "local";
+  const backupReference = process.env.BACKUP_REFERENCE?.trim() || null;
+  if (commit && targetEnvironment === "prod" && !backupReference) {
+    throw new Error(
+      "Production conversion requires a verified backup reference.",
+    );
+  }
   const initial = await analyze(prisma);
   const report = {
     mode: commit ? "commit" : "dry-run",
@@ -642,6 +649,8 @@ async function main() {
           data: {
             academicYear: reviewed.schedule.academicYearLabel,
             revision: reviewed.schedule.revision,
+            targetEnvironment,
+            backupReference,
             counts: report.counts,
           },
         },
