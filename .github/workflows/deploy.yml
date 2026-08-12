@@ -149,38 +149,36 @@ jobs:
           # broke or its money-row assertion tripped, and both are worth stopping for.
           [ "$EXIT" = "0" ]
 
-      - name: Roll services to the new images
+      - name: Roll API to the new image
         run: |
           CLUSTER="daust-$ENV_NAME"
-          for SVC in api portal; do
-            TD=$(aws ecs describe-services --cluster "$CLUSTER" --services "daust-$ENV_NAME-$SVC" \
-                  --query 'services[0].taskDefinition' --output text)
-            # Re-register the current definition with only the image swapped.
-            aws ecs describe-task-definition --task-definition "$TD" --query 'taskDefinition' --output json \
-              | jq --arg img "$ECR/daust-$SVC:$TAG" --arg svc "$SVC" \
-                   --arg transcript_bucket "daust-$ENV_NAME-transcript-imports-961828155948" \
-                   'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
-                    | .containerDefinitions[0].image = $img
-                    | if $svc == "api" then
-                        .containerDefinitions[0].environment =
-                          ((.containerDefinitions[0].environment // [])
-                           | map(select(.name != "TRANSCRIPT_IMPORT_BUCKET"))
-                           + [{"name":"TRANSCRIPT_IMPORT_BUCKET","value":$transcript_bucket}])
-                      else . end' > td.json
-            NEW=$(aws ecs register-task-definition --cli-input-json file://td.json \
-                  --query 'taskDefinition.taskDefinitionArn' --output text)
-            aws ecs update-service --cluster "$CLUSTER" --service "daust-$ENV_NAME-$SVC" \
-              --task-definition "$NEW" >/dev/null
-            echo "$SVC -> $NEW"
-          done
+          SERVICE="daust-$ENV_NAME-api"
+          TD=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+                --query 'services[0].taskDefinition' --output text)
+          # Keep the portal on its last stable image until this API revision passes
+          # ALB health checks and the post-deploy accounting reconciliation below.
+          aws ecs describe-task-definition --task-definition "$TD" --query 'taskDefinition' --output json \
+            | jq --arg img "$ECR/daust-api:$TAG" \
+                 --arg transcript_bucket "daust-$ENV_NAME-transcript-imports-961828155948" \
+                 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+                  | .containerDefinitions[0].image = $img
+                  | .containerDefinitions[0].environment =
+                      ((.containerDefinitions[0].environment // [])
+                       | map(select(.name != "TRANSCRIPT_IMPORT_BUCKET"))
+                       + [{"name":"TRANSCRIPT_IMPORT_BUCKET","value":$transcript_bucket}])' > api-td.json
+          NEW=$(aws ecs register-task-definition --cli-input-json file://api-td.json \
+                --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$NEW" >/dev/null
+          echo "api -> $NEW"
 
-      - name: Wait for rollout + health check
+      - name: Wait for API rollout + health check
         run: |
           CLUSTER="daust-$ENV_NAME"
           # services-stable is the real gate: ECS only reports stable once the new
           # tasks pass the ALB target-group health checks.
           aws ecs wait services-stable --cluster "$CLUSTER" \
-            --services "daust-$ENV_NAME-api" "daust-$ENV_NAME-portal"
+            --services "daust-$ENV_NAME-api"
           # Best-effort edge check; non-fatal while the Cloudflare hostname is still being wired.
           if curl -sf "$API_ORIGIN/api/health" | grep -q '"ok":true'; then
             echo "edge health OK ($API_ORIGIN)"
@@ -254,6 +252,28 @@ jobs:
             exit 1
           fi
           echo "reconciliation changed count: $(jq -r '.changedCount' <<<"$RESULT")"
+
+      - name: Roll portal to the new image
+        run: |
+          CLUSTER="daust-$ENV_NAME"
+          SERVICE="daust-$ENV_NAME-portal"
+          TD=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+                --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$TD" --query 'taskDefinition' --output json \
+            | jq --arg img "$ECR/daust-portal:$TAG" \
+                 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+                  | .containerDefinitions[0].image = $img' > portal-td.json
+          NEW=$(aws ecs register-task-definition --cli-input-json file://portal-td.json \
+                --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$NEW" >/dev/null
+          echo "portal -> $NEW"
+
+      - name: Wait for portal rollout
+        run: |
+          CLUSTER="daust-$ENV_NAME"
+          aws ecs wait services-stable --cluster "$CLUSTER" \
+            --services "daust-$ENV_NAME-portal"
 
   vitrine:
     needs: changes

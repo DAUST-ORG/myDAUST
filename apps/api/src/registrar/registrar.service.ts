@@ -5,10 +5,11 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import bcrypt from "bcryptjs";
-import type { Prisma } from "@mydaust/db";
+import { Prisma } from "@mydaust/db";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
+import { assignStandardPackageInTransaction } from "../finance/standard-package.js";
 
 /** Defaults for the early-alert thresholds shown on Student Success. */
 const DEFAULT_MIN_GPA = 2.5;
@@ -61,9 +62,9 @@ export class RegistrarService {
   // --- Students -----------------------------------------------------------
 
   /**
-   * Provision a student record + account and email a password-setup link — the
-   * registrar's design flow. Deliberately does NOT bill tuition: money stays in the
-   * bursar's Finance portal, so this touches no invoices and no finance code.
+   * Provision a student record + account, atomically assign the administrator-approved
+   * annual package, and email a password-setup link. A missing/incomplete schedule rolls
+   * back the student instead of leaving an active account outside the billing cohort.
    */
   async createStudent(actorId: string, input: RegistrarStudentInput) {
     const studentNo = input.studentNo.trim();
@@ -98,7 +99,7 @@ export class RegistrarService {
       return t ? t : null;
     };
 
-    const student = await this.prisma.$transaction(async (tx) => {
+    const createRecord = async (tx: Prisma.TransactionClient) => {
       const person = await tx.person.create({
         data: {
           email,
@@ -151,8 +152,28 @@ export class RegistrarService {
           data: { studentNo, email },
         },
       });
+      await assignStandardPackageInTransaction(tx, created.id, actorId);
       return { student: created, person };
-    });
+    };
+    let student: Awaited<ReturnType<typeof createRecord>> | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        student = await this.prisma.$transaction(createRecord, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 10_000,
+          timeout: 30_000,
+        });
+        break;
+      } catch (error) {
+        const retryable =
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "P2034";
+        if (!retryable || attempt === 2) throw error;
+      }
+    }
+    if (!student) throw new Error("Student creation retry limit exhausted");
 
     const name = `${input.firstName.trim()} ${input.lastName.trim()}`.trim();
     const invite = await this.issueStudentInvite(

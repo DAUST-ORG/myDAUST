@@ -20,14 +20,30 @@ export default function ParentAttendance() {
 
   useEffect(() => {
     if (!activeId) return;
+    let cancelled = false;
     setData(null);
     setLoadError(null);
-    getChildAttendance(activeId).then(setData).catch((e: Error) => setLoadError(e.message));
+    getChildAttendance(activeId)
+      .then((next) => {
+        if (!cancelled) setData(next);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setLoadError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeId]);
 
-  if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
+  if (error)
+    return (
+      <p className="card" style={{ color: "var(--danger)" }}>
+        {error}
+      </p>
+    );
   if (!children) return <p className="muted">Loading…</p>;
-  if (children.length === 0) return <EmptyState title="No students linked to your account" />;
+  if (children.length === 0)
+    return <EmptyState title="No students linked to your account" />;
 
   return (
     <>
@@ -41,16 +57,32 @@ export default function ParentAttendance() {
         }
         actions={
           data?.overall !== null && data?.overall !== undefined ? (
-            <Badge tone={data.overall >= 90 ? "success" : data.overall >= 75 ? "warning" : "error"}>
+            <Badge
+              tone={
+                data.overall >= 90
+                  ? "success"
+                  : data.overall >= 75
+                    ? "warning"
+                    : "error"
+              }
+            >
               {data.overall}% overall
             </Badge>
           ) : undefined
         }
       />
 
-      <ChildSwitcher children={children} activeId={activeId} onSelect={select} />
+      <ChildSwitcher
+        children={children}
+        activeId={activeId}
+        onSelect={select}
+      />
 
-      {loadError && <p className="card" style={{ color: "var(--danger)" }}>{loadError}</p>}
+      {loadError && (
+        <p className="card" style={{ color: "var(--danger)" }}>
+          {loadError}
+        </p>
+      )}
       {!data && !loadError && <p className="muted">Loading attendance…</p>}
 
       {data && data.rows.length === 0 && (
@@ -65,9 +97,19 @@ export default function ParentAttendance() {
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             {data.rows.map((r) => (
               <div key={r.code}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 7, flexWrap: "wrap" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: 10,
+                    marginBottom: 7,
+                    flexWrap: "wrap",
+                  }}
+                >
                   <span style={{ fontWeight: 600 }}>{r.title}</span>
-                  <span className="muted" style={{ fontSize: 12.5 }}>{r.code}</span>
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    {r.code}
+                  </span>
                   <span style={{ flex: 1 }} />
                   <span className="muted" style={{ fontSize: 12.5 }}>
                     {r.present} present · {r.late} late · {r.absent} absent
@@ -81,7 +123,10 @@ export default function ParentAttendance() {
                     {r.pct === null ? "—" : `${r.pct}%`}
                   </strong>
                 </div>
-                <Progress pct={r.pct ?? 0} tone={r.pct === null ? "var(--gray-200)" : rateTone(r.pct)} />
+                <Progress
+                  pct={r.pct ?? 0}
+                  tone={r.pct === null ? "var(--gray-200)" : rateTone(r.pct)}
+                />
               </div>
             ))}
           </div>

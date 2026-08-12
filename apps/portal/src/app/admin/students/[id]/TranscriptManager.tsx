@@ -5,6 +5,7 @@ import {
   ArchiveRestore,
   BookMarked,
   CheckCircle2,
+  Download,
   FileClock,
   Link2,
   Link2Off,
@@ -17,16 +18,26 @@ import {
   type TermRow,
   type TranscriptEntryInput,
   type TranscriptEntryRow,
+  type TranscriptView,
   createTranscriptEntry,
   getAdminCourseDetail,
   getAdminPrograms,
   getRegistrarTranscript,
+  getRegistrarTranscriptPdf,
+  getRegistrarTranscriptView,
   getTerms,
   restoreTranscriptEntry,
   updateTranscriptEntry,
   voidTranscriptEntry,
 } from "@/lib/api";
-import { Badge, EmptyState, Field, Modal, Select } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  Modal,
+  Select,
+} from "@/components/ui";
 
 const SOURCE_LABEL: Record<TranscriptEntryRow["source"], string> = {
   approved_enrollment: "Approved grade",
@@ -43,46 +54,6 @@ const SOURCE_TONE: Record<
   manual: "info",
 };
 
-interface TranscriptSummary {
-  gpa: number;
-  attemptedCredits: number;
-  earnedCredits: number;
-}
-
-function summarize(rows: TranscriptEntryRow[]): TranscriptSummary {
-  let attemptedCredits = 0;
-  let qualityPoints = 0;
-  const earnedByCourse = new Map<string, number>();
-
-  for (const row of rows) {
-    if (row.countsTowardGpa && row.points !== null) {
-      attemptedCredits += row.credits;
-      qualityPoints += row.points * row.credits;
-    }
-    if (row.countsTowardCredits && row.earnedCredits > 0) {
-      const identity =
-        row.courseId ??
-        row.courseCode.trim().toUpperCase().replace(/\s+/g, " ");
-      earnedByCourse.set(
-        identity,
-        Math.max(earnedByCourse.get(identity) ?? 0, row.earnedCredits),
-      );
-    }
-  }
-
-  return {
-    gpa:
-      attemptedCredits === 0
-        ? 0
-        : Math.round((qualityPoints / attemptedCredits) * 100) / 100,
-    attemptedCredits,
-    earnedCredits: [...earnedByCourse.values()].reduce(
-      (total, credits) => total + credits,
-      0,
-    ),
-  };
-}
-
 function gradeTone(grade: string): string {
   const normalized = grade.trim().toUpperCase();
   if (normalized.startsWith("A")) return "var(--success)";
@@ -92,8 +63,10 @@ function gradeTone(grade: string): string {
 
 export function TranscriptManager({ studentId }: { studentId: string }) {
   const [rows, setRows] = useState<TranscriptEntryRow[] | null>(null);
+  const [view, setView] = useState<TranscriptView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [showVoided, setShowVoided] = useState(true);
   const [editing, setEditing] = useState<TranscriptEntryRow | "new" | null>(
     null,
@@ -106,7 +79,12 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setRows(await getRegistrarTranscript(studentId, true));
+      const [ledger, canonicalView] = await Promise.all([
+        getRegistrarTranscript(studentId, true),
+        getRegistrarTranscriptView(studentId),
+      ]);
+      setRows(ledger);
+      setView(canonicalView);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Could not load the transcript.",
@@ -126,7 +104,6 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
     () => (showVoided ? (rows ?? []) : activeRows),
     [activeRows, rows, showVoided],
   );
-  const summary = useMemo(() => summarize(activeRows), [activeRows]);
   const groups = useMemo(() => {
     const grouped = new Map<string, TranscriptEntryRow[]>();
     for (const entry of visibleRows) {
@@ -136,6 +113,11 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
     }
     return [...grouped.entries()];
   }, [visibleRows]);
+  const semesterByLabel = useMemo(
+    () =>
+      new Map(view?.semesters.map((semester) => [semester.label, semester])),
+    [view],
+  );
   const voidedCount = (rows ?? []).length - activeRows.length;
 
   async function mutationFinished(message: string) {
@@ -143,6 +125,29 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
     setAction(null);
     setNotice(message);
     await load();
+  }
+
+  async function downloadTranscript() {
+    if (!view) return;
+    setDownloading(true);
+    setError(null);
+    try {
+      const blob = await getRegistrarTranscriptPdf(studentId);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `unofficial-transcript-${view.student.studentNo.replace(/[^A-Za-z0-9_-]+/g, "-")}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "The transcript could not be downloaded.",
+      );
+    } finally {
+      setDownloading(false);
+    }
   }
 
   return (
@@ -161,6 +166,15 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
           </div>
         </div>
         <div className="transcript-toolbar-actions">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Download size={14} aria-hidden="true" />}
+            disabled={!view || downloading}
+            onClick={() => void downloadTranscript()}
+          >
+            {downloading ? "Generating…" : "Download PDF"}
+          </Button>
           <label className="transcript-toggle">
             <input
               type="checkbox"
@@ -181,17 +195,17 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
       <div className="transcript-summary" aria-label="Transcript summary">
         <SummaryMetric
           label="Cumulative GPA"
-          value={summary.attemptedCredits ? summary.gpa.toFixed(2) : "—"}
+          value={view?.totals.gpa?.toFixed(2) ?? "—"}
           detail="4.00 scale"
         />
         <SummaryMetric
           label="Attempted credits"
-          value={String(summary.attemptedCredits)}
-          detail="GPA-bearing"
+          value={view ? String(view.totals.attemptedCredits) : "—"}
+          detail="All coursework"
         />
         <SummaryMetric
           label="Earned credits"
-          value={String(summary.earnedCredits)}
+          value={view ? String(view.totals.earnedCredits) : "—"}
           detail="Retakes counted once"
         />
       </div>
@@ -230,6 +244,11 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
               key={term}
               term={term}
               entries={entries}
+              gpa={semesterByLabel.get(term)?.gpa ?? null}
+              attemptedCredits={
+                semesterByLabel.get(term)?.attemptedCredits ?? 0
+              }
+              earnedCredits={semesterByLabel.get(term)?.earnedCredits ?? 0}
               onEdit={setEditing}
               onAction={(type, entry) => setAction({ type, entry })}
             />
@@ -411,6 +430,7 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
           align-items: center;
           justify-content: space-between;
           gap: 12px;
+          flex-wrap: wrap;
           padding: 10px 14px;
           background: var(--bg-subtle);
           border-bottom: 1px solid var(--divider);
@@ -648,21 +668,21 @@ function SummaryMetric({
 function TermGroup({
   term,
   entries,
+  gpa,
+  attemptedCredits,
+  earnedCredits,
   onEdit,
   onAction,
 }: {
   term: string;
   entries: TranscriptEntryRow[];
+  gpa: number | null;
+  attemptedCredits: number;
+  earnedCredits: number;
   onEdit: (entry: TranscriptEntryRow) => void;
   onAction: (type: "void" | "restore", entry: TranscriptEntryRow) => void;
 }) {
   const active = entries.filter((entry) => !entry.voidedAt);
-  const attempted = active.reduce(
-    (total, entry) =>
-      total +
-      (entry.countsTowardGpa && entry.points !== null ? entry.credits : 0),
-    0,
-  );
   return (
     <section
       className="transcript-term"
@@ -671,8 +691,9 @@ function TermGroup({
       <div className="transcript-term-header">
         <h3 id={`term-${term.replace(/\W+/g, "-")}`}>{term}</h3>
         <span>
+          Semester GPA {gpa === null ? "—" : gpa.toFixed(2)} ·{" "}
+          {attemptedCredits} attempted · {earnedCredits} earned ·{" "}
           {active.length} active {active.length === 1 ? "entry" : "entries"}
-          {attempted ? ` · ${attempted} attempted cr.` : ""}
         </span>
       </div>
       <div className="transcript-desktop">

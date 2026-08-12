@@ -54,7 +54,12 @@ import type { NavGroup } from "@/components/AppShell";
 
 /** Badge slots the design puts on nav items; resolved against live counts in the shell. */
 export type BadgeKey =
-  "register" | "messages" | "billing" | "admissions" | "approvals";
+  | "register"
+  | "messages"
+  | "billing"
+  | "admissions"
+  | "approvals"
+  | "approvalRequests";
 
 export interface PortalNav {
   /** Small caps caption under the wordmark, e.g. "PARENT ACCESS". */
@@ -184,14 +189,18 @@ export const REGISTRAR_NAV: PortalNav = {
         icon: CalendarClock,
       },
       {
+        href: "/admin/courses",
+        label: "Course Catalog",
+        icon: BookMarked,
+      },
+      {
         href: "/admin/programs",
         label: "Programs & Curriculum",
         icon: Network,
       },
-      { href: "/admin/courses", label: "Course Catalog", icon: BookMarked },
       {
         href: "/admin/offerings",
-        label: "Course Enrollment",
+        label: "Course Sections",
         icon: ListChecks,
       },
       {
@@ -221,6 +230,22 @@ export const REGISTRAR_NAV: PortalNav = {
   ],
 };
 
+export const DIRECTOR_NAV: PortalNav = {
+  label: "Director Portal",
+  meta: "Administration · Director",
+  groups: [
+    g("Executive overview", [
+      { href: "/director", label: "Overview", icon: LayoutDashboard },
+      {
+        href: "/director/approvals",
+        label: "Approvals",
+        icon: ClipboardCheck,
+        badgeKey: "approvalRequests",
+      },
+    ]),
+  ],
+};
+
 export const FINANCE_NAV: PortalNav = {
   label: "Finance Portal",
   meta: "Finance · Bursar",
@@ -232,6 +257,12 @@ export const FINANCE_NAV: PortalNav = {
       { href: "/finance/fee-schedule", label: "Fee Schedule", icon: Receipt },
       { href: "/finance/accounts", label: "Student Accounts", icon: Wallet },
       { href: "/finance/wires", label: "Wire Transfers", icon: Banknote },
+      {
+        href: "/finance/requests",
+        label: "My Requests",
+        icon: ClipboardCheck,
+        badgeKey: "approvalRequests",
+      },
     ]),
   ],
 };
@@ -257,6 +288,7 @@ export const COMMS_NAV: PortalNav = {
 
 /** Portal registry, keyed so a server layout can name one without importing icons. */
 export const PORTALS = {
+  director: DIRECTOR_NAV,
   student: STUDENT_NAV,
   parent: PARENT_NAV,
   faculty: FACULTY_NAV,
@@ -332,8 +364,8 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     crumb: "Catalog management · Administration",
   },
   "/admin/offerings": {
-    title: "Course Enrollment",
-    crumb: "Offered course sections · Administration",
+    title: "Course Sections",
+    crumb: "Term sections and registration availability · Administration",
   },
   "/admin/calendar": {
     title: "Academic Calendar & Terms",
@@ -433,6 +465,19 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/parent/grades": { title: "Grades", crumb: "Academic record" },
   "/parent/attendance": { title: "Attendance", crumb: "Attendance record" },
   "/parent/billing": { title: "Billing", crumb: "Fees & payment" },
+  // director
+  "/director": {
+    title: "Director Overview",
+    crumb: "Institutional operations · Administration",
+  },
+  "/director/approvals": {
+    title: "Approvals",
+    crumb: "Finance change control · Administration",
+  },
+  "/finance/requests": {
+    title: "My Requests",
+    crumb: "Submitted changes · Finance",
+  },
 };
 
 /**
@@ -441,7 +486,7 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
  */
 export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
   [
-    { role: "admin", portal: "registrar", home: "/admin" },
+    { role: "admin", portal: "director", home: "/director" },
     { role: "registrar", portal: "registrar", home: "/admin" },
     { role: "bursar", portal: "finance", home: "/finance" },
     { role: "faculty", portal: "faculty", home: "/faculty" },

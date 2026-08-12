@@ -13,18 +13,24 @@ import {
   RequestToPayRegistry,
 } from "./request-to-pay.provider.js";
 import { WireProofStorage } from "./wire-proof.storage.js";
+import { ApprovalsController } from "./approvals.controller.js";
+import { DirectorController } from "./director.controller.js";
+import { FinanceApprovalsService } from "./finance-approvals.service.js";
 
 @Module({
   controllers: [
     PaymentsController,
     AdminFinanceController,
     PublicBillingController,
+    ApprovalsController,
+    DirectorController,
   ],
   providers: [
     FinanceService,
     FinanceTasks,
     BillThrottleGuard,
     WireProofStorage,
+    FinanceApprovalsService,
     { provide: PAYMENT_PROVIDER, useClass: PaytechProvider },
     // Request-to-pay rails are registered separately from the redirect-checkout seam so
     // PayTech's call sites stay untouched. Settlement resolves the rail by

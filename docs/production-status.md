@@ -2,6 +2,21 @@
 
 Production last verified: **2026-08-11**. This page is the operational handoff for recent production data work and deployments. `TODO.md` remains the broader product backlog.
 
+## Full-Package and Director Release Candidate (Not Yet Deployed)
+
+The 2026-08-12 release candidate is implemented and locally validated on branch
+`codex/full-package-director`. It has **not** yet changed staging or production data.
+
+- Annual standard billing is 4,285,000 XOF: tuition 2,975,000, housing 680,000, and cafeteria 630,000. The separate 10,000 XOF insurance fee is excluded.
+- Versioned, administrator-approved schedules drive all new standard packages and linked plan dates. Bursar fee/plan/charge/discount/scholarship changes enter a generic approval queue; only admin decisions apply protected changes.
+- A dry-run-first conversion command preserves payments, credits, discounts, allocations, and installment IDs and refuses unresolved or nonstandard accounts. The manual deployment workflow defaults to dry-run, requires zero unresolved accounts, enforces `develop`→staging and `main`→production, and requires a verified backup reference for a production commit.
+- Finance includes an expected-versus-collected timeline with actual cash, approved schedule, and dashed run-rate forecast. The admin-only Director portal includes a configurable overview and approval history.
+- Student and registrar transcript views include semester GPA and audited server-generated PDFs. Every page carries the appropriate student- or staff-generated `UNOFFICIAL` watermark and Unicode Senegalese Latin identities render from bundled fonts.
+- Authenticated guardians can review a linked child's complete billing/payment/wire history and initiate card/mobile, PI-SPI, or wire payments without re-entering ID/DOB. All routes enforce `GuardianStudent` ownership and record payer provenance.
+- Registrar navigation now puts Course Catalog before Programs & Curriculum and calls `/admin/offerings` **Course Sections**. The public site's myDAUST link goes directly to the configured portal origin.
+
+Local release gates passed: 43 fresh migrations with empty schema diff; 160/160 API tests against PostgreSQL; full workspace test/typecheck/build; one valid 4,285,000 XOF package for every active seed student; exact payment/component reconciliation; and local multi-role browser smoke. Production status will be updated with immutable commit, workflow runs, conversion counts, and service revisions only after those checks succeed in each environment.
+
 ## Status Definitions
 
 - **Production verified** means the behavior or data was checked on `my.daust.net` or `daust.net`.
@@ -14,14 +29,14 @@ Production last verified: **2026-08-11**. This page is the operational handoff f
 - The catalog correction **Power Systems = `EE 3615`** is live.
 - The Fall 2026 schedule import created **62 open sections** from 61 workbook rows. The cross-listed `EE 3513 / ME 2931` row was represented as two section records. No catalog codes were missing and no room or instructor collisions were detected.
 - **44 sections** have an assigned instructor. **18 are TBA**: 16 were blank in the source and two reference an ambiguous duplicate name.
-- The schedule workbook contains no student identifiers. It created offerings under Course Enrollment; it did **not** enroll individual students.
+- The schedule workbook contains no student identifiers. It created section offerings; it did **not** enroll individual students.
 
 ### Assigning an Instructor
 
 The system already supports one instructor per section through `Section.instructorId`.
 
 1. Create or confirm the faculty account under **Registrar → Directory**.
-2. Open **Registrar → Course Enrollment** (`/admin/offerings`).
+2. Open **Registrar → Course Sections** (`/admin/offerings`).
 3. Select **Edit offering**, choose the instructor, and save.
 4. The section then appears automatically in that instructor's faculty teaching views.
 

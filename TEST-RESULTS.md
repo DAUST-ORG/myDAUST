@@ -4,6 +4,19 @@ Environment confirmed: portal+API `https://daust-staging.azt.dev`; vitrine `http
 pay-bill/billing-admin reachable as routes on the portal host (payment.* vanity host not in staging tunnel).
 All 10 seeded logins work (password `daust-dev-2026`).
 
+## 2026-08-12 full-package/director release-candidate validation
+
+- PASS: all **43 migrations** applied to fresh PostgreSQL and Prisma migration diff reported no schema drift.
+- PASS: the fresh seed created one non-void 2026–27 `standard_full` invoice for each of 9 active students. Every invoice, component split, and four-installment plan totals **4,285,000 XOF**; there were no missing, duplicate, or malformed packages.
+- PASS: successful seeded payments, installment allocations, and component allocations each reconciled to **2,491,666 XOF**.
+- PASS: conversion dry-run/commit/rerun on the fresh database reported 9 unchanged accounts and 0 unresolved rows; the rerun was idempotent. The integration suite separately covers unpaid, partial, tuition-paid, credited/discounted, missing, already-full, void, archived, and nonstandard accounts plus failure-closed discrepancy cases.
+- PASS: the complete API suite ran against disposable PostgreSQL: **160/160** tests. This includes approval decision races/staleness, standard-package concurrency, component rounding/refund reversal, guardian invite/payment lifecycle, canonical transcript/PDF parity, and Unicode identity rendering.
+- PASS: workspace `pnpm test`, `pnpm typecheck`, and production builds. Portal generated 71 routes; vitrine generated 6 pages.
+- PASS: local browser smoke covered admin Director/Approvals, bursar request submission, approved schedule propagation, the expected/actual/forecast chart, two-child parent billing/payment history, and student transcript download. No browser errors were observed.
+- RELEASE STATUS: implementation is on `codex/full-package-director`; staging and production deployment/conversion are intentionally pending the reviewed merge, explicit administrator schedule approval, clean environment dry run, and production backup gate.
+
+The detailed execution log below is retained as historical evidence from the earlier staging fixture; statements such as tuition-only seed totals and read-only parent billing describe that older build, not the current release candidate.
+
 ## 2026-08-11 payment-plan aging release-candidate validation
 
 - PASS: shared account-position suite, 35/35 tests. Includes Dakar yesterday/today/tomorrow behavior, partial payments, credits, void/no-plan invoices, and aging boundaries.
@@ -46,7 +59,7 @@ Seed note: linked children on staging are **Aïssatou Diallo + Sokhna Mbaye** (p
 - PAR-DASH-001 PASS: stat cards per child (GPA/Standing/Credits/Attendance/Balance). PAR-DASH-002 PASS: switching Sokhna→Aïssatou flips standing 0.00 "Good Standing" → "Dean's List" (GPA 4.0). Confirms standing derivation (≥3.7 Dean's List) works.
 - PAR-GRD-001 PASS: "Grades — Aïssatou Diallo", GPA 4.00, CSC 101 A, Spring 2026 == student view. PAR-GRD-002 PASS (API RBAC-022): non-linked child → 403.
 - PAR-ATT-001 PASS: "Attendance — Aïssatou Diallo" per-course PRESENT/LATE/ABSENT. PAR-ATT-002: same 403 guard.
-- PAR-BILL-001 PASS: "Billing — Aïssatou Diallo", installment table, SETTLED. PAR-BILL-002 PASS: **no Pay button** — guardian billing read-only (parent API has no payment route; prototype Pay button correctly omitted). PAR-BILL-003: assertGuardianOf 403 on non-linked.
+- PAR-BILL-001/PAR-BILL-003 PASS on the historical build: account data rendered and non-linked access returned 403. Parent payment actions were read-only in that build; the 2026-08-12 release candidate supersedes this with GuardianStudent-scoped card/mobile, PI-SPI, wire, status, and receipt endpoints.
 
 ## §4 FACULTY PORTAL (amadou.ba@daust.edu = Prof Ba, teaches all Fall sections)
 
@@ -73,7 +86,7 @@ Seed note: linked children on staging are **Aïssatou Diallo + Sokhna Mbaye** (p
 - REG-YR PASS: "Academic Years", "Add academic year" + "Set active", years 2023–2026, Active/Draft/Archived. (Active-year flip not executed — disruptive global change.)
 - REG-PRG PASS: "Programs & Curriculum", "New program", programs listed.
 - REG-CAT PASS: "Course Catalog", "New course", courses.
-- REG-OFF PASS: "Course Enrollment", "Add course", Open(5)/Closed(0) filter, sections. (Close-section not executed — would break enroll tests.)
+- REG-OFF PASS on the historical build: Open(5)/Closed(0) filtering and section records. Current UI copy is **Course Sections** / **New section** while `/admin/offerings` remains the compatible route.
 - REG-CAL PASS: "Academic Calendar & Terms", "Add event" + "Edit term", terms. (Add-deadline-past not executed — blocks all students.)
 - REG-RUL-001 PASS (functional, reversible): set CSC 201 prereq=CSC 101(min C) → 200; drove **STU-REG-007/ENR-009 PASS**: bineta (no CSC 101) enroll CSC 201 → 400 "Missing prerequisite(s): CSC 101"; rule restored to [].
 - REG-GS PASS: "Grading Scales & Schemes", schemes + rows.
@@ -216,7 +229,7 @@ Seed note: linked children on staging are **Aïssatou Diallo + Sokhna Mbaye** (p
 - STU-MSG-001 PASS: thread list (Fatou Sow, Amadou Ba), first auto-opens, composer + New. STU-MSG-002 PASS: reply posts, input clears.
 - STU-PRO-001/002 PASS: tabs Overview/Personal/Academic/Emergency&Health, no edit/save (read-only).
 - STU-ID-001 PASS: "Student ID" + name + DAUST-CE-23-0142 + QR. STU-ID-002: pass token dot-separated `studentId.sig` (len 82); tamper-reject enforced by verifyPass (scanner endpoint out of UI scope).
-- STU-DOC-001 PASS: transcript GPA 4.00 (== grades) + terms + Print. STU-DOC-002 hub links present.
+- STU-DOC-001 PASS on the historical build: transcript GPA 4.00 matched Grades. The current release candidate adds canonical semester GPA plus audited, server-generated multi-page PDF downloads with actor-specific `UNOFFICIAL` watermarks.
 - STU-ASG-001 PASS: To-do 4 / Awaiting 0 / Graded 0 / returned 0; MTH 210 & CE 201 items with due + Submit.
 - STU-CRS-003 PASS (API): foreign section → 404. STU-ASG-005 PASS: foreign submit → 404. VAL-007 PASS: uploads no-file → 400.
 - RBAC-024 (foreign dining order) → 404 for non-existent id (403 ownership path in code); RBAC-025 (non-participant thread) → 403 PASS.

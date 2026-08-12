@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { FinanceModule } from "../finance/finance.module.js";
 import { MailModule } from "../mail/mail.module.js";
 import { PrismaModule } from "../prisma/prisma.module.js";
+import { TranscriptModule } from "../transcript/transcript.module.js";
 import {
   GuardianInvitesController,
   GuardiansController,
@@ -10,8 +11,12 @@ import {
 import { GuardiansService } from "./guardians.service.js";
 
 @Module({
-  imports: [PrismaModule, MailModule, FinanceModule],
-  controllers: [GuardiansController, GuardianInvitesController, ParentController],
+  imports: [PrismaModule, MailModule, FinanceModule, TranscriptModule],
+  controllers: [
+    GuardiansController,
+    GuardianInvitesController,
+    ParentController,
+  ],
   providers: [GuardiansService],
   exports: [GuardiansService],
 })

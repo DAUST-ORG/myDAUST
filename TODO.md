@@ -8,6 +8,16 @@ Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 desig
 
 - [x] **Deploy payment-plan-aware balances and A/R aging (production 2026-08-11)** — promoted through PRs `#16`–`#18`. Staging runs commit `6935a05` at API 90 / portal 49; production runs commit `7016794` at API 85 / portal 46. Migration, reference loading, health checks, signed-in smoke tests, and the permanent post-rollout reconciliation gate passed in both environments with 0 stale rows remaining.
 
+## 2026-08-12 Full-Package / Director Release Candidate
+
+- [x] Versioned 4,285,000 XOF tuition + housing + cafeteria schedules, proportional component accounting, durable payment provenance, and dry-run-first active-student conversion.
+- [x] Generic protected Finance approval registry, Director Overview/Approvals, curated per-admin widgets, and bursar request history.
+- [x] Expected-versus-collected cumulative timeline with approved schedule, actual cash, accessible data table, and dashed run-rate forecast.
+- [x] Canonical transcript view with semester GPA plus audited, watermarked, server-generated student/staff PDFs.
+- [x] Authenticated multi-child guardian billing/payment/wire/receipt flow with scoped authorization, truthful invite lifecycle, and stale-request protection.
+- [x] Course Catalog/Programs navigation order, Course Sections copy, and direct public-site myDAUST portal link.
+- [ ] Promote through staging and production gates: explicit admin schedule approval, zero-unresolved conversion dry run, production snapshot, commit conversion, reconciliation, and multi-role smoke. See `docs/production-status.md`.
+
 ## 0 · SIS redesign — remaining backend gaps (audited 2026-07-21)
 
 All five portals now follow `design/Student information system design (1)`. These are

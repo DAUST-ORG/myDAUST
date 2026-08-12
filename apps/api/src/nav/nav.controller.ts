@@ -85,6 +85,18 @@ export class NavController {
       if (approvals > 0) out.approvals = String(approvals);
     }
 
+    if (roles.includes("admin") || roles.includes("bursar")) {
+      const approvalRequests = await this.prisma.approvalRequest.count({
+        where: {
+          status: "pending",
+          ...(roles.includes("admin") ? {} : { requestedById: user.personId }),
+        },
+      });
+      if (approvalRequests > 0) {
+        out.approvalRequests = String(approvalRequests);
+      }
+    }
+
     if (user.studentId) {
       const [openSections, invoices] = await Promise.all([
         this.prisma.section.count({ where: { status: "open" } }),

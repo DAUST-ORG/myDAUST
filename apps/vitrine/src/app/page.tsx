@@ -60,7 +60,6 @@ export default function Site() {
   const [facultyId, setFacultyId] = useState<string | null>(null);
   const [applyOpen, setApplyOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
-  const [portalMsg, setPortalMsg] = useState(false);
   const [contactSent, setContactSent] = useState(false);
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -131,6 +130,12 @@ export default function Site() {
   const fr = lang === "fr";
 
   function go(p: PageKey) {
+    if (p === "portal") {
+      window.location.assign(
+        process.env.NEXT_PUBLIC_PORTAL_URL ?? "http://localhost:3000",
+      );
+      return;
+    }
     setPage(p);
     setMenuOpen(false);
     setFacultyId(null);
@@ -818,46 +823,6 @@ export default function Site() {
     </>
   );
 
-  /* ---------------- PORTAL ---------------- */
-  const portal = (
-    <section style={{ background: "var(--daust-navy-deep)", position: "relative", overflow: "hidden" }}>
-      <div style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(rgba(255,255,255,.04) 1px,transparent 1px)", backgroundSize: "22px 22px" }} />
-      <div className="split" style={{ position: "relative", ...WRAP, padding: "72px 40px", display: "grid", gridTemplateColumns: "1fr 460px", gap: 56, alignItems: "center" }}>
-        <div style={{ minWidth: 0 }}>
-          <Dash label="myDAUST" onDark />
-          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(34px,4.6vw,58px)", lineHeight: 1, letterSpacing: "-.015em", color: "#fff", margin: "22px 0 0", maxWidth: 520 }}>{tx.portalTitle}</h1>
-          <p style={{ fontFamily: "var(--font-body)", fontSize: 16, lineHeight: 1.65, color: "var(--fg-on-navy-muted)", maxWidth: 460, margin: "22px 0 0" }}>{tx.portalSub}</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 28 }}>
-            {c.portalRoles.map((r) => (
-              <span key={r} style={{ fontFamily: "var(--font-body)", fontSize: 12.5, fontWeight: 600, color: "#fff", border: "1px solid rgba(255,255,255,.22)", padding: "8px 14px", borderRadius: 3 }}>{r}</span>
-            ))}
-          </div>
-        </div>
-        <div style={{ background: "#fff", borderRadius: 6, padding: "32px 30px", minWidth: 0 }}>
-          <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 22, color: "var(--fg1)", margin: 0 }}>{tx.signInTitle}</h2>
-          <p style={{ fontFamily: "var(--font-body)", fontSize: 13.5, color: "var(--fg3)", margin: "6px 0 22px" }}>{tx.signInSub}</p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div>
-              <label style={{ fontFamily: "var(--font-body)", fontSize: 12, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--fg2)", display: "block", marginBottom: 6 }}>{tx.emailLabel}</label>
-              <input placeholder="you@daust.org" style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 4, padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 14, outline: "none" }} />
-            </div>
-            <div>
-              <label style={{ fontFamily: "var(--font-body)", fontSize: 12, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--fg2)", display: "block", marginBottom: 6 }}>{tx.passwordLabel}</label>
-              <input type="password" placeholder="••••••••" style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 4, padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 14, outline: "none" }} />
-            </div>
-          </div>
-          <Hover as="button" onClick={() => setPortalMsg(true)} base={{ width: "100%", marginTop: 22, fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 13, letterSpacing: ".05em", textTransform: "uppercase", border: "none", borderRadius: 4, padding: 14, background: "var(--daust-navy)", color: "#fff", cursor: "pointer" }} hover={{ background: "var(--daust-orange)" }}>{tx.signInBtn}</Hover>
-          {portalMsg && (
-            <div style={{ marginTop: 16, background: "var(--accent-bg)", border: "1px solid var(--border)", borderRadius: 4, padding: "12px 14px", fontFamily: "var(--font-body)", fontSize: 13, lineHeight: 1.5, color: "var(--fg1)" }}>
-              {tx.portalNote} <button onClick={openApply} style={{ color: "var(--daust-navy)", fontWeight: 600, cursor: "pointer", background: "none", border: "none", padding: 0, fontSize: 13 }}>{tx.portalNoteApply}</button> {tx.portalNoteOr} <button onClick={openAI} style={{ color: "var(--daust-navy)", fontWeight: 600, cursor: "pointer", background: "none", border: "none", padding: 0, fontSize: 13 }}>{tx.portalNoteAI}</button>.
-            </div>
-          )}
-          <p style={{ fontFamily: "var(--font-body)", fontSize: 12.5, color: "var(--fg3)", textAlign: "center", margin: "18px 0 0" }}>{tx.portalNew} <button onClick={openApply} style={{ color: "var(--daust-navy)", fontWeight: 600, cursor: "pointer", background: "none", border: "none", padding: 0, fontSize: 12.5 }}>{tx.portalApplyLink}</button></p>
-        </div>
-      </div>
-    </section>
-  );
-
   /* ---------------- CONTACT ---------------- */
   const contact = (
     <>
@@ -968,7 +933,7 @@ export default function Site() {
     </>
   );
 
-  const views: Record<PageKey, React.ReactNode> = { home, academics, admissions, research, faculty, innovation, campus, about, portal, contact, news: newsView, privacy };
+  const views: Record<PageKey, React.ReactNode> = { home, academics, admissions, research, faculty, innovation, campus, about, portal: null, contact, news: newsView, privacy };
 
   /* ---------------- NEWS ARTICLE ---------------- */
   const articleView = (

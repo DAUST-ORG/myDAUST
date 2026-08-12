@@ -41,18 +41,15 @@ import {
   projectedInstallmentStatus,
   selectOldestPayableTarget,
 } from "./account-position.js";
+import { allocateProportionallyXof } from "./component-allocation.js";
+import {
+  assignStandardPackageInTransaction,
+  type StandardPackageAssignment,
+} from "./standard-package.js";
 
-// Standard annual tuition, billed as the official 4-installment quarterly plan — mirrors
-// packages/db/prisma/import-students.ts so admin-created students match the imported roster.
-// Official DAUST payment sheet (tuition-only): 4 x 743,750 XOF due Aug 5 / Nov 5 / Jan 5 / Mar 5.
-const STANDARD_TUITION_XOF = FEE_STRUCTURE.tuitionPerYear; // 2_975_000
+// Shared fee constants are bootstrap fallbacks only. Standard billing always reads
+// the current administrator-approved FeeSchedule revision from the database.
 const TUITION_TERM_NAME = "Fall 2026";
-const TUITION_INSTALLMENT_DUE = [
-  "2026-08-05",
-  "2026-11-05",
-  "2027-01-05",
-  "2027-03-05",
-] as const;
 const WIRE_CONFIG_KEY = "wire_payment_config";
 const DEFAULT_WIRE_CONFIG: WirePaymentConfig = {
   enabled: false,
@@ -325,7 +322,7 @@ export class FinanceService {
     studentId: string;
     amountXof: number;
     contactEmail: string;
-    source: "student_portal" | "public_bill" | "payment_link";
+    source: string;
     submittedById?: string;
     submittedByEmail?: string;
     paymentLinkId?: string;
@@ -365,6 +362,9 @@ export class FinanceService {
           status: "pending",
           provider: "wire",
           providerRef: ref,
+          source: input.source,
+          initiatedById: input.submittedById,
+          initiatedByEmail: input.submittedByEmail ?? input.contactEmail,
         },
       });
       const created = await tx.wireTransferSubmission.create({
@@ -415,13 +415,34 @@ export class FinanceService {
     invoiceId: string,
     amountXof: number,
     file: Express.Multer.File,
+    context: { source?: string } = {},
   ) {
     return this.createInvoiceWire({
       invoiceId,
       studentId,
       amountXof,
       contactEmail: actor.email,
-      source: "student_portal",
+      source: context.source ?? "student_portal",
+      submittedById: actor.personId,
+      submittedByEmail: actor.email,
+      file,
+    });
+  }
+
+  /** Authenticated guardian paying for a linked child after GuardianStudent authorization. */
+  async submitGuardianWire(
+    studentId: string,
+    actor: { personId: string; email: string },
+    invoiceId: string,
+    amountXof: number,
+    file: Express.Multer.File,
+  ) {
+    return this.createInvoiceWire({
+      invoiceId,
+      studentId,
+      amountXof,
+      contactEmail: actor.email,
+      source: "parent_portal",
       submittedById: actor.personId,
       submittedByEmail: actor.email,
       file,
@@ -536,6 +557,9 @@ export class FinanceService {
         id: inv.id,
         createdAt: inv.createdAt,
         term: inv.term.name,
+        packageType: inv.packageType,
+        academicYearLabel: inv.academicYearLabel,
+        feeScheduleRevision: inv.feeScheduleRevision,
         total: inv.totalAmount,
         paid: inv.amountPaid,
         balance: inv.status === "void" ? 0 : inv.totalAmount - inv.amountPaid,
@@ -558,6 +582,11 @@ export class FinanceService {
           amount: p.amount,
           method: p.method,
           status: p.status,
+          providerRef: p.providerRef,
+          source: p.source,
+          initiatedByEmail: p.initiatedByEmail,
+          settledAt: p.settledAt,
+          refundedAt: p.refundedAt,
           createdAt: p.createdAt,
         })),
         wireTransfers: inv.wireTransfers.map((w) => this.wireSummary(w)),
@@ -630,11 +659,7 @@ export class FinanceService {
     });
   }
 
-  /**
-   * The institution-wide fee schedule (the DAUST payment-plan sheet). This is the
-   * template staff edit; it does not retroactively change invoices already raised —
-   * those carry their own installments and are edited per student.
-   */
+  /** The current administrator-approved, immutable fee-schedule revision. */
   async getFeePlan(academicYearLabel?: string) {
     const year =
       academicYearLabel ??
@@ -646,20 +671,32 @@ export class FinanceService {
     if (!year)
       return {
         academicYearLabel: null,
+        scheduleId: null,
+        revision: null,
+        status: null,
+        approvedAt: null,
         rows: [],
-        totals: { full: 0, tuition: 0 },
+        totals: { full: 0, tuition: 0, housing: 0, cafeteria: 0 },
       };
 
-    const rows = await this.prisma.feePlanInstallment.findMany({
-      where: { academicYearLabel: year },
-      orderBy: { sequence: "asc" },
+    const schedule = await this.prisma.feeSchedule.findFirst({
+      where: { academicYearLabel: year, status: "approved" },
+      orderBy: { revision: "desc" },
+      include: { rows: { orderBy: { sequence: "asc" } } },
     });
+    const rows = schedule?.rows ?? [];
     return {
       academicYearLabel: year,
+      scheduleId: schedule?.id ?? null,
+      revision: schedule?.revision ?? null,
+      status: schedule?.status ?? null,
+      approvedAt: schedule?.approvedAt ?? null,
       rows,
       totals: {
         full: rows.reduce((s, r) => s + r.amountFullXof, 0),
         tuition: rows.reduce((s, r) => s + r.amountTuitionXof, 0),
+        housing: rows.reduce((s, r) => s + r.amountHousingXof, 0),
+        cafeteria: rows.reduce((s, r) => s + r.amountCafeteriaXof, 0),
       },
     };
   }
@@ -797,7 +834,11 @@ export class FinanceService {
             : "open";
       await tx.invoice.update({
         where: { id: invoice.id },
-        data: { totalAmount: newTotal, status: invStatus },
+        data: {
+          totalAmount: newTotal,
+          status: invStatus,
+          revision: { increment: 1 },
+        },
       });
 
       await tx.auditLog.create({
@@ -952,6 +993,7 @@ export class FinanceService {
         where: { id: invoiceId },
         data: {
           totalAmount: newTotal,
+          revision: { increment: 1 },
           status:
             invoice.amountPaid >= newTotal
               ? "paid"
@@ -979,7 +1021,15 @@ export class FinanceService {
   }
 
   /** Student initiates a payment toward an invoice they own. Returns the gateway redirect. */
-  async initiatePayment(studentId: string, input: InitiatePaymentInput) {
+  async initiatePayment(
+    studentId: string,
+    input: InitiatePaymentInput,
+    context: {
+      source?: string;
+      initiatedById?: string;
+      initiatedByEmail?: string;
+    } = {},
+  ) {
     if (input.method === "wire") {
       throw new BadRequestException(
         "Wire transfers must include a proof of payment",
@@ -1017,6 +1067,9 @@ export class FinanceService {
         method: input.method,
         status: "pending",
         providerRef: ref,
+        source: context.source ?? "student_portal",
+        initiatedById: context.initiatedById,
+        initiatedByEmail: context.initiatedByEmail,
       },
     });
 
@@ -1032,8 +1085,12 @@ export class FinanceService {
         entity: "Payment",
         entityId: payment.id,
         action: "initiated",
-        actorId: studentId,
-        data: { amount, method: input.method },
+        actorId: context.initiatedById,
+        data: {
+          amount,
+          method: input.method,
+          source: context.source ?? "student_portal",
+        },
       },
     });
 
@@ -1178,6 +1235,7 @@ export class FinanceService {
             data: {
               status: "success",
               amount,
+              settledAt: new Date(),
               ...(opts.payload ? { ipnPayload: opts.payload } : {}),
             },
           });
@@ -1199,6 +1257,58 @@ export class FinanceService {
           );
           const directAppliedXof = Math.min(amount, directCapacityXof);
           const creditMemoXof = amount - directAppliedXof;
+
+          if (
+            directAppliedXof > 0 &&
+            tx.invoiceComponent &&
+            tx.paymentComponentAllocation
+          ) {
+            let components = await tx.invoiceComponent.findMany({
+              where: { invoiceId: originalInvoice.id },
+              include: { allocations: true },
+              orderBy: { id: "asc" },
+            });
+            if (components.length === 0) {
+              const kind =
+                originalInvoice.costCenterCode === "9100"
+                  ? "tuition"
+                  : originalInvoice.costCenterCode === "3700"
+                    ? "housing"
+                    : originalInvoice.costCenterCode === "3600"
+                      ? "cafeteria"
+                      : "other";
+              const created = await tx.invoiceComponent.create({
+                data: {
+                  invoiceId: originalInvoice.id,
+                  kind,
+                  costCenterCode: originalInvoice.costCenterCode,
+                  amountXof: originalInvoice.totalAmount,
+                },
+                include: { allocations: true },
+              });
+              components = [created];
+            }
+            const split = allocateProportionallyXof(
+              directAppliedXof,
+              components.map((component) => ({
+                id: component.id,
+                availableXof:
+                  component.amountXof -
+                  component.allocations.reduce(
+                    (sum, allocation) =>
+                      sum + allocation.amountXof - allocation.refundedAmountXof,
+                    0,
+                  ),
+              })),
+            );
+            await tx.paymentComponentAllocation.createMany({
+              data: split.map((allocation) => ({
+                paymentId: payment.id,
+                invoiceComponentId: allocation.id,
+                amountXof: allocation.amountXof,
+              })),
+            });
+          }
 
           // Allocation rows record actual cash only. Account/invoice credits stay in
           // creditAppliedXof, so a receipt never pretends that a scholarship was cash.
@@ -1247,11 +1357,18 @@ export class FinanceService {
               where: { id: originalInvoice.id },
               data: {
                 amountPaid: newInvoicePaid,
+                revision: { increment: 1 },
                 status:
                   newInvoicePaid >= originalInvoice.totalAmount
                     ? "paid"
                     : "partial",
               },
+            });
+          }
+          if (directAppliedXof === 0) {
+            await tx.invoice.update({
+              where: { id: originalInvoice.id },
+              data: { revision: { increment: 1 } },
             });
           }
 
@@ -1265,6 +1382,7 @@ export class FinanceService {
                     totalAmount: -creditMemoXof,
                     amountPaid: 0,
                     status: "paid",
+                    packageType: "credit",
                     description: `Unapplied payment credit — ${payment.providerRef}`,
                     costCenterCode: originalInvoice.costCenterCode,
                   },
@@ -1686,8 +1804,7 @@ export class FinanceService {
    * rejected and retried.
    */
   private async createPiSpiRequest(input: {
-    source:
-      "student_portal" | "public_bill" | "payment_link" | "application_fee";
+    source: string;
     alias: string;
     amountXof: number;
     motif: string;
@@ -1697,6 +1814,7 @@ export class FinanceService {
     paymentLinkId?: string;
     applicantId?: string;
     actorId?: string;
+    initiatedByEmail?: string;
   }) {
     const rail = this.piSpiRail();
     const amount = Math.floor(input.amountXof);
@@ -1742,6 +1860,9 @@ export class FinanceService {
                 status: "pending",
                 provider: "pi_spi",
                 providerRef: txId,
+                source: input.source,
+                initiatedById: input.actorId,
+                initiatedByEmail: input.initiatedByEmail,
               },
             })
           : null;
@@ -1834,6 +1955,7 @@ export class FinanceService {
       amountXof: number;
       saveAlias?: boolean;
     },
+    context: { source?: string; initiatedByEmail?: string } = {},
   ) {
     const requested = await this.prisma.invoice.findUnique({
       where: { id: input.invoiceId },
@@ -1855,7 +1977,7 @@ export class FinanceService {
       });
     }
     return this.createPiSpiRequest({
-      source: "student_portal",
+      source: context.source ?? "student_portal",
       alias: input.alias,
       amountXof: amount,
       motif: `DAUST ${invoice.description ?? "tuition"}`,
@@ -1863,6 +1985,7 @@ export class FinanceService {
       studentId,
       invoiceId: invoice.id,
       actorId,
+      initiatedByEmail: context.initiatedByEmail,
     });
   }
 
@@ -2244,6 +2367,7 @@ export class FinanceService {
       include: {
         student: { include: { person: true } },
         invoice: { include: { term: true } },
+        initiatedBy: { select: { firstName: true, lastName: true } },
       },
     });
     if (!p) return;
@@ -2261,6 +2385,30 @@ export class FinanceService {
         </table>
         <p>View the full receipt anytime in your myDAUST billing page.</p>`,
     });
+    if (
+      p.initiatedByEmail &&
+      p.initiatedByEmail.toLowerCase() !== p.student.person.email.toLowerCase()
+    ) {
+      const payerName = p.initiatedBy
+        ? `${p.initiatedBy.firstName} ${p.initiatedBy.lastName}`.trim()
+        : "Payer";
+      const studentName =
+        `${p.student.person.firstName} ${p.student.person.lastName}`.trim();
+      await this.mail.send({
+        to: p.initiatedByEmail,
+        subject: `Payment receipt for ${studentName}`,
+        html: `
+          <h2>Payment received</h2>
+          <p>Hi ${payerName}, we've received your payment for <strong>${studentName}</strong>.</p>
+          <table cellpadding="6">
+            <tr><td><strong>Amount</strong></td><td>${p.amount.toLocaleString("en-US")} XOF</td></tr>
+            <tr><td><strong>Method</strong></td><td>${p.method}</td></tr>
+            <tr><td><strong>Reference</strong></td><td>${p.providerRef}</td></tr>
+            <tr><td><strong>Term</strong></td><td>${p.invoice.term.name}</td></tr>
+          </table>
+          <p>You can review this receipt in the parent billing portal.</p>`,
+      });
+    }
   }
 
   // --- Admin (bursar/finance) tracking ---
@@ -2284,6 +2432,10 @@ export class FinanceService {
       method: p.method,
       status: p.status,
       providerRef: p.providerRef,
+      source: p.source,
+      initiatedByEmail: p.initiatedByEmail,
+      settledAt: p.settledAt,
+      refundedAt: p.refundedAt,
       createdAt: p.createdAt,
     }));
   }
@@ -2452,6 +2604,9 @@ export class FinanceService {
           // Human handle + description drive the design's "Billing" and "Plan" columns.
           billingNumber: primary?.number ?? null,
           billingDescription: primary?.description ?? null,
+          packageType: primary?.packageType ?? null,
+          academicYearLabel: primary?.academicYearLabel ?? null,
+          feeScheduleRevision: primary?.feeScheduleRevision ?? null,
         },
       ];
     });
@@ -2478,6 +2633,7 @@ export class FinanceService {
 
     const position = deriveApiAccountPosition(invoices);
     const derived = derivedInstallmentsById(position);
+    const payableTarget = selectOldestPayableTarget(invoices, position);
     const activeHolds = await this.prisma.studentHold.findMany({
       where: { studentId, active: true },
       orderBy: { placedAt: "asc" },
@@ -2496,6 +2652,7 @@ export class FinanceService {
       },
       totals: { billed, paid, balance: position.summary.balanceXof },
       summary: position.summary,
+      payableTarget,
       activeHolds: activeHolds.map((hold) => ({
         id: hold.id,
         type: hold.type,
@@ -2506,8 +2663,12 @@ export class FinanceService {
         const summary = invoicePositionSummary(position, inv.id);
         return {
           id: inv.id,
+          createdAt: inv.createdAt,
           term: inv.term.name,
           description: inv.description,
+          packageType: inv.packageType,
+          academicYearLabel: inv.academicYearLabel,
+          feeScheduleRevision: inv.feeScheduleRevision,
           total: inv.totalAmount,
           paid: inv.amountPaid,
           balance: inv.status === "void" ? 0 : inv.totalAmount - inv.amountPaid,
@@ -2531,6 +2692,11 @@ export class FinanceService {
             amount: p.amount,
             method: p.method,
             status: p.status,
+            providerRef: p.providerRef,
+            source: p.source,
+            initiatedByEmail: p.initiatedByEmail,
+            settledAt: p.settledAt,
+            refundedAt: p.refundedAt,
             createdAt: p.createdAt,
           })),
           wireTransfers: inv.wireTransfers.map((w) => this.wireSummary(w)),
@@ -2563,67 +2729,63 @@ export class FinanceService {
     return `DAUST-${year}-${randomUUID().slice(0, 8)}`;
   }
 
-  /** Bill the standard annual tuition (idempotent per student+term). */
-  private async billStandardTuition(studentId: string, actorId: string) {
-    const term = await this.prisma.term.findUnique({
-      where: { name: TUITION_TERM_NAME },
-    });
-    if (!term)
-      throw new BadRequestException(
-        `Term "${TUITION_TERM_NAME}" is not set up`,
+  /** Bill the approved annual tuition + housing + cafeteria package. */
+  private async billStandardTuition(
+    studentId: string,
+    actorId: string,
+  ): Promise<StandardPackageAssignment> {
+    try {
+      return await this.serializableTransaction((tx) =>
+        assignStandardPackageInTransaction(tx, studentId, actorId),
       );
-    const existing = await this.prisma.invoice.findFirst({
-      where: { studentId, termId: term.id },
-    });
-    if (existing) return;
-    const amounts = splitEvenXof(
-      STANDARD_TUITION_XOF,
-      TUITION_INSTALLMENT_DUE.length,
-    );
-    const now = new Date();
-    const installments = TUITION_INSTALLMENT_DUE.map((d, idx) => ({
-      sequence: idx + 1,
-      dueDate: new Date(`${d}T00:00:00Z`),
-      amountDue: amounts[idx] ?? 0,
-      status: projectedInstallmentStatus(
-        {
-          dueDate: d,
-          amountDue: amounts[idx] ?? 0,
-          amountPaid: 0,
+    } catch (error) {
+      // PostgreSQL can surface the partial unique-index race as P2002 instead of
+      // a serializable P2034. Return the winner so retries stay idempotent.
+      const isUniqueRace =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "P2002";
+      if (!isUniqueRace) throw error;
+      const existing = await this.prisma.invoice.findFirst({
+        where: {
+          studentId,
+          packageType: "standard_full",
+          status: { not: "void" },
+          feeSchedule: { academicYear: { status: "active" } },
         },
-        now,
-      ),
-    }));
-    const year = new Date().getUTCFullYear();
-    const invoice = await this.prisma.invoice.create({
-      data: {
-        number: this.billingNumber(year, await this.nextBillingSeq(year)),
-        studentId,
-        termId: term.id,
-        totalAmount: STANDARD_TUITION_XOF,
-        costCenterCode: COST_CENTER_TUITION,
-        plan: {
-          create: {
-            createdById: actorId,
-            installments: { create: installments },
-          },
-        },
-      },
+        orderBy: { createdAt: "desc" },
+      });
+      if (
+        !existing ||
+        !existing.feeScheduleId ||
+        !existing.feeScheduleRevision
+      ) {
+        throw error;
+      }
+      return {
+        created: false,
+        invoiceId: existing.id,
+        feeScheduleId: existing.feeScheduleId,
+        feeScheduleRevision: existing.feeScheduleRevision,
+      };
+    }
+  }
+
+  /** Bursar/admin direct action: assign the exact already-approved package only. */
+  async assignStandardPackage(studentId: string, actorId: string) {
+    const student = await this.prisma.student.findFirst({
+      where: { id: studentId, recordStatus: "active" },
+      select: { id: true },
     });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Invoice",
-        entityId: invoice.id,
-        action: "tuition-billed",
-        actorId,
-        data: { amount: STANDARD_TUITION_XOF },
-      },
-    });
+    if (!student) throw new NotFoundException("Active student not found");
+    return this.billStandardTuition(student.id, actorId);
   }
 
   /**
    * Create a real platform student (Person + Student) from the billing admin. They immediately
-   * appear in the registrar roster and can pay on payment.daust.net. Optionally auto-bills tuition.
+   * appear in the registrar roster and can pay on payment.daust.net. Active students always
+   * receive the approved full package; a missing schedule rolls the whole creation back.
    */
   async createStudent(
     actorId: string,
@@ -2633,7 +2795,6 @@ export class FinanceService {
       studentNo?: string;
       email?: string;
       programCode?: string;
-      billTuition?: boolean;
     },
   ) {
     const { firstName, lastName } = this.splitName(input.fullName);
@@ -2663,7 +2824,7 @@ export class FinanceService {
       programId = program.id;
     }
 
-    const student = await this.prisma.$transaction(async (tx) => {
+    const student = await this.serializableTransaction(async (tx) => {
       const person = await tx.person.create({
         data: {
           email,
@@ -2685,11 +2846,9 @@ export class FinanceService {
           data: { studentNo, email },
         },
       });
+      await assignStandardPackageInTransaction(tx, created.id, actorId);
       return created;
     });
-
-    if (input.billTuition !== false)
-      await this.billStandardTuition(student.id, actorId);
     return { id: student.id, studentNo };
   }
 
@@ -2830,6 +2989,21 @@ export class FinanceService {
               totalAmount: amount,
               description,
               costCenterCode,
+              packageType: "custom",
+              components: {
+                create: {
+                  kind:
+                    costCenterCode === "9100"
+                      ? "tuition"
+                      : costCenterCode === "3700"
+                        ? "housing"
+                        : costCenterCode === "3600"
+                          ? "cafeteria"
+                          : "other",
+                  costCenterCode,
+                  amountXof: amount,
+                },
+              },
               plan: {
                 create: {
                   createdById: actorId,
@@ -2908,6 +3082,7 @@ export class FinanceService {
         totalAmount: -amount,
         amountPaid: 0,
         status: "paid", // excludes it from payable selection; balance math still nets it
+        packageType: "credit",
         description: `${kind} — ${label}`,
         costCenterCode,
       },
@@ -2995,6 +3170,7 @@ export class FinanceService {
           totalAmount: -creditAmount,
           amountPaid: 0,
           status: "paid", // excludes it from checkoutBill's open/partial selection
+          packageType: "credit",
           description: `Credit — reversal of ${invoice.description ?? `${TUITION_TERM_NAME} tuition`}`,
           costCenterCode: invoice.costCenterCode,
         },
@@ -3257,13 +3433,274 @@ export class FinanceService {
     });
   }
 
+  /** Cumulative approved schedule vs durable net cash, plus a capped run-rate forecast. */
+  async collectionsTimeline(academicYearLabel?: string) {
+    const academicYear = academicYearLabel
+      ? await this.prisma.academicYear.findUnique({
+          where: { label: academicYearLabel },
+          include: { terms: true },
+        })
+      : await this.prisma.academicYear.findFirst({
+          where: { status: "active" },
+          include: { terms: true },
+        });
+    if (!academicYear) throw new NotFoundException("Academic year not found");
+
+    const students = await this.prisma.student.findMany({
+      include: {
+        invoices: {
+          include: {
+            term: true,
+            plan: { include: { installments: true } },
+            payments: true,
+          },
+        },
+      },
+    });
+    const expectedByDate = new Map<string, number>();
+    const cashByDate = new Map<string, number>();
+    let unscheduledDebtXof = 0;
+    let collectibleBalanceXof = 0;
+    for (const student of students) {
+      const position = deriveApiAccountPosition(student.invoices);
+      const targetInvoiceIds = new Set(
+        student.invoices
+          .filter(
+            (invoice) =>
+              invoice.status !== "void" &&
+              invoice.totalAmount > 0 &&
+              (invoice.academicYearLabel === academicYear.label ||
+                invoice.term.academicYearId === academicYear.id),
+          )
+          .map((invoice) => invoice.id),
+      );
+      for (const line of position.installments) {
+        if (!targetInvoiceIds.has(line.invoiceId)) continue;
+        collectibleBalanceXof += line.outstandingXof;
+        if (!line.dueDate) {
+          unscheduledDebtXof += line.outstandingXof;
+          continue;
+        }
+        const expectedXof = Math.max(
+          0,
+          line.amountDueXof - line.creditAppliedXof,
+        );
+        expectedByDate.set(
+          line.dueDate,
+          (expectedByDate.get(line.dueDate) ?? 0) + expectedXof,
+        );
+      }
+      for (const invoice of student.invoices) {
+        if (!targetInvoiceIds.has(invoice.id)) continue;
+        for (const payment of invoice.payments) {
+          if (
+            (payment.status === "success" || payment.status === "refunded") &&
+            payment.settledAt
+          ) {
+            const date = toDakarDateKey(payment.settledAt);
+            cashByDate.set(date, (cashByDate.get(date) ?? 0) + payment.amount);
+          }
+          if (payment.status === "refunded" && payment.refundedAt) {
+            const date = toDakarDateKey(payment.refundedAt);
+            cashByDate.set(date, (cashByDate.get(date) ?? 0) - payment.amount);
+          }
+        }
+      }
+    }
+
+    const today = toDakarDateKey(new Date());
+    const termStarts = academicYear.terms.map((term) =>
+      toDakarDateKey(term.startDate),
+    );
+    const termEnds = academicYear.terms.map((term) =>
+      toDakarDateKey(term.endDate),
+    );
+    const startDate = academicYear.startsOn
+      ? toDakarDateKey(academicYear.startsOn)
+      : (termStarts.sort()[0] ?? [...expectedByDate.keys()].sort()[0] ?? today);
+    const endDate = academicYear.endsOn
+      ? toDakarDateKey(academicYear.endsOn)
+      : (termEnds.sort().at(-1) ??
+        [...expectedByDate.keys()].sort().at(-1) ??
+        today);
+    const scheduledXof = [...expectedByDate.values()].reduce(
+      (sum, amount) => sum + amount,
+      0,
+    );
+    const collectedXof = [...cashByDate.entries()]
+      .filter(([date]) => date <= today)
+      .reduce((sum, [, amount]) => sum + amount, 0);
+
+    const todayMs = Date.parse(`${today}T00:00:00.000Z`);
+    const trailingStart = new Date(todayMs - 29 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const trailingEvents = [...cashByDate.entries()].filter(
+      ([date]) => date >= trailingStart && date <= today,
+    );
+    const trailingSettlementDays = new Set(
+      trailingEvents.filter(([, amount]) => amount > 0).map(([date]) => date),
+    ).size;
+    const allSettlementDays = new Set(
+      [...cashByDate.entries()]
+        .filter(
+          ([date, amount]) => date >= startDate && date <= today && amount > 0,
+        )
+        .map(([date]) => date),
+    ).size;
+    let forecastStatus:
+      "trailing_30_days" | "academic_year_to_date" | "insufficient_data" =
+      "insufficient_data";
+    let dailyRateXof: number | null = null;
+    let settlementDayCount = trailingSettlementDays;
+    if (trailingSettlementDays >= 3) {
+      forecastStatus = "trailing_30_days";
+      dailyRateXof = Math.max(
+        0,
+        trailingEvents.reduce((sum, [, amount]) => sum + amount, 0) / 30,
+      );
+    } else if (allSettlementDays > 0) {
+      forecastStatus = "academic_year_to_date";
+      settlementDayCount = allSettlementDays;
+      const elapsedDays = Math.max(
+        1,
+        Math.floor(
+          (todayMs - Date.parse(`${startDate}T00:00:00.000Z`)) / 86_400_000,
+        ) + 1,
+      );
+      dailyRateXof = Math.max(0, collectedXof / elapsedDays);
+    }
+    if (!dailyRateXof) {
+      forecastStatus = "insufficient_data";
+      dailyRateXof = null;
+    }
+
+    const pointDates = new Set([
+      startDate,
+      ...expectedByDate.keys(),
+      ...[...cashByDate.keys()].filter((date) => date <= today),
+      today,
+      endDate,
+    ]);
+    const dates = [...pointDates].sort();
+    let expectedCumulativeXof = 0;
+    let actualCumulativeXof = 0;
+    const points = dates.map((date) => {
+      expectedCumulativeXof += expectedByDate.get(date) ?? 0;
+      if (date <= today) actualCumulativeXof += cashByDate.get(date) ?? 0;
+      const forecastDays = Math.max(
+        0,
+        Math.floor(
+          (Date.parse(`${date}T00:00:00.000Z`) - todayMs) / 86_400_000,
+        ),
+      );
+      return {
+        date,
+        expectedCumulativeXof,
+        actualCumulativeXof: date <= today ? actualCumulativeXof : null,
+        forecastCumulativeXof:
+          date < today || dailyRateXof === null
+            ? null
+            : Math.round(
+                collectedXof +
+                  Math.min(collectibleBalanceXof, dailyRateXof * forecastDays),
+              ),
+      };
+    });
+    return {
+      academicYear: academicYear.label,
+      asOfDate: today,
+      currency: "XOF" as const,
+      summary: {
+        scheduledXof,
+        collectedXof,
+        varianceXof:
+          collectedXof -
+          points.filter((point) => point.date <= today).at(-1)!
+            .expectedCumulativeXof,
+        collectibleBalanceXof,
+        unscheduledDebtXof,
+      },
+      forecast: {
+        status: forecastStatus,
+        dailyRateXof: dailyRateXof === null ? null : Math.round(dailyRateXof),
+        settlementDayCount,
+        cappedAtXof: collectedXof + collectibleBalanceXof,
+      },
+      points,
+    };
+  }
+
+  /** Stable aggregate contract for the admin-only Director portal. */
+  async directorPortalOverview() {
+    const [
+      activeStudents,
+      faculty,
+      staff,
+      programs,
+      applicants,
+      pendingApprovals,
+      activeHoldRows,
+      aging,
+      money,
+    ] = await Promise.all([
+      this.prisma.student.count({ where: { recordStatus: "active" } }),
+      this.prisma.person.count({ where: { roles: { has: "faculty" } } }),
+      this.prisma.person.count({
+        where: { kind: "staff", NOT: { roles: { has: "faculty" } } },
+      }),
+      this.prisma.program.count(),
+      this.prisma.applicant.count(),
+      this.prisma.approvalRequest.count({ where: { status: "pending" } }),
+      this.prisma.studentHold.findMany({
+        where: { active: true },
+        distinct: ["studentId"],
+        select: { studentId: true },
+      }),
+      this.arAging(),
+      this.directorOverview(),
+    ]);
+    return {
+      generatedAt: new Date().toISOString(),
+      people: { activeStudents, faculty, staff },
+      academics: { programs },
+      admissions: { applicants },
+      approvals: { pending: pendingApprovals },
+      holds: { activeStudents: activeHoldRows.length },
+      receivables: {
+        overdueAccounts: aging.accountCounts.overdue,
+        overdueXof: aging.summary.overdueXof,
+        outstandingXof: aging.summary.outstandingXof,
+      },
+      collections: {
+        collectedXof: money.totals.moneyIn,
+        expensesXof: money.totals.moneyOut,
+        netCashXof: money.totals.net,
+      },
+      costCenters: money.centers.map((center) => ({
+        code: center.code,
+        name: center.name,
+        revenueXof: center.revenue,
+        expenseXof: center.expense,
+        netXof: center.net,
+      })),
+    };
+  }
+
   /** Director's institution-wide money-in vs money-out, by cost center and rolled up by group. */
   async directorOverview(fiscalYear = "FY2026") {
     const [centers, payments, expenseAgg, budgets] = await Promise.all([
       this.prisma.costCenter.findMany(),
       this.prisma.payment.findMany({
-        where: { status: "success" },
-        include: { invoice: { select: { costCenterCode: true } } },
+        where: { status: { in: ["success", "refunded"] } },
+        include: {
+          invoice: { select: { costCenterCode: true } },
+          componentAllocations: {
+            include: {
+              invoiceComponent: { select: { costCenterCode: true } },
+            },
+          },
+        },
       }),
       this.prisma.expense.groupBy({
         by: ["costCenterCode"],
@@ -3274,8 +3711,17 @@ export class FinanceService {
 
     const revenueByCc = new Map<string, number>();
     for (const p of payments) {
-      const cc = p.invoice.costCenterCode;
-      revenueByCc.set(cc, (revenueByCc.get(cc) ?? 0) + p.amount);
+      if (p.componentAllocations.length > 0) {
+        for (const allocation of p.componentAllocations) {
+          const cc = allocation.invoiceComponent.costCenterCode;
+          const net = allocation.amountXof - allocation.refundedAmountXof;
+          revenueByCc.set(cc, (revenueByCc.get(cc) ?? 0) + net);
+        }
+      } else if (p.status === "success") {
+        // Legacy settlement before component allocations were introduced.
+        const cc = p.invoice.costCenterCode;
+        revenueByCc.set(cc, (revenueByCc.get(cc) ?? 0) + p.amount);
+      }
     }
 
     // Auxiliary revenue that doesn't ride invoices: dining orders → 3600, application fees → 4200.
@@ -3388,8 +3834,59 @@ export class FinanceService {
       },
     });
     if (!payment) throw new NotFoundException("Payment not found");
-    if (payment.status !== "success")
+    if (payment.status === "refunded") {
+      return { ok: true, refundedAmount: payment.amount, gatewayRefund: false };
+    }
+    const requiresGatewayRefund =
+      payment.provider === this.provider.name && Boolean(this.provider.refund);
+    const resumesInternalRefund =
+      payment.status === "refund_pending" && !requiresGatewayRefund;
+    if (payment.status === "refund_pending" && requiresGatewayRefund) {
+      throw new BadRequestException(
+        "This gateway refund needs Finance reconciliation before it can be retried",
+      );
+    }
+    if (payment.status !== "success" && !resumesInternalRefund)
       throw new BadRequestException("Only successful payments can be refunded");
+
+    // Claim before touching the gateway. Concurrent requests cannot both refund,
+    // and a gateway rejection leaves invoice/installment/component ledgers intact.
+    if (!resumesInternalRefund) {
+      const refundClaim = await this.prisma.payment.updateMany({
+        where: { id: payment.id, status: "success" },
+        data: { status: "refund_pending" },
+      });
+      if (refundClaim.count === 0) {
+        throw new BadRequestException("This payment is no longer refundable");
+      }
+    }
+
+    let gateway: { ok: boolean; ref?: string } = { ok: false };
+    if (requiresGatewayRefund) {
+      try {
+        gateway = await this.provider.refund!(
+          payment.providerRef,
+          payment.amount,
+        );
+      } catch (error) {
+        await this.prisma.payment.updateMany({
+          where: { id: payment.id, status: "refund_pending" },
+          data: { status: "success" },
+        });
+        throw new BadRequestException(
+          `The payment gateway did not confirm the refund: ${error instanceof Error ? error.message : "unknown error"}`,
+        );
+      }
+      if (!gateway.ok) {
+        await this.prisma.payment.updateMany({
+          where: { id: payment.id, status: "refund_pending" },
+          data: { status: "success" },
+        });
+        throw new BadRequestException(
+          "The payment gateway did not confirm the refund",
+        );
+      }
+    }
 
     // Re-read the payment, invoice, allocations and credit memo inside the same
     // serializable transaction that performs the reversal. A different payment may
@@ -3400,13 +3897,17 @@ export class FinanceService {
         async (tx) => {
           const current = await tx.payment.findUnique({
             where: { id: payment.id },
-            include: { allocations: true, invoice: true },
+            include: {
+              allocations: true,
+              componentAllocations: true,
+              invoice: true,
+            },
           });
           if (!current) throw new NotFoundException("Payment not found");
           if (current.status === "refunded") return false;
-          if (current.status !== "success") {
+          if (current.status !== "refund_pending") {
             throw new BadRequestException(
-              "Only successful payments can be refunded",
+              "The refund is not in a claimable state",
             );
           }
 
@@ -3420,10 +3921,17 @@ export class FinanceService {
           const directAppliedXof = Math.max(0, current.amount - creditMemoXof);
 
           const claimed = await tx.payment.updateMany({
-            where: { id: current.id, status: "success" },
-            data: { status: "refunded" },
+            where: { id: current.id, status: "refund_pending" },
+            data: { status: "refunded", refundedAt: new Date() },
           });
           if (claimed.count === 0) return false;
+
+          for (const allocation of current.componentAllocations ?? []) {
+            await tx.paymentComponentAllocation.update({
+              where: { id: allocation.id },
+              data: { refundedAmountXof: allocation.amountXof },
+            });
+          }
 
           for (const allocation of current.allocations) {
             const installment = await tx.installment.findUniqueOrThrow({
@@ -3455,6 +3963,7 @@ export class FinanceService {
               where: { id: current.invoice.id },
               data: {
                 amountPaid: newInvoicePaid,
+                revision: { increment: 1 },
                 status:
                   current.invoice.status === "void"
                     ? "void"
@@ -3464,6 +3973,12 @@ export class FinanceService {
                         ? "partial"
                         : "open",
               },
+            });
+          }
+          if (directAppliedXof === 0) {
+            await tx.invoice.update({
+              where: { id: current.invoice.id },
+              data: { revision: { increment: 1 } },
             });
           }
           if (creditMemo && creditMemo.status !== "void") {
@@ -3513,18 +4028,6 @@ export class FinanceService {
 
     if (!didRefund) {
       return { ok: true, refundedAmount: payment.amount, gatewayRefund: false };
-    }
-
-    let gateway: { ok: boolean; ref?: string } = { ok: false };
-    if (this.provider.refund) {
-      try {
-        gateway = await this.provider.refund(
-          payment.providerRef,
-          payment.amount,
-        );
-      } catch {
-        gateway = { ok: false };
-      }
     }
 
     await this.mail.send({
@@ -3729,7 +4232,10 @@ export class FinanceService {
       method: p.method,
       status: p.status,
       providerRef: p.providerRef,
-      paidAt: p.updatedAt,
+      paidAt: p.settledAt ?? p.updatedAt,
+      refundedAt: p.refundedAt,
+      source: p.source,
+      initiatedByEmail: p.initiatedByEmail,
       allocations: p.allocations.map((a) => ({
         sequence: a.installment.sequence,
         amount: a.amount,
@@ -3896,6 +4402,8 @@ export class FinanceService {
           method: "card", // schema enum has no bank type; the link record carries method="manual"
           status: "pending",
           providerRef: `PLINK-${link.id}`,
+          source: "finance_manual",
+          initiatedById: actorId,
         },
       });
       await this.settlePayment(payment.id, { via: "manual", actorId });
@@ -3989,6 +4497,7 @@ export class FinanceService {
             : "card") as never,
           status: "pending",
           providerRef: ref,
+          source: "payment_link",
         },
       });
     }
@@ -4162,6 +4671,7 @@ export class FinanceService {
           : "card") as never,
         status: "pending",
         providerRef: ref,
+        source: "public_bill",
       },
     });
 

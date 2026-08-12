@@ -63,7 +63,11 @@ export class PaymentsController {
   @Roles("student")
   initiate(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const input = InitiatePaymentInput.parse(body);
-    return this.finance.initiatePayment(user.studentId!, input);
+    return this.finance.initiatePayment(user.studentId!, input, {
+      source: "student_portal",
+      initiatedById: user.personId,
+      initiatedByEmail: user.email,
+    });
   }
 
   @Get("wire/config")
@@ -171,6 +175,7 @@ export class PaymentsController {
       user.studentId!,
       user.personId,
       input,
+      { source: "student_portal", initiatedByEmail: user.email },
     );
   }
 

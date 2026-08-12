@@ -25,16 +25,34 @@ import { PORTALS, type PortalKey } from "@/lib/nav";
  * subject, not just a role, and is deliberately not part of this switcher.
  */
 const VIEW_AS_ALL: (ViewAsOption & { roles: string[] })[] = [
+  { key: "director", label: "director", href: "/director", roles: ["admin"] },
   { key: "student", label: "student", href: "/student", roles: ["student"] },
   { key: "faculty", label: "faculty", href: "/faculty", roles: ["faculty"] },
-  { key: "registrar", label: "registrar", href: "/admin", roles: ["registrar", "admin"] },
-  { key: "finance", label: "finance", href: "/finance", roles: ["bursar"] },
-  { key: "comms", label: "website", href: "/comms", roles: ["communications", "admin"] },
+  {
+    key: "registrar",
+    label: "registrar",
+    href: "/admin",
+    roles: ["registrar", "admin"],
+  },
+  {
+    key: "finance",
+    label: "finance",
+    href: "/finance",
+    roles: ["bursar", "admin"],
+  },
+  {
+    key: "comms",
+    label: "website",
+    href: "/comms",
+    roles: ["communications", "admin"],
+  },
   { key: "parent", label: "parent", href: "/parent", roles: ["parent"] },
 ];
 
 /** Only the student portal has a profile screen behind the sidebar identity block. */
-const PROFILE_HREF: Partial<Record<PortalKey, string>> = { student: "/student/profile" };
+const PROFILE_HREF: Partial<Record<PortalKey, string>> = {
+  student: "/student/profile",
+};
 
 export function PortalShell({
   portal,
@@ -49,12 +67,15 @@ export function PortalShell({
   const pathname = usePathname();
 
   useEffect(() => {
-    getMe().then(setMe).catch(() => {});
+    getMe()
+      .then(setMe)
+      .catch(() => {});
   }, []);
 
   // A temp-password account must change it before using the app.
   useEffect(() => {
-    if (me?.mustChangePassword && pathname !== "/change-password") router.replace("/change-password");
+    if (me?.mustChangePassword && pathname !== "/change-password")
+      router.replace("/change-password");
   }, [me, pathname, router]);
 
   // The design gives the switcher to the registrar/admin console only.
