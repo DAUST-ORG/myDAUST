@@ -1,21 +1,22 @@
 # Production and Delivery Status
 
-Production last verified: **2026-08-11**. This page is the operational handoff for recent production data work and deployments. `TODO.md` remains the broader product backlog.
+Production last verified: **2026-08-12**. This page is the operational handoff for recent production data work and deployments. `TODO.md` remains the broader product backlog.
 
-## Full-Package and Director Release Candidate (Not Yet Deployed)
+## Full-Package, Director, Transcript, and Guardian Release
 
-The 2026-08-12 release candidate is implemented and locally validated on branch
-`codex/full-package-director`. It has **not** yet changed staging or production data.
+The 2026-08-12 release is deployed to production from immutable commit `fa83fb5`. Production workflow run `31591314155` completed successfully after applying all **43 migrations** and stabilized at API task definition `daust-prod-api:87` and portal task definition `daust-prod-portal:47`.
 
 - Annual standard billing is 4,285,000 XOF: tuition 2,975,000, housing 680,000, and cafeteria 630,000. The separate 10,000 XOF insurance fee is excluded.
 - Versioned, administrator-approved schedules drive all new standard packages and linked plan dates. Bursar fee/plan/charge/discount/scholarship changes enter a generic approval queue; only admin decisions apply protected changes.
 - A dry-run-first conversion command preserves payments, credits, discounts, allocations, and installment IDs and refuses unresolved or nonstandard accounts. The manual deployment workflow defaults to dry-run, requires zero unresolved accounts, enforces `develop`→staging and `main`→production, and requires a verified backup reference for a production commit.
-- Finance includes an expected-versus-collected timeline with actual cash, approved schedule, and dashed run-rate forecast. The admin-only Director portal includes a configurable overview and approval history.
+- Finance includes an expected-versus-collected timeline with actual cash, approved schedule, and dashed run-rate forecast. The admin-only Director portal includes a configurable overview and approval history. A richer interactive chart enhancement is still in development and is not part of this deployed release.
 - Student and registrar transcript views include semester GPA and audited server-generated PDFs. Every page carries the appropriate student- or staff-generated `UNOFFICIAL` watermark and Unicode Senegalese Latin identities render from bundled fonts.
 - Authenticated guardians can review a linked child's complete billing/payment/wire history and initiate card/mobile, PI-SPI, or wire payments without re-entering ID/DOB. All routes enforce `GuardianStudent` ownership and record payer provenance.
 - Registrar navigation now puts Course Catalog before Programs & Curriculum and calls `/admin/offerings` **Course Sections**. The public site's myDAUST link goes directly to the configured portal origin.
 
-Local release gates passed: 43 fresh migrations with empty schema diff; 160/160 API tests against PostgreSQL; full workspace test/typecheck/build; one valid 4,285,000 XOF package for every active seed student; exact payment/component reconciliation; and local multi-role browser smoke. Production status will be updated with immutable commit, workflow runs, conversion counts, and service revisions only after those checks succeed in each environment.
+Staging deployment, schedule approval, normalization, package conversion, reconciliation, and multi-role smoke passed before production promotion. The production schedule is administrator-approved revision 2. The protected conversion used encrypted snapshot `daust-prod-pre-full-package-conversion-20260812-114302`, then commit run `31593253913` converted **298** accounts with **zero unresolved**. Idempotency run `31593520266` reported all 298 unchanged and zero unresolved.
+
+Production now has **298** non-void `standard_full` invoices totaling **1,276,930,000 XOF**, with **27,434,950 XOF** previously paid and preserved. Component totals reconcile exactly: tuition **886,550,000 XOF**, housing **202,640,000 XOF**, and cafeteria **187,740,000 XOF**. Successful-payment, installment-allocation, and component-allocation totals all reconcile to the preserved paid amount; no refund or conversion discrepancy was found.
 
 ## Status Definitions
 
@@ -132,21 +133,22 @@ Validation on 2026-08-10: **22 shared tests**, **104 API tests**, and all **8 da
 
 ## Validation and Repository State
 
-Latest local validation on 2026-08-11:
+Latest local validation on 2026-08-12:
 
-- `pnpm test`: **35 shared tests passed**; the complete API suite passed **135/135** against disposable PostgreSQL, including settlement races and cross-portal account-summary parity.
+- `pnpm test`: the complete API suite passed **160/160** against disposable PostgreSQL, including approval races and stale requests, full-package conversion, component accounting, guardian payments, and transcript/PDF parity.
 - `pnpm typecheck`: passed across all workspaces.
 - `pnpm build`: API, portal, database package, shared package, and vitrine passed.
-- Fresh PostgreSQL 16 validation applied all 42 migrations successfully, and Prisma migration diff was empty.
+- Fresh PostgreSQL 16 validation applied all 43 migrations successfully, and Prisma migration diff was empty.
 - Prisma reports a non-blocking warning that `package.json#prisma` must eventually move to `prisma.config.ts` before Prisma 7.
 
-Latest deployment verified on 2026-08-11:
+Latest deployment verified on 2026-08-12:
 
-- Staging: commit `6935a05`, API task definition `daust-staging-api:90`, portal `daust-staging-portal:49`, deploy run `31462548833`; migration/reference tasks, rollout, edge health, and reconciliation passed. Reconciliation changed 0 rows.
-- Production: commit `7016794`, API task definition `daust-prod-api:85`, portal `daust-prod-portal:46`, deploy run `31463149312`; migration/reference tasks, rollout, edge health, and reconciliation passed. Reconciliation changed 0 rows, `/api/health` returned OK, and signed-in Finance, Billing Admin, account-list, and registrar balance smoke tests produced no browser errors.
+- Staging: final deploy run `31589811728` passed. Schedule approval, exact legacy normalization, full-package dry-run/commit/idempotency, reconciliation, and authenticated admin, Finance, registrar, student, and multi-child guardian browser smoke all passed with no console errors.
+- Production: commit `fa83fb5`, deploy run `31591314155`, API task definition `daust-prod-api:87`, and portal `daust-prod-portal:47`. Migration/reference tasks, rollout, edge health, and reconciliation passed. The conversion commit (`31593253913`) and idempotency rerun (`31593520266`) each completed with zero unresolved accounts.
+- Production accounting read-back confirmed 298 standard packages, 1,192 installments, exact 4,285,000 XOF per-account totals, preserved 27,434,950 XOF payments, and exact invoice/component/allocation reconciliation.
 - The `material-delete-reorder` work was merged and deployed with the transcript release. Exact reorder validation, deletion audit metadata, split-origin file links, and accurate destructive-action copy are included.
 
-All intended transcript, material, and payment-aging application and infrastructure changes are committed and reproducible from Git. Unrelated local screenshots and design references remain untracked and must be preserved. Never commit AWS sessions, passwords, bank details, or provider secrets.
+All intended full-package, approval, Director, guardian, transcript, material, and payment-aging application and infrastructure changes are committed and reproducible from Git. Unrelated local screenshots and design references remain untracked and must be preserved. Never commit AWS sessions, passwords, bank details, or provider secrets.
 
 ## Next Actions
 
@@ -157,3 +159,4 @@ All intended transcript, material, and payment-aging application and infrastruct
 5. Re-upload the four missing legacy news images and any missing faculty portraits, then verify their S3-backed URLs.
 6. Complete the Official Student ID and Resolution Status columns for the 106 names in `Historical_Students_Identity_Mapping.xlsx`. The six legacy database workbooks are password-protected and may supply the authoritative IDs.
 7. Build a new manifest against the historical-only workbook and its distinct hash, review the dry-run totals, then execute one production import with `CONFIRM=1` and verify its batch, entry, policy, and audit counts.
+8. Finish, validate, and promote the richer interactive Finance chart controls. Production currently has the approved expected/actual/forecast chart, but not the in-progress hover, focus, pinning, and keyboard-navigation enhancement.
