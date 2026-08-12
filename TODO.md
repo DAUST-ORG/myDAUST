@@ -8,7 +8,7 @@ Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 desig
 
 - [x] **Deploy payment-plan-aware balances and A/R aging (production 2026-08-11)** — promoted through PRs `#16`–`#18`. Staging runs commit `6935a05` at API 90 / portal 49; production runs commit `7016794` at API 85 / portal 46. Migration, reference loading, health checks, signed-in smoke tests, and the permanent post-rollout reconciliation gate passed in both environments with 0 stale rows remaining.
 
-## 2026-08-12 Full-Package / Director Release Candidate
+## 2026-08-12 Full-Package / Director Release (Production)
 
 - [x] Versioned 4,285,000 XOF tuition + housing + cafeteria schedules, proportional component accounting, durable payment provenance, and dry-run-first active-student conversion.
 - [x] Generic protected Finance approval registry, Director Overview/Approvals, curated per-admin widgets, and bursar request history.
@@ -16,7 +16,8 @@ Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 desig
 - [x] Canonical transcript view with semester GPA plus audited, watermarked, server-generated student/staff PDFs.
 - [x] Authenticated multi-child guardian billing/payment/wire/receipt flow with scoped authorization, truthful invite lifecycle, and stale-request protection.
 - [x] Course Catalog/Programs navigation order, Course Sections copy, and direct public-site myDAUST portal link.
-- [ ] Promote through staging and production gates: explicit admin schedule approval, zero-unresolved conversion dry run, production snapshot, commit conversion, reconciliation, and multi-role smoke. See `docs/production-status.md`.
+- [x] Promoted to staging and production: immutable production commit `fa83fb5`, deploy run `31591314155`, encrypted pre-conversion snapshot, administrator-approved schedule revision 2, 298-account conversion with zero unresolved, exact component/payment reconciliation, and idempotent rerun.
+- [ ] Complete and promote the post-release interactive Finance chart enhancement (series toggles, rich crosshair tooltip, pinned selection, and keyboard date navigation). The approved expected/actual/forecast chart is already live; these richer controls are not yet deployed.
 
 ## 0 · SIS redesign — remaining backend gaps (audited 2026-07-21)
 
