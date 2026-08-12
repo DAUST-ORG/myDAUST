@@ -70,6 +70,7 @@ function student(input: {
 function service(students: ReturnType<typeof student>[]) {
   const prisma = {
     student: { findMany: vi.fn().mockResolvedValue(students) },
+    approvalRequest: { findMany: vi.fn().mockResolvedValue([]) },
   };
   return new FinanceService(
     prisma as never,

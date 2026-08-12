@@ -827,6 +827,34 @@ export interface AdminStudent {
   hasLogin: boolean;
   mustChangePassword: boolean;
 }
+export interface AdminStudentDirectoryRow {
+  id: string;
+  studentNo: string;
+  name: string;
+  program: string;
+  yearLevel: number | null;
+  recordStatus: "active" | "archived";
+}
+export type AdminStudentRosterSort =
+  "name" | "program" | "year" | "gpa" | "balance" | "status";
+export interface AdminStudentRosterPage {
+  items: AdminStudent[];
+  page: number;
+  pageSize: 25 | 50 | 100;
+  total: number;
+  allTotal: number;
+  totalPages: number;
+  missingLoginCount: number;
+  programs: { code: string; name: string }[];
+}
+export interface AdminStudentRosterParams {
+  page?: number;
+  pageSize?: 25 | 50 | 100;
+  search?: string;
+  program?: string;
+  sort?: AdminStudentRosterSort;
+  direction?: "asc" | "desc";
+}
 export interface ProvisionedLogin {
   studentId: string;
   studentNo: string;
@@ -1028,6 +1056,26 @@ export const getAdminStats = () =>
   request<AdminStats>("/academics/admin/stats");
 export const getAdminStudents = () =>
   request<AdminStudent[]>("/academics/admin/students");
+export const getAdminStudentDirectory = () =>
+  request<AdminStudentDirectoryRow[]>("/academics/admin/student-directory");
+export const getAdminStudentRoster = (
+  params: AdminStudentRosterParams,
+  signal?: AbortSignal,
+) => {
+  const query = new URLSearchParams();
+  if (params.page) query.set("page", String(params.page));
+  if (params.pageSize) query.set("pageSize", String(params.pageSize));
+  if (params.search) query.set("search", params.search);
+  if (params.program && params.program !== "all") {
+    query.set("program", params.program);
+  }
+  if (params.sort) query.set("sort", params.sort);
+  if (params.direction) query.set("direction", params.direction);
+  return request<AdminStudentRosterPage>(
+    `/academics/admin/student-roster?${query.toString()}`,
+    { signal },
+  );
+};
 export interface AdminStudentDetail {
   id: string;
   studentNo: string;
@@ -1792,6 +1840,23 @@ export interface AccountInstallment {
 }
 export type InvoicePackageType =
   "standard_full" | "standard_tuition_legacy" | "custom" | "credit";
+export type AccountPlanType =
+  "global_standard" | "individual_override" | "legacy" | "custom" | "credit";
+export interface AccountSpecialStatus {
+  isSpecial: boolean;
+  hasIndividualPlan: boolean;
+  hasPendingPlanChange: boolean;
+  reasons: {
+    code:
+      | "individual_plan_override"
+      | "pending_plan_change"
+      | "legacy_package"
+      | "custom_charge"
+      | "account_credit";
+    label: string;
+    invoiceId: string;
+  }[];
+}
 
 export interface AccountInvoice {
   id: string;
@@ -1801,10 +1866,16 @@ export interface AccountInvoice {
   description: string | null;
   packageType: InvoicePackageType;
   academicYearLabel: string | null;
+  feeScheduleId?: string | null;
   feeScheduleRevision: number | null;
+  planType?: AccountPlanType;
+  isIndividualPlanOverride?: boolean;
+  hasPendingPlanChange?: boolean;
   total: number;
   paid: number;
   balance: number;
+  remaining?: number;
+  remainingXof?: number;
   summary?: AccountBalanceSummary;
   effectiveOutstandingXof?: number;
   effectiveStatus?: AccountBalanceSummary["standing"];
@@ -1816,8 +1887,15 @@ export interface AccountInvoice {
 }
 export interface StudentAccount {
   student: { studentNo: string; name: string; program: string; email: string };
-  totals: { billed: number; paid: number; balance: number };
+  totals: {
+    billed: number;
+    paid: number;
+    balance: number;
+    remaining?: number;
+    remainingXof?: number;
+  };
   summary?: AccountBalanceSummary;
+  specialAccount?: AccountSpecialStatus;
   /** Selected by the API's due-date-first cash-application algorithm. */
   payableTarget?: {
     invoiceId: string;
@@ -1856,6 +1934,8 @@ export interface StudentAccountRow {
   billed: number;
   paid: number;
   balance: number;
+  remaining?: number;
+  remainingXof?: number;
   summary?: AccountBalanceSummary;
   openCharges: number;
   overdue: boolean;
@@ -1875,6 +1955,8 @@ export interface StudentAccountRow {
   packageType: InvoicePackageType | null;
   academicYearLabel: string | null;
   feeScheduleRevision: number | null;
+  planType?: AccountPlanType | null;
+  specialAccount?: AccountSpecialStatus;
 }
 export const listStudentAccounts = () =>
   request<StudentAccountRow[]>("/finance/admin/accounts");
@@ -2021,6 +2103,17 @@ export const replacePaymentPlan = (
     method: "PUT",
     body: JSON.stringify({ installments, requestReason }),
   });
+export const restoreStandardPaymentPlan = (
+  invoiceId: string,
+  requestReason: string,
+) =>
+  request<FinanceChangeResult>(
+    `/finance/admin/plans/${invoiceId}/restore-standard`,
+    {
+      method: "POST",
+      body: JSON.stringify({ requestReason }),
+    },
+  );
 
 export interface AdminWireTransfer extends WireTransferSummary {
   source: string;

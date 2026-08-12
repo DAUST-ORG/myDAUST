@@ -14,14 +14,13 @@ import {
   type BadgeTone,
 } from "@/components/ui";
 import {
-  getAdminPrograms,
-  getAdminStudents,
+  getAdminStats,
+  getAdminStudentDirectory,
   getBroadcasts,
   previewBroadcast,
   sendBroadcast,
-  type AdminStudent,
+  type AdminStudentDirectoryRow,
   type BroadcastRow,
-  type ProgramRow,
 } from "@/lib/api";
 
 type AudienceType = "individual" | "year" | "program" | "all";
@@ -54,8 +53,8 @@ function relativeTime(iso: string): string {
 }
 
 export default function RegistrarMessagesPage() {
-  const [students, setStudents] = useState<AdminStudent[]>([]);
-  const [programs, setPrograms] = useState<ProgramRow[]>([]);
+  const [students, setStudents] = useState<AdminStudentDirectoryRow[]>([]);
+  const [programs, setPrograms] = useState<{ code: string; name: string }[]>([]);
   const [broadcasts, setBroadcasts] = useState<BroadcastRow[]>([]);
 
   const [audienceType, setAudienceType] = useState<AudienceType>("individual");
@@ -70,8 +69,8 @@ export default function RegistrarMessagesPage() {
   const [preview, setPreview] = useState<number | null>(null);
 
   useEffect(() => {
-    getAdminStudents().then(setStudents).catch(() => setStudents([]));
-    getAdminPrograms().then((p) => setPrograms(p.programs)).catch(() => setPrograms([]));
+    getAdminStudentDirectory().then(setStudents).catch(() => setStudents([]));
+    getAdminStats().then((stats) => setPrograms(stats.byProgram)).catch(() => setPrograms([]));
     getBroadcasts().then(setBroadcasts).catch(() => setBroadcasts([]));
   }, []);
 

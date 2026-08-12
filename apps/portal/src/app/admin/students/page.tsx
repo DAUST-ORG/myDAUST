@@ -1,14 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { KeyRound, Pencil, UserPlus, X } from "lucide-react";
 import {
-  type AdminPrograms,
   type AdminStudent,
+  type AdminStudentRosterPage,
+  type AdminStudentRosterSort,
   createRegistrarStudent,
-  getAdminPrograms,
-  getAdminStudents,
+  getAdminStudentRoster,
   type ProvisionedLogin,
   provisionAllStudentLogins,
   provisionStudentLogin,
@@ -48,15 +48,25 @@ interface CreatedNotice {
 export default function AdminStudentsPage() {
   const router = useRouter();
   const [rows, setRows] = useState<AdminStudent[]>([]);
-  const [programs, setPrograms] = useState<AdminPrograms["programs"]>([]);
+  const [programs, setPrograms] = useState<AdminStudentRosterPage["programs"]>([]);
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
   const [prog, setProg] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<25 | 50 | 100>(50);
+  const [total, setTotal] = useState(0);
+  const [allTotal, setAllTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [missingLogins, setMissingLogins] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<CreatedNotice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creds, setCreds] = useState<ProvisionedLogin[] | null>(null);
   const [provisioning, setProvisioning] = useState<string | null>(null);
-  const { sort, toggle, apply } = useSort({ key: "name", dir: "asc" });
+  const { sort, toggle } = useSort({ key: "name", dir: "asc" });
+  const sortKey = (sort?.key ?? "name") as AdminStudentRosterSort;
+  const sortDirection = sort?.dir ?? "asc";
 
   async function provisionOne(id: string) {
     setProvisioning(id);
@@ -86,32 +96,52 @@ export default function AdminStudentsPage() {
     }
   }
 
-  const missingLogins = rows.filter((s) => !s.hasLogin).length;
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await getAdminStudentRoster({
+        page,
+        pageSize,
+        search: debouncedQ || undefined,
+        program: prog,
+        sort: sortKey,
+        direction: sortDirection,
+      }, signal);
+      if (signal?.aborted) return;
+      setRows(result.items);
+      setPrograms(result.programs);
+      setTotal(result.total);
+      setAllTotal(result.allTotal);
+      setTotalPages(result.totalPages);
+      setMissingLogins(result.missingLoginCount);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setError(e instanceof Error ? e.message : "Could not load students.");
+      }
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, [debouncedQ, page, pageSize, prog, sortDirection, sortKey]);
 
-  function load() {
-    getAdminStudents().then(setRows).catch((e: Error) => setError(e.message));
-  }
   useEffect(() => {
-    load();
-    getAdminPrograms().then((p) => setPrograms(p.programs)).catch(() => {});
-  }, []);
+    const timer = window.setTimeout(() => {
+      setPage(1);
+      setDebouncedQ(q.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [q]);
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const base = rows.filter(
-      (s) =>
-        (prog === "all" || s.program === prog) &&
-        (!needle || s.name.toLowerCase().includes(needle) || s.studentNo.toLowerCase().includes(needle)),
-    );
-    return apply(base, {
-      name: (s) => s.name,
-      program: (s) => s.program,
-      year: (s) => s.yearLevel ?? 0,
-      gpa: (s) => s.gpa,
-      balance: (s) => s.balance,
-      status: (s) => s.status,
-    });
-  }, [rows, q, prog, apply]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  function changeSort(key: string) {
+    setPage(1);
+    toggle(key);
+  }
 
   const programOptions = [{ value: "all", label: "All programs" }, ...programs.map((p) => ({ value: p.code, label: p.name }))];
 
@@ -120,7 +150,7 @@ export default function AdminStudentsPage() {
       <PageHeader
         eyebrow="Student Records"
         title="Students"
-        subtitle={`${rows.length.toLocaleString()} enrolled across ${programs.length} programs.`}
+        subtitle={`${allTotal.toLocaleString()} student records across ${programs.length} programs.`}
         actions={
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {missingLogins > 0 && (
@@ -151,10 +181,10 @@ export default function AdminStudentsPage() {
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
         <SearchInput value={q} onChange={setQ} placeholder="Search by name or ID…" width={280} />
-        <Select value={prog} onChange={setProg} options={programOptions} />
+        <Select value={prog} onChange={(value) => { setProg(value); setPage(1); }} options={programOptions} />
         <span style={{ flex: 1 }} />
         <span className="muted" style={{ fontSize: 13 }}>
-          {filtered.length} of {rows.length} shown
+          {loading ? "Loading…" : total === 0 ? "0 students" : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}`}
         </span>
       </div>
 
@@ -163,18 +193,21 @@ export default function AdminStudentsPage() {
           <table>
             <thead>
               <tr>
-                <SortTh label="Student" sortKey="name" sort={sort} onSort={toggle} />
-                <SortTh label="Program" sortKey="program" sort={sort} onSort={toggle} />
-                <SortTh label="Year" sortKey="year" sort={sort} onSort={toggle} />
-                <SortTh label="GPA" sortKey="gpa" sort={sort} onSort={toggle} />
-                <SortTh label="Balance" sortKey="balance" sort={sort} onSort={toggle} align="right" />
-                <SortTh label="Status" sortKey="status" sort={sort} onSort={toggle} />
+                <SortTh label="Student" sortKey="name" sort={sort} onSort={changeSort} />
+                <SortTh label="Program" sortKey="program" sort={sort} onSort={changeSort} />
+                <SortTh label="Year" sortKey="year" sort={sort} onSort={changeSort} />
+                <SortTh label="GPA" sortKey="gpa" sort={sort} onSort={changeSort} />
+                <SortTh label="Balance" sortKey="balance" sort={sort} onSort={changeSort} align="right" />
+                <SortTh label="Status" sortKey="status" sort={sort} onSort={changeSort} />
                 <th style={{ textAlign: "left" }}>Login</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {filtered.map((s) => (
+              {loading && rows.length === 0 && (
+                <tr><td colSpan={8} className="muted" style={{ textAlign: "center", padding: 32 }}>Loading student records…</td></tr>
+              )}
+              {rows.map((s) => (
                 <tr key={s.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/admin/students/${s.id}`)}>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -212,7 +245,7 @@ export default function AdminStudentsPage() {
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
+              {!loading && rows.length === 0 && (
                 <tr>
                   <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 32 }}>No students match your search.</td>
                 </tr>
@@ -220,6 +253,23 @@ export default function AdminStudentsPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }} aria-live="polite">
+        <label className="muted" style={{ fontSize: 12.5 }} htmlFor="student-page-size">Rows per page</label>
+        <select
+          id="student-page-size"
+          value={pageSize}
+          onChange={(event) => { setPageSize(Number(event.target.value) as 25 | 50 | 100); setPage(1); }}
+          aria-label="Rows per page"
+        >
+          <option value={25}>25</option>
+          <option value={50}>50</option>
+          <option value={100}>100</option>
+        </select>
+        <Button variant="secondary" disabled={loading || page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</Button>
+        <span style={{ minWidth: 90, textAlign: "center", fontSize: 13 }}>Page {page} of {totalPages}</span>
+        <Button variant="secondary" disabled={loading || page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Next</Button>
       </div>
 
       {adding && (
@@ -294,7 +344,7 @@ function AddStudentModal({
   onClose,
   onCreated,
 }: {
-  programs: AdminPrograms["programs"];
+  programs: AdminStudentRosterPage["programs"];
   onClose: () => void;
   onCreated: (notice: CreatedNotice) => void;
 }) {

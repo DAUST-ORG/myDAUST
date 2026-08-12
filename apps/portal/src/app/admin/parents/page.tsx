@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Mail, Pencil, Trash2, X } from "lucide-react";
 import {
-  type AdminStudent,
+  type AdminStudentDirectoryRow,
   type GuardianRow,
   createGuardian,
   deleteGuardian,
-  getAdminStudents,
+  getAdminStudentDirectory,
   getGuardians,
   resendGuardianInvite,
   setGuardianChildren,
@@ -29,7 +29,7 @@ import {
 
 export default function ParentsPage() {
   const [rows, setRows] = useState<GuardianRow[] | null>(null);
-  const [students, setStudents] = useState<AdminStudent[]>([]);
+  const [students, setStudents] = useState<AdminStudentDirectoryRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -56,7 +56,7 @@ export default function ParentsPage() {
   }, []);
   useEffect(() => {
     load();
-    getAdminStudents()
+    getAdminStudentDirectory()
       .then(setStudents)
       .catch(() => setStudents([]));
   }, [load]);
@@ -481,7 +481,7 @@ function ChildChecklist({
   selected,
   onToggle,
 }: {
-  students: AdminStudent[];
+  students: AdminStudentDirectoryRow[];
   selected: string[];
   onToggle: (id: string) => void;
 }) {

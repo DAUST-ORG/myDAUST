@@ -132,6 +132,17 @@ const UpdateStudentInput = z.object({
   catalogYear: z.string().max(20).nullish(),
 });
 
+const AdminStudentRosterQueryInput = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().refine((value) => [25, 50, 100].includes(value), {
+    message: "pageSize must be 25, 50, or 100",
+  }).default(50),
+  search: z.string().trim().max(100).optional(),
+  program: z.string().trim().max(20).optional(),
+  sort: z.enum(["name", "program", "year", "gpa", "balance", "status"]).default("name"),
+  direction: z.enum(["asc", "desc"]).default("asc"),
+});
+
 @Controller("academics")
 export class AcademicsController {
   constructor(private readonly academics: AcademicsService) {}
@@ -210,6 +221,23 @@ export class AcademicsController {
   @Roles("admin", "registrar", "bursar")
   adminStudents() {
     return this.academics.adminStudents();
+  }
+
+  @Get("admin/student-roster")
+  @Roles("admin", "registrar", "bursar")
+  adminStudentRoster(@Query() query: Record<string, string | undefined>) {
+    const parsed = AdminStudentRosterQueryInput.parse(query);
+    return this.academics.adminStudentRoster({
+      ...parsed,
+      search: parsed.search || undefined,
+      program: parsed.program && parsed.program !== "all" ? parsed.program : undefined,
+    });
+  }
+
+  @Get("admin/student-directory")
+  @Roles("admin", "registrar", "bursar")
+  adminStudentDirectory() {
+    return this.academics.adminStudentDirectory();
   }
 
   @Get("admin/students/:id")

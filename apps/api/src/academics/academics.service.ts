@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import type { Prisma } from "@mydaust/db";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
   bestPointsByCourse,
@@ -73,6 +74,77 @@ export function meetsPrerequisite(
 
 /** Maximum credits a student may carry in one term (enrolled + newly added). */
 export const MAX_CREDITS_PER_TERM = 30;
+
+export interface AdminStudentRosterQuery {
+  page: number;
+  pageSize: number;
+  search?: string;
+  program?: string;
+  sort: "name" | "program" | "year" | "gpa" | "balance" | "status";
+  direction: "asc" | "desc";
+}
+
+/**
+ * The registrar roster deliberately selects only fields rendered in the table.
+ * In particular, it never hydrates full Person, Invoice, or TranscriptEntry rows.
+ */
+const ADMIN_STUDENT_ROSTER_SELECT = {
+  id: true,
+  studentNo: true,
+  photoUrl: true,
+  yearLevel: true,
+  cohort: true,
+  recordStatus: true,
+  person: {
+    select: {
+      firstName: true,
+      lastName: true,
+      email: true,
+      passwordHash: true,
+      mustChangePassword: true,
+    },
+  },
+  program: { select: { code: true, name: true } },
+  _count: { select: { holds: { where: { active: true } } } },
+  invoices: {
+    select: {
+      id: true,
+      status: true,
+      totalAmount: true,
+      amountPaid: true,
+      createdAt: true,
+      plan: {
+        select: {
+          installments: {
+            select: {
+              id: true,
+              sequence: true,
+              dueDate: true,
+              amountDue: true,
+              amountPaid: true,
+            },
+          },
+        },
+      },
+    },
+  },
+  transcriptEntries: {
+    where: { voidedAt: null },
+    select: {
+      courseId: true,
+      courseCode: true,
+      credits: true,
+      earnedCredits: true,
+      gradePoints: true,
+      countsTowardGpa: true,
+      countsTowardCredits: true,
+    },
+  },
+} satisfies Prisma.StudentSelect;
+
+type AdminStudentRosterRecord = Prisma.StudentGetPayload<{
+  select: typeof ADMIN_STUDENT_ROSTER_SELECT;
+}>;
 
 /** True only when the proposed order contains every material id exactly once. */
 export function isExactMaterialOrder(
@@ -1665,52 +1737,208 @@ export class AcademicsService {
     };
   }
 
-  /** Admin: student roster with program, derived GPA/credits/standing + outstanding balance. */
-  async adminStudents() {
+  private mapAdminStudentRoster(s: AdminStudentRosterRecord) {
+    const { gpa, completedCredits } = summarizeTranscriptRows(
+      s.transcriptEntries,
+    );
+    const summary = deriveApiAccountPosition(s.invoices).summary;
+    // Compatibility for test doubles and older adapters that still return the
+    // legacy active-holds array instead of Prisma's compact relation count.
+    const legacyHolds = (s as unknown as { holds?: unknown[] }).holds;
+    const activeHoldCount =
+      s._count?.holds ?? (Array.isArray(legacyHolds) ? legacyHolds.length : 0);
+    return {
+      id: s.id,
+      studentNo: s.studentNo,
+      name: `${s.person.firstName} ${s.person.lastName}`,
+      email: s.person.email,
+      photoUrl: s.photoUrl,
+      program: s.program?.code ?? "—",
+      programName: s.program?.name ?? null,
+      yearLevel: s.yearLevel,
+      cohort: s.cohort,
+      gpa,
+      completedCredits,
+      balance: summary.balanceXof,
+      summary,
+      hasActiveHold: activeHoldCount > 0,
+      activeHoldCount,
+      status:
+        s.recordStatus === "archived"
+          ? "archived"
+          : gpa > 0 && gpa < 2
+            ? "probation"
+            : "active",
+      recordStatus: s.recordStatus,
+      hasLogin: !!s.person.passwordHash,
+      mustChangePassword: s.person.mustChangePassword,
+    };
+  }
+
+  private adminStudentRosterWhere(
+    query: Pick<AdminStudentRosterQuery, "search" | "program">,
+  ): Prisma.StudentWhereInput {
+    const searchTokens =
+      query.search?.trim().split(/\s+/).filter(Boolean) ?? [];
+    return {
+      ...(query.program ? { program: { is: { code: query.program } } } : {}),
+      ...(searchTokens.length > 0
+        ? {
+            AND: searchTokens.map((token) => ({
+              OR: [
+                { studentNo: { contains: token, mode: "insensitive" } },
+                {
+                  person: {
+                    is: {
+                      OR: [
+                        {
+                          firstName: { contains: token, mode: "insensitive" },
+                        },
+                        {
+                          lastName: { contains: token, mode: "insensitive" },
+                        },
+                        { email: { contains: token, mode: "insensitive" } },
+                      ],
+                    },
+                  },
+                },
+              ],
+            })),
+          }
+        : {}),
+    };
+  }
+
+  private adminStudentRosterOrderBy(
+    query: AdminStudentRosterQuery,
+  ): Prisma.StudentOrderByWithRelationInput[] {
+    const direction = query.direction;
+    if (query.sort === "name") {
+      return [
+        { person: { firstName: direction } },
+        { person: { lastName: direction } },
+        { studentNo: "asc" },
+      ];
+    }
+    if (query.sort === "program") {
+      return [{ program: { code: direction } }, { studentNo: "asc" }];
+    }
+    return [{ yearLevel: direction }, { studentNo: "asc" }];
+  }
+
+  /**
+   * Admin: paginated roster for the full Students page. Default name/program/year
+   * sorts are applied in PostgreSQL before pagination. Derived-column sorts remain
+   * exact by sorting the filtered result before taking the requested page.
+   */
+  async adminStudentRoster(query: AdminStudentRosterQuery) {
+    const where = this.adminStudentRosterWhere(query);
+    const derivedSort = ["gpa", "balance", "status"].includes(query.sort);
+    const recordsPromise = derivedSort
+      ? this.prisma.student.findMany({
+          where,
+          select: ADMIN_STUDENT_ROSTER_SELECT,
+          orderBy: { studentNo: "asc" },
+        })
+      : this.prisma.student.findMany({
+          where,
+          select: ADMIN_STUDENT_ROSTER_SELECT,
+          orderBy: this.adminStudentRosterOrderBy(query),
+          skip: (query.page - 1) * query.pageSize,
+          take: query.pageSize,
+        });
+    const [records, total, allTotal, missingLoginCount, programs] =
+      await Promise.all([
+        recordsPromise,
+        this.prisma.student.count({ where }),
+        this.prisma.student.count(),
+        this.prisma.student.count({
+          where: {
+            recordStatus: "active",
+            person: { is: { passwordHash: null } },
+          },
+        }),
+        this.prisma.program.findMany({
+          select: { code: true, name: true },
+          orderBy: { code: "asc" },
+        }),
+      ]);
+
+    let items = records.map((student) => this.mapAdminStudentRoster(student));
+    if (derivedSort) {
+      const direction = query.direction === "asc" ? 1 : -1;
+      items.sort((left, right) => {
+        const leftValue =
+          query.sort === "gpa"
+            ? left.gpa
+            : query.sort === "balance"
+              ? left.balance
+              : left.status;
+        const rightValue =
+          query.sort === "gpa"
+            ? right.gpa
+            : query.sort === "balance"
+              ? right.balance
+              : right.status;
+        const compared =
+          typeof leftValue === "number" && typeof rightValue === "number"
+            ? leftValue - rightValue
+            : String(leftValue).localeCompare(String(rightValue));
+        return (
+          compared * direction || left.studentNo.localeCompare(right.studentNo)
+        );
+      });
+      items = items.slice(
+        (query.page - 1) * query.pageSize,
+        query.page * query.pageSize,
+      );
+    }
+
+    return {
+      items,
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      allTotal,
+      totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
+      missingLoginCount,
+      programs,
+    };
+  }
+
+  /** Minimal directory for search boxes and guardian/message selectors. */
+  async adminStudentDirectory() {
     const students = await this.prisma.student.findMany({
-      include: {
-        person: true,
-        program: true,
-        holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
-        invoices: {
-          include: { plan: { include: { installments: true } } },
-        },
-        transcriptEntries: { where: { voidedAt: null } },
+      select: {
+        id: true,
+        studentNo: true,
+        yearLevel: true,
+        recordStatus: true,
+        person: { select: { firstName: true, lastName: true } },
+        program: { select: { code: true } },
       },
       orderBy: { studentNo: "asc" },
     });
-    return students.map((s) => {
-      const { gpa, completedCredits } = summarizeTranscriptRows(
-        s.transcriptEntries,
-      );
-      const summary = deriveApiAccountPosition(s.invoices).summary;
-      return {
-        id: s.id,
-        studentNo: s.studentNo,
-        name: `${s.person.firstName} ${s.person.lastName}`,
-        email: s.person.email,
-        photoUrl: s.photoUrl,
-        program: s.program?.code ?? "—",
-        programName: s.program?.name ?? null,
-        yearLevel: s.yearLevel,
-        cohort: s.cohort,
-        gpa,
-        completedCredits,
-        balance: summary.balanceXof,
-        summary,
-        hasActiveHold: s.holds.length > 0,
-        activeHoldCount: s.holds.length,
-        status:
-          s.recordStatus === "archived"
-            ? "archived"
-            : gpa > 0 && gpa < 2
-              ? "probation"
-              : "active",
-        recordStatus: s.recordStatus,
-        hasLogin: !!s.person.passwordHash,
-        mustChangePassword: s.person.mustChangePassword,
-      };
+    return students.map((student) => ({
+      id: student.id,
+      studentNo: student.studentNo,
+      name: `${student.person.firstName} ${student.person.lastName}`,
+      program: student.program?.code ?? "—",
+      yearLevel: student.yearLevel,
+      recordStatus: student.recordStatus,
+    }));
+  }
+
+  /**
+   * Compatibility read for existing API clients. Portal directory surfaces use
+   * adminStudentDirectory and the roster page uses adminStudentRoster.
+   */
+  async adminStudents() {
+    const students = await this.prisma.student.findMany({
+      select: ADMIN_STUDENT_ROSTER_SELECT,
+      orderBy: { studentNo: "asc" },
     });
+    return students.map((student) => this.mapAdminStudentRoster(student));
   }
 
   /** Admin: programs, course catalog + department list (for create forms). */

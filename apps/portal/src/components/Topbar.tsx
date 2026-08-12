@@ -8,7 +8,7 @@ import {
   type Announcement,
   type Me,
   getAnnouncements,
-  getAdminStudents,
+  getAdminStudentDirectory,
   getCurrentTerm,
   getFacultyOverview,
   getMyEnrollments,
@@ -87,7 +87,7 @@ export function Topbar({
     const hits: SearchHit[] = [];
     try {
       if (me.roles.some((r) => ["admin", "registrar", "bursar"].includes(r))) {
-        const students = await getAdminStudents();
+        const students = await getAdminStudentDirectory();
         hits.push(...students.map((s) => ({ group: "Students", label: s.name, sub: s.studentNo, href: `/admin/students/${s.id}` })));
       } else if (me.roles.includes("faculty")) {
         const ov = await getFacultyOverview();
