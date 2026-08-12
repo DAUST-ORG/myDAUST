@@ -4,6 +4,18 @@ Environment confirmed: portal+API `https://daust-staging.azt.dev`; vitrine `http
 pay-bill/billing-admin reachable as routes on the portal host (payment.* vanity host not in staging tunnel).
 All 10 seeded logins work (password `daust-dev-2026`).
 
+## 2026-08-12 individual-plan and interactive Finance-chart production release
+
+- PASS: Finance accounts now expose billed, paid, and remaining amounts plus explicit special-account reasons. Bursars can propose an individual student's installment amount/date changes; only an admin approval applies them. Approved overrides detach from future global schedule propagation, and the audited restore-to-standard workflow safely relinks the current approved schedule.
+- PASS: approval handling is transactional, idempotent, revision-stale-safe, and duplicate-pending-safe. A real concurrent PostgreSQL check produced exactly one accepted request and one rejection; the disposable-database approval suite passed **11/11**.
+- PASS: the expected-versus-collected chart now supports series toggles, hover/focus crosshairs, exact tooltips, pinned selections, keyboard date navigation, and an accessible table/slider fallback.
+- PASS: Registrar Students now uses server-side search/filter/sort/pagination (25/50/100 rows), aborts stale searches, and uses a lightweight directory endpoint for global-search, parent, and message consumers. The default roster response drops from roughly 298 full account records to at most 50 compact rows.
+- PASS: workspace tests passed (**35 shared + 147 API**, with 31 database-gated skips), typecheck passed **7/7**, and production builds passed (portal 71 routes; vitrine 6 pages).
+- PASS: staging workflow run `31598725037` deployed immutable commit `5d86eb5` at API `daust-staging-api:104` and portal `daust-staging-portal:56`; migrations, reference loading, health checks, and reconciliation completed with `changedCount: 0`.
+- PASS: production promotion PR `#31` merged as immutable commit `e52cc7b`; workflow run `31600961458` stabilized at API `daust-prod-api:89` and portal `daust-prod-portal:48`. All 43 migrations were already applied, reference loading preserved 298 students / 298 invoices / 36 payments, and reconciliation returned `changedCount: 0`.
+- PASS: read-only production smoke verified the 50-row Registrar roster and six-page navigation across 298 students, exact-name search, Billed/Remaining and Special-account Finance controls, Director approval history, and interactive chart pointer/keyboard controls with no browser errors or writes.
+- RELEASE STATUS: deployed and verified in production.
+
 ## 2026-08-12 full-package/director production rollout
 
 - PASS: all **43 migrations** applied to fresh PostgreSQL and Prisma migration diff reported no schema drift.
@@ -18,7 +30,7 @@ All 10 seeded logins work (password `daust-dev-2026`).
 - PASS: the administrator-approved production schedule is revision 2. Encrypted snapshot `daust-prod-pre-full-package-conversion-20260812-114302` was available before the write.
 - PASS: production conversion commit run `31593253913` converted 298 accounts with zero unresolved. Idempotency run `31593520266` returned 298 unchanged and zero unresolved.
 - PASS: production read-back found 298 `standard_full` invoices totaling **1,276,930,000 XOF**, 1,192 installments, and **27,434,950 XOF** paid. Components reconcile exactly to tuition **886,550,000 XOF**, housing **202,640,000 XOF**, and cafeteria **187,740,000 XOF**; successful payment, installment allocation, and component allocation totals agree.
-- RELEASE STATUS: deployed and data-converted in production. The separate richer interactive Finance chart controls requested afterward remain in development and are not included in this rollout status.
+- RELEASE STATUS: deployed and data-converted in production; the later interactive-chart and individual-plan release is also deployed and recorded above.
 
 The detailed execution log below is retained as historical evidence from the earlier staging fixture; statements such as tuition-only seed totals and read-only parent billing describe that older build, not current production.
 
