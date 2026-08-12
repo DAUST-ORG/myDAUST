@@ -2,6 +2,16 @@
 
 Production last verified: **2026-08-12**. This page is the operational handoff for recent production data work and deployments. `TODO.md` remains the broader product backlog.
 
+## Individual Plans, Interactive Collections, and Registrar Performance
+
+The post-release improvements were verified on `develop`/staging at commit `5d86eb5` (run `31598725037`, API 104 / portal 56), then promoted through PR `#31` as immutable production commit `e52cc7b`. Production run `31600961458` completed at API `daust-prod-api:89` and portal `daust-prod-portal:48`; all 43 migrations were already applied, reference loading preserved 298 students / 298 invoices / 36 payments, health passed, and reconciliation returned `changedCount: 0`.
+
+- Finance now shows billed, paid, and remaining amounts and marks why an account is special. Bursars submit individual installment amount/date changes for admin approval; successful approval detaches that invoice from later global schedule propagation. A separate approved restore action safely relinks the live standard schedule.
+- Duplicate pending requests, stale revisions, paid-installment floors, void invoices, and concurrent decisions are guarded. Approval/application remains transactional, idempotent, and audited.
+- The collections chart adds series visibility controls, pointer and keyboard date exploration, exact crosshair tooltips, pinned selections, and accessible non-visual equivalents.
+- Registrar Students now uses compact server-side pagination, search, filters, and common sorts. Lightweight directory lookups replace the previous full finance/transcript/hold payload for global search, Parents, and Messages.
+- Local verification passed 35 shared and 147 API tests, 11/11 disposable-PostgreSQL approval tests, all seven workspace typechecks, and all production builds. The concurrent request test produced exactly one winner.
+
 ## Full-Package, Director, Transcript, and Guardian Release
 
 The 2026-08-12 release is deployed to production from immutable commit `fa83fb5`. Production workflow run `31591314155` completed successfully after applying all **43 migrations** and stabilized at API task definition `daust-prod-api:87` and portal task definition `daust-prod-portal:47`.
@@ -9,7 +19,7 @@ The 2026-08-12 release is deployed to production from immutable commit `fa83fb5`
 - Annual standard billing is 4,285,000 XOF: tuition 2,975,000, housing 680,000, and cafeteria 630,000. The separate 10,000 XOF insurance fee is excluded.
 - Versioned, administrator-approved schedules drive all new standard packages and linked plan dates. Bursar fee/plan/charge/discount/scholarship changes enter a generic approval queue; only admin decisions apply protected changes.
 - A dry-run-first conversion command preserves payments, credits, discounts, allocations, and installment IDs and refuses unresolved or nonstandard accounts. The manual deployment workflow defaults to dry-run, requires zero unresolved accounts, enforces `develop`→staging and `main`→production, and requires a verified backup reference for a production commit.
-- Finance includes an expected-versus-collected timeline with actual cash, approved schedule, and dashed run-rate forecast. The admin-only Director portal includes a configurable overview and approval history. A richer interactive chart enhancement is still in development and is not part of this deployed release.
+- Finance includes an expected-versus-collected timeline with actual cash, approved schedule, dashed run-rate forecast, series toggles, crosshair tooltips, pinned selection, keyboard date navigation, and accessible table/slider equivalents. The admin-only Director portal includes a configurable overview and approval history.
 - Student and registrar transcript views include semester GPA and audited server-generated PDFs. Every page carries the appropriate student- or staff-generated `UNOFFICIAL` watermark and Unicode Senegalese Latin identities render from bundled fonts.
 - Authenticated guardians can review a linked child's complete billing/payment/wire history and initiate card/mobile, PI-SPI, or wire payments without re-entering ID/DOB. All routes enforce `GuardianStudent` ownership and record payer provenance.
 - Registrar navigation now puts Course Catalog before Programs & Curriculum and calls `/admin/offerings` **Course Sections**. The public site's myDAUST link goes directly to the configured portal origin.
@@ -133,7 +143,15 @@ Validation on 2026-08-10: **22 shared tests**, **104 API tests**, and all **8 da
 
 ## Validation and Repository State
 
-Latest local validation on 2026-08-12:
+Post-release candidate validation on 2026-08-12:
+
+- `pnpm test`: **35 shared + 147 API** tests passed; 31 database-dependent tests were correctly skipped without `TEST_DATABASE_URL`.
+- Disposable PostgreSQL approval integration: **11/11** passed, including concurrent duplicate submission, stale decisions, restore-to-standard, and paid-history guards.
+- `pnpm typecheck`: all **7/7** workspace tasks passed.
+- `pnpm build`: API, portal (71 routes), database, shared, and vitrine (6 pages) passed.
+- Staging run `31598725037`: API 104 / portal 56, successful health and reconciliation (`changedCount: 0`). Production run `31600961458`: API 89 / portal 48, successful migrations/reference invariants/health/reconciliation and read-only role smoke.
+
+Full-package release validation on 2026-08-12:
 
 - `pnpm test`: the complete API suite passed **160/160** against disposable PostgreSQL, including approval races and stale requests, full-package conversion, component accounting, guardian payments, and transcript/PDF parity.
 - `pnpm typecheck`: passed across all workspaces.
@@ -159,4 +177,3 @@ All intended full-package, approval, Director, guardian, transcript, material, a
 5. Re-upload the four missing legacy news images and any missing faculty portraits, then verify their S3-backed URLs.
 6. Complete the Official Student ID and Resolution Status columns for the 106 names in `Historical_Students_Identity_Mapping.xlsx`. The six legacy database workbooks are password-protected and may supply the authoritative IDs.
 7. Build a new manifest against the historical-only workbook and its distinct hash, review the dry-run totals, then execute one production import with `CONFIRM=1` and verify its batch, entry, policy, and audit counts.
-8. Finish, validate, and promote the richer interactive Finance chart controls. Production currently has the approved expected/actual/forecast chart, but not the in-progress hover, focus, pinning, and keyboard-navigation enhancement.
