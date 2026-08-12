@@ -40,7 +40,6 @@ env:
 jobs:
   convert:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.target_environment }}
     steps:
       - name: Validate release and backup gate
         env:
