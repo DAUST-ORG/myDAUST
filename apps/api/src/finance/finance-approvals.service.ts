@@ -140,6 +140,22 @@ export class FinanceApprovalsService {
   async request(actor: AuthUser, change: ProtectedChange) {
     const { before, baseRevision } = await this.snapshot(change);
     const request = await this.transaction(async (tx) => {
+      if (change.kind === "payment_plan" && change.targetId) {
+        const pending = await tx.approvalRequest.findFirst({
+          where: {
+            kind: change.kind,
+            targetType: change.targetType,
+            targetId: change.targetId,
+            status: "pending",
+          },
+          select: { id: true },
+        });
+        if (pending) {
+          throw new BadRequestException(
+            "A change for this billing is already awaiting administrator approval",
+          );
+        }
+      }
       const created = await tx.approvalRequest.create({
         data: {
           kind: change.kind,
@@ -167,11 +183,31 @@ export class FinanceApprovalsService {
       return created;
     });
     if (actor.roles.includes("admin")) {
-      const decision = await this.approve(
-        request.id,
-        actor,
-        "Admin-originated change",
-      );
+      let decision;
+      try {
+        decision = await this.approve(
+          request.id,
+          actor,
+          "Admin-originated change",
+        );
+      } catch (error) {
+        // The submission and self-approval are intentionally separate transactions so
+        // every admin change has the same durable audit record as a bursar request.
+        // If validation rejects the application, do not leave that record pending: a
+        // pending payment-plan request would otherwise lock the student's billing and
+        // make the corrected admin retry fail as a duplicate.
+        const detail =
+          error instanceof Error && error.message.trim()
+            ? error.message.trim().slice(0, 900)
+            : "The protected change failed validation";
+        await this.decideWithoutApply(
+          request.id,
+          actor.personId,
+          "cancelled",
+          `Admin-originated change was not applied: ${detail}`,
+        );
+        throw error;
+      }
       const applied = await this.prisma.approvalRequest.findUniqueOrThrow({
         where: { id: request.id },
         include: {
@@ -962,12 +998,26 @@ export class FinanceApprovalsService {
       },
     });
     if (!invoice) throw new NotFoundException("Invoice not found");
-    if (invoice.packageType === "standard_full") {
+    if (invoice.status === "void") {
       throw new BadRequestException(
-        "Assign the approved standard package instead of customizing its linked schedule",
+        "A void invoice cannot have a payment plan",
+      );
+    }
+    if (invoice.packageType === "credit" || invoice.totalAmount < 0) {
+      throw new BadRequestException("A credit memo cannot have a payment plan");
+    }
+    if (
+      String(after.mode ?? "replace") === "restore_standard" &&
+      !invoice.academicYearLabel
+    ) {
+      throw new BadRequestException(
+        "The invoice has no academic year for a standard-plan restoration",
       );
     }
     const mode = String(after.mode ?? "replace");
+    if (mode === "restore_standard") {
+      return this.restoreStandardPaymentPlan(tx, invoice, requesterId);
+    }
     let rows: {
       id?: string;
       sequence: number;
@@ -990,12 +1040,40 @@ export class FinanceApprovalsService {
           Math.round((invoice.totalAmount * (row.percent ?? 0)) / 100),
       }));
     } else if (mode === "update") {
-      rows = (after.installments as typeof rows).map((row) => ({
-        ...row,
-        sequence:
-          invoice.plan?.installments.find((item) => item.id === row.id)
-            ?.sequence ?? row.sequence,
-      }));
+      const updates = after.installments as typeof rows;
+      if (
+        updates.some((row) => !row.id) ||
+        new Set(updates.map((row) => row.id)).size !== updates.length
+      ) {
+        throw new BadRequestException(
+          "Updated payment-plan installments must have unique IDs",
+        );
+      }
+      const updatesById = new Map(updates.map((row) => [row.id!, row]));
+      for (const id of updatesById.keys()) {
+        if (!invoice.plan?.installments.some((item) => item.id === id)) {
+          throw new BadRequestException("Installment is not on this invoice");
+        }
+      }
+      // PATCH changes only the submitted rows. Preserve every unspecified line so a
+      // partial client payload cannot silently delete unpaid obligations.
+      rows = (invoice.plan?.installments ?? []).map((current) => {
+        const update = updatesById.get(current.id);
+        return update
+          ? {
+              ...update,
+              id: current.id,
+              sequence: current.sequence,
+              label: update.label === undefined ? current.label : update.label,
+            }
+          : {
+              id: current.id,
+              sequence: current.sequence,
+              dueDate: current.dueDate.toISOString().slice(0, 10),
+              amountDue: current.amountDue,
+              label: current.label,
+            };
+      });
     } else {
       rows = after.installments as typeof rows;
     }
@@ -1034,6 +1112,18 @@ export class FinanceApprovalsService {
         throw new BadRequestException("A paid installment cannot be removed");
       }
     }
+    const planChanged =
+      rows.length !== existing.size ||
+      rows.some((row) => {
+        const current = row.id ? existing.get(row.id) : undefined;
+        return (
+          !current ||
+          current.sequence !== row.sequence ||
+          current.dueDate.toISOString().slice(0, 10) !== row.dueDate ||
+          current.amountDue !== row.amountDue ||
+          (current.label ?? "") !== (row.label?.trim() ?? "")
+        );
+      });
     const incomingIds = rows.flatMap((row) => (row.id ? [row.id] : []));
     await tx.installment.deleteMany({
       where: { planId: plan.id, id: { notIn: incomingIds }, amountPaid: 0 },
@@ -1132,6 +1222,12 @@ export class FinanceApprovalsService {
       where: { id: invoiceId },
       data: {
         totalAmount: total,
+        // A student-specific change must no longer follow future global revisions.
+        // Retain feeScheduleRevision as historical provenance while severing the
+        // live relation that applyScheduleRevision uses to select linked accounts.
+        ...(invoice.packageType === "standard_full" && planChanged
+          ? { feeScheduleId: null }
+          : {}),
         revision: { increment: 1 },
         status:
           invoice.amountPaid >= total
@@ -1141,7 +1237,201 @@ export class FinanceApprovalsService {
               : "open",
       },
     });
-    return { invoiceId, total, installments: rows.length };
+    return {
+      invoiceId,
+      total,
+      installments: rows.length,
+      individualOverride:
+        invoice.packageType === "standard_full" &&
+        (planChanged || invoice.feeScheduleId === null),
+    };
+  }
+
+  private async restoreStandardPaymentPlan(
+    tx: Prisma.TransactionClient,
+    invoice: Prisma.InvoiceGetPayload<{
+      include: {
+        plan: { include: { installments: true } };
+        components: { include: { allocations: true } };
+      };
+    }>,
+    requesterId: string,
+  ) {
+    if (invoice.packageType !== "standard_full") {
+      throw new BadRequestException(
+        "Only a full-package invoice can be restored to the standard schedule",
+      );
+    }
+    if (invoice.feeScheduleId !== null) {
+      return { invoiceId: invoice.id, alreadyStandard: true };
+    }
+    const unsupportedComponent = invoice.components.find(
+      (component) =>
+        !["tuition", "housing", "cafeteria"].includes(component.kind),
+    );
+    if (unsupportedComponent) {
+      throw new BadRequestException(
+        `The package contains unsupported ${unsupportedComponent.kind} accounting`,
+      );
+    }
+    const schedule = await tx.feeSchedule.findFirst({
+      where: {
+        academicYearLabel: invoice.academicYearLabel ?? undefined,
+        status: "approved",
+        approvedById: { not: null },
+        approvedAt: { not: null },
+      },
+      orderBy: { revision: "desc" },
+      include: { rows: { orderBy: { sequence: "asc" } } },
+    });
+    if (!schedule || schedule.rows.length === 0) {
+      throw new BadRequestException(
+        "No approved standard schedule exists for this academic year",
+      );
+    }
+    if (schedule.rows.some((row) => !row.dueOn)) {
+      throw new BadRequestException(
+        "Every approved standard installment needs a due date",
+      );
+    }
+    const existing = new Map(
+      (invoice.plan?.installments ?? []).map(
+        (row) => [row.sequence, row] as const,
+      ),
+    );
+    if (invoice.plan) {
+      for (const installment of invoice.plan.installments) {
+        const standard = schedule.rows.find(
+          (row) => row.sequence === installment.sequence,
+        );
+        if (
+          installment.amountPaid > 0 &&
+          (!standard || standard.amountFullXof < installment.amountPaid)
+        ) {
+          throw new BadRequestException(
+            `Installment ${installment.sequence} cannot be restored below ${installment.amountPaid} XOF already paid`,
+          );
+        }
+      }
+    }
+    const total = schedule.rows.reduce(
+      (sum, row) => sum + row.amountFullXof,
+      0,
+    );
+    if (total < invoice.amountPaid) {
+      throw new BadRequestException(
+        "The standard package total cannot be below the amount already paid",
+      );
+    }
+    const plan =
+      invoice.plan ??
+      (await tx.paymentPlan.create({
+        data: { invoiceId: invoice.id, createdById: requesterId },
+      }));
+    const standardSequences = schedule.rows.map((row) => row.sequence);
+    await tx.installment.deleteMany({
+      where: {
+        planId: plan.id,
+        sequence: { notIn: standardSequences },
+        amountPaid: 0,
+      },
+    });
+    for (const row of schedule.rows) {
+      const current = existing.get(row.sequence);
+      const data = {
+        label: row.label,
+        dueDate: row.dueOn!,
+        amountDue: row.amountFullXof,
+        status: projectedInstallmentStatus({
+          dueDate: row.dueOn!,
+          amountDue: row.amountFullXof,
+          amountPaid: current?.amountPaid ?? 0,
+        }),
+      };
+      if (current) {
+        await tx.installment.update({ where: { id: current.id }, data });
+      } else {
+        await tx.installment.create({
+          data: { planId: plan.id, sequence: row.sequence, ...data },
+        });
+      }
+    }
+    const componentTotals = [
+      {
+        kind: "tuition",
+        costCenterCode: "9100",
+        amountXof: schedule.rows.reduce(
+          (sum, row) => sum + row.amountTuitionXof,
+          0,
+        ),
+      },
+      {
+        kind: "housing",
+        costCenterCode: "3700",
+        amountXof: schedule.rows.reduce(
+          (sum, row) => sum + row.amountHousingXof,
+          0,
+        ),
+      },
+      {
+        kind: "cafeteria",
+        costCenterCode: "3600",
+        amountXof: schedule.rows.reduce(
+          (sum, row) => sum + row.amountCafeteriaXof,
+          0,
+        ),
+      },
+    ];
+    for (const component of componentTotals) {
+      const current = invoice.components.find(
+        (row) => row.kind === component.kind,
+      );
+      const allocated = (current?.allocations ?? []).reduce(
+        (sum, allocation) =>
+          sum + allocation.amountXof - allocation.refundedAmountXof,
+        0,
+      );
+      if (component.amountXof < allocated) {
+        throw new BadRequestException(
+          `${component.kind} cannot be restored below ${allocated} XOF already collected`,
+        );
+      }
+      await tx.invoiceComponent.upsert({
+        where: {
+          invoiceId_kind: {
+            invoiceId: invoice.id,
+            kind: component.kind,
+          },
+        },
+        create: { invoiceId: invoice.id, ...component },
+        update: {
+          costCenterCode: component.costCenterCode,
+          amountXof: component.amountXof,
+        },
+      });
+    }
+    await tx.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        totalAmount: total,
+        feeScheduleId: schedule.id,
+        feeScheduleRevision: schedule.revision,
+        revision: { increment: 1 },
+        status:
+          invoice.amountPaid >= total
+            ? "paid"
+            : invoice.amountPaid > 0
+              ? "partial"
+              : "open",
+      },
+    });
+    return {
+      invoiceId: invoice.id,
+      restored: true,
+      feeScheduleId: schedule.id,
+      feeScheduleRevision: schedule.revision,
+      total,
+    };
   }
 
   private async applyCredit(

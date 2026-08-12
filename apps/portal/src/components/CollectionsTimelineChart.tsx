@@ -1,12 +1,18 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { CollectionsTimeline, CollectionsTimelinePoint } from "@/lib/api";
-import { formatDateShort, formatXof, formatXofCompact } from "@/lib/format";
+import {
+  formatDate,
+  formatDateShort,
+  formatXof,
+  formatXofCompact,
+} from "@/lib/format";
 
 const WIDTH = 820;
 const HEIGHT = 330;
 const MARGIN = { top: 24, right: 24, bottom: 42, left: 76 };
+const TOOLTIP_WIDTH = 254;
 
 type SeriesKey =
   "expectedCumulativeXof" | "actualCumulativeXof" | "forecastCumulativeXof";
@@ -20,20 +26,38 @@ const SERIES: {
   {
     key: "expectedCumulativeXof",
     label: "Approved expected schedule",
-    color: "#738297",
+    color: "var(--fg3)",
   },
   {
     key: "actualCumulativeXof",
     label: "Actual collected",
-    color: "#173f70",
+    color: "var(--accent)",
   },
   {
     key: "forecastCumulativeXof",
     label: "Run-rate forecast",
-    color: "#d66f16",
+    color: "var(--daust-orange-600)",
     dashed: true,
   },
 ];
+
+const DEFAULT_SERIES_VISIBILITY: Record<SeriesKey, boolean> = {
+  expectedCumulativeXof: true,
+  actualCumulativeXof: true,
+  forecastCumulativeXof: true,
+};
+
+const VISUALLY_HIDDEN_STYLE = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+} as const;
 
 function time(date: string): number {
   return Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
@@ -67,6 +91,46 @@ function forecastLabel(status: CollectionsTimeline["forecast"]["status"]) {
   return "Insufficient collection history";
 }
 
+function nearestPointIndex(
+  points: CollectionsTimelinePoint[],
+  targetTime: number,
+): number {
+  let closestIndex = 0;
+  let closestDistance = Number.POSITIVE_INFINITY;
+
+  points.forEach((point, index) => {
+    const distance = Math.abs(time(point.date) - targetTime);
+    if (distance < closestDistance) {
+      closestIndex = index;
+      closestDistance = distance;
+    }
+  });
+
+  return closestIndex;
+}
+
+function shortSeriesLabel(key: SeriesKey): string {
+  if (key === "expectedCumulativeXof") return "Expected";
+  if (key === "actualCumulativeXof") return "Actual";
+  return "Forecast";
+}
+
+function pointValueLabel(value: number | null): string {
+  return value === null ? "Not available" : formatXof(value);
+}
+
+function pointAnnouncement(
+  point: CollectionsTimelinePoint,
+  visibility: Record<SeriesKey, boolean>,
+): string {
+  const values = SERIES.filter((series) => visibility[series.key]).map(
+    (series) =>
+      `${shortSeriesLabel(series.key)} ${pointValueLabel(point[series.key])}`,
+  );
+
+  return `${formatDateShort(point.date)}. ${values.length > 0 ? values.join(". ") : "All series hidden"}.`;
+}
+
 export function CollectionsTimelineChart({
   data,
 }: {
@@ -74,7 +138,18 @@ export function CollectionsTimelineChart({
 }) {
   const titleId = useId();
   const descriptionId = useId();
-  const [focus, setFocus] = useState<CollectionsTimelinePoint | null>(null);
+  const interactionId = useId();
+  const shadowId = `${titleId.replaceAll(":", "")}-chart-shadow`;
+  const [seriesVisibility, setSeriesVisibility] = useState(() => ({
+    ...DEFAULT_SERIES_VISIBILITY,
+  }));
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [keyboardIndex, setKeyboardIndex] = useState<number | null>(null);
+  const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
+  const [interactionAcademicYear, setInteractionAcademicYear] = useState(
+    data.academicYear,
+  );
+  const [plotFocused, setPlotFocused] = useState(false);
   const points = useMemo(
     () => [...data.points].sort((a, b) => a.date.localeCompare(b.date)),
     [data.points],
@@ -118,6 +193,96 @@ export function CollectionsTimelineChart({
       all.findIndex((p) => p.date === point.date) === index,
   );
   const variance = data.summary.varianceXof;
+  const defaultIndex = nearestPointIndex(points, time(data.asOfDate));
+  const interactionIsCurrent = interactionAcademicYear === data.academicYear;
+  const currentPinnedIndex =
+    interactionIsCurrent && pinnedIndex !== null
+      ? Math.min(points.length - 1, Math.max(0, pinnedIndex))
+      : null;
+  const rawActiveIndex = interactionIsCurrent
+    ? (hoveredIndex ?? keyboardIndex ?? currentPinnedIndex)
+    : null;
+  const activeIndex =
+    rawActiveIndex === null
+      ? null
+      : Math.min(points.length - 1, Math.max(0, rawActiveIndex));
+  const activePoint = activeIndex === null ? null : points[activeIndex]!;
+  const visibleSeries = SERIES.filter((series) => seriesVisibility[series.key]);
+  const activeValues = activePoint
+    ? visibleSeries
+        .map((series) => ({ series, value: activePoint[series.key] }))
+        .filter(
+          (
+            entry,
+          ): entry is {
+            series: (typeof SERIES)[number];
+            value: number;
+          } => entry.value !== null,
+        )
+    : [];
+  const tooltipHeight = 66 + Math.max(1, visibleSeries.length) * 24;
+  const activeX = activePoint ? x(activePoint.date) : 0;
+  const activeAnchorY =
+    activeValues.length > 0
+      ? y(Math.max(...activeValues.map((entry) => entry.value)))
+      : MARGIN.top + plotHeight / 2;
+  const tooltipX = Math.min(
+    WIDTH - MARGIN.right - TOOLTIP_WIDTH,
+    Math.max(
+      MARGIN.left,
+      activeX + 16 + TOOLTIP_WIDTH > WIDTH - MARGIN.right
+        ? activeX - TOOLTIP_WIDTH - 16
+        : activeX + 16,
+    ),
+  );
+  const tooltipY = Math.min(
+    MARGIN.top + plotHeight - tooltipHeight - 6,
+    Math.max(MARGIN.top + 6, activeAnchorY - tooltipHeight / 2),
+  );
+
+  const indexFromClientX = (clientX: number, target: SVGRectElement) => {
+    const bounds = target.getBoundingClientRect();
+    const ratio = Math.min(
+      1,
+      Math.max(0, (clientX - bounds.left) / Math.max(bounds.width, 1)),
+    );
+    return nearestPointIndex(points, minTime + ratio * (maxTime - minTime));
+  };
+
+  const moveKeyboardSelection = (nextIndex: number) => {
+    setHoveredIndex(null);
+    setKeyboardIndex(Math.min(points.length - 1, Math.max(0, nextIndex)));
+  };
+
+  const handlePlotKeyDown = (event: KeyboardEvent<SVGRectElement>) => {
+    const currentIndex = interactionIsCurrent
+      ? (keyboardIndex ?? currentPinnedIndex ?? defaultIndex)
+      : defaultIndex;
+    setInteractionAcademicYear(data.academicYear);
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      moveKeyboardSelection(currentIndex - 1);
+    } else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      moveKeyboardSelection(currentIndex + 1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      moveKeyboardSelection(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      moveKeyboardSelection(points.length - 1);
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setPinnedIndex(currentIndex);
+      setKeyboardIndex(currentIndex);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setPinnedIndex(null);
+      setHoveredIndex(null);
+      setKeyboardIndex(null);
+    }
+  };
 
   return (
     <section className="card" style={{ margin: 0 }} aria-labelledby={titleId}>
@@ -161,43 +326,89 @@ export function CollectionsTimelineChart({
       </div>
 
       <div
-        aria-label="Chart legend"
+        role="group"
+        aria-label="Chart series"
         style={{
           display: "flex",
           flexWrap: "wrap",
-          gap: "8px 18px",
+          gap: 8,
           marginTop: 18,
         }}
       >
-        {SERIES.map((series) => (
-          <span
-            key={series.key}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 7,
-              fontSize: 12.5,
-            }}
-          >
-            <svg width="24" height="8" aria-hidden="true">
-              <line
-                x1="1"
-                x2="23"
-                y1="4"
-                y2="4"
-                stroke={series.color}
-                strokeWidth="2.5"
-                strokeDasharray={series.dashed ? "5 4" : undefined}
-              />
-            </svg>
-            {series.label}
-          </span>
-        ))}
+        {SERIES.map((series) => {
+          const isVisible = seriesVisibility[series.key];
+          return (
+            <button
+              key={series.key}
+              type="button"
+              className="sis-btn"
+              aria-pressed={isVisible}
+              aria-label={`${series.label}, ${isVisible ? "shown" : "hidden"}. Toggle series.`}
+              onClick={() =>
+                setSeriesVisibility((current) => ({
+                  ...current,
+                  [series.key]: !current[series.key],
+                }))
+              }
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                minHeight: 34,
+                padding: "6px 10px",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-pill)",
+                background: isVisible ? "var(--accent-bg)" : "transparent",
+                color: isVisible ? "var(--fg1)" : "var(--fg3)",
+                cursor: "pointer",
+                filter: "none",
+                fontFamily: "inherit",
+                fontSize: 12,
+                fontWeight: isVisible ? 700 : 600,
+                opacity: isVisible ? 1 : 0.72,
+                transform: "none",
+                transition: "none",
+              }}
+            >
+              <svg width="24" height="8" aria-hidden="true">
+                <line
+                  x1="1"
+                  x2="23"
+                  y1="4"
+                  y2="4"
+                  stroke={series.color}
+                  strokeWidth="2.5"
+                  strokeDasharray={series.dashed ? "5 4" : undefined}
+                  opacity={isVisible ? 1 : 0.42}
+                />
+              </svg>
+              <span>{series.label}</span>
+              <span
+                aria-hidden="true"
+                style={{
+                  paddingLeft: 2,
+                  color: isVisible ? "var(--accent)" : "var(--fg3)",
+                  fontSize: 10,
+                  fontWeight: 800,
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {isVisible ? "Shown" : "Hidden"}
+              </span>
+            </button>
+          );
+        })}
       </div>
+
+      <p id={interactionId} style={VISUALLY_HIDDEN_STYLE}>
+        Use the left and right arrow keys to move between dates. Press Enter or
+        Space to pin a date. Press Escape to clear the pinned date.
+      </p>
 
       <div style={{ overflowX: "auto", marginTop: 12 }}>
         <svg
-          role="img"
+          role="group"
           aria-labelledby={`${titleId} ${descriptionId}`}
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           style={{
@@ -205,8 +416,20 @@ export function CollectionsTimelineChart({
             width: "100%",
             minWidth: 620,
             height: "auto",
+            fontFamily: "var(--font-body)",
           }}
         >
+          <defs>
+            <filter id={shadowId} x="-20%" y="-20%" width="140%" height="150%">
+              <feDropShadow
+                dx="0"
+                dy="4"
+                stdDeviation="5"
+                floodColor="#0f2c50"
+                floodOpacity="0.16"
+              />
+            </filter>
+          </defs>
           {ticks.map((tick) => (
             <g key={tick.value}>
               <line
@@ -214,7 +437,7 @@ export function CollectionsTimelineChart({
                 x2={WIDTH - MARGIN.right}
                 y1={tick.y}
                 y2={tick.y}
-                stroke="#dfe4eb"
+                stroke="var(--border)"
                 strokeWidth="1"
               />
               <text
@@ -222,7 +445,7 @@ export function CollectionsTimelineChart({
                 y={tick.y + 4}
                 textAnchor="end"
                 fontSize="11"
-                fill="#637083"
+                fill="var(--fg3)"
               >
                 {formatXofCompact(tick.value).replace(" FCFA", "")}
               </text>
@@ -235,12 +458,12 @@ export function CollectionsTimelineChart({
               y={HEIGHT - 12}
               textAnchor="middle"
               fontSize="11"
-              fill="#637083"
+              fill="var(--fg3)"
             >
               {formatDateShort(point.date)}
             </text>
           ))}
-          {SERIES.map((series) => (
+          {visibleSeries.map((series) => (
             <path
               key={series.key}
               d={linePath(points, series.key, x, y)}
@@ -252,33 +475,204 @@ export function CollectionsTimelineChart({
               strokeLinejoin="round"
             />
           ))}
-          {points.map((point) => (
-            <circle
-              key={point.date}
-              cx={x(point.date)}
-              cy={y(
-                point.actualCumulativeXof ??
-                  point.forecastCumulativeXof ??
-                  point.expectedCumulativeXof,
-              )}
-              r="7"
-              fill="transparent"
-              stroke="transparent"
-              tabIndex={0}
-              onMouseEnter={() => setFocus(point)}
-              onMouseLeave={() => setFocus(null)}
-              onFocus={() => setFocus(point)}
-              onBlur={() => setFocus(null)}
-            >
-              <title>{`${formatDateShort(point.date)}: expected ${formatXof(point.expectedCumulativeXof)}, actual ${point.actualCumulativeXof === null ? "not available" : formatXof(point.actualCumulativeXof)}, forecast ${point.forecastCumulativeXof === null ? "not available" : formatXof(point.forecastCumulativeXof)}`}</title>
-            </circle>
-          ))}
+
+          <rect
+            role="slider"
+            aria-label="Chart date"
+            aria-describedby={interactionId}
+            aria-valuemin={1}
+            aria-valuemax={points.length}
+            aria-valuenow={(activeIndex ?? defaultIndex) + 1}
+            aria-valuetext={pointAnnouncement(
+              points[activeIndex ?? defaultIndex]!,
+              seriesVisibility,
+            )}
+            aria-orientation="horizontal"
+            tabIndex={0}
+            x={MARGIN.left}
+            y={MARGIN.top}
+            width={plotWidth}
+            height={plotHeight}
+            rx="4"
+            fill="transparent"
+            stroke={plotFocused ? "var(--accent)" : "transparent"}
+            strokeWidth="2"
+            style={{ cursor: "crosshair", outline: "none" }}
+            onPointerMove={(event) => {
+              if (event.pointerType !== "touch") {
+                setInteractionAcademicYear(data.academicYear);
+                setHoveredIndex(
+                  indexFromClientX(event.clientX, event.currentTarget),
+                );
+              }
+            }}
+            onPointerLeave={() => setHoveredIndex(null)}
+            onClick={(event) => {
+              const index = indexFromClientX(
+                event.clientX,
+                event.currentTarget,
+              );
+              event.currentTarget.focus();
+              setInteractionAcademicYear(data.academicYear);
+              setHoveredIndex(null);
+              setKeyboardIndex(index);
+              setPinnedIndex(index);
+            }}
+            onFocus={() => {
+              setPlotFocused(true);
+              setInteractionAcademicYear(data.academicYear);
+              setKeyboardIndex((current) =>
+                interactionIsCurrent
+                  ? (current ?? currentPinnedIndex ?? defaultIndex)
+                  : defaultIndex,
+              );
+            }}
+            onBlur={() => {
+              setPlotFocused(false);
+              setKeyboardIndex(null);
+            }}
+            onKeyDown={handlePlotKeyDown}
+          />
+
+          {activePoint ? (
+            <g aria-hidden="true" pointerEvents="none">
+              <line
+                x1={activeX}
+                x2={activeX}
+                y1={MARGIN.top}
+                y2={MARGIN.top + plotHeight}
+                stroke="var(--accent)"
+                strokeWidth="1.5"
+                strokeDasharray="3 4"
+                opacity="0.62"
+              />
+              {activeValues.map(({ series, value }) => (
+                <circle
+                  key={series.key}
+                  cx={activeX}
+                  cy={y(value)}
+                  r={series.key === "actualCumulativeXof" ? 5 : 4.5}
+                  fill="var(--surface)"
+                  stroke={series.color}
+                  strokeWidth="3"
+                />
+              ))}
+
+              <g
+                transform={`translate(${tooltipX}, ${tooltipY})`}
+                filter={`url(#${shadowId})`}
+              >
+                <rect
+                  width={TOOLTIP_WIDTH}
+                  height={tooltipHeight}
+                  rx="7"
+                  fill="var(--surface)"
+                  stroke="var(--border-strong)"
+                />
+                <text
+                  x="14"
+                  y="22"
+                  fill="var(--fg1)"
+                  fontSize="12"
+                  fontWeight="800"
+                >
+                  {formatDate(activePoint.date)}
+                </text>
+                {currentPinnedIndex === activeIndex ? (
+                  <g transform={`translate(${TOOLTIP_WIDTH - 70}, 9)`}>
+                    <rect
+                      width="56"
+                      height="19"
+                      rx="9.5"
+                      fill="var(--accent-bg)"
+                    />
+                    <text
+                      x="28"
+                      y="13.5"
+                      textAnchor="middle"
+                      fill="var(--accent)"
+                      fontSize="8.5"
+                      fontWeight="800"
+                      letterSpacing="0.07em"
+                    >
+                      PINNED
+                    </text>
+                  </g>
+                ) : null}
+                <line
+                  x1="14"
+                  x2={TOOLTIP_WIDTH - 14}
+                  y1="35"
+                  y2="35"
+                  stroke="var(--divider)"
+                />
+                {visibleSeries.length > 0 ? (
+                  visibleSeries.map((series, index) => {
+                    const value = activePoint[series.key];
+                    const rowY = 54 + index * 24;
+                    return (
+                      <g key={series.key}>
+                        <line
+                          x1="14"
+                          x2="28"
+                          y1={rowY - 4}
+                          y2={rowY - 4}
+                          stroke={series.color}
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeDasharray={series.dashed ? "4 3" : undefined}
+                        />
+                        <text
+                          x="35"
+                          y={rowY}
+                          fill="var(--fg2)"
+                          fontSize="10.5"
+                          fontWeight="600"
+                        >
+                          {shortSeriesLabel(series.key)}
+                        </text>
+                        <text
+                          x={TOOLTIP_WIDTH - 14}
+                          y={rowY}
+                          textAnchor="end"
+                          fill={value === null ? "var(--fg3)" : "var(--fg1)"}
+                          fontSize="10.5"
+                          fontWeight="800"
+                        >
+                          {value === null ? "—" : formatXof(value)}
+                        </text>
+                      </g>
+                    );
+                  })
+                ) : (
+                  <text x="14" y="58" fill="var(--fg3)" fontSize="11">
+                    All chart series are hidden.
+                  </text>
+                )}
+                <text
+                  x="14"
+                  y={tooltipHeight - 12}
+                  fill="var(--fg3)"
+                  fontSize="9.5"
+                  fontWeight="600"
+                >
+                  {currentPinnedIndex === activeIndex
+                    ? "Pinned · Press Escape to clear"
+                    : "Click or tap to pin this date"}
+                </text>
+              </g>
+            </g>
+          ) : null}
         </svg>
       </div>
 
       <div
-        aria-live="polite"
         style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          flexWrap: "wrap",
           minHeight: 34,
           padding: "8px 10px",
           background: "var(--bg-subtle)",
@@ -286,23 +680,71 @@ export function CollectionsTimelineChart({
           fontSize: 12.5,
         }}
       >
-        {focus ? (
-          <>
-            <strong>{formatDateShort(focus.date)}</strong> · expected{" "}
-            {formatXof(focus.expectedCumulativeXof)} · actual{" "}
-            {focus.actualCumulativeXof === null
-              ? "—"
-              : formatXof(focus.actualCumulativeXof)}{" "}
-            · forecast{" "}
-            {focus.forecastCumulativeXof === null
-              ? "—"
-              : formatXof(focus.forecastCumulativeXof)}
-          </>
-        ) : (
-          <span className="muted">
-            Focus or hover a point for exact values.
-          </span>
-        )}
+        <div aria-live="polite" style={{ flex: "1 1 520px" }}>
+          {activePoint ? (
+            <span>
+              <strong>{formatDate(activePoint.date)}</strong>
+              {currentPinnedIndex === activeIndex ? (
+                <span
+                  style={{
+                    display: "inline-block",
+                    marginLeft: 7,
+                    padding: "2px 7px",
+                    borderRadius: "var(--radius-pill)",
+                    background: "var(--accent-bg)",
+                    color: "var(--accent)",
+                    fontSize: 9.5,
+                    fontWeight: 800,
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Pinned
+                </span>
+              ) : null}
+              {visibleSeries.map((series) => (
+                <span key={series.key}>
+                  {" · "}
+                  {shortSeriesLabel(series.key).toLowerCase()}{" "}
+                  <strong>{pointValueLabel(activePoint[series.key])}</strong>
+                </span>
+              ))}
+              {visibleSeries.length === 0 ? " · all series hidden" : null}
+            </span>
+          ) : (
+            <span className="muted">
+              Hover or focus the plot for exact values. Click or tap to pin a
+              date; use arrow keys to navigate.
+            </span>
+          )}
+        </div>
+        {currentPinnedIndex !== null ? (
+          <button
+            type="button"
+            className="sis-btn"
+            onClick={() => {
+              setInteractionAcademicYear(data.academicYear);
+              setPinnedIndex(null);
+              setHoveredIndex(null);
+              setKeyboardIndex(null);
+            }}
+            style={{
+              padding: "3px 8px",
+              border: 0,
+              background: "transparent",
+              color: "var(--accent)",
+              cursor: "pointer",
+              filter: "none",
+              fontFamily: "inherit",
+              fontSize: 11,
+              fontWeight: 800,
+              transform: "none",
+              transition: "none",
+            }}
+          >
+            Clear selection
+          </button>
+        ) : null}
       </div>
 
       <div

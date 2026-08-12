@@ -40,6 +40,7 @@ import {
   rejectWireTransfer,
   removeCharge,
   replacePaymentPlan,
+  restoreStandardPaymentPlan,
   updateAdminWireConfig,
 } from "@/lib/api";
 import {
@@ -390,6 +391,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           return false;
         if (filter === "unscheduled" && s.summary.standing !== "unscheduled")
           return false;
+        if (filter === "special" && !s.specialAccount?.isSpecial) return false;
         if (filter === "holds" && !s.hasActiveHold) return false;
         if (
           q &&
@@ -667,6 +669,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             <option value="unscheduled">Needs a schedule</option>
             <option value="cleared">Cleared</option>
             <option value="credit">In credit</option>
+            <option value="special">Special accounts</option>
             <option value="holds">Active holds</option>
           </select>
           <div style={{ flex: 1 }} />
@@ -754,7 +757,8 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                     "Student",
                     "Program",
                     "Charges",
-                    "Balance",
+                    "Billed",
+                    "Remaining",
                     "Status",
                     "",
                   ].map((h, i) => (
@@ -762,7 +766,8 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                       key={h || "act"}
                       style={{
                         ...thStyle,
-                        textAlign: i === 5 ? "right" : "left",
+                        textAlign:
+                          i === 3 || i === 4 || i === 6 ? "right" : "left",
                       }}
                     >
                       {h}
@@ -774,7 +779,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 {rows === null ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       style={{
                         padding: 40,
                         textAlign: "center",
@@ -787,7 +792,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 ) : list.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       style={{
                         padding: 40,
                         textAlign: "center",
@@ -851,6 +856,9 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                             <span style={{ fontSize: 11.5, color: "#6c7884" }}>
                               {s.studentNo}
                             </span>
+                            {s.specialAccount?.isSpecial && (
+                              <SpecialAccountPill status={s.specialAccount} />
+                            )}
                           </span>
                         </div>
                       </td>
@@ -860,8 +868,25 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                       <td style={{ ...tdStyle, color: "#6c7884" }}>
                         {s.openCharges} open
                       </td>
-                      <td style={tdStyle}>
-                        <span style={{ display: "grid", gap: 2 }}>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          fontWeight: 650,
+                          textAlign: "right",
+                          whiteSpace: "nowrap",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {fcfa(s.billed)} FCFA
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "right" }}>
+                        <span
+                          style={{
+                            display: "grid",
+                            gap: 2,
+                            justifyItems: "end",
+                          }}
+                        >
                           <AccountBalanceText
                             summary={s.summary}
                             style={{ fontWeight: 700, whiteSpace: "nowrap" }}
@@ -995,6 +1020,37 @@ function CheckBox({ on, onClick }: { on: boolean; onClick: () => void }) {
       }}
     >
       {on && <Check size={12} color="#fff" strokeWidth={3} />}
+    </span>
+  );
+}
+
+function SpecialAccountPill({
+  status,
+}: {
+  status: NonNullable<StudentAccountRow["specialAccount"]>;
+}) {
+  const label = status.hasPendingPlanChange
+    ? "Approval pending"
+    : status.hasIndividualPlan
+      ? "Individual plan"
+      : "Special account";
+  return (
+    <span
+      title={status.reasons.map((reason) => reason.label).join(" · ")}
+      style={{
+        display: "table",
+        marginTop: 4,
+        padding: "2px 7px",
+        borderRadius: 999,
+        background: status.hasPendingPlanChange ? "#e8f0fb" : "#fff3df",
+        color: status.hasPendingPlanChange ? "#234d7d" : "#8b5a14",
+        border: `1px solid ${status.hasPendingPlanChange ? "#c8d8eb" : "#eed5ab"}`,
+        fontSize: 10.5,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
     </span>
   );
 }
@@ -1809,8 +1865,15 @@ function ManageDrawer({
                   }}
                 >
                   Billed {fcfa(acct.totals.billed)} · Paid{" "}
-                  {fcfa(acct.totals.paid)} FCFA
+                  {fcfa(acct.totals.paid)} · Remaining{" "}
+                  {fcfa(acct.totals.remaining ?? summary?.outstandingXof ?? 0)}{" "}
+                  FCFA
                 </div>
+                {acct.specialAccount?.isSpecial && (
+                  <div style={{ marginTop: 8 }}>
+                    <SpecialAccountPill status={acct.specialAccount} />
+                  </div>
+                )}
               </div>
 
               <SectionKick>Charges on account</SectionKick>
@@ -1821,7 +1884,11 @@ function ManageDrawer({
               ) : (
                 acct.invoices.map((inv) => {
                   const isCredit = inv.total < 0;
-                  const isGlobalPackage = inv.packageType === "standard_full";
+                  const isVoid = inv.status === "void";
+                  const isStandardPackage = inv.packageType === "standard_full";
+                  const isIndividualPlan =
+                    inv.planType === "individual_override" ||
+                    inv.isIndividualPlanOverride;
                   const invoiceOutstanding = invoiceEffectiveOutstanding(inv);
                   const invoiceSummary = resolveAccountSummary(inv.summary, {
                     balanceXof: invoiceOutstanding,
@@ -1866,7 +1933,7 @@ function ManageDrawer({
                                   ? `Settled · ${fcfa(invoiceSettled)} FCFA`
                                   : `${inv.installments.length || 1} installment${(inv.installments.length || 1) > 1 ? "s" : ""}`}
                           </div>
-                          {isGlobalPackage && (
+                          {isStandardPackage && (
                             <div
                               style={{
                                 fontSize: 11.5,
@@ -1874,12 +1941,17 @@ function ManageDrawer({
                                 marginTop: 2,
                               }}
                             >
-                              Global Fee Schedule
+                              {isIndividualPlan
+                                ? "Individual plan override"
+                                : "Global Fee Schedule"}
                               {inv.academicYearLabel
                                 ? ` · ${inv.academicYearLabel}`
                                 : ""}
                               {inv.feeScheduleRevision
                                 ? ` · revision ${inv.feeScheduleRevision}`
+                                : ""}
+                              {inv.hasPendingPlanChange
+                                ? " · approval pending"
                                 : ""}
                             </div>
                           )}
@@ -1912,29 +1984,11 @@ function ManageDrawer({
                               )}
                               <AccountStandingBadge summary={invoiceSummary} />
                             </span>
-                            {isGlobalPackage ? (
-                              <a
-                                href="/finance/fee-schedule"
-                                title="Change dates and amounts for every linked standard package"
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  padding: "5px 11px",
-                                  borderRadius: 8,
-                                  color: "var(--daust-navy)",
-                                  background: "#eef2f8",
-                                  border: "1px solid #ccd7e4",
-                                  fontSize: 12,
-                                  fontWeight: 700,
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Manage Fee Schedule
-                              </a>
-                            ) : (
+                            {!isVoid && (
                               <>
                                 <button
                                   onClick={() => setPlanInvoice(inv)}
+                                  disabled={inv.hasPendingPlanChange}
                                   style={{
                                     display: "flex",
                                     alignItems: "center",
@@ -1946,36 +2000,57 @@ function ManageDrawer({
                                     border: "1px solid #ccd7e4",
                                     fontSize: 12,
                                     fontWeight: 700,
-                                    cursor: "pointer",
+                                    cursor: inv.hasPendingPlanChange
+                                      ? "not-allowed"
+                                      : "pointer",
+                                    opacity: inv.hasPendingPlanChange
+                                      ? 0.55
+                                      : 1,
                                   }}
                                 >
-                                  {inv.installments.length
-                                    ? "Edit plan"
-                                    : "Create plan"}
+                                  {inv.hasPendingPlanChange
+                                    ? "Approval pending"
+                                    : inv.installments.length
+                                      ? "Edit plan"
+                                      : "Create plan"}
                                 </button>
-                                <button
-                                  onClick={() => {
-                                    setRemoveReason("");
-                                    setPendingRemove(inv);
-                                  }}
-                                  title="Remove charge"
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 5,
-                                    padding: "5px 11px",
-                                    borderRadius: 8,
-                                    color: "#c0392b",
-                                    background: "#fdeeeb",
-                                    border: "1px solid #f1c9c1",
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  <Trash2 size={13} /> Remove
-                                </button>
+                                {!isStandardPackage && (
+                                  <button
+                                    onClick={() => {
+                                      setRemoveReason("");
+                                      setPendingRemove(inv);
+                                    }}
+                                    title="Remove charge"
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 5,
+                                      padding: "5px 11px",
+                                      borderRadius: 8,
+                                      color: "#c0392b",
+                                      background: "#fdeeeb",
+                                      border: "1px solid #f1c9c1",
+                                      fontSize: 12,
+                                      fontWeight: 700,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <Trash2 size={13} /> Remove
+                                  </button>
+                                )}
                               </>
+                            )}
+                            {isVoid && (
+                              <span
+                                style={{
+                                  color: "#6c7884",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Voided
+                              </span>
                             )}
                           </>
                         )}
@@ -2344,12 +2419,6 @@ function PlanEditorModal({
     setBusy(true);
     setError(null);
     try {
-      if (invoice.packageType === "standard_full") {
-        setError(
-          "This package follows the global Fee Schedule and cannot be changed per student.",
-        );
-        return;
-      }
       if (!reason.trim()) {
         setError("Explain why this payment plan is changing.");
         return;
@@ -2382,9 +2451,19 @@ function PlanEditorModal({
       onClose={onClose}
     >
       <p style={{ color: "#6c7884", fontSize: 13, marginTop: 0 }}>
-        Paid installments are preserved. Your proposed change is applied only
-        after administrator approval.
+        Paid installments are preserved. This proposal changes only this student
+        and is applied after administrator approval. An approved individual
+        schedule no longer follows future global revisions.
       </p>
+      {invoice.planType === "individual_override" && (
+        <RestoreStandardPlanForm
+          invoice={invoice}
+          busy={busy}
+          onBusy={setBusy}
+          onSaved={onSaved}
+          onError={setError}
+        />
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {rows.map((row, index) => (
           <div
@@ -2475,6 +2554,88 @@ function PlanEditorModal({
       </div>
       {error && <p style={{ color: "#c0392b", fontSize: 13 }}>{error}</p>}
     </WideModal>
+  );
+}
+
+function RestoreStandardPlanForm({
+  invoice,
+  busy,
+  onBusy,
+  onSaved,
+  onError,
+}: {
+  invoice: AccountInvoice;
+  busy: boolean;
+  onBusy: (busy: boolean) => void;
+  onSaved: (message: string) => void;
+  onError: (message: string | null) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const restore = async () => {
+    if (!reason.trim()) return;
+    onBusy(true);
+    onError(null);
+    try {
+      const result = await restoreStandardPaymentPlan(
+        invoice.id,
+        reason.trim(),
+      );
+      onSaved(
+        result.applied
+          ? "Approved standard payment plan restored"
+          : "Restore-to-standard request submitted for administrator approval",
+      );
+    } catch (error) {
+      onError(
+        error instanceof Error
+          ? error.message
+          : "Could not request a standard-plan restoration.",
+      );
+    } finally {
+      onBusy(false);
+    }
+  };
+  return (
+    <div
+      style={{
+        marginBottom: 16,
+        padding: 12,
+        border: "1px solid #eed5ab",
+        borderRadius: 10,
+        background: "#fff9ef",
+      }}
+    >
+      <strong style={{ display: "block", fontSize: 13 }}>
+        Return to the approved global schedule
+      </strong>
+      <p style={{ margin: "4px 0 9px", color: "#6c7884", fontSize: 12 }}>
+        Replace this student&apos;s individual dates and amounts with the
+        current approved package after administrator approval.
+      </p>
+      <label style={{ ...fieldLabel, display: "block" }}>
+        Reason for restoration
+        <textarea
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          rows={2}
+          maxLength={1000}
+          placeholder="Explain why this student should return to the standard plan"
+          style={{ ...inputStyle, resize: "vertical", margin: "6px 0 0" }}
+        />
+      </label>
+      <button
+        type="button"
+        onClick={restore}
+        disabled={busy || !reason.trim()}
+        style={{
+          ...outlineBtn,
+          marginTop: 8,
+          opacity: busy || !reason.trim() ? 0.55 : 1,
+        }}
+      >
+        Restore standard plan
+      </button>
+    </div>
   );
 }
 

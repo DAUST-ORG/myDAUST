@@ -117,6 +117,7 @@ function service() {
       findMany: vi.fn().mockResolvedValue([student]),
     },
     studentHold: { findMany: vi.fn().mockResolvedValue(student.holds) },
+    approvalRequest: { findMany: vi.fn().mockResolvedValue([]) },
     guardianStudent: {
       findMany: vi.fn().mockResolvedValue([{ student, relation: "parent" }]),
     },

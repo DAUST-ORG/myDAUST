@@ -46,6 +46,10 @@ import {
   assignStandardPackageInTransaction,
   type StandardPackageAssignment,
 } from "./standard-package.js";
+import {
+  deriveAccountSpecialStatus,
+  invoicePlanType,
+} from "./account-customization.js";
 
 // Shared fee constants are bootstrap fallbacks only. Standard billing always reads
 // the current administrator-approved FeeSchedule revision from the database.
@@ -2537,21 +2541,40 @@ export class FinanceService {
 
   /** All student accounts with derived balances + status. Powers the standalone billing admin. */
   async listStudentAccounts() {
-    const students = await this.prisma.student.findMany({
-      orderBy: { studentNo: "asc" },
-      include: {
-        person: true,
-        program: true,
-        holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
-        invoices: {
-          orderBy: { createdAt: "desc" },
-          include: { plan: { include: { installments: true } } },
+    const [students, pendingPlanChanges] = await Promise.all([
+      this.prisma.student.findMany({
+        orderBy: { studentNo: "asc" },
+        include: {
+          person: true,
+          program: true,
+          holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
+          invoices: {
+            orderBy: { createdAt: "desc" },
+            include: { plan: { include: { installments: true } } },
+          },
         },
-      },
-    });
+      }),
+      this.prisma.approvalRequest.findMany({
+        where: {
+          kind: "payment_plan",
+          status: "pending",
+          targetType: "Invoice",
+        },
+        select: { targetId: true },
+      }),
+    ]);
+    const pendingPlanInvoiceIds = new Set(
+      pendingPlanChanges.flatMap((request) =>
+        request.targetId ? [request.targetId] : [],
+      ),
+    );
     return students.flatMap((s) => {
       const position = deriveApiAccountPosition(s.invoices);
       const summary = position.summary;
+      const specialAccount = deriveAccountSpecialStatus(
+        s.invoices,
+        pendingPlanInvoiceIds,
+      );
       if (s.recordStatus === "archived" && summary.outstandingXof <= 0)
         return [];
       const chargeInvoices = s.invoices.filter(
@@ -2562,7 +2585,13 @@ export class FinanceService {
       // The billing row represents a real charge, so skip negative credit memos
       // (discounts/reversals) when picking which invoice the row stands for.
       const payableTarget = selectOldestPayableTarget(s.invoices, position);
+      const standardPlan = chargeInvoices.find((invoice) =>
+        ["standard_full", "standard_tuition_legacy"].includes(
+          invoice.packageType,
+        ),
+      );
       const primary =
+        standardPlan ??
         s.invoices.find((invoice) => invoice.id === payableTarget?.invoiceId) ??
         chargeInvoices[0] ??
         s.invoices.find((invoice) => invoice.status !== "void");
@@ -2587,6 +2616,8 @@ export class FinanceService {
           billed,
           paid,
           balance: summary.balanceXof,
+          remaining: summary.outstandingXof,
+          remainingXof: summary.outstandingXof,
           openCharges,
           overdue: summary.overdueXof > 0,
           status,
@@ -2607,6 +2638,8 @@ export class FinanceService {
           packageType: primary?.packageType ?? null,
           academicYearLabel: primary?.academicYearLabel ?? null,
           feeScheduleRevision: primary?.feeScheduleRevision ?? null,
+          planType: primary ? invoicePlanType(primary) : null,
+          specialAccount,
         },
       ];
     });
@@ -2620,24 +2653,45 @@ export class FinanceService {
     });
     if (!student) throw new NotFoundException("Student not found");
 
-    const invoices = await this.prisma.invoice.findMany({
-      where: { studentId },
-      orderBy: { createdAt: "desc" },
-      include: {
-        term: true,
-        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
-        payments: { orderBy: { createdAt: "desc" } },
-        wireTransfers: { orderBy: { createdAt: "desc" } },
-      },
-    });
+    const [invoices, activeHolds, pendingPlanChanges] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where: { studentId },
+        orderBy: { createdAt: "desc" },
+        include: {
+          term: true,
+          plan: {
+            include: { installments: { orderBy: { sequence: "asc" } } },
+          },
+          payments: { orderBy: { createdAt: "desc" } },
+          wireTransfers: { orderBy: { createdAt: "desc" } },
+        },
+      }),
+      this.prisma.studentHold.findMany({
+        where: { studentId, active: true },
+        orderBy: { placedAt: "asc" },
+      }),
+      this.prisma.approvalRequest.findMany({
+        where: {
+          kind: "payment_plan",
+          status: "pending",
+          targetType: "Invoice",
+        },
+        select: { targetId: true },
+      }),
+    ]);
 
     const position = deriveApiAccountPosition(invoices);
     const derived = derivedInstallmentsById(position);
     const payableTarget = selectOldestPayableTarget(invoices, position);
-    const activeHolds = await this.prisma.studentHold.findMany({
-      where: { studentId, active: true },
-      orderBy: { placedAt: "asc" },
-    });
+    const pendingPlanInvoiceIds = new Set(
+      pendingPlanChanges.flatMap((request) =>
+        request.targetId ? [request.targetId] : [],
+      ),
+    );
+    const specialAccount = deriveAccountSpecialStatus(
+      invoices,
+      pendingPlanInvoiceIds,
+    );
     const chargeInvoices = invoices.filter(
       (invoice) => invoice.status !== "void" && invoice.totalAmount > 0,
     );
@@ -2650,8 +2704,15 @@ export class FinanceService {
         program: student.program?.name ?? "—",
         email: student.person.email,
       },
-      totals: { billed, paid, balance: position.summary.balanceXof },
+      totals: {
+        billed,
+        paid,
+        balance: position.summary.balanceXof,
+        remaining: position.summary.outstandingXof,
+        remainingXof: position.summary.outstandingXof,
+      },
       summary: position.summary,
+      specialAccount,
       payableTarget,
       activeHolds: activeHolds.map((hold) => ({
         id: hold.id,
@@ -2661,6 +2722,7 @@ export class FinanceService {
       })),
       invoices: invoices.map((inv) => {
         const summary = invoicePositionSummary(position, inv.id);
+        const planType = invoicePlanType(inv);
         return {
           id: inv.id,
           createdAt: inv.createdAt,
@@ -2668,10 +2730,16 @@ export class FinanceService {
           description: inv.description,
           packageType: inv.packageType,
           academicYearLabel: inv.academicYearLabel,
+          feeScheduleId: inv.feeScheduleId,
           feeScheduleRevision: inv.feeScheduleRevision,
+          planType,
+          isIndividualPlanOverride: planType === "individual_override",
+          hasPendingPlanChange: pendingPlanInvoiceIds.has(inv.id),
           total: inv.totalAmount,
           paid: inv.amountPaid,
           balance: inv.status === "void" ? 0 : inv.totalAmount - inv.amountPaid,
+          remaining: summary.outstandingXof,
+          remainingXof: summary.outstandingXof,
           status:
             inv.status === "void"
               ? "void"
