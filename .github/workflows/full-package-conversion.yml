@@ -1,0 +1,168 @@
+name: Full-package conversion
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: Environment whose currently deployed API task should run the conversion
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod
+      academic_year:
+        description: Exact approved academic-year label
+        required: true
+        default: 2026–2027
+        type: string
+      confirm:
+        description: Commit the conversion (unchecked is a read-only dry run)
+        required: true
+        default: false
+        type: boolean
+      backup_reference:
+        description: Required for a production commit; enter the verified RDS snapshot identifier
+        required: false
+        type: string
+
+concurrency:
+  group: full-package-${{ inputs.target_environment }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ROLE_ARN: arn:aws:iam::961828155948:role/daust-github-deploy
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_environment }}
+    steps:
+      - name: Validate release and backup gate
+        env:
+          TARGET_ENV: ${{ inputs.target_environment }}
+          SHOULD_CONFIRM: ${{ inputs.confirm }}
+          BACKUP_REFERENCE: ${{ inputs.backup_reference }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_ENV" = "staging" ] && [ "$GITHUB_REF_NAME" != "develop" ]; then
+            echo "Staging conversion must run from develop, not $GITHUB_REF_NAME."
+            exit 1
+          fi
+          if [ "$TARGET_ENV" = "prod" ] && [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Production conversion must run from main, not $GITHUB_REF_NAME."
+            exit 1
+          fi
+          if [ "$TARGET_ENV" = "prod" ] && [ "$SHOULD_CONFIRM" = "true" ] && [ -z "$BACKUP_REFERENCE" ]; then
+            echo "A verified production RDS snapshot reference is required before commit."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run conversion in the deployed API task
+        env:
+          TARGET_ENV: ${{ inputs.target_environment }}
+          ACADEMIC_YEAR: ${{ inputs.academic_year }}
+          SHOULD_CONFIRM: ${{ inputs.confirm }}
+          BACKUP_REFERENCE: ${{ inputs.backup_reference }}
+        run: |
+          set -euo pipefail
+          CLUSTER="daust-$TARGET_ENV"
+          SERVICE="daust-$TARGET_ENV-api"
+          TASK_DEF=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          NET=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].networkConfiguration' --output json)
+          LOG_OPTIONS=$(aws ecs describe-task-definition --task-definition "$TASK_DEF" \
+            --query "taskDefinition.containerDefinitions[?name=='api'] | [0].logConfiguration.options" \
+            --output json)
+          LOG_GROUP=$(jq -r '.["awslogs-group"]' <<<"$LOG_OPTIONS")
+          LOG_PREFIX=$(jq -r '.["awslogs-stream-prefix"]' <<<"$LOG_OPTIONS")
+
+          ENVIRONMENT=$(jq -nc \
+            --arg year "$ACADEMIC_YEAR" \
+            --arg confirm "$SHOULD_CONFIRM" \
+            --arg backup "$BACKUP_REFERENCE" \
+            '[{"name":"ACADEMIC_YEAR","value":$year},
+              {"name":"CONFIRM","value":(if $confirm == "true" then "1" else "0" end)},
+              {"name":"BACKUP_REFERENCE","value":$backup}]')
+          OVERRIDES=$(jq -nc --argjson environment "$ENVIRONMENT" \
+            '{containerOverrides:[{
+              name:"api",
+              command:["node","node_modules/tsx/dist/cli.mjs","node_modules/@mydaust/db/prisma/convert-full-package.ts"],
+              environment:$environment
+            }]}')
+          RUN_RESULT=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_DEF" \
+            --launch-type FARGATE --network-configuration "$NET" --overrides "$OVERRIDES")
+          TASK=$(jq -r '.tasks[0].taskArn // empty' <<<"$RUN_RESULT")
+          if [ -z "$TASK" ]; then
+            jq -c '.failures' <<<"$RUN_RESULT"
+            exit 1
+          fi
+          echo "conversion task: $TASK"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
+
+          TASK_RESULT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK")
+          EXIT=$(jq -r '.tasks[0].containers[] | select(.name == "api") | .exitCode // empty' <<<"$TASK_RESULT")
+          TASK_ID="${TASK##*/}"
+          LOG_STREAM="$LOG_PREFIX/api/$TASK_ID"
+          printf '{"events":[]}' > conversion-logs.json
+          for attempt in $(seq 1 20); do
+            if aws logs get-log-events --log-group-name "$LOG_GROUP" \
+              --log-stream-name "$LOG_STREAM" --start-from-head \
+              --output json > conversion-logs.json 2>/dev/null \
+              && jq -e \
+                '[.events[].message | fromjson? | select(.event == "full-package-conversion")] | length > 0' \
+                conversion-logs.json >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          jq -r '.events[].message' conversion-logs.json
+          RESULT=$(jq -c \
+            '[.events[].message | fromjson? | select(.event == "full-package-conversion")] | last // empty' \
+            conversion-logs.json)
+          if [ "$EXIT" != "0" ]; then
+            echo "Conversion task failed with exit code ${EXIT:-not reported}."
+            exit 1
+          fi
+          if [ -z "$RESULT" ] || ! jq -e \
+            '.ok == true and .counts.unresolved == 0' <<<"$RESULT" >/dev/null; then
+            echo "Conversion did not produce a clean result."
+            exit 1
+          fi
+          EXPECTED_MODE=$([ "$SHOULD_CONFIRM" = "true" ] && echo commit || echo dry-run)
+          if [ "$(jq -r '.mode' <<<"$RESULT")" != "$EXPECTED_MODE" ]; then
+            echo "Conversion mode did not match the requested mode."
+            exit 1
+          fi
+          echo "conversion_result=$RESULT" >> "$GITHUB_OUTPUT"
+
+          if [ "$SHOULD_CONFIRM" != "true" ]; then
+            exit 0
+          fi
+
+          RECON_RESULT=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_DEF" \
+            --launch-type FARGATE --network-configuration "$NET" \
+            --overrides '{"containerOverrides":[{"name":"api","command":["node","dist/finance/reconcile-installment-statuses.cli.js"]}]}')
+          RECON_TASK=$(jq -r '.tasks[0].taskArn // empty' <<<"$RECON_RESULT")
+          if [ -z "$RECON_TASK" ]; then
+            jq -c '.failures' <<<"$RECON_RESULT"
+            exit 1
+          fi
+          echo "reconciliation task: $RECON_TASK"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$RECON_TASK"
+          RECON_EXIT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$RECON_TASK" \
+            --query "tasks[0].containers[?name=='api'] | [0].exitCode" --output text)
+          if [ "$RECON_EXIT" != "0" ]; then
+            echo "Post-conversion reconciliation failed with exit code $RECON_EXIT."
+            exit 1
+          fi
