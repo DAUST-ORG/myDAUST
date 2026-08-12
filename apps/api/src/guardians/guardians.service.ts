@@ -6,11 +6,13 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import bcrypt from "bcryptjs";
+import type { AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { FinanceService } from "../finance/finance.service.js";
 import { standingLabel } from "../academics/academics.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
+import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
 
 /** Password-setup invites are short-lived; the registrar can always re-issue one. */
@@ -22,14 +24,6 @@ function attendanceRate(records: { status: string }[]): number | null {
   const present = records.filter((r) => r.status === "present").length;
   const late = records.filter((r) => r.status === "late").length;
   return Math.round(((present + late * 0.5) / records.length) * 100);
-}
-
-/** One graded course on a child's transcript. */
-export interface TranscriptRow {
-  code: string;
-  title: string;
-  credits: number;
-  grade: string | null;
 }
 
 export interface CreateGuardianInput {
@@ -45,6 +39,9 @@ export class GuardiansService {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly finance: FinanceService,
+    private readonly transcripts: TranscriptService = new TranscriptService(
+      prisma,
+    ),
   ) {}
 
   /** Invite tokens are stored hashed — a leaked database row must not grant access. */
@@ -156,7 +153,12 @@ export class GuardiansService {
     // a fresh invite here would let anyone who can create guardians reset an
     // existing guardian's password without access to their mailbox.
     if (guardian.passwordHash) {
-      return { id: guardian.id, email: guardian.email, inviteExpiresAt: null };
+      return {
+        id: guardian.id,
+        email: guardian.email,
+        inviteExpiresAt: null,
+        inviteDelivery: "not_needed" as const,
+      };
     }
 
     const invite = await this.issueInvite(
@@ -168,6 +170,7 @@ export class GuardiansService {
       id: guardian.id,
       email: guardian.email,
       inviteExpiresAt: invite.expiresAt,
+      inviteDelivery: invite.sent ? ("sent" as const) : ("not_sent" as const),
     };
   }
 
@@ -183,18 +186,23 @@ export class GuardiansService {
     // authenticated portal layout, and the guardian has no password yet.
     const origin = process.env.PUBLIC_URL ?? "http://localhost:3000";
     const link = `${origin}/set-password?token=${token}`;
-    await this.mail.send({
-      to: email,
-      subject: "Set up your myDAUST parent account",
-      html: `
-        <p>Hello ${name},</p>
-        <p>A myDAUST parent account has been created for you so you can follow your
-        child's grades, attendance and fees.</p>
-        <p><a href="${link}">Set your password</a> (link valid for ${INVITE_TTL_HOURS} hours).</p>
-        <p>If you were not expecting this, you can ignore this email.</p>
-      `,
-    });
-    return { expiresAt, link };
+    const sent = await this.mail
+      .send({
+        to: email,
+        subject: "Set up your myDAUST parent account",
+        html: `
+          <p>Hello ${name},</p>
+          <p>A myDAUST parent account has been created for you so you can follow your
+          child's grades, attendance and fees.</p>
+          <p><a href="${link}">Set your password</a> (link valid for ${INVITE_TTL_HOURS} hours).</p>
+          <p>If you were not expecting this, you can ignore this email.</p>
+        `,
+      })
+      .then((delivery) => delivery?.sent === true)
+      // Account creation must remain truthful when the provider is unavailable:
+      // preserve the valid invite and let the registrar retry/disclose it safely.
+      .catch(() => false);
+    return { expiresAt, link, sent };
   }
 
   async resendInvite(actorId: string, guardianId: string) {
@@ -227,6 +235,7 @@ export class GuardiansService {
       ok: true,
       inviteLink: invite.link,
       inviteExpiresAt: invite.expiresAt,
+      inviteDelivery: invite.sent ? ("sent" as const) : ("not_sent" as const),
     };
   }
 
@@ -241,12 +250,22 @@ export class GuardiansService {
         "A guardian must be linked to at least one student",
       );
     }
+    const uniqueStudentIds = [...new Set(studentIds)];
+    const activeStudents = await this.prisma.student.findMany({
+      where: { id: { in: uniqueStudentIds }, recordStatus: "active" },
+      select: { id: true },
+    });
+    if (activeStudents.length !== uniqueStudentIds.length) {
+      throw new BadRequestException(
+        "One or more selected students do not exist or are archived",
+      );
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.guardianStudent.deleteMany({
-        where: { guardianId, studentId: { notIn: studentIds } },
+        where: { guardianId, studentId: { notIn: uniqueStudentIds } },
       });
       await tx.guardianStudent.createMany({
-        data: studentIds.map((studentId) => ({ guardianId, studentId })),
+        data: uniqueStudentIds.map((studentId) => ({ guardianId, studentId })),
         skipDuplicates: true,
       });
       await tx.auditLog.create({
@@ -255,7 +274,7 @@ export class GuardiansService {
           entityId: guardianId,
           action: "guardian-children-changed",
           actorId,
-          data: { studentIds },
+          data: { studentIds: uniqueStudentIds },
         },
       });
     });
@@ -289,23 +308,55 @@ export class GuardiansService {
       }
       data.email = email;
     }
-    const updated = await this.prisma.person.update({
-      where: { id: guardianId },
-      data,
+    const emailChanged =
+      data.email !== undefined && data.email !== guardian.email;
+    const invalidateInvites = emailChanged && !guardian.passwordHash;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const person = await tx.person.update({
+        where: { id: guardianId },
+        data,
+      });
+      if (invalidateInvites) {
+        // An invite sent to the old mailbox is a credential. Once the account's
+        // email changes it must stop working immediately, even if it has not expired.
+        await tx.guardianInvite.updateMany({
+          where: { guardianId, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          entity: "Person",
+          entityId: guardianId,
+          action: "guardian-updated",
+          actorId,
+          data: {
+            email: person.email,
+            previousEmail: emailChanged ? guardian.email : undefined,
+            outstandingInvitesInvalidated: invalidateInvites,
+          },
+        },
+      });
+      return person;
     });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Person",
-        entityId: guardianId,
-        action: "guardian-updated",
-        actorId,
-        data: { email: updated.email },
-      },
-    });
+
+    const replacementInvite = invalidateInvites
+      ? await this.issueInvite(
+          updated.id,
+          updated.email,
+          `${updated.firstName} ${updated.lastName}`,
+        )
+      : null;
     return {
       id: updated.id,
       name: `${updated.firstName} ${updated.lastName}`,
       email: updated.email,
+      inviteDelivery: replacementInvite
+        ? replacementInvite.sent
+          ? "sent"
+          : "not_sent"
+        : null,
+      inviteExpiresAt: replacementInvite?.expiresAt ?? null,
     };
   }
 
@@ -315,16 +366,20 @@ export class GuardiansService {
       where: { id: guardianId, kind: "parent" },
     });
     if (!guardian) throw new NotFoundException("Guardian not found");
-    // GuardianStudent and GuardianInvite cascade on the guardian relation.
-    await this.prisma.person.delete({ where: { id: guardianId } });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Person",
-        entityId: guardianId,
-        action: "guardian-deleted",
-        actorId,
-        data: { email: guardian.email },
-      },
+    // GuardianStudent and GuardianInvite cascade on the guardian relation. Keep
+    // the audit write in the same transaction so a deletion is never completed
+    // without its immutable registrar evidence (or logged when deletion fails).
+    await this.prisma.$transaction(async (tx) => {
+      await tx.person.delete({ where: { id: guardianId } });
+      await tx.auditLog.create({
+        data: {
+          entity: "Person",
+          entityId: guardianId,
+          action: "guardian-deleted",
+          actorId,
+          data: { email: guardian.email },
+        },
+      });
     });
     return { ok: true };
   }
@@ -340,78 +395,90 @@ export class GuardiansService {
       throw new BadRequestException("Password must be at least 10 characters");
     }
     const tokenHash = this.hashToken(token);
-    const valid = (
-      inv: { usedAt: Date | null; expiresAt: Date } | null,
-    ): boolean => !!inv && !inv.usedAt && inv.expiresAt.getTime() >= Date.now();
+    const invalidInvite = () =>
+      new BadRequestException("That invitation link is invalid or has expired");
 
     // Guardian invite first, then the student invite — one opaque token, one page.
     const gInvite = await this.prisma.guardianInvite.findUnique({
       where: { tokenHash },
       include: { guardian: true },
     });
-    if (valid(gInvite)) {
+    if (gInvite) {
       const passwordHash = await bcrypt.hash(password, 10);
+      const redeemedAt = new Date();
       await this.prisma.$transaction(async (tx) => {
-        await tx.person.update({
-          where: { id: gInvite!.guardianId },
-          data: { passwordHash },
+        // Claim before changing the password. updateMany makes the single-use
+        // condition part of the write, so two concurrent requests cannot both
+        // redeem a token they read while it was still unused.
+        const claim = await tx.guardianInvite.updateMany({
+          where: {
+            id: gInvite.id,
+            usedAt: null,
+            expiresAt: { gte: redeemedAt },
+          },
+          data: { usedAt: redeemedAt },
         });
-        await tx.guardianInvite.update({
-          where: { id: gInvite!.id },
-          data: { usedAt: new Date() },
+        if (claim.count !== 1) throw invalidInvite();
+        await tx.person.update({
+          where: { id: gInvite.guardianId },
+          data: { passwordHash },
         });
         // Any other outstanding invites for this guardian are now moot.
         await tx.guardianInvite.updateMany({
-          where: { guardianId: gInvite!.guardianId, usedAt: null },
-          data: { usedAt: new Date() },
+          where: { guardianId: gInvite.guardianId, usedAt: null },
+          data: { usedAt: redeemedAt },
         });
         await tx.auditLog.create({
           data: {
             entity: "Person",
-            entityId: gInvite!.guardianId,
+            entityId: gInvite.guardianId,
             action: "guardian-password-set",
-            actorId: gInvite!.guardianId,
+            actorId: gInvite.guardianId,
           },
         });
       });
-      return { ok: true, email: gInvite!.guardian.email };
+      return { ok: true, email: gInvite.guardian.email };
     }
 
     const sInvite = await this.prisma.studentInvite.findUnique({
       where: { tokenHash },
       include: { person: true },
     });
-    if (valid(sInvite)) {
+    if (sInvite) {
       const passwordHash = await bcrypt.hash(password, 10);
+      const redeemedAt = new Date();
       await this.prisma.$transaction(async (tx) => {
+        const claim = await tx.studentInvite.updateMany({
+          where: {
+            id: sInvite.id,
+            usedAt: null,
+            expiresAt: { gte: redeemedAt },
+          },
+          data: { usedAt: redeemedAt },
+        });
+        if (claim.count !== 1) throw invalidInvite();
         await tx.person.update({
-          where: { id: sInvite!.studentPersonId },
+          where: { id: sInvite.studentPersonId },
           data: { passwordHash },
         });
-        await tx.studentInvite.update({
-          where: { id: sInvite!.id },
-          data: { usedAt: new Date() },
-        });
         await tx.studentInvite.updateMany({
-          where: { studentPersonId: sInvite!.studentPersonId, usedAt: null },
-          data: { usedAt: new Date() },
+          where: { studentPersonId: sInvite.studentPersonId, usedAt: null },
+          data: { usedAt: redeemedAt },
         });
         await tx.auditLog.create({
           data: {
             entity: "Person",
-            entityId: sInvite!.studentPersonId,
+            entityId: sInvite.studentPersonId,
             action: "student-password-set",
-            actorId: sInvite!.studentPersonId,
+            actorId: sInvite.studentPersonId,
           },
         });
       });
-      return { ok: true, email: sInvite!.person.email };
+      return { ok: true, email: sInvite.person.email };
     }
 
     // Same generic failure for unknown, used and expired tokens — no oracle.
-    throw new BadRequestException(
-      "That invitation link is invalid or has expired",
-    );
+    throw invalidInvite();
   }
 
   // --- Parent-facing ------------------------------------------------------
@@ -435,40 +502,7 @@ export class GuardiansService {
    */
   async childGrades(guardianId: string, studentId: string) {
     await this.assertGuardianOf(guardianId, studentId);
-    const completed = await this.prisma.transcriptEntry.findMany({
-      where: { studentId, voidedAt: null },
-      orderBy: [{ termSortKey: "desc" }, { courseCode: "asc" }],
-    });
-
-    const byTerm = new Map<
-      string,
-      { term: string; entries: typeof completed; courses: TranscriptRow[] }
-    >();
-    for (const entry of completed) {
-      const key = entry.termLabel;
-      if (!byTerm.has(key)) {
-        byTerm.set(key, { term: key, entries: [], courses: [] });
-      }
-      byTerm.get(key)!.entries.push(entry);
-      byTerm.get(key)!.courses.push({
-        code: entry.courseCode,
-        title: entry.courseTitle,
-        credits: entry.credits,
-        grade: entry.grade,
-      });
-    }
-
-    const terms = [...byTerm.values()].map((term) => {
-      const summary = summarizeTranscriptRows(term.entries);
-      return {
-        term: term.term,
-        gpa: summary.gpa,
-        credits: summary.completedCredits,
-        courses: term.courses,
-      };
-    });
-
-    return { cumulativeGpa: summarizeTranscriptRows(completed).gpa, terms };
+    return this.transcripts.view(studentId);
   }
 
   /** A child's per-course attendance. Late counts as half a present. */
@@ -515,7 +549,200 @@ export class GuardiansService {
    */
   async childAccount(guardianId: string, studentId: string) {
     await this.assertGuardianOf(guardianId, studentId);
-    return this.finance.getStudentAccount(studentId);
+    const account = await this.finance.getStudentAccount(studentId);
+    return {
+      ...account,
+      invoices: account.invoices.map((invoice) => ({
+        ...invoice,
+        // Finance keeps contact snapshots for notification/audit, but a second
+        // guardian of the same child must not learn another payer's email.
+        payments: invoice.payments.map((payment) => {
+          const { initiatedByEmail: _email, ...safe } =
+            payment as typeof payment & {
+              initiatedByEmail?: string | null;
+            };
+          return safe;
+        }),
+        wireTransfers: invoice.wireTransfers.map((wire) => {
+          const { contactEmail: _email, ...safe } = wire;
+          return safe;
+        }),
+      })),
+    };
+  }
+
+  /** Verify the selected child and invoice as one scope before any money moves. */
+  private async assertChildInvoice(
+    guardianId: string,
+    studentId: string,
+    invoiceId: string,
+  ) {
+    await this.assertGuardianOf(guardianId, studentId);
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId, studentId },
+      select: { id: true },
+    });
+    if (!invoice) throw new NotFoundException("Invoice not found");
+    return invoice;
+  }
+
+  /** Start a hosted checkout for a linked child, preserving who actually paid. */
+  async initiateChildPayment(
+    guardian: AuthUser,
+    studentId: string,
+    input: {
+      invoiceId: string;
+      amount: number;
+      method: "wave" | "orange_money" | "card";
+    },
+  ) {
+    await this.assertChildInvoice(
+      guardian.personId,
+      studentId,
+      input.invoiceId,
+    );
+    const result = await this.finance.initiatePayment(studentId, input, {
+      source: "parent_portal",
+      initiatedById: guardian.personId,
+      initiatedByEmail: guardian.email,
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Payment",
+        entityId: result.paymentId,
+        action: "parent-initiated",
+        actorId: guardian.personId,
+        data: { studentId, invoiceId: input.invoiceId, method: input.method },
+      },
+    });
+    return result;
+  }
+
+  /** Send a PI-SPI request for a linked child; never save the alias on the child. */
+  async submitChildPiSpi(
+    guardian: AuthUser,
+    studentId: string,
+    input: { invoiceId: string; alias: string; amountXof: number },
+  ) {
+    await this.assertChildInvoice(
+      guardian.personId,
+      studentId,
+      input.invoiceId,
+    );
+    const result = await this.finance.submitStudentPiSpi(
+      studentId,
+      guardian.personId,
+      input,
+      {
+        source: "parent_portal",
+        initiatedByEmail: guardian.email,
+      },
+    );
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "PiSpiRequest",
+        entityId: result.txId,
+        action: "parent-initiated",
+        actorId: guardian.personId,
+        data: { studentId, invoiceId: input.invoiceId },
+      },
+    });
+    return result;
+  }
+
+  async childPiSpiStatus(guardianId: string, studentId: string, txId: string) {
+    await this.assertGuardianOf(guardianId, studentId);
+    return this.finance.getPiSpiRequest(txId, { studentId });
+  }
+
+  /** Submit private proof for a linked child using the guardian's account email. */
+  async submitChildWire(
+    guardian: AuthUser,
+    studentId: string,
+    input: { invoiceId: string; amountXof: number },
+    file: Express.Multer.File,
+  ) {
+    await this.assertChildInvoice(
+      guardian.personId,
+      studentId,
+      input.invoiceId,
+    );
+    if (!file) throw new BadRequestException("Choose a wire-transfer proof");
+
+    const result = await this.finance.submitGuardianWire(
+      studentId,
+      { personId: guardian.personId, email: guardian.email },
+      input.invoiceId,
+      input.amountXof,
+      file,
+    );
+
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "WireTransferSubmission",
+        entityId: result.id,
+        action: "parent-submitted",
+        actorId: guardian.personId,
+        data: { studentId, invoiceId: input.invoiceId },
+      },
+    });
+    return result;
+  }
+
+  private async assertChildPayment(
+    guardianId: string,
+    studentId: string,
+    paymentId: string,
+  ) {
+    await this.assertGuardianOf(guardianId, studentId);
+    const payment = await this.prisma.payment.findFirst({
+      where: { id: paymentId, studentId },
+      include: { invoice: { select: { studentId: true } } },
+    });
+    if (!payment || payment.invoice.studentId !== studentId) {
+      throw new NotFoundException("Payment not found");
+    }
+    return payment;
+  }
+
+  async childPaymentStatus(
+    guardianId: string,
+    studentId: string,
+    paymentId: string,
+  ) {
+    const payment = await this.assertChildPayment(
+      guardianId,
+      studentId,
+      paymentId,
+    );
+    const durable = payment as typeof payment & {
+      source?: string;
+      settledAt?: Date | null;
+      refundedAt?: Date | null;
+    };
+    return {
+      id: payment.id,
+      invoiceId: payment.invoiceId,
+      amount: payment.amount,
+      method: payment.method,
+      status: payment.status,
+      providerRef: payment.providerRef,
+      source: durable.source ?? "legacy",
+      settledAt: durable.settledAt ?? null,
+      refundedAt: durable.refundedAt ?? null,
+      createdAt: payment.createdAt,
+    };
+  }
+
+  async childPaymentReceipt(
+    guardianId: string,
+    studentId: string,
+    paymentId: string,
+  ) {
+    await this.assertChildPayment(guardianId, studentId, paymentId);
+    const receipt = await this.finance.getReceipt(paymentId);
+    const { initiatedByEmail: _payerEmail, ...safe } = receipt;
+    return safe;
   }
 
   async myChildren(guardianId: string) {
@@ -552,9 +779,8 @@ export class GuardiansService {
     );
 
     return links.map(({ student, relation }) => {
-      const { gpa, completedCredits } = summarizeTranscriptRows(
-        student.transcriptEntries,
-      );
+      const transcript = summarizeTranscriptRows(student.transcriptEntries);
+      const gpa = transcript.attemptedCredits === 0 ? null : transcript.gpa;
       const summary = deriveApiAccountPosition(student.invoices).summary;
       return {
         studentId: student.id,
@@ -565,8 +791,10 @@ export class GuardiansService {
         photoUrl: student.photoUrl,
         relation,
         gpa,
-        completedCredits,
-        standing: student.standing ?? standingLabel(gpa),
+        completedCredits: transcript.completedCredits,
+        standing:
+          student.standing ??
+          (gpa === null ? "Not yet graded" : standingLabel(gpa)),
         balance: summary.balanceXof,
         summary,
         requiredCredits: student.programId

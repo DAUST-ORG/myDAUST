@@ -199,7 +199,7 @@ async function seedFacultyProfiles() {
 }
 
 async function seedStudents(passwordHash: string) {
-  const term = await prisma.term.upsert({
+  await prisma.term.upsert({
     where: { name: "Fall 2026" },
     update: { addDeadline: new Date("2026-09-15"), dropDeadline: new Date("2026-10-15") },
     create: {
@@ -211,48 +211,97 @@ async function seedStudents(passwordHash: string) {
     },
   });
 
-  for (const s of STUDENTS) {
+  for (const student of STUDENTS) {
     const person = await prisma.person.upsert({
-      where: { email: s.email },
+      where: { email: student.email },
       update: { roles: ["student"], passwordHash },
       create: {
-        email: s.email,
-        firstName: s.firstName,
-        lastName: s.lastName,
+        email: student.email,
+        firstName: student.firstName,
+        lastName: student.lastName,
         kind: "student",
         roles: ["student"],
         passwordHash,
       },
     });
-    const student = await prisma.student.upsert({
-      where: { studentNo: s.studentNo },
+    await prisma.student.upsert({
+      where: { studentNo: student.studentNo },
       update: {},
-      create: { id: s.id, personId: person.id, studentNo: s.studentNo },
+      create: { id: student.id, personId: person.id, studentNo: student.studentNo },
     });
+  }
+  console.log(`Seeded ${STUDENTS.length} students.`);
+}
+
+/** Seed demo accounts with the same approved package used by live student creation. */
+async function seedStandardPackages() {
+  const schedule = await prisma.feeSchedule.findFirst({
+    where: { status: "approved", academicYear: { status: "active" } },
+    orderBy: { revision: "desc" },
+    include: { rows: { orderBy: { sequence: "asc" } } },
+  });
+  if (!schedule || schedule.rows.some((row) => !row.dueOn)) {
+    throw new Error("Seed requires a complete approved fee schedule");
+  }
+  const term = await prisma.term.findFirstOrThrow({
+    where: { academicYear: { label: schedule.academicYearLabel } },
+    orderBy: [{ startDate: "asc" }, { id: "asc" }],
+  });
+  const tuition = schedule.rows.reduce((sum, row) => sum + row.amountTuitionXof, 0);
+  const housing = schedule.rows.reduce((sum, row) => sum + row.amountHousingXof, 0);
+  const cafeteria = schedule.rows.reduce((sum, row) => sum + row.amountCafeteriaXof, 0);
+  const full = schedule.rows.reduce((sum, row) => sum + row.amountFullXof, 0);
+  const students = await prisma.student.findMany({
+    where: { recordStatus: "active" },
+    select: { id: true },
+  });
+  let created = 0;
+  for (const student of students) {
     const existing = await prisma.invoice.findFirst({
-      where: { studentId: student.id, termId: term.id },
+      where: {
+        studentId: student.id,
+        academicYearLabel: schedule.academicYearLabel,
+        packageType: "standard_full",
+        status: { not: "void" },
+      },
     });
-    if (!existing) {
-      await prisma.invoice.create({
-        data: {
-          studentId: student.id,
-          termId: term.id,
-          totalAmount: s.total,
-          costCenterCode: COST_CENTER_TUITION,
-          plan: {
-            create: {
-              installments: {
-                create: s.installments.map((i) => ({ ...i, dueDate: new Date(i.dueDate) })),
-              },
+    if (existing) continue;
+    await prisma.invoice.create({
+      data: {
+        studentId: student.id,
+        termId: term.id,
+        totalAmount: full,
+        costCenterCode: COST_CENTER_TUITION,
+        description: "Annual tuition, housing and cafeteria package",
+        packageType: "standard_full",
+        academicYearLabel: schedule.academicYearLabel,
+        feeScheduleId: schedule.id,
+        feeScheduleRevision: schedule.revision,
+        components: {
+          create: [
+            { kind: "tuition", costCenterCode: "9100", amountXof: tuition },
+            { kind: "housing", costCenterCode: "3700", amountXof: housing },
+            { kind: "cafeteria", costCenterCode: "3600", amountXof: cafeteria },
+          ],
+        },
+        plan: {
+          create: {
+            installments: {
+              create: schedule.rows.map((row) => ({
+                sequence: row.sequence,
+                label: row.label,
+                dueDate: row.dueOn!,
+                amountDue: row.amountFullXof,
+              })),
             },
           },
         },
-      });
-    }
+      },
+    });
+    created++;
   }
-  console.log(`Seeded ${STUDENTS.length} students with Fall 2026 invoices.`);
+  console.log(`Seeded ${created} approved full-package invoice(s).`);
 }
-
 async function seedAcademics() {
   const dept = await prisma.department.upsert({
     where: { code: "CE" },
@@ -489,20 +538,71 @@ async function seedFinanceMgmt() {
     data: { personId: "usr_faculty" },
   });
 
-  // A couple of settled payments so "money in" (tuition revenue, cc 9100) is non-zero.
-  const settle: [string, string, number][] = [
+  // Settled demo payments include installment and component allocations.
+  const payments: [string, string, number][] = [
     ["stu_demo_aissatou", "SEED-PAY-AISS", 1_500_000],
     ["stu_mamadou", "SEED-PAY-MAM", 991_666],
   ];
-  for (const [studentId, ref, amount] of settle) {
-    if (await prisma.payment.findUnique({ where: { providerRef: ref } })) continue;
-    const inv = await prisma.invoice.findFirst({ where: { studentId } });
-    if (!inv) continue;
-    await prisma.payment.create({
-      data: { invoiceId: inv.id, studentId, amount, method: "wave", status: "success", providerRef: ref },
+  for (const [studentId, providerRef, amount] of payments) {
+    if (await prisma.payment.findUnique({ where: { providerRef } })) continue;
+    const invoice = await prisma.invoice.findFirst({
+      where: { studentId, packageType: "standard_full", status: { not: "void" } },
+      include: {
+        components: true,
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    if (!invoice) continue;
+    const payment = await prisma.payment.create({
+      data: {
+        invoiceId: invoice.id,
+        studentId,
+        amount,
+        method: "wave",
+        status: "success",
+        providerRef,
+        source: "seed",
+        settledAt: new Date("2026-08-10T12:00:00Z"),
+      },
+    });
+    let remaining = amount;
+    for (const installment of invoice.plan?.installments ?? []) {
+      const allocated = Math.min(remaining, installment.amountDue);
+      if (allocated === 0) break;
+      await prisma.paymentAllocation.create({
+        data: { paymentId: payment.id, installmentId: installment.id, amount: allocated },
+      });
+      await prisma.installment.update({
+        where: { id: installment.id },
+        data: {
+          amountPaid: allocated,
+          status: allocated >= installment.amountDue ? "paid" : "partial",
+        },
+      });
+      remaining -= allocated;
+    }
+    const componentAmounts = invoice.components.map((component) => ({
+      component,
+      amountXof: Math.floor((amount * component.amountXof) / invoice.totalAmount),
+    }));
+    let remainder = amount - componentAmounts.reduce((sum, row) => sum + row.amountXof, 0);
+    componentAmounts.sort((a, b) => a.component.kind.localeCompare(b.component.kind));
+    for (const row of componentAmounts) {
+      if (remainder === 0) break;
+      row.amountXof++;
+      remainder--;
+    }
+    await prisma.paymentComponentAllocation.createMany({
+      data: componentAmounts
+        .filter((row) => row.amountXof > 0)
+        .map((row) => ({
+          paymentId: payment.id,
+          invoiceComponentId: row.component.id,
+          amountXof: row.amountXof,
+        })),
     });
     await prisma.invoice.update({
-      where: { id: inv.id },
+      where: { id: invoice.id },
       data: { amountPaid: { increment: amount }, status: "partial" },
     });
   }
@@ -748,6 +848,8 @@ async function main() {
   await seedFacultyProfiles();
   await seedStudents(passwordHash);
   await seedAcademics();
+  await seedSisReference(prisma);
+  await seedStandardPackages();
   await seedGrades();
   await seedAnnouncements();
   await seedFinanceMgmt();
@@ -757,7 +859,6 @@ async function main() {
   await seedDining();
   await seedHousing();
   await seedTrackD();
-  await seedSisReference(prisma);
   await seedGuardians(passwordHash);
   console.log(`All seeded users share dev password: "${DEV_PASSWORD}"`);
 }

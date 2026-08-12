@@ -11,3 +11,4 @@ export * from "./site-content.js";
 export * from "./contact.js";
 export * from "./news.js";
 export * from "./faculty.js";
+export * from "./transcript.js";

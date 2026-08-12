@@ -6,8 +6,9 @@ import type { PrismaClient } from "@prisma/client";
  *
  * This is *official* configuration, not demo data, so both the dev seed and the
  * production bootstrap load it — without it the grading, degree-audit and fee
- * screens are empty. Idempotent: keyed on natural unique columns so re-running
- * updates rather than duplicates.
+ * screens are empty. Idempotent reference rows may be refreshed, but an approved
+ * fee schedule is financial configuration and is therefore created only when the
+ * academic year has no approved revision. Deployments never overwrite it.
  */
 
 /** Scales the institution grades on. Null points = excluded from GPA, not zero. */
@@ -207,29 +208,31 @@ export async function seedSisReference(
     });
   }
 
-  for (const [semester, label, sequence, dueOn] of FEE_PLAN) {
-    await prisma.feePlanInstallment.upsert({
-      where: {
-        academicYearLabel_sequence: {
-          academicYearLabel: activeLabel,
-          sequence,
-        },
-      },
-      update: {
-        semester,
-        label,
-        dueOn: new Date(dueOn),
-        amountFullXof: 1_071_250,
-        amountTuitionXof: 743_750,
-      },
-      create: {
+  const approvedSchedule = await prisma.feeSchedule.findFirst({
+    where: { academicYearLabel: activeLabel, status: "approved" },
+    orderBy: { revision: "desc" },
+  });
+  if (!approvedSchedule) {
+    await prisma.feeSchedule.create({
+      data: {
         academicYearLabel: activeLabel,
-        semester,
-        label,
-        sequence,
-        dueOn: new Date(dueOn),
-        amountFullXof: 1_071_250,
-        amountTuitionXof: 743_750,
+        revision: 1,
+        status: "approved",
+        reason: "Bootstrap fallback — replace through Director approval",
+        approvedAt: new Date(),
+        rows: {
+          create: FEE_PLAN.map(([semester, label, sequence, dueOn]) => ({
+            academicYearLabel: activeLabel,
+            semester,
+            label,
+            sequence,
+            dueOn: new Date(dueOn),
+            amountFullXof: 1_071_250,
+            amountTuitionXof: 743_750,
+            amountHousingXof: 170_000,
+            amountCafeteriaXof: 157_500,
+          })),
+        },
       },
     });
   }

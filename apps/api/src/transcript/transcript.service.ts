@@ -2,9 +2,28 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
+import { createHash, randomUUID } from "node:crypto";
+import { Prisma } from "@mydaust/db";
+import type {
+  TranscriptPdfGeneration,
+  TranscriptPdfGeneratorKind,
+  TranscriptStudentIdentity,
+  TranscriptView,
+} from "@mydaust/shared";
+import type { AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { summarizeTranscriptRows } from "./transcript-calculation.js";
+import {
+  renderTranscriptPdf,
+  transcriptWatermark,
+  UnsupportedTranscriptCharacterError,
+} from "./transcript-pdf.js";
+import {
+  buildTranscriptView,
+  type TranscriptLedgerRow,
+} from "./transcript-view.js";
 
 export interface TranscriptEntryInput {
   courseId?: string | null;
@@ -35,9 +54,209 @@ function sortKeyForDate(date: Date, label: string): string {
   return `${date.toISOString().slice(0, 10)}:${label}`;
 }
 
+function dakarTimestamp(date: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Dakar",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    timeZoneName: "short",
+  }).format(date);
+}
+
+function transcriptFileName(studentNo: string): string {
+  const safeStudentNo = studentNo.replace(/[^A-Za-z0-9_-]+/g, "-");
+  return `unofficial-transcript-${safeStudentNo || "student"}.pdf`;
+}
+
+export interface TranscriptPdfFile {
+  data: Buffer;
+  fileName: string;
+  sha256: string;
+  generationId: string;
+  pageCount: number;
+}
+
 @Injectable()
 export class TranscriptService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async readView(
+    client: Prisma.TransactionClient,
+    studentId: string,
+  ): Promise<TranscriptView> {
+    const [student, entries] = await Promise.all([
+      client.student.findUnique({
+        where: { id: studentId },
+        select: {
+          id: true,
+          studentNo: true,
+          person: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          program: {
+            select: { code: true, name: true, degree: true },
+          },
+        },
+      }),
+      client.transcriptEntry.findMany({
+        where: { studentId, voidedAt: null },
+        select: {
+          id: true,
+          courseId: true,
+          termId: true,
+          courseCode: true,
+          courseTitle: true,
+          termLabel: true,
+          termSortKey: true,
+          grade: true,
+          credits: true,
+          earnedCredits: true,
+          gradePoints: true,
+          countsTowardGpa: true,
+          countsTowardCredits: true,
+          requirementCategory: true,
+          source: true,
+        },
+      }),
+    ]);
+    if (!student) throw new NotFoundException("Student not found");
+
+    const identity: TranscriptStudentIdentity = {
+      id: student.id,
+      studentNo: student.studentNo,
+      name: `${student.person.firstName} ${student.person.lastName}`.trim(),
+      email: student.person.email,
+      program: student.program,
+    };
+    const rows: TranscriptLedgerRow[] = entries.map((entry) => ({
+      id: entry.id,
+      courseId: entry.courseId,
+      termId: entry.termId,
+      courseCode: entry.courseCode,
+      title: entry.courseTitle,
+      term: entry.termLabel,
+      termSortKey: entry.termSortKey,
+      grade: entry.grade,
+      credits: entry.credits,
+      earnedCredits: entry.earnedCredits,
+      points: entry.gradePoints,
+      countsTowardGpa: entry.countsTowardGpa,
+      countsTowardCredits: entry.countsTowardCredits,
+      requirementCategory: entry.requirementCategory,
+      source: entry.source as TranscriptLedgerRow["source"],
+    }));
+    return buildTranscriptView(identity, rows);
+  }
+
+  /** Consistent canonical transcript view used by every interactive surface. */
+  async view(studentId: string): Promise<TranscriptView> {
+    return this.prisma.$transaction((tx) => this.readView(tx, studentId), {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  }
+
+  /**
+   * Render and audit one immutable ledger snapshot. The consistent read, hash
+   * and audit record share a transaction so the provenance describes exactly
+   * the PDF returned to the caller.
+   */
+  async generatePdf(
+    actor: AuthUser,
+    studentId: string,
+    kind: TranscriptPdfGeneratorKind,
+  ): Promise<TranscriptPdfFile> {
+    const generatedAt = new Date();
+    const generationId = randomUUID();
+    const role =
+      kind === "student"
+        ? "student"
+        : actor.roles.includes("admin")
+          ? "admin"
+          : "registrar";
+    const generation: TranscriptPdfGeneration = {
+      generationId,
+      generatedAt: generatedAt.toISOString(),
+      generatedAtDakar: dakarTimestamp(generatedAt),
+      generator: {
+        personId: actor.personId,
+        name: actor.name,
+        email: actor.email,
+        role,
+        kind,
+      },
+    };
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const view = await this.readView(tx, studentId);
+        let rendered: Awaited<ReturnType<typeof renderTranscriptPdf>>;
+        try {
+          rendered = await renderTranscriptPdf(view, generation);
+        } catch (error) {
+          if (error instanceof UnsupportedTranscriptCharacterError) {
+            throw new UnprocessableEntityException(
+              "This academic record contains characters that the transcript renderer cannot represent safely. Contact the registrar rather than using a corrupted document.",
+            );
+          }
+          throw error;
+        }
+        const data = Buffer.from(rendered.bytes);
+        const sha256 = createHash("sha256").update(data).digest("hex");
+        await tx.auditLog.create({
+          data: {
+            entity: "TranscriptGeneration",
+            entityId: generationId,
+            action: "pdf-generated",
+            actorId: actor.personId,
+            data: {
+              studentId,
+              studentNo: view.student.studentNo,
+              generation: {
+                generationId: generation.generationId,
+                generatedAt: generation.generatedAt,
+                generatedAtDakar: generation.generatedAtDakar,
+                generator: {
+                  personId: generation.generator.personId,
+                  name: generation.generator.name,
+                  email: generation.generator.email,
+                  role: generation.generator.role,
+                  kind: generation.generator.kind,
+                },
+              },
+              watermark: transcriptWatermark(kind),
+              sha256,
+              pageCount: rendered.pageCount,
+              entryCount: view.semesters.reduce(
+                (count, semester) => count + semester.entries.length,
+                0,
+              ),
+            },
+          },
+        });
+        return {
+          data,
+          fileName: transcriptFileName(view.student.studentNo),
+          sha256,
+          generationId,
+          pageCount: rendered.pageCount,
+        };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5_000,
+        timeout: 15_000,
+      },
+    );
+  }
 
   private async defaultPolicy(grade: string) {
     const normalized = clean(grade).toUpperCase();

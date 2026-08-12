@@ -14,7 +14,17 @@ import {
   updateGuardian,
 } from "@/lib/api";
 import {
-  Avatar, Badge, Button, Card, EmptyState, Field, IconButton, Input, Modal, PageHeader, SearchInput,
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  IconButton,
+  Input,
+  Modal,
+  PageHeader,
+  SearchInput,
 } from "@/components/ui";
 
 export default function ParentsPage() {
@@ -23,18 +33,32 @@ export default function ParentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ fullName: "", email: "", relation: "", studentIds: [] as string[] });
-  const [editing, setEditing] = useState<{ id: string; fullName: string; email: string; studentIds: string[] } | null>(null);
+  const [form, setForm] = useState({
+    fullName: "",
+    email: "",
+    relation: "",
+    studentIds: [] as string[],
+  });
+  const [editing, setEditing] = useState<{
+    id: string;
+    fullName: string;
+    email: string;
+    studentIds: string[];
+  } | null>(null);
   const [removing, setRemoving] = useState<GuardianRow | null>(null);
   const [listQuery, setListQuery] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    getGuardians().then(setRows).catch((e: Error) => setError(e.message));
+    getGuardians()
+      .then(setRows)
+      .catch((e: Error) => setError(e.message));
   }, []);
   useEffect(() => {
     load();
-    getAdminStudents().then(setStudents).catch(() => setStudents([]));
+    getAdminStudents()
+      .then(setStudents)
+      .catch(() => setStudents([]));
   }, [load]);
 
   const toggleId = (ids: string[], id: string) =>
@@ -47,11 +71,16 @@ export default function ParentsPage() {
       (g) =>
         g.name.toLowerCase().includes(needle) ||
         g.email.toLowerCase().includes(needle) ||
-        g.children.some((c) => c.name.toLowerCase().includes(needle) || c.studentNo.toLowerCase().includes(needle)),
+        g.children.some(
+          (c) =>
+            c.name.toLowerCase().includes(needle) ||
+            c.studentNo.toLowerCase().includes(needle),
+        ),
     );
   }, [rows, listQuery]);
 
-  const valid = form.fullName.trim() && form.email.trim() && form.studentIds.length > 0;
+  const valid =
+    form.fullName.trim() && form.email.trim() && form.studentIds.length > 0;
 
   async function submit() {
     if (!valid) return;
@@ -65,13 +94,19 @@ export default function ParentsPage() {
         relation: form.relation.trim() || undefined,
       });
       setNote(
-        `Parent account created for ${form.fullName.trim()} · ID ${created.id}. A password-setup email has been sent to ${form.email.trim()}.`,
+        created.inviteDelivery === "sent"
+          ? `Parent account created for ${form.fullName.trim()} · ID ${created.id}. The password-setup email was sent to ${created.email}.`
+          : created.inviteDelivery === "not_needed"
+            ? `${form.fullName.trim()} was linked to the selected student account(s). Their existing parent login remains active.`
+            : `Parent account created for ${form.fullName.trim()} · ID ${created.id}, but email delivery was not confirmed. Use Resend invite to try again and retrieve the setup link.`,
       );
       setAdding(false);
       setForm({ fullName: "", email: "", relation: "", studentIds: [] });
       load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create the parent account.");
+      setError(
+        e instanceof Error ? e.message : "Could not create the parent account.",
+      );
     } finally {
       setBusy(false);
     }
@@ -82,12 +117,28 @@ export default function ParentsPage() {
     setBusy(true);
     setError(null);
     try {
-      await updateGuardian(editing.id, { fullName: editing.fullName.trim(), email: editing.email.trim() });
+      const updated = await updateGuardian(editing.id, {
+        fullName: editing.fullName.trim(),
+        email: editing.email.trim(),
+      });
       await setGuardianChildren(editing.id, editing.studentIds);
+      if (updated.inviteDelivery === "sent") {
+        setNote(
+          `Parent updated. The previous setup link was invalidated and a new one was sent to ${updated.email}.`,
+        );
+      } else if (updated.inviteDelivery === "not_sent") {
+        setNote(
+          `Parent updated and the previous setup link was invalidated, but delivery to ${updated.email} was not confirmed. Use Resend invite to retrieve a replacement link.`,
+        );
+      } else {
+        setNote("Parent account updated.");
+      }
       setEditing(null);
       load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not update the parent account.");
+      setError(
+        e instanceof Error ? e.message : "Could not update the parent account.",
+      );
     } finally {
       setBusy(false);
     }
@@ -102,7 +153,9 @@ export default function ParentsPage() {
       setRemoving(null);
       load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not delete the parent account.");
+      setError(
+        e instanceof Error ? e.message : "Could not delete the parent account.",
+      );
       setRemoving(null);
     } finally {
       setBusy(false);
@@ -111,10 +164,16 @@ export default function ParentsPage() {
 
   async function resend(id: string, email: string) {
     try {
-      await resendGuardianInvite(id);
-      setNote(`Invitation re-sent to ${email}.`);
+      const result = await resendGuardianInvite(id);
+      setNote(
+        result.inviteDelivery === "sent"
+          ? `Invitation sent to ${email}.`
+          : `Email delivery was not confirmed. Give the guardian this one-time setup link securely: ${result.inviteLink}`,
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not resend the invitation.");
+      setError(
+        e instanceof Error ? e.message : "Could not resend the invitation.",
+      );
     }
   }
 
@@ -126,49 +185,105 @@ export default function ParentsPage() {
         subtitle="Guardian accounts and the students each may follow. Guardians never self-register."
         actions={
           <>
-            <SearchInput value={listQuery} onChange={setListQuery} placeholder="Filter parents or students…" width={260} />
-            <Button variant="primary" onClick={() => setAdding(true)}>New parent</Button>
+            <SearchInput
+              value={listQuery}
+              onChange={setListQuery}
+              placeholder="Filter parents or students…"
+              width={260}
+            />
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              New parent
+            </Button>
           </>
         }
       />
 
-      {error && <p className="card" style={{ color: "var(--danger)" }}>{error}</p>}
+      {error && (
+        <p className="card" style={{ color: "var(--danger)" }}>
+          {error}
+        </p>
+      )}
       {note && (
         <div
           className="card"
-          style={{ color: "var(--success-500)", display: "flex", alignItems: "flex-start", gap: 12, justifyContent: "space-between" }}
+          style={{
+            color: "var(--success-500)",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+            justifyContent: "space-between",
+          }}
         >
           <span>{note}</span>
-          <IconButton label="Dismiss notice" onClick={() => setNote(null)}><X size={15} /></IconButton>
+          <IconButton label="Dismiss notice" onClick={() => setNote(null)}>
+            <X size={15} />
+          </IconButton>
         </div>
       )}
 
       {!rows && <p className="muted">Loading…</p>}
       {rows && rows.length === 0 && (
-        <EmptyState title="No parent accounts yet" note="Create one to give a guardian read access to their child's record." />
+        <EmptyState
+          title="No parent accounts yet"
+          note="Create one to give a guardian read access to their child's record."
+        />
       )}
 
-      {rows && rows.length > 0 && visible.length === 0 && <EmptyState title="No parents match" />}
+      {rows && rows.length > 0 && visible.length === 0 && (
+        <EmptyState title="No parents match" />
+      )}
 
       {visible.length > 0 && (
         <Card pad={false}>
           <table>
-            <thead><tr><th>Parent</th><th>Email</th><th>Status</th><th>Assigned students</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Parent</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Assigned students</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
               {visible.map((g) => (
                 <tr key={g.id} className="sis-row">
                   <td>
-                    <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <span
+                      style={{ display: "flex", alignItems: "center", gap: 9 }}
+                    >
                       <Avatar name={g.name} size={28} />
-                      <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.3 }}>
+                      <span
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          lineHeight: 1.3,
+                        }}
+                      >
                         <span style={{ fontWeight: 600 }}>{g.name}</span>
-                        <span className="muted" style={{ fontSize: 11.5, fontFamily: "var(--font-mono, monospace)" }}>{g.id}</span>
+                        <span
+                          className="muted"
+                          style={{
+                            fontSize: 11.5,
+                            fontFamily: "var(--font-mono, monospace)",
+                          }}
+                        >
+                          {g.id}
+                        </span>
                       </span>
                     </span>
                   </td>
                   <td className="muted">{g.email}</td>
                   <td>
-                    <Badge tone={g.status === "active" ? "success" : g.status === "invited" ? "warning" : "error"}>
+                    <Badge
+                      tone={
+                        g.status === "active"
+                          ? "success"
+                          : g.status === "invited"
+                            ? "warning"
+                            : "error"
+                      }
+                    >
                       {g.status}
                     </Badge>
                   </td>
@@ -180,19 +295,40 @@ export default function ParentsPage() {
                     ))}
                   </td>
                   <td>
-                    <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        gap: 6,
+                        alignItems: "center",
+                      }}
+                    >
                       {g.status !== "active" && (
-                        <Button size="sm" icon={<Mail size={12} />} onClick={() => resend(g.id, g.email)}>
+                        <Button
+                          size="sm"
+                          icon={<Mail size={12} />}
+                          onClick={() => resend(g.id, g.email)}
+                        >
                           Resend invite
                         </Button>
                       )}
                       <IconButton
                         label="Edit parent"
-                        onClick={() => setEditing({ id: g.id, fullName: g.name, email: g.email, studentIds: g.children.map((c) => c.studentId) })}
+                        onClick={() =>
+                          setEditing({
+                            id: g.id,
+                            fullName: g.name,
+                            email: g.email,
+                            studentIds: g.children.map((c) => c.studentId),
+                          })
+                        }
                       >
                         <Pencil size={15} />
                       </IconButton>
-                      <IconButton label="Delete parent" tone="danger" onClick={() => setRemoving(g)}>
+                      <IconButton
+                        label="Delete parent"
+                        tone="danger"
+                        onClick={() => setRemoving(g)}
+                      >
                         <Trash2 size={15} />
                       </IconButton>
                     </span>
@@ -212,7 +348,9 @@ export default function ParentsPage() {
           width={560}
           footer={
             <>
-              <Button onClick={() => setAdding(false)} disabled={busy}>Cancel</Button>
+              <Button onClick={() => setAdding(false)} disabled={busy}>
+                Cancel
+              </Button>
               <Button variant="navy" onClick={submit} disabled={busy || !valid}>
                 {busy ? "Creating…" : "Create & send invite"}
               </Button>
@@ -220,17 +358,37 @@ export default function ParentsPage() {
           }
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Field label="Full name"><Input value={form.fullName} onChange={(v) => setForm((f) => ({ ...f, fullName: v }))} /></Field>
-            <Field label="Email" hint="The password-setup link is sent here.">
-              <Input value={form.email} onChange={(v) => setForm((f) => ({ ...f, email: v }))} type="email" />
+            <Field label="Full name">
+              <Input
+                value={form.fullName}
+                onChange={(v) => setForm((f) => ({ ...f, fullName: v }))}
+              />
             </Field>
-            <Field label="Relationship" hint="Optional, e.g. Father, Mother, Guardian.">
-              <Input value={form.relation} onChange={(v) => setForm((f) => ({ ...f, relation: v }))} />
+            <Field label="Email" hint="The password-setup link is sent here.">
+              <Input
+                value={form.email}
+                onChange={(v) => setForm((f) => ({ ...f, email: v }))}
+                type="email"
+              />
+            </Field>
+            <Field
+              label="Relationship"
+              hint="Optional, e.g. Father, Mother, Guardian."
+            >
+              <Input
+                value={form.relation}
+                onChange={(v) => setForm((f) => ({ ...f, relation: v }))}
+              />
             </Field>
             <ChildChecklist
               students={students}
               selected={form.studentIds}
-              onToggle={(id) => setForm((f) => ({ ...f, studentIds: toggleId(f.studentIds, id) }))}
+              onToggle={(id) =>
+                setForm((f) => ({
+                  ...f,
+                  studentIds: toggleId(f.studentIds, id),
+                }))
+              }
             />
           </div>
         </Modal>
@@ -244,11 +402,15 @@ export default function ParentsPage() {
           width={560}
           footer={
             <>
-              <Button onClick={() => setEditing(null)} disabled={busy}>Cancel</Button>
+              <Button onClick={() => setEditing(null)} disabled={busy}>
+                Cancel
+              </Button>
               <Button
                 variant="navy"
                 onClick={saveEdit}
-                disabled={busy || !editing.fullName.trim() || !editing.email.trim()}
+                disabled={
+                  busy || !editing.fullName.trim() || !editing.email.trim()
+                }
               >
                 {busy ? "Saving…" : "Save changes"}
               </Button>
@@ -257,15 +419,30 @@ export default function ParentsPage() {
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Field label="Full name">
-              <Input value={editing.fullName} onChange={(v) => setEditing((e) => (e ? { ...e, fullName: v } : e))} />
+              <Input
+                value={editing.fullName}
+                onChange={(v) =>
+                  setEditing((e) => (e ? { ...e, fullName: v } : e))
+                }
+              />
             </Field>
             <Field label="Email">
-              <Input type="email" value={editing.email} onChange={(v) => setEditing((e) => (e ? { ...e, email: v } : e))} />
+              <Input
+                type="email"
+                value={editing.email}
+                onChange={(v) =>
+                  setEditing((e) => (e ? { ...e, email: v } : e))
+                }
+              />
             </Field>
             <ChildChecklist
               students={students}
               selected={editing.studentIds}
-              onToggle={(id) => setEditing((e) => (e ? { ...e, studentIds: toggleId(e.studentIds, id) } : e))}
+              onToggle={(id) =>
+                setEditing((e) =>
+                  e ? { ...e, studentIds: toggleId(e.studentIds, id) } : e,
+                )
+              }
             />
           </div>
         </Modal>
@@ -279,7 +456,9 @@ export default function ParentsPage() {
           width={480}
           footer={
             <>
-              <Button onClick={() => setRemoving(null)} disabled={busy}>Cancel</Button>
+              <Button onClick={() => setRemoving(null)} disabled={busy}>
+                Cancel
+              </Button>
               <Button variant="danger" onClick={remove} disabled={busy}>
                 {busy ? "Deleting…" : "Delete"}
               </Button>
@@ -287,8 +466,9 @@ export default function ParentsPage() {
           }
         >
           <p style={{ margin: 0 }}>
-            Delete the guardian account for <strong>{removing.name}</strong> ({removing.email})? This revokes their access
-            to the assigned student record(s). This cannot be undone.
+            Delete the guardian account for <strong>{removing.name}</strong> (
+            {removing.email})? This revokes their access to the assigned student
+            record(s). This cannot be undone.
           </p>
         </Modal>
       )}
@@ -322,24 +502,52 @@ function ChildChecklist({
   return (
     <>
       <Field label={`Assign students (${selected.length} selected)`}>
-        <SearchInput value={q} onChange={setQ} placeholder="Filter students by name, ID or program…" />
+        <SearchInput
+          value={q}
+          onChange={setQ}
+          placeholder="Filter students by name, ID or program…"
+        />
       </Field>
-      <div style={{ maxHeight: 280, overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}>
-        {options.length === 0 && <p className="muted" style={{ padding: 12, margin: 0, fontSize: 13 }}>No students match your filter.</p>}
+      <div
+        style={{
+          maxHeight: 280,
+          overflowY: "auto",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-md)",
+        }}
+      >
+        {options.length === 0 && (
+          <p className="muted" style={{ padding: 12, margin: 0, fontSize: 13 }}>
+            No students match your filter.
+          </p>
+        )}
         {options.map((s) => {
           const checked = selected.includes(s.id);
           return (
             <label
               key={s.id}
               style={{
-                display: "flex", alignItems: "center", gap: 9, padding: "8px 12px",
-                borderBottom: "1px solid var(--divider)", cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 9,
+                padding: "8px 12px",
+                borderBottom: "1px solid var(--divider)",
+                cursor: "pointer",
                 background: checked ? "var(--accent-bg)" : undefined,
               }}
             >
-              <input type="checkbox" checked={checked} onChange={() => onToggle(s.id)} />
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onToggle(s.id)}
+              />
               <span style={{ fontSize: 13 }}>{s.name}</span>
-              <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>{s.studentNo} · {s.program}</span>
+              <span
+                className="muted"
+                style={{ fontSize: 12, marginLeft: "auto" }}
+              >
+                {s.studentNo} · {s.program}
+              </span>
             </label>
           );
         })}

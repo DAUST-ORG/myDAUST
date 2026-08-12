@@ -172,8 +172,8 @@ The API validates with `Schema.parse(body)`; `ZodExceptionFilter` maps failures 
   - **Faculty** — *Overview*: Dashboard · *Teaching*: Grade Entry, Gradebook, Attendance,
     Course Materials, Messages.
   - **Registrar** — *Overview*: Dashboard, Admissions `[badge admissions]`, Students, Parents,
-    Student Success · *Academic structure*: Departments, Academic Years, Programs & Curriculum,
-    Course Catalog, Course Enrollment, Academic Calendar · *Policy & rules*: Rule Engine,
+    Student Success · *Academic structure*: Departments, Academic Years, Course Catalog,
+    Programs & Curriculum, Course Sections, Academic Calendar · *Policy & rules*: Rule Engine,
     Grading Schemes, Grade Approvals `[badge approvals]` · *Administration*: Faculty & Staff,
     Security & System · *Communication*: Messages.
   - **Finance** — *Overview*: Dashboard · *Finance*: Fee Schedule, Student Accounts.
@@ -452,14 +452,17 @@ student-record edits are admin-side). Data: `getMyProfile`.
 
 ### 2.16 Documents — `/student/documents` (+ transcript, enrollment) — `STU-DOC`
 
-**Screen Spec:** hub linking printable transcript (`getMe`,`getMyGrades`,`getMySummary`) and
-enrollment verification (`getMe`,`getMyEnrollments`).
+**Screen Spec:** hub linking the canonical transcript view/PDF and enrollment verification.
+The server-generated PDF freezes one ledger snapshot and carries an actor-specific `UNOFFICIAL`
+watermark, generation ID, Dakar timestamp, student identity/program, and semester/cumulative GPA.
 
 | ID | Tags | Steps | Expected |
 |---|---|---|---|
-| STU-DOC-001 | FUNC | Open transcript | Printable transcript with GPA + all terms; matches `/student/grades`. |
+| STU-DOC-001 | FUNC | Open transcript | Ordered semesters, semester GPA/credits/entries and cumulative totals match `/student/grades`; non-GPA-only semesters show `—`, not `0.00`. |
 | STU-DOC-002 | FUNC | Open enrollment verification | Printable list of current enrollments. |
-| STU-DOC-003 | FUNC | Browser print | Print layout is clean (print styles applied). |
+| STU-DOC-003 | FUNC,DATA | Download unofficial PDF | Valid multi-page PDF; watermark appears on every page; generation ID, actor, timestamp and PDF hash are audited. |
+| STU-DOC-004 | AUTHZ | Request another student's PDF | 403; registrar/admin use the staff endpoint and receive staff-generated provenance. |
+| STU-DOC-005 | I18N | Generate for Senegalese Latin names | Accented/extended Latin glyphs render without replacement; unsupported scripts fail explicitly instead of corrupting identity text. |
 
 ---
 
@@ -513,15 +516,17 @@ stat cards; records read-only. Empty state if none linked.
 
 ### 3.4 Billing — `/parent/billing` — `PAR-BILL`
 
-**Screen Spec:** "Billing — {child}"; read-only account (charges, installments, balance).
-**No pay action** (prototype shows a "Pay …" button; built parent billing is read-only — verify).
-Data: `getChildAccount(studentId)`.
+**Screen Spec:** "Billing — {child}"; charges, installments, canonical standing,
+successful/pending/refunded payments, receipts, wire submissions and authenticated payment actions.
+Every operation is scoped through `GuardianStudent`; the parent never re-enters student ID/DOB.
 
 | ID | Tags | Steps | Expected |
 |---|---|---|---|
-| PAR-BILL-001 | FUNC | Load for Aïssatou | Balance + installment table, read-only. |
-| PAR-BILL-002 | DESIGN | Compare to prototype "Pay …" button | Built app is read-only for guardians (flag if a live pay action exists — confirm intended). |
+| PAR-BILL-001 | FUNC | Load for Aïssatou | Balance, installments, payment/wire history, receipts and payable target match the student's account. |
+| PAR-BILL-002 | FUNC,DATA | Initiate card/mobile, PI-SPI and wire flows | Linked child's invoice is used; payment records guardian provenance and does not expose another guardian's email. |
 | PAR-BILL-003 | AUTHZ | `getChildAccount` for non-linked child | 403. |
+| PAR-BILL-004 | CONC | Switch children while an action is pending | Stale completion is ignored and cannot redirect or overwrite the newly selected child's state. |
+| PAR-BILL-005 | CONC,AUTHZ | Redeem one invite concurrently | Exactly one redemption claims the single-use token. |
 
 ---
 
@@ -727,9 +732,9 @@ Data: `getAdminCourseDetail`, `getSections`, `createCourse`, `updateCourse`, `ge
 | REG-CAT-002 | FUNC | Edit a course | Updated; audit. |
 | REG-CAT-003 | NEG | Duplicate course code | Rejected. |
 
-### 5.10 Course Enrollment / Offerings — `/admin/offerings` — `REG-OFF`
+### 5.10 Course Sections — `/admin/offerings` — `REG-OFF`
 
-**Screen Spec:** offered sections with status filter (All/Open/Closed); "Add Course"; toggle status;
+**Screen Spec:** offered sections with status filter (All/Open/Closed); "New section"; toggle status;
 master schedule. Data: sections CRUD + `getStaff`.
 
 | ID | Tags | Steps | Expected |
@@ -1090,7 +1095,7 @@ Per-screen verdict vs the prototype (`design/Student information system design (
 | DES-STU-12 | Messages | — | Thread list + composer parity. |
 | DES-STU-13 | Profile | — | Read-only tabs. |
 | DES-PAR-01 | Parent Dashboard | new | "Family overview" cards per child. |
-| DES-PAR-02 | Parent Billing | check | Prototype shows Pay button; built is read-only — confirm intended. |
+| DES-PAR-02 | Parent Billing | check | Linked-child history/receipts and card/mobile, PI-SPI and wire actions render without ID/DOB re-entry or contact-data leakage. |
 | DES-FAC-01 | Grade Entry | check | Section tabs + letter-grade selects + "Submit for approval". |
 | DES-FAC-02 | Gradebook | check | Numeric grid + "Manage columns". |
 | DES-FAC-03 | Attendance | check | Date picker + "All present". |

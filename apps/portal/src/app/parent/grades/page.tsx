@@ -23,12 +23,27 @@ export default function ParentGrades() {
 
   useEffect(() => {
     if (!activeId) return;
+    let cancelled = false;
     setData(null);
     setLoadError(null);
-    getChildGrades(activeId).then(setData).catch((e: Error) => setLoadError(e.message));
+    getChildGrades(activeId)
+      .then((next) => {
+        if (!cancelled) setData(next);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setLoadError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeId]);
 
-  if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
+  if (error)
+    return (
+      <p className="card" style={{ color: "var(--danger)" }}>
+        {error}
+      </p>
+    );
   if (!children) return <p className="muted">Loading…</p>;
   if (children.length === 0) {
     return <EmptyState title="No students linked to your account" />;
@@ -41,29 +56,50 @@ export default function ParentGrades() {
         title={active ? `Grades — ${active.name}` : "Grades"}
         subtitle={active ? `${active.program} · academic record` : undefined}
         actions={
-          data ? <Badge tone="info">Cumulative GPA {data.cumulativeGpa.toFixed(2)}</Badge> : undefined
+          data ? (
+            <Badge tone="info">
+              Cumulative GPA{" "}
+              {data.totals.gpa === null ? "—" : data.totals.gpa.toFixed(2)}
+            </Badge>
+          ) : undefined
         }
       />
 
-      <ChildSwitcher children={children} activeId={activeId} onSelect={select} />
+      <ChildSwitcher
+        children={children}
+        activeId={activeId}
+        onSelect={select}
+      />
 
-      {loadError && <p className="card" style={{ color: "var(--danger)" }}>{loadError}</p>}
+      {loadError && (
+        <p className="card" style={{ color: "var(--danger)" }}>
+          {loadError}
+        </p>
+      )}
       {!data && !loadError && <p className="muted">Loading transcript…</p>}
 
-      {data && data.terms.length === 0 && (
+      {data && data.semesters.length === 0 && (
         <EmptyState
           title="No completed courses yet"
           note="Grades appear here once a term's results are approved by the registrar."
         />
       )}
 
-      {data?.terms.map((t) => (
-        <div key={t.term} style={{ marginBottom: 16 }}>
+      {data?.semesters.map((semester) => (
+        <div
+          key={semester.termId ?? semester.label}
+          style={{ marginBottom: 16 }}
+        >
           <Card
-            title={t.term}
+            title={semester.label}
             action={
               <span className="muted" style={{ fontSize: 13 }}>
-                Term GPA <strong style={{ color: "var(--fg1)" }}>{t.gpa.toFixed(2)}</strong> · {t.credits} credits
+                Term GPA{" "}
+                <strong style={{ color: "var(--fg1)" }}>
+                  {semester.gpa === null ? "—" : semester.gpa.toFixed(2)}
+                </strong>{" "}
+                · {semester.earnedCredits} earned / {semester.attemptedCredits}{" "}
+                attempted credits
               </span>
             }
           >
@@ -77,13 +113,19 @@ export default function ParentGrades() {
                 </tr>
               </thead>
               <tbody>
-                {t.courses.map((c) => (
-                  <tr key={c.code}>
-                    <td style={{ fontWeight: 600 }}>{c.code}</td>
-                    <td>{c.title}</td>
-                    <td style={{ textAlign: "right" }}>{c.credits}</td>
-                    <td style={{ textAlign: "right", fontWeight: 800, color: gradeTone(c.grade) }}>
-                      {c.grade ?? "—"}
+                {semester.entries.map((entry) => (
+                  <tr key={entry.id}>
+                    <td style={{ fontWeight: 600 }}>{entry.courseCode}</td>
+                    <td>{entry.title}</td>
+                    <td style={{ textAlign: "right" }}>{entry.credits}</td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontWeight: 800,
+                        color: gradeTone(entry.grade),
+                      }}
+                    >
+                      {entry.grade}
                     </td>
                   </tr>
                 ))}

@@ -115,8 +115,10 @@ export type WireApprovalInput = z.infer<typeof WireApprovalInput>;
 export const PaymentStatus = z.enum([
   "pending",
   "success",
+  "refund_pending",
   "failed",
   "cancelled",
+  "refunded",
 ]);
 export type PaymentStatus = z.infer<typeof PaymentStatus>;
 

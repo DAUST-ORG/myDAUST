@@ -1,7 +1,11 @@
 "use client";
 
 import { GraduationCap, Layers, UserCheck, Wallet } from "lucide-react";
-import { accountBalanceLabel, accountPresentation, resolveAccountSummary } from "@/components/AccountBalance";
+import {
+  accountBalanceLabel,
+  accountPresentation,
+  resolveAccountSummary,
+} from "@/components/AccountBalance";
 import { EmptyState, PageHeader, Stat } from "@/components/ui";
 import { ChildSwitcher } from "./ChildSwitcher";
 import { useChildren } from "./useChildren";
@@ -9,7 +13,12 @@ import { useChildren } from "./useChildren";
 export default function ParentDashboard() {
   const { children, active, activeId, select, error } = useChildren();
 
-  if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
+  if (error)
+    return (
+      <p className="card" style={{ color: "var(--danger)" }}>
+        {error}
+      </p>
+    );
   if (!children) return <p className="muted">Loading…</p>;
   if (children.length === 0) {
     return (
@@ -19,7 +28,9 @@ export default function ParentDashboard() {
       />
     );
   }
-  const accountSummary = resolveAccountSummary(active?.summary, { balanceXof: active?.balance ?? 0 });
+  const accountSummary = resolveAccountSummary(active?.summary, {
+    balanceXof: active?.balance ?? 0,
+  });
   const accountMeta = accountPresentation(accountSummary);
 
   return (
@@ -30,14 +41,18 @@ export default function ParentDashboard() {
         subtitle="Select a child to view their academics, attendance and billing."
       />
 
-      <ChildSwitcher children={children} activeId={activeId} onSelect={select} />
+      <ChildSwitcher
+        children={children}
+        activeId={activeId}
+        onSelect={select}
+      />
 
       {active && (
         <>
           <div className="kpi-grid" style={{ marginBottom: 20 }}>
             <Stat
               label="Cumulative GPA"
-              value={active.gpa.toFixed(2)}
+              value={active.gpa === null ? "—" : active.gpa.toFixed(2)}
               sub={active.standing}
               icon={<GraduationCap size={16} />}
             />
@@ -53,9 +68,15 @@ export default function ParentDashboard() {
             />
             <Stat
               label="Attendance"
-              value={active.attendanceRate === null ? "—" : `${active.attendanceRate}%`}
+              value={
+                active.attendanceRate === null
+                  ? "—"
+                  : `${active.attendanceRate}%`
+              }
               sub="this term"
-              tone={active.attendanceRate === null ? undefined : "var(--success)"}
+              tone={
+                active.attendanceRate === null ? undefined : "var(--success)"
+              }
               icon={<UserCheck size={16} />}
             />
             <Stat
@@ -80,12 +101,17 @@ export default function ParentDashboard() {
           </div>
 
           <div className="card">
-            <p className="h1" style={{ fontSize: 16, marginBottom: 6 }}>{active.name}</p>
-            <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+            <p className="h1" style={{ fontSize: 16, marginBottom: 6 }}>
+              {active.name}
+            </p>
+            <p
+              className="muted"
+              style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}
+            >
               {active.program}
-              {active.yearLevel ? ` · Year ${active.yearLevel}` : ""} · use the sidebar to view
-              grades, attendance and billing. Records are read-only; contact the registrar for
-              corrections.
+              {active.yearLevel ? ` · Year ${active.yearLevel}` : ""} · use the
+              sidebar to view grades, attendance and billing. Records are
+              read-only; contact the registrar for corrections.
             </p>
           </div>
         </>

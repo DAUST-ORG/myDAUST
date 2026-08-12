@@ -6,6 +6,7 @@ import {
   type FeePlan,
   type StudentAccountRow,
   getArAging,
+  getCollectionsTimeline,
   getCurrentTerm,
   getFeePlan,
   listStudentAccounts,
@@ -20,6 +21,8 @@ import {
   resolveAccountSummary,
   type AgingBucketDisplay,
 } from "@/components/AccountBalance";
+import { CollectionsTimelineChart } from "@/components/CollectionsTimelineChart";
+import type { CollectionsTimeline } from "@/lib/api";
 
 function fallbackAging(rows: StudentAccountRow[]): AgingBucketDisplay[] {
   const buckets: AgingBucketDisplay[] = [
@@ -106,6 +109,8 @@ export default function FinanceDashboard() {
   const [aging, setAging] = useState<ArAging | null>(null);
   const [plan, setPlan] = useState<FeePlan | null>(null);
   const [term, setTerm] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<CollectionsTimeline | null>(null);
+  const [timelineYear, setTimelineYear] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -121,7 +126,20 @@ export default function FinanceDashboard() {
     getCurrentTerm()
       .then((t) => setTerm(t.name))
       .catch(() => setTerm(null));
+    getCollectionsTimeline()
+      .then((result) => {
+        setTimeline(result);
+        setTimelineYear(result.academicYear);
+      })
+      .catch(() => setTimeline(null));
   }, []);
+
+  useEffect(() => {
+    if (!timelineYear) return;
+    getCollectionsTimeline(timelineYear)
+      .then(setTimeline)
+      .catch(() => setTimeline(null));
+  }, [timelineYear]);
 
   const positioned = useMemo(
     () =>
@@ -189,6 +207,50 @@ export default function FinanceDashboard() {
       {accounts && (
         <>
           <ReceivablesKpis metrics={metrics} />
+          <div style={{ marginBottom: 24 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                marginBottom: 10,
+              }}
+            >
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                }}
+              >
+                Academic year
+                <select
+                  aria-label="Collections academic year"
+                  value={timelineYear}
+                  onChange={(event) => setTimelineYear(event.target.value)}
+                  style={{ minWidth: 132 }}
+                >
+                  {academicYearOptions(
+                    timelineYear || timeline?.academicYear,
+                  ).map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {timeline ? (
+              <CollectionsTimelineChart data={timeline} />
+            ) : (
+              <div className="card" style={{ margin: 0 }}>
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Loading collection timeline…
+                </p>
+              </div>
+            )}
+          </div>
           <AgingBuckets buckets={agingBuckets} />
 
           <Card
@@ -252,4 +314,14 @@ export default function FinanceDashboard() {
       )}
     </>
   );
+}
+
+function academicYearOptions(selected?: string): string[] {
+  const first = Number(
+    selected?.match(/20\d{2}/)?.[0] ?? new Date().getFullYear(),
+  );
+  return [-2, -1, 0, 1, 2].map((offset) => {
+    const start = first + offset;
+    return `${start}–${start + 1}`;
+  });
 }
