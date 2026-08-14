@@ -10,6 +10,7 @@
     "lint": "echo 'no lint yet'",
     "test": "vitest run",
     "import:historical-transcripts": "node dist/transcript/historical-import.cli.js",
+    "import:historical-payments": "node dist/finance/historical-payment-import.cli.js",
     "reconcile:installment-statuses": "node dist/finance/reconcile-installment-statuses.cli.js"
   },
   "dependencies": {

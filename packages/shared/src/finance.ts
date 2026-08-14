@@ -2,20 +2,33 @@ import { z } from "zod";
 import { Xof } from "./money.js";
 
 /**
- * Payment methods a payer can choose.
+ * Canonical ledger payment methods.
  *
  * `wave` / `orange_money` / `card` all hand off to PayTech's hosted checkout; `wire` is
  * proof-of-transfer with bursar review; `pi_spi` is the BCEAO request-to-pay rail, where
  * the payer approves in their own banking app and settlement arrives asynchronously.
+ * `cheque` is an accounting-only value for reviewed historical/manual records and is
+ * intentionally not exposed by payer-facing checkout endpoints.
  */
 export const PaymentMethod = z.enum([
   "wave",
   "orange_money",
   "card",
   "wire",
+  "cheque",
   "pi_spi",
 ]);
 export type PaymentMethod = z.infer<typeof PaymentMethod>;
+
+/** Methods accepted by payer-facing initiation APIs. Cheques are ledger-only. */
+export const PayerPaymentMethod = z.enum([
+  "wave",
+  "orange_money",
+  "card",
+  "wire",
+  "pi_spi",
+]);
+export type PayerPaymentMethod = z.infer<typeof PayerPaymentMethod>;
 
 /** Lifecycle of a PI-SPI request-to-pay, mirroring the Prisma enum. */
 export const PiSpiStatus = z.enum([
@@ -156,7 +169,7 @@ export type CreatePaymentPlanInput = z.infer<typeof CreatePaymentPlanInput>;
 export const InitiatePaymentInput = z.object({
   invoiceId: z.string().uuid(),
   amount: Xof.positive(),
-  method: PaymentMethod,
+  method: PayerPaymentMethod,
 });
 export type InitiatePaymentInput = z.infer<typeof InitiatePaymentInput>;
 
