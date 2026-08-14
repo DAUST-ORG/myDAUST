@@ -1,5 +1,6 @@
 export type AccountSpecialReasonCode =
   | "individual_plan_override"
+  | "individual_component_override"
   | "pending_plan_change"
   | "legacy_package"
   | "custom_charge"
@@ -17,10 +18,13 @@ type AccountInvoiceCustomizationSource = {
   totalAmount: number;
   packageType: string;
   feeScheduleId: string | null;
+  paymentPlanOverride?: boolean;
+  componentOverrides?: readonly unknown[];
 };
 
 const REASON_LABELS: Record<AccountSpecialReasonCode, string> = {
   individual_plan_override: "Individual payment plan",
+  individual_component_override: "Individual fee selection",
   pending_plan_change: "Payment-plan change awaiting approval",
   legacy_package: "Legacy tuition package",
   custom_charge: "Custom charge",
@@ -29,8 +33,8 @@ const REASON_LABELS: Record<AccountSpecialReasonCode, string> = {
 
 /**
  * Account flags are derived from the ledger, so they cannot drift from billing.
- * An approved individual override deliberately unlinks a standard invoice from the
- * global schedule; future global revisions therefore cannot overwrite that account.
+ * Date/count overrides are explicit. Component include/exclude overrides remain
+ * linked to the global schedule so other fees and global dates can still propagate.
  */
 export function deriveAccountSpecialStatus(
   invoices: readonly AccountInvoiceCustomizationSource[],
@@ -50,10 +54,17 @@ export function deriveAccountSpecialStatus(
     if (
       invoice.packageType === "standard_full" &&
       invoice.totalAmount > 0 &&
-      invoice.feeScheduleId === null
+      (invoice.paymentPlanOverride === true || invoice.feeScheduleId === null)
     ) {
       add("individual_plan_override", invoice.id);
-    } else if (
+    }
+    if (
+      invoice.packageType === "standard_full" &&
+      (invoice.componentOverrides?.length ?? 0) > 0
+    ) {
+      add("individual_component_override", invoice.id);
+    }
+    if (
       invoice.packageType === "standard_tuition_legacy" &&
       invoice.totalAmount > 0
     ) {
@@ -70,6 +81,9 @@ export function deriveAccountSpecialStatus(
     hasIndividualPlan: reasons.some(
       (reason) => reason.code === "individual_plan_override",
     ),
+    hasIndividualComponents: reasons.some(
+      (reason) => reason.code === "individual_component_override",
+    ),
     hasPendingPlanChange: reasons.some(
       (reason) => reason.code === "pending_plan_change",
     ),
@@ -80,7 +94,7 @@ export function deriveAccountSpecialStatus(
 export function invoicePlanType(invoice: AccountInvoiceCustomizationSource) {
   if (
     invoice.packageType === "standard_full" &&
-    invoice.feeScheduleId === null
+    (invoice.paymentPlanOverride === true || invoice.feeScheduleId === null)
   ) {
     return "individual_override" as const;
   }

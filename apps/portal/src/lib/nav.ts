@@ -9,6 +9,7 @@ import {
   CalendarClock,
   CalendarDays,
   CalendarRange,
+  ChartNoAxesCombined,
   CheckCheck,
   ClipboardCheck,
   ClipboardList,
@@ -254,7 +255,16 @@ export const FINANCE_NAV: PortalNav = {
       { href: "/finance", label: "Dashboard", icon: LayoutDashboard },
     ]),
     g("Finance", [
-      { href: "/finance/fee-schedule", label: "Fee Schedule", icon: Receipt },
+      {
+        href: "/finance/budget",
+        label: "Budgeting & Cashflow",
+        icon: ChartNoAxesCombined,
+      },
+      {
+        href: "/finance/fee-schedule",
+        label: "Fees & Payment Schedule",
+        icon: Receipt,
+      },
       { href: "/finance/accounts", label: "Student Accounts", icon: Wallet },
       { href: "/finance/wires", label: "Wire Transfers", icon: Banknote },
       {
@@ -405,8 +415,12 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     crumb: "Receivables overview · {term} · Finance",
   },
   "/finance/fee-schedule": {
-    title: "Tuition & Fees",
-    crumb: "Fee structure & payment plan · Finance",
+    title: "Fees & Payment Schedule",
+    crumb: "Annual charges & payment dates · Finance",
+  },
+  "/finance/budget": {
+    title: "Budgeting & Cashflow",
+    crumb: "Budget vs actual & cashflow forecast · Finance",
   },
   "/finance/accounts": {
     title: "Student Accounts",

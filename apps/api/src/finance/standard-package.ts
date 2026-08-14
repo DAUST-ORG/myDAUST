@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
 import { projectedInstallmentStatus } from "./account-position.js";
+import {
+  displayFeeComponentLabel,
+  feePackageTotalXof,
+  splitEvenlyXof,
+} from "./fee-components.js";
 
 export type StandardPackageAssignment = {
   created: boolean;
@@ -34,7 +39,10 @@ export async function assignStandardPackageInTransaction(
       approvedAt: { not: null },
     },
     orderBy: { revision: "desc" },
-    include: { rows: { orderBy: { sequence: "asc" } } },
+    include: {
+      rows: { orderBy: { sequence: "asc" } },
+      components: { orderBy: [{ sortOrder: "asc" }, { key: "asc" }] },
+    },
   });
   if (!schedule || schedule.rows.length === 0) {
     throw new BadRequestException(
@@ -46,16 +54,15 @@ export async function assignStandardPackageInTransaction(
       "Every approved standard installment must have a due date",
     );
   }
-  for (const row of schedule.rows) {
-    if (
-      row.amountFullXof !==
-      row.amountTuitionXof + row.amountHousingXof + row.amountCafeteriaXof
-    ) {
-      throw new BadRequestException(
-        `Approved installment ${row.sequence} components do not reconcile`,
-      );
-    }
+  const selectedComponents = schedule.components.filter(
+    (component) => component.defaultSelected && component.annualAmountXof > 0,
+  );
+  if (selectedComponents.length === 0) {
+    throw new BadRequestException(
+      "The approved fee schedule has no default student charges",
+    );
   }
+  const full = feePackageTotalXof(selectedComponents);
 
   const existing = await tx.invoice.findFirst({
     where: {
@@ -119,20 +126,7 @@ export async function assignStandardPackageInTransaction(
     );
   }
 
-  const totals = {
-    tuition: schedule.rows.reduce((sum, row) => sum + row.amountTuitionXof, 0),
-    housing: schedule.rows.reduce((sum, row) => sum + row.amountHousingXof, 0),
-    cafeteria: schedule.rows.reduce(
-      (sum, row) => sum + row.amountCafeteriaXof,
-      0,
-    ),
-    full: schedule.rows.reduce((sum, row) => sum + row.amountFullXof, 0),
-  };
-  if (totals.full !== totals.tuition + totals.housing + totals.cafeteria) {
-    throw new BadRequestException(
-      "Approved fee schedule components do not reconcile",
-    );
-  }
+  const installmentAmounts = splitEvenlyXof(full, schedule.rows.length);
 
   const invoice = await tx.invoice.create({
     data: {
@@ -141,44 +135,34 @@ export async function assignStandardPackageInTransaction(
         .toUpperCase()}`,
       studentId,
       termId: term.id,
-      totalAmount: totals.full,
+      totalAmount: full,
       costCenterCode: "9100",
-      description: "Annual tuition, housing and cafeteria package",
+      description: "Annual approved fee package",
       packageType: "standard_full",
       academicYearLabel: schedule.academicYearLabel,
       feeScheduleId: schedule.id,
       feeScheduleRevision: schedule.revision,
       components: {
-        create: [
-          {
-            kind: "tuition",
-            costCenterCode: "9100",
-            amountXof: totals.tuition,
-          },
-          {
-            kind: "housing",
-            costCenterCode: "3700",
-            amountXof: totals.housing,
-          },
-          {
-            kind: "cafeteria",
-            costCenterCode: "3600",
-            amountXof: totals.cafeteria,
-          },
-        ],
+        create: selectedComponents.map((component) => ({
+          scheduleComponentId: component.id,
+          kind: component.key,
+          label: component.label || displayFeeComponentLabel(component.key),
+          costCenterCode: component.costCenterCode,
+          amountXof: component.annualAmountXof,
+        })),
       },
       plan: {
         create: {
           createdById: actorId,
           installments: {
-            create: schedule.rows.map((row) => ({
+            create: schedule.rows.map((row, index) => ({
               sequence: row.sequence,
               label: row.label,
               dueDate: row.dueOn!,
-              amountDue: row.amountFullXof,
+              amountDue: installmentAmounts[index]!,
               status: projectedInstallmentStatus({
                 dueDate: row.dueOn!,
-                amountDue: row.amountFullXof,
+                amountDue: installmentAmounts[index]!,
                 amountPaid: 0,
               }),
             })),
@@ -194,10 +178,11 @@ export async function assignStandardPackageInTransaction(
       action: "standard-package-billed",
       actorId,
       data: {
-        amount: totals.full,
-        tuitionXof: totals.tuition,
-        housingXof: totals.housing,
-        cafeteriaXof: totals.cafeteria,
+        amount: full,
+        components: selectedComponents.map((component) => ({
+          key: component.key,
+          amountXof: component.annualAmountXof,
+        })),
         feeScheduleId: schedule.id,
         feeScheduleRevision: schedule.revision,
       },

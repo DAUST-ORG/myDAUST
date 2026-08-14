@@ -114,6 +114,34 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
         status: "approved",
         approvedAt: new Date(),
         reason: "Bootstrap fallback",
+        components: {
+          create: [
+            {
+              key: "tuition",
+              label: "Tuition",
+              costCenterCode: "9100",
+              annualAmountXof: 2_975_000,
+              defaultSelected: true,
+              sortOrder: 0,
+            },
+            {
+              key: "housing",
+              label: "Housing",
+              costCenterCode: "3700",
+              annualAmountXof: 680_000,
+              defaultSelected: true,
+              sortOrder: 1,
+            },
+            {
+              key: "cafeteria",
+              label: "Cafeteria",
+              costCenterCode: "3600",
+              annualAmountXof: 630_000,
+              defaultSelected: true,
+              sortOrder: 2,
+            },
+          ],
+        },
         rows: {
           create: [1, 2, 3, 4].map((sequence) => ({
             academicYearLabel: year.label,
@@ -128,7 +156,10 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
           })),
         },
       },
-      include: { rows: { orderBy: { sequence: "asc" } } },
+      include: {
+        rows: { orderBy: { sequence: "asc" } },
+        components: true,
+      },
     });
     scheduleId = schedule.id;
     const invoice = await prisma.invoice.create({
@@ -143,9 +174,33 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
         costCenterCode: "9100",
         components: {
           create: [
-            { kind: "tuition", costCenterCode: "9100", amountXof: 2_975_000 },
-            { kind: "housing", costCenterCode: "3700", amountXof: 680_000 },
-            { kind: "cafeteria", costCenterCode: "3600", amountXof: 630_000 },
+            {
+              scheduleComponentId: schedule.components.find(
+                (row) => row.key === "tuition",
+              )!.id,
+              kind: "tuition",
+              label: "Tuition",
+              costCenterCode: "9100",
+              amountXof: 2_975_000,
+            },
+            {
+              scheduleComponentId: schedule.components.find(
+                (row) => row.key === "housing",
+              )!.id,
+              kind: "housing",
+              label: "Housing",
+              costCenterCode: "3700",
+              amountXof: 680_000,
+            },
+            {
+              scheduleComponentId: schedule.components.find(
+                (row) => row.key === "cafeteria",
+              )!.id,
+              kind: "cafeteria",
+              label: "Cafeteria",
+              costCenterCode: "3600",
+              amountXof: 630_000,
+            },
           ],
         },
         plan: {
@@ -384,7 +439,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
     await approvals.cancel(winner.value.request.id, bursar, "Race cleanup");
   });
 
-  it("rejects an individual plan amount below the paid installment", async () => {
+  it("rejects a standard-plan amount that differs from the component total", async () => {
     const invoice = await prisma.invoice.findUniqueOrThrow({
       where: { id: invoiceId },
       include: {
@@ -419,7 +474,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
       },
     });
     await expect(approvals.approve(request.request.id, admin)).rejects.toThrow(
-      "below its paid amount",
+      "installment amounts are derived",
     );
     await approvals.cancel(request.request.id, bursar, "Test cleanup");
     await prisma.$transaction([
@@ -468,7 +523,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
         reason: invalidReason,
         after: { mode: "replace", installments: rows },
       }),
-    ).rejects.toThrow("below its paid amount");
+    ).rejects.toThrow("installment amounts are derived");
     await expect(
       prisma.approvalRequest.findFirstOrThrow({
         where: { reason: invalidReason },
@@ -580,7 +635,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
     ).resolves.toMatchObject({ ok: false, status: "stale" });
   });
 
-  it("approves, flags, isolates, and restores an individual standard plan", async () => {
+  it("approves, flags, propagates, and restores an individual date plan", async () => {
     const invoice = await prisma.invoice.findUniqueOrThrow({
       where: { id: invoiceId },
       include: {
@@ -589,7 +644,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
     });
     const first = invoice.plan!.installments[0]!;
     const individualDueDate = "2026-10-17";
-    const individualTotal = invoice.totalAmount + 10_000;
+    const individualTotal = invoice.totalAmount;
     const request = await approvals.request(bursar, {
       kind: "payment_plan",
       targetType: "Invoice",
@@ -604,7 +659,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
             row.id === first.id
               ? individualDueDate
               : row.dueDate.toISOString().slice(0, 10),
-          amountDue: row.amountDue + (row.id === first.id ? 10_000 : 0),
+          amountDue: row.amountDue,
           label: row.label,
         })),
       },
@@ -622,7 +677,8 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
         plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
       },
     });
-    expect(customized.feeScheduleId).toBeNull();
+    expect(customized.feeScheduleId).not.toBeNull();
+    expect(customized.paymentPlanOverride).toBe(true);
     expect(customized.totalAmount).toBe(individualTotal);
     expect(
       customized.plan!.installments[0]!.dueDate.toISOString().slice(0, 10),
@@ -653,7 +709,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
       targetType: "FeeSchedule",
       targetId: currentSchedule.id,
       academicYearLabel: currentSchedule.academicYearLabel,
-      reason: "Global label update must skip individual arrangements",
+      reason: "Global label update must preserve individual dates",
       after: {
         rows: currentSchedule.rows.map((row) => ({
           id: row.id,
@@ -667,13 +723,14 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
       },
     });
     expect(global.applied).toBe(true);
-    expect(global.result).toMatchObject({ linkedPlansUpdated: 0 });
+    expect(global.result).toMatchObject({ linkedPlansUpdated: 1 });
     const isolated = await prisma.invoice.findUniqueOrThrow({
       where: { id: invoice.id },
       include: { plan: { include: { installments: true } } },
     });
     expect(isolated.totalAmount).toBe(individualTotal);
-    expect(isolated.feeScheduleId).toBeNull();
+    expect(isolated.feeScheduleId).toBe(global.result.scheduleId);
+    expect(isolated.paymentPlanOverride).toBe(true);
     expect(
       isolated
         .plan!.installments.find((row) => row.sequence === 1)!

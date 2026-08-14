@@ -2,7 +2,8 @@ import type { PrismaClient } from "@prisma/client";
 
 /**
  * SIS reference data: grading scales, catalogue years, degree-audit requirement
- * buckets, course requirement mapping and the institution fee schedule.
+ * buckets, course requirement mapping, management-reporting categories and the
+ * institution fee schedule.
  *
  * This is *official* configuration, not demo data, so both the dev seed and the
  * production bootstrap load it — without it the grading, degree-audit and fee
@@ -98,6 +99,36 @@ const FEE_PLAN: [string, string, number, string][] = [
   ["Spring", "4th installment", 4, "2027-03-05"],
 ];
 
+/** Stable Budgeting & Cashflow categories. These labels mirror the approved
+ * standalone reference; the prototype's example monetary values are not data. */
+const MANAGEMENT_CATEGORIES: [string, string, "expense" | "income", number][] =
+  [
+    ["taxes", "Taxes", "expense", 0],
+    ["debts", "Debts", "expense", 1],
+    ["rent", "Rent", "expense", 2],
+    ["permanent_staff_salaries", "Permanent Staff Salaries", "expense", 3],
+    ["cafeteria_restaurant", "Cafeteria & Restaurant", "expense", 4],
+    ["capital_other_expenses", "Capital & Other Expenses", "expense", 5],
+    [
+      "contract_vacataire_salaries",
+      "Contract (Vacataire) Salaries",
+      "expense",
+      6,
+    ],
+    ["service_providers", "Service Providers", "expense", 7],
+    ["utilities", "Utilities", "expense", 8],
+    ["facilities_it_maintenance", "Facilities, IT & Maintenance", "expense", 9],
+    ["departments_events", "Departments & Events", "expense", 10],
+    ["insurance", "Insurance", "expense", 11],
+    ["travel_transportation", "Travel & Transportation", "expense", 12],
+    ["bursar", "Tuition, dining & housing (Bursar)", "income", 0],
+    ["research_grants", "Research Grants", "income", 1],
+    ["service_contracts", "Service Contracts", "income", 2],
+    ["donations_sponsorships", "Donations & Sponsorships", "income", 3],
+    ["scholarships", "Scholarships", "income", 4],
+    ["others", "Others", "income", 5],
+  ];
+
 export async function seedSisReference(
   prisma: PrismaClient,
   opts: {
@@ -154,6 +185,14 @@ export async function seedSisReference(
       where: { label },
       update: { status },
       create: { label, status },
+    });
+  }
+
+  for (const [key, label, kind, sortOrder] of MANAGEMENT_CATEGORIES) {
+    await prisma.managementCategory.upsert({
+      where: { key },
+      update: { label, kind, sortOrder, isActive: true },
+      create: { key, label, kind, sortOrder },
     });
   }
 
@@ -220,6 +259,37 @@ export async function seedSisReference(
         status: "approved",
         reason: "Bootstrap fallback — replace through Director approval",
         approvedAt: new Date(),
+        components: {
+          create: [
+            {
+              key: "tuition",
+              label: "Tuition",
+              description: "Annual tuition",
+              costCenterCode: "9100",
+              annualAmountXof: 2_975_000,
+              defaultSelected: true,
+              sortOrder: 0,
+            },
+            {
+              key: "housing",
+              label: "Housing",
+              description: "Annual student housing",
+              costCenterCode: "3700",
+              annualAmountXof: 680_000,
+              defaultSelected: true,
+              sortOrder: 1,
+            },
+            {
+              key: "cafeteria",
+              label: "Cafeteria",
+              description: "Annual cafeteria plan",
+              costCenterCode: "3600",
+              annualAmountXof: 630_000,
+              defaultSelected: true,
+              sortOrder: 2,
+            },
+          ],
+        },
         rows: {
           create: FEE_PLAN.map(([semester, label, sequence, dueOn]) => ({
             academicYearLabel: activeLabel,

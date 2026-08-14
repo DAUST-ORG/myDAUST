@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { APP_ROLES } from "@mydaust/shared";
 import {
   type AppUser,
@@ -22,6 +23,9 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 const xof = (n: number) => `${n.toLocaleString("en-US")} XOF`;
+const PACKAGE_FEE_KEYS = new Set(["tuition", "housing", "cafeteria"]);
+const managedInFeeSchedule = (fee: FeeItem) =>
+  fee.managedBy === "fee_schedule" || fee.editable === false || PACKAGE_FEE_KEYS.has(fee.key);
 
 /** Institution facts; `Current term` is filled from live Term data at render. */
 function generalRows(currentTerm: string): [string, string][] {
@@ -181,8 +185,12 @@ function FeesEditor({ editable }: { editable: boolean }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <p className="h1" style={{ fontSize: 16, flex: 1 }}>Fee structure (director-configurable)</p>
+        <p className="h1" style={{ fontSize: 16, flex: 1 }}>Fee references</p>
         {note && <span className="muted" style={{ fontSize: 12 }}>{note}</span>}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "10px 12px", margin: "10px 0 12px", borderRadius: "var(--radius-md)", background: "var(--accent-bg)", color: "var(--fg2)", fontSize: 12 }}>
+        <span>Annual student charges are controlled by the approved package and are read-only here.</span>
+        <Link href="/finance/fee-schedule" style={{ color: "var(--daust-navy)", fontWeight: 700 }}>Open Fees &amp; Payment Schedule →</Link>
       </div>
       <table>
         <thead><tr><th>Fee</th><th>Amount</th><th>Period</th><th>Note</th>{editable && <th />}</tr></thead>
@@ -213,7 +221,9 @@ function FeesEditor({ editable }: { editable: boolean }) {
               <td className="muted" style={{ fontSize: 12 }}>{f.note}</td>
               {editable && (
               <td style={{ whiteSpace: "nowrap" }}>
-                {editKey === f.key ? (
+                {managedInFeeSchedule(f) ? (
+                  <span className="badge pending">Managed in Finance</span>
+                ) : editKey === f.key ? (
                   <>
                     <button className="primary" onClick={() => save(f.key)} style={{ fontSize: 12, marginRight: 6 }}>Save</button>
                     <button onClick={() => setEditKey(null)} style={{ fontSize: 12 }}>Cancel</button>

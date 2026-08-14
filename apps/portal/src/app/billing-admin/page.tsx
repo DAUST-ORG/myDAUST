@@ -43,6 +43,7 @@ import {
   restoreStandardPaymentPlan,
   updateAdminWireConfig,
 } from "@/lib/api";
+import { InvoiceComponentManager } from "@/components/InvoiceComponentManager";
 import {
   AccountBalanceText,
   AccountStandingBadge,
@@ -1668,7 +1669,7 @@ function ManageDrawer({
     if (pendingRemove.packageType === "standard_full") {
       setPendingRemove(null);
       setRemoveReason("");
-      flash("Standard packages are managed from the global Fee Schedule");
+      flash("Standard packages are managed from Fees & Payment Schedule");
       return;
     }
     const wasPaid = pendingRemove.paid > 0;
@@ -1943,7 +1944,7 @@ function ManageDrawer({
                             >
                               {isIndividualPlan
                                 ? "Individual plan override"
-                                : "Global Fee Schedule"}
+                                : "Fees & Payment Schedule"}
                               {inv.academicYearLabel
                                 ? ` · ${inv.academicYearLabel}`
                                 : ""}
@@ -2451,9 +2452,9 @@ function PlanEditorModal({
       onClose={onClose}
     >
       <p style={{ color: "#6c7884", fontSize: 13, marginTop: 0 }}>
-        Paid installments are preserved. This proposal changes only this student
-        and is applied after administrator approval. An approved individual
-        schedule no longer follows future global revisions.
+        Annual charges set this student&apos;s total. Component or payment-date
+        exceptions require administrator approval. Component selections retain
+        later global fee amounts; individual payment dates remain separate.
       </p>
       {invoice.planType === "individual_override" && (
         <RestoreStandardPlanForm
@@ -2464,13 +2465,28 @@ function PlanEditorModal({
           onError={setError}
         />
       )}
+      {invoice.packageType === "standard_full" && (
+        <InvoiceComponentManager invoice={invoice} onSubmitted={onSaved} />
+      )}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          margin: "18px 0 10px",
+        }}
+      >
+        <strong style={{ fontSize: 13 }}>Payment dates</strong>
+        <span style={{ color: "#6c7884", fontSize: 11.5 }}>
+          Amounts are calculated from annual charges
+        </span>
+      </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {rows.map((row, index) => (
           <div
             key={row.id ?? `new-${index}`}
+            className="student-payment-date-row"
             style={{
-              display: "grid",
-              gridTemplateColumns: "42px minmax(140px,1fr) 150px 150px 36px",
               gap: 8,
               alignItems: "center",
             }}
@@ -2490,34 +2506,44 @@ function PlanEditorModal({
             <input
               inputMode="numeric"
               value={row.amountDue ? fcfa(row.amountDue) : ""}
-              onChange={(e) =>
-                edit(index, { amountDue: digits(e.target.value) })
-              }
-              style={{ ...inputStyle, margin: 0 }}
-            />
-            <button
-              onClick={() => remove(index)}
-              disabled={rows.length === 1 || row.amountPaid > 0}
-              title={
-                row.amountPaid > 0
-                  ? "Paid installments cannot be removed"
-                  : "Remove"
-              }
+              onChange={() => {}}
+              disabled
+              aria-label={`${row.label} amount calculated from annual charges`}
               style={{
-                border: 0,
-                background: "none",
-                color: "#c0392b",
-                cursor: "pointer",
+                ...inputStyle,
+                margin: 0,
+                background: "var(--surface-2)",
               }}
-            >
-              <X size={16} />
-            </button>
+            />
+            {invoice.packageType !== "standard_full" ? (
+              <button
+                onClick={() => remove(index)}
+                disabled={rows.length === 1 || row.amountPaid > 0}
+                title={
+                  row.amountPaid > 0
+                    ? "Paid payment dates cannot be removed"
+                    : "Remove"
+                }
+                style={{
+                  border: 0,
+                  background: "none",
+                  color: "#c0392b",
+                  cursor: "pointer",
+                }}
+              >
+                <X size={16} />
+              </button>
+            ) : (
+              <span aria-hidden />
+            )}
           </div>
         ))}
       </div>
-      <button onClick={add} style={{ ...outlineBtn, marginTop: 12 }}>
-        <Plus size={14} /> Add installment
-      </button>
+      {invoice.packageType !== "standard_full" && (
+        <button onClick={add} style={{ ...outlineBtn, marginTop: 12 }}>
+          <Plus size={14} /> Add payment date
+        </button>
+      )}
       <label style={{ ...fieldLabel, display: "block", marginTop: 16 }}>
         Reason for change
       </label>
@@ -2539,7 +2565,7 @@ function PlanEditorModal({
           paddingTop: 16,
         }}
       >
-        <strong>Total: {fcfa(total)} FCFA</strong>
+        <strong>Annual charge total: {fcfa(total)} FCFA</strong>
         <button
           onClick={save}
           disabled={

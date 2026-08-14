@@ -17,7 +17,8 @@ Legend: 🔴 defect/debt in built code · 🟠 plan item not built · 🟡 desig
 - [x] Authenticated multi-child guardian billing/payment/wire/receipt flow with scoped authorization, truthful invite lifecycle, and stale-request protection.
 - [x] Course Catalog/Programs navigation order, Course Sections copy, and direct public-site myDAUST portal link.
 - [x] Promoted to staging and production: immutable production commit `fa83fb5`, deploy run `31591314155`, encrypted pre-conversion snapshot, administrator-approved schedule revision 2, 298-account conversion with zero unresolved, exact component/payment reconciliation, and idempotent rerun.
-- [ ] Complete and promote the post-release interactive Finance chart enhancement (series toggles, rich crosshair tooltip, pinned selection, and keyboard date navigation). The approved expected/actual/forecast chart is already live; these richer controls are not yet deployed.
+- [x] Deploy the interactive Finance chart enhancement: series toggles, rich crosshair tooltip, pinned selection, keyboard date navigation, and accessible table/slider fallback.
+- [x] Deploy per-student plan approvals and restore-to-standard, billed/remaining columns, special-account flags, and compact paginated Registrar rosters. Staging run `31598725037` stabilized at API 104 / portal 56; production run `31600961458` stabilized at API 89 / portal 48 and passed read-only role smoke.
 
 ## 0 · SIS redesign — remaining backend gaps (audited 2026-07-21)
 

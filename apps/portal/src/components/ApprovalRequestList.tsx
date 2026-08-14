@@ -9,7 +9,7 @@ import {
   listApprovalRequests,
   rejectApprovalRequest,
 } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatXof, formatXofCompact } from "@/lib/format";
 import {
   Badge,
   Button,
@@ -21,12 +21,14 @@ import {
 } from "@/components/ui";
 
 const KIND_LABEL: Record<ApprovalRequestRow["kind"], string> = {
-  global_fee_schedule: "Global fee schedule",
+  global_fee_schedule: "Fees & payment schedule",
   custom_charge: "Custom charge",
   charge_removal: "Charge removal",
   payment_plan: "Student payment plan",
   discount: "Discount",
   scholarship: "Scholarship",
+  operating_budget: "Operating budget",
+  management_actual: "Management actual",
 };
 
 const STATUS_TONE = {
@@ -43,6 +45,194 @@ type FlatRow = {
   after: string;
   changed: boolean;
 };
+
+type SnapshotMetric = {
+  label: string;
+  before: string;
+  after: string;
+};
+
+const INCOME_CATEGORY_KEYS = new Set([
+  "bursar",
+  "research_grants",
+  "service_contracts",
+  "donations_sponsorships",
+  "scholarships",
+  "others",
+]);
+
+function object(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function text(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  return String(value);
+}
+
+function amount(record: Record<string, unknown> | null): number | null {
+  if (!record) return null;
+  const raw = record.amountXof ?? record.amount;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function amountText(value: number | null): string {
+  return value === null ? "—" : formatXof(value);
+}
+
+function budgetSnapshot(value: unknown): Record<string, unknown> | null {
+  const root = object(value);
+  return object(root?.draft) ?? root;
+}
+
+function budgetLines(snapshot: Record<string, unknown> | null) {
+  return Array.isArray(snapshot?.lines)
+    ? snapshot.lines
+        .map(object)
+        .filter((line): line is Record<string, unknown> => line !== null)
+    : [];
+}
+
+function budgetTotal(
+  snapshot: Record<string, unknown> | null,
+  kind: "income" | "expense",
+): number {
+  return budgetLines(snapshot).reduce((total, line) => {
+    const key = typeof line.categoryKey === "string" ? line.categoryKey : "";
+    const lineKind = INCOME_CATEGORY_KEYS.has(key) ? "income" : "expense";
+    const value = typeof line.amountXof === "number" ? line.amountXof : 0;
+    return lineKind === kind ? total + value : total;
+  }, 0);
+}
+
+function changedBudgetCells(before: unknown, after: unknown): number {
+  const map = (value: unknown) =>
+    new Map(
+      budgetLines(budgetSnapshot(value)).map((line) => [
+        `${line.categoryKey}:${line.month ?? line.monthIndex}`,
+        line.amountXof,
+      ]),
+    );
+  const left = map(before);
+  const right = map(after);
+  return [...new Set([...left.keys(), ...right.keys()])].filter(
+    (key) => left.get(key) !== right.get(key),
+  ).length;
+}
+
+function requestMetrics(request: ApprovalRequestRow): SnapshotMetric[] | null {
+  if (request.kind === "operating_budget") {
+    const before = budgetSnapshot(request.beforeJson);
+    const after = budgetSnapshot(request.afterJson);
+    return [
+      {
+        label: "Opening balance",
+        before: amountText(
+          typeof before?.openingBalanceXof === "number"
+            ? before.openingBalanceXof
+            : null,
+        ),
+        after: amountText(
+          typeof after?.openingBalanceXof === "number"
+            ? after.openingBalanceXof
+            : null,
+        ),
+      },
+      {
+        label: "Planned income",
+        before: amountText(before ? budgetTotal(before, "income") : null),
+        after: amountText(after ? budgetTotal(after, "income") : null),
+      },
+      {
+        label: "Planned expenses",
+        before: amountText(before ? budgetTotal(before, "expense") : null),
+        after: amountText(after ? budgetTotal(after, "expense") : null),
+      },
+      {
+        label: "Monthly cells changed",
+        before: "—",
+        after: String(
+          changedBudgetCells(request.beforeJson, request.afterJson),
+        ),
+      },
+    ];
+  }
+
+  if (request.kind === "management_actual") {
+    const before = object(request.beforeJson);
+    const after = object(request.afterJson);
+    const mode = typeof after?.mode === "string" ? after.mode : "change";
+    if (mode === "void_expense" || mode === "void_entry") {
+      return [
+        {
+          label: "Entry amount",
+          before: amountText(amount(before)),
+          after: "Void entry",
+        },
+        {
+          label: "Category",
+          before: text(before?.categoryLabel ?? before?.categoryKey),
+          after: "Removed from management actuals",
+        },
+      ];
+    }
+    const isAdjustment = mode === "adjustment";
+    return [
+      {
+        label: isAdjustment ? "Reported actual" : "Amount",
+        before: amountText(
+          isAdjustment && typeof after?.baseActualXof === "number"
+            ? after.baseActualXof
+            : amount(before),
+        ),
+        after: amountText(
+          isAdjustment && typeof after?.targetActualXof === "number"
+            ? after.targetActualXof
+            : amount(after),
+        ),
+      },
+      {
+        label: "Category",
+        before: text(before?.categoryLabel ?? before?.categoryKey),
+        after: text(after?.categoryLabel ?? after?.categoryKey),
+      },
+      {
+        label: "Cost center",
+        before: text(before?.costCenterCode),
+        after: text(after?.costCenterCode),
+      },
+      {
+        label: isAdjustment ? "Adjustment month" : "Occurred on",
+        before: text(before?.occurredOn),
+        after: text(after?.month ?? after?.occurredOn),
+      },
+    ];
+  }
+  return null;
+}
+
+function requestPreview(request: ApprovalRequestRow): string | null {
+  if (request.kind === "operating_budget") {
+    const after = budgetSnapshot(request.afterJson);
+    if (!after) return null;
+    return `${formatXofCompact(budgetTotal(after, "income"))} planned income · ${formatXofCompact(budgetTotal(after, "expense"))} planned expenses`;
+  }
+  if (request.kind === "management_actual") {
+    const after = object(request.afterJson);
+    const before = object(request.beforeJson);
+    const mode = typeof after?.mode === "string" ? after.mode : "";
+    if (mode.startsWith("void"))
+      return `${amountText(amount(before))} entry · void requested`;
+    const shown =
+      typeof after?.targetActualXof === "number"
+        ? after.targetActualXof
+        : amount(after);
+    return `${amountText(shown)} · ${text(after?.categoryLabel ?? after?.categoryKey)}`;
+  }
+  return null;
+}
 
 function flatten(value: unknown, prefix = ""): Map<string, string> {
   const out = new Map<string, string>();
@@ -320,6 +510,18 @@ export function ApprovalRequestList({
                   <p style={{ margin: "7px 0 0", fontSize: 13.5 }}>
                     {request.reason}
                   </p>
+                  {requestPreview(request) && (
+                    <p
+                      style={{
+                        margin: "6px 0 0",
+                        color: "var(--daust-navy-700)",
+                        fontSize: 11.5,
+                        fontWeight: 650,
+                      }}
+                    >
+                      {requestPreview(request)}
+                    </p>
+                  )}
                   <p
                     className="muted"
                     style={{ margin: "5px 0 0", fontSize: 12 }}
@@ -449,6 +651,8 @@ export function ApprovalRequestList({
 
 function RequestDetails({ request }: { request: ApprovalRequestRow }) {
   const rows = comparison(request);
+  const metrics = requestMetrics(request);
+  const visibleRows = metrics ? rows.slice(0, 120) : rows;
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div
@@ -480,6 +684,74 @@ function RequestDetails({ request }: { request: ApprovalRequestRow }) {
         </div>
         <p style={{ margin: "6px 0 0" }}>{request.reason}</p>
       </div>
+      {metrics && (
+        <section aria-labelledby="approval-summary-title">
+          <div
+            id="approval-summary-title"
+            className="muted"
+            style={{
+              marginBottom: 8,
+              fontSize: 11.5,
+              textTransform: "uppercase",
+              letterSpacing: ".08em",
+              fontWeight: 700,
+            }}
+          >
+            Decision summary
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: 9,
+            }}
+          >
+            {metrics.map((metric) => (
+              <div
+                key={metric.label}
+                style={{
+                  padding: 11,
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--surface)",
+                }}
+              >
+                <div
+                  className="muted"
+                  style={{ fontSize: 10.5, fontWeight: 650 }}
+                >
+                  {metric.label}
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto 1fr",
+                    alignItems: "center",
+                    gap: 6,
+                    marginTop: 7,
+                    fontSize: 11.5,
+                  }}
+                >
+                  <span
+                    style={{ color: "var(--fg3)", overflowWrap: "anywhere" }}
+                  >
+                    {metric.before}
+                  </span>
+                  <span
+                    aria-label="changes to"
+                    style={{ color: "var(--fg-faint)" }}
+                  >
+                    →
+                  </span>
+                  <strong style={{ overflowWrap: "anywhere" }}>
+                    {metric.after}
+                  </strong>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <div style={{ overflowX: "auto" }}>
         {rows.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>
@@ -487,46 +759,56 @@ function RequestDetails({ request }: { request: ApprovalRequestRow }) {
             of the current values.
           </p>
         ) : (
-          <table>
-            <caption
-              style={{ textAlign: "left", paddingBottom: 8, fontWeight: 700 }}
+          <details open={!metrics}>
+            <summary
+              style={{
+                cursor: "pointer",
+                color: "var(--fg2)",
+                fontSize: 12,
+                fontWeight: 700,
+                padding: "6px 0 10px",
+              }}
             >
-              Proposed changes only
-            </caption>
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Before</th>
-                <th>After</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.path} style={{ background: "var(--accent-bg)" }}>
-                  <td
-                    style={{
-                      fontFamily: "ui-monospace, monospace",
-                      fontSize: 11.5,
-                    }}
-                  >
-                    {row.path}
-                  </td>
-                  <td style={{ maxWidth: 240, overflowWrap: "anywhere" }}>
-                    {row.before}
-                  </td>
-                  <td
-                    style={{
-                      maxWidth: 240,
-                      overflowWrap: "anywhere",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {row.after}
-                  </td>
+              {metrics ? "Technical field changes" : "Proposed changes only"}
+            </summary>
+            <table>
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Before</th>
+                  <th>After</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {visibleRows.map((row) => (
+                  <tr key={row.path} style={{ background: "var(--accent-bg)" }}>
+                    <td style={{ fontSize: 11.5, overflowWrap: "anywhere" }}>
+                      {row.path}
+                    </td>
+                    <td style={{ maxWidth: 240, overflowWrap: "anywhere" }}>
+                      {row.before}
+                    </td>
+                    <td
+                      style={{
+                        maxWidth: 240,
+                        overflowWrap: "anywhere",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {row.after}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {visibleRows.length < rows.length && (
+              <p className="muted" style={{ fontSize: 11.5 }}>
+                Showing the first {visibleRows.length} of {rows.length}{" "}
+                technical field changes. The summary above contains the full
+                totals used for this decision.
+              </p>
+            )}
+          </details>
         )}
       </div>
       {request.decisionNote && (

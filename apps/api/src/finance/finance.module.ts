@@ -16,6 +16,7 @@ import { WireProofStorage } from "./wire-proof.storage.js";
 import { ApprovalsController } from "./approvals.controller.js";
 import { DirectorController } from "./director.controller.js";
 import { FinanceApprovalsService } from "./finance-approvals.service.js";
+import { OperatingBudgetService } from "./operating-budget.service.js";
 
 @Module({
   controllers: [
@@ -31,6 +32,7 @@ import { FinanceApprovalsService } from "./finance-approvals.service.js";
     BillThrottleGuard,
     WireProofStorage,
     FinanceApprovalsService,
+    OperatingBudgetService,
     { provide: PAYMENT_PROVIDER, useClass: PaytechProvider },
     // Request-to-pay rails are registered separately from the redirect-checkout seam so
     // PayTech's call sites stay untouched. Settlement resolves the rail by
@@ -45,6 +47,11 @@ import { FinanceApprovalsService } from "./finance-approvals.service.js";
   // Dining orders and application fees ride the same PayTech rail.
   // FinanceService is exported so the parent portal reads a child's account
   // through the same code the bursar uses — one source of truth for money.
-  exports: [PAYMENT_PROVIDER, REQUEST_TO_PAY_PROVIDERS, FinanceService],
+  exports: [
+    PAYMENT_PROVIDER,
+    REQUEST_TO_PAY_PROVIDERS,
+    FinanceService,
+    OperatingBudgetService,
+  ],
 })
 export class FinanceModule {}
