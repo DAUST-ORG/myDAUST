@@ -12,7 +12,7 @@ export class HrService {
    */
   async payslips(personId: string) {
     const salaries = await this.prisma.expense.findMany({
-      where: { category: "Salary", personId },
+      where: { category: "Salary", personId, status: "approved" },
       orderBy: { incurredOn: "desc" },
     });
     return salaries.map((s) => {
@@ -20,7 +20,10 @@ export class HrService {
       const net = Math.round(gross * 0.9); // illustrative 10% withholding; statutory payroll -> ERP
       return {
         id: s.id,
-        period: s.incurredOn.toLocaleDateString("en-US", { month: "long", year: "numeric" }),
+        period: s.incurredOn.toLocaleDateString("en-US", {
+          month: "long",
+          year: "numeric",
+        }),
         gross,
         deductions: gross - net,
         net,
@@ -30,22 +33,58 @@ export class HrService {
   }
 
   async myLeave(personId: string) {
-    return this.prisma.leaveRequest.findMany({ where: { personId }, orderBy: { createdAt: "desc" } });
+    return this.prisma.leaveRequest.findMany({
+      where: { personId },
+      orderBy: { createdAt: "desc" },
+    });
   }
 
-  async requestLeave(personId: string, input: { type: string; startDate: string; endDate: string; reason?: string }) {
+  async requestLeave(
+    personId: string,
+    input: {
+      type: string;
+      startDate: string;
+      endDate: string;
+      reason?: string;
+    },
+  ) {
     return this.prisma.leaveRequest.create({
-      data: { personId, type: input.type, startDate: new Date(input.startDate), endDate: new Date(input.endDate), reason: input.reason ?? null },
+      data: {
+        personId,
+        type: input.type,
+        startDate: new Date(input.startDate),
+        endDate: new Date(input.endDate),
+        reason: input.reason ?? null,
+      },
     });
   }
 
   async myBookings(personId: string) {
-    return this.prisma.roomBooking.findMany({ where: { personId }, orderBy: { date: "desc" } });
+    return this.prisma.roomBooking.findMany({
+      where: { personId },
+      orderBy: { date: "desc" },
+    });
   }
 
-  async book(personId: string, input: { room: string; date: string; startTime: string; endTime: string; purpose?: string }) {
+  async book(
+    personId: string,
+    input: {
+      room: string;
+      date: string;
+      startTime: string;
+      endTime: string;
+      purpose?: string;
+    },
+  ) {
     return this.prisma.roomBooking.create({
-      data: { personId, room: input.room, date: new Date(input.date), startTime: input.startTime, endTime: input.endTime, purpose: input.purpose ?? null },
+      data: {
+        personId,
+        room: input.room,
+        date: new Date(input.date),
+        startTime: input.startTime,
+        endTime: input.endTime,
+        purpose: input.purpose ?? null,
+      },
     });
   }
 }

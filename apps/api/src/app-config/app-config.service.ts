@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import {
   FEE_STRUCTURE,
   SCHOLARSHIP_TIERS,
@@ -13,11 +17,51 @@ import { PrismaService } from "../prisma/prisma.service.js";
 
 /** Seed rows derived from the former hardcoded constants. Created once; director edits win after that. */
 const DEFAULT_FEES = [
-  { key: "tuition", label: "Tuition", minXof: FEE_STRUCTURE.tuitionPerYear, maxXof: null, period: "year", note: "Half per semester · monthly installments available", sortOrder: 0 },
-  { key: "housing", label: "Housing", minXof: FEE_STRUCTURE.housingPerYear, maxXof: null, period: "year", note: "Optional · on-campus residence", sortOrder: 1 },
-  { key: "cafeteria", label: "Cafeteria", minXof: FEE_STRUCTURE.cafeteriaPerYear, maxXof: null, period: "year", note: "Optional · full pension meal plan", sortOrder: 2 },
-  { key: "application_fee", label: "Application Fee", minXof: FEE_STRUCTURE.applicationFee, maxXof: null, period: "one-time", note: "One-time, paid with your application", sortOrder: 3 },
-  { key: "insurance", label: "Insurance", minXof: FEE_STRUCTURE.insurancePerYear, maxXof: null, period: "year", note: "Annual student insurance", sortOrder: 4 },
+  {
+    key: "tuition",
+    label: "Tuition",
+    minXof: FEE_STRUCTURE.tuitionPerYear,
+    maxXof: null,
+    period: "year",
+    note: "Half per semester · monthly installments available",
+    sortOrder: 0,
+  },
+  {
+    key: "housing",
+    label: "Housing",
+    minXof: FEE_STRUCTURE.housingPerYear,
+    maxXof: null,
+    period: "year",
+    note: "Optional · on-campus residence",
+    sortOrder: 1,
+  },
+  {
+    key: "cafeteria",
+    label: "Cafeteria",
+    minXof: FEE_STRUCTURE.cafeteriaPerYear,
+    maxXof: null,
+    period: "year",
+    note: "Optional · full pension meal plan",
+    sortOrder: 2,
+  },
+  {
+    key: "application_fee",
+    label: "Application Fee",
+    minXof: FEE_STRUCTURE.applicationFee,
+    maxXof: null,
+    period: "one-time",
+    note: "One-time, paid with your application",
+    sortOrder: 3,
+  },
+  {
+    key: "insurance",
+    label: "Insurance",
+    minXof: FEE_STRUCTURE.insurancePerYear,
+    maxXof: null,
+    period: "year",
+    note: "Annual student insurance",
+    sortOrder: 4,
+  },
 ];
 
 @Injectable()
@@ -27,23 +71,53 @@ export class AppConfigService {
   /** Idempotent: creates missing defaults without touching director-edited rows. */
   private async ensureSeeded() {
     const count = await this.prisma.feeItem.count();
-    if (count === 0) await this.prisma.feeItem.createMany({ data: DEFAULT_FEES });
+    if (count === 0)
+      await this.prisma.feeItem.createMany({ data: DEFAULT_FEES });
     const tiers = await this.prisma.scholarshipTier.count();
     if (tiers === 0) {
       await this.prisma.scholarshipTier.createMany({
-        data: SCHOLARSHIP_TIERS.map((t) => ({ minScore: t.minScore, pct: t.pct, band: t.band, note: t.note ?? null })),
+        data: SCHOLARSHIP_TIERS.map((t) => ({
+          minScore: t.minScore,
+          pct: t.pct,
+          band: t.band,
+          note: t.note ?? null,
+        })),
       });
     }
   }
 
   async fees() {
     await this.ensureSeeded();
-    return this.prisma.feeItem.findMany({ orderBy: { sortOrder: "asc" } });
+    const [fees, schedule] = await Promise.all([
+      this.prisma.feeItem.findMany({ orderBy: { sortOrder: "asc" } }),
+      this.prisma.feeSchedule.findFirst({
+        where: { status: "approved", academicYear: { status: "active" } },
+        orderBy: { revision: "desc" },
+        include: { components: true },
+      }),
+    ]);
+    const annual = new Map(
+      (schedule?.components ?? []).map((row) => [row.key, row.annualAmountXof]),
+    );
+    return fees.map((fee) =>
+      annual.has(fee.key)
+        ? {
+            ...fee,
+            minXof: annual.get(fee.key)!,
+            maxXof: null,
+            managedBy: "fee_schedule" as const,
+            editable: false,
+          }
+        : { ...fee, managedBy: "settings" as const, editable: true },
+    );
   }
 
   /** Public: the real SIS programs, so the vitrine apply form offers exactly what exists. */
   async programs(): Promise<{ code: string; name: string }[]> {
-    return this.prisma.program.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } });
+    return this.prisma.program.findMany({
+      select: { code: true, name: true },
+      orderBy: { name: "asc" },
+    });
   }
 
   // --- New-application notification recipients (AppSetting singleton) ---
@@ -51,9 +125,13 @@ export class AppConfigService {
   private static readonly DEFAULT_RECIPIENTS = ["sndao@daust.org"];
 
   async applicationNotificationRecipients(): Promise<string[]> {
-    const row = await this.prisma.appSetting.findUnique({ where: { key: AppConfigService.NOTIFY_KEY } });
+    const row = await this.prisma.appSetting.findUnique({
+      where: { key: AppConfigService.NOTIFY_KEY },
+    });
     const val = row?.valueJson as { recipients?: string[] } | null | undefined;
-    return val?.recipients?.length ? val.recipients : AppConfigService.DEFAULT_RECIPIENTS;
+    return val?.recipients?.length
+      ? val.recipients
+      : AppConfigService.DEFAULT_RECIPIENTS;
   }
 
   async setNotificationRecipients(recipients: string[], actorId: string) {
@@ -63,7 +141,13 @@ export class AppConfigService {
       update: { valueJson: { recipients } },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "AppSetting", entityId: AppConfigService.NOTIFY_KEY, action: "notification-recipients-updated", actorId, data: { count: recipients.length } },
+      data: {
+        entity: "AppSetting",
+        entityId: AppConfigService.NOTIFY_KEY,
+        action: "notification-recipients-updated",
+        actorId,
+        data: { count: recipients.length },
+      },
     });
     return { recipients };
   }
@@ -72,46 +156,90 @@ export class AppConfigService {
   private static readonly EMAIL_TEMPLATES_KEY = "email_templates";
 
   async emailTemplates(): Promise<EmailTemplatesInput> {
-    const row = await this.prisma.appSetting.findUnique({ where: { key: AppConfigService.EMAIL_TEMPLATES_KEY } });
-    const val = row?.valueJson as Partial<EmailTemplatesInput> | null | undefined;
+    const row = await this.prisma.appSetting.findUnique({
+      where: { key: AppConfigService.EMAIL_TEMPLATES_KEY },
+    });
+    const val = row?.valueJson as
+      Partial<EmailTemplatesInput> | null | undefined;
     return { ...DEFAULT_EMAIL_TEMPLATES, ...val };
   }
 
   async setEmailTemplates(templates: EmailTemplatesInput, actorId: string) {
     await this.prisma.appSetting.upsert({
       where: { key: AppConfigService.EMAIL_TEMPLATES_KEY },
-      create: { key: AppConfigService.EMAIL_TEMPLATES_KEY, valueJson: templates },
+      create: {
+        key: AppConfigService.EMAIL_TEMPLATES_KEY,
+        valueJson: templates,
+      },
       update: { valueJson: templates },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "AppSetting", entityId: AppConfigService.EMAIL_TEMPLATES_KEY, action: "email-templates-updated", actorId, data: templates },
+      data: {
+        entity: "AppSetting",
+        entityId: AppConfigService.EMAIL_TEMPLATES_KEY,
+        action: "email-templates-updated",
+        actorId,
+        data: templates,
+      },
     });
     return templates;
   }
 
   async scholarships(): Promise<(ScholarshipTierDef & { id: string })[]> {
     await this.ensureSeeded();
-    const rows = await this.prisma.scholarshipTier.findMany({ orderBy: { minScore: "desc" } });
-    return rows.map((r) => ({ id: r.id, minScore: r.minScore, pct: r.pct, band: r.band, note: r.note }));
+    const rows = await this.prisma.scholarshipTier.findMany({
+      orderBy: { minScore: "desc" },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      minScore: r.minScore,
+      pct: r.pct,
+      band: r.band,
+      note: r.note,
+    }));
   }
 
   /** The live award function: DB tiers, shared pure logic, constant fallback if the table is empty. */
   async awardFor(score: number | null | undefined) {
     const tiers = await this.scholarships();
-    return scholarshipForBac(score, tiers.length > 0 ? tiers : SCHOLARSHIP_TIERS);
+    return scholarshipForBac(
+      score,
+      tiers.length > 0 ? tiers : SCHOLARSHIP_TIERS,
+    );
   }
 
   /** Current application fee (fixed amount) for checkout + revenue derivation. */
   async applicationFee(): Promise<number> {
     await this.ensureSeeded();
-    const row = await this.prisma.feeItem.findUnique({ where: { key: "application_fee" } });
+    const row = await this.prisma.feeItem.findUnique({
+      where: { key: "application_fee" },
+    });
     return row?.minXof ?? FEE_STRUCTURE.applicationFee;
   }
 
   async updateFee(key: string, patch: UpdateFeeInput, actorId: string) {
+    const scheduleManaged = await this.prisma.feeScheduleComponent.findFirst({
+      where: {
+        key,
+        schedule: {
+          status: "approved",
+          academicYear: { status: "active" },
+        },
+      },
+      select: { id: true },
+    });
+    if (scheduleManaged) {
+      throw new BadRequestException(
+        "Annual student charges are managed in Fees & Payment Schedule and require the finance approval workflow",
+      );
+    }
     const existing = await this.prisma.feeItem.findUnique({ where: { key } });
     if (!existing) throw new NotFoundException("Unknown fee item");
-    if (patch.maxXof != null && patch.minXof != null && patch.maxXof < patch.minXof) {
+    if (
+      patch.maxXof != null &&
+      patch.minXof != null &&
+      patch.maxXof < patch.minXof
+    ) {
       throw new BadRequestException("maxXof must be ≥ minXof");
     }
     const updated = await this.prisma.feeItem.update({
@@ -125,40 +253,78 @@ export class AppConfigService {
       },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "FeeItem", entityId: key, action: "fee-updated", actorId, data: { from: existing, to: patch } },
+      data: {
+        entity: "FeeItem",
+        entityId: key,
+        action: "fee-updated",
+        actorId,
+        data: { from: existing, to: patch },
+      },
     });
     return updated;
   }
 
   async createTier(input: ScholarshipTierInput, actorId: string) {
     const tier = await this.prisma.scholarshipTier.create({
-      data: { minScore: input.minScore, pct: input.pct, band: input.band, note: input.note ?? null },
+      data: {
+        minScore: input.minScore,
+        pct: input.pct,
+        band: input.band,
+        note: input.note ?? null,
+      },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "ScholarshipTier", entityId: tier.id, action: "tier-created", actorId, data: input },
+      data: {
+        entity: "ScholarshipTier",
+        entityId: tier.id,
+        action: "tier-created",
+        actorId,
+        data: input,
+      },
     });
     return tier;
   }
 
   async updateTier(id: string, input: ScholarshipTierInput, actorId: string) {
-    const existing = await this.prisma.scholarshipTier.findUnique({ where: { id } });
+    const existing = await this.prisma.scholarshipTier.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Tier not found");
     const tier = await this.prisma.scholarshipTier.update({
       where: { id },
-      data: { minScore: input.minScore, pct: input.pct, band: input.band, note: input.note ?? null },
+      data: {
+        minScore: input.minScore,
+        pct: input.pct,
+        band: input.band,
+        note: input.note ?? null,
+      },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "ScholarshipTier", entityId: id, action: "tier-updated", actorId, data: { from: existing, to: input } },
+      data: {
+        entity: "ScholarshipTier",
+        entityId: id,
+        action: "tier-updated",
+        actorId,
+        data: { from: existing, to: input },
+      },
     });
     return tier;
   }
 
   async deleteTier(id: string, actorId: string) {
-    const existing = await this.prisma.scholarshipTier.findUnique({ where: { id } });
+    const existing = await this.prisma.scholarshipTier.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Tier not found");
     await this.prisma.scholarshipTier.delete({ where: { id } });
     await this.prisma.auditLog.create({
-      data: { entity: "ScholarshipTier", entityId: id, action: "tier-deleted", actorId, data: existing },
+      data: {
+        entity: "ScholarshipTier",
+        entityId: id,
+        action: "tier-deleted",
+        actorId,
+        data: existing,
+      },
     });
     return { ok: true };
   }

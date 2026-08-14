@@ -1,0 +1,331 @@
+/* Component-first finance controls shared by fee configuration and student accounts. */
+.fee-page-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+.fee-component-catalog,
+.invoice-component-manager {
+  min-width: 0;
+}
+.fee-component-list {
+  display: grid;
+  gap: 8px;
+}
+.fee-component-row {
+  display: grid;
+  grid-template-columns: 30px minmax(150px, 1fr) minmax(120px, auto) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--divider);
+}
+.fee-component-row:last-child {
+  border-bottom: 0;
+}
+.fee-component-marker {
+  display: inline-flex;
+  width: 27px;
+  height: 27px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--fg3);
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+}
+.fee-component-marker.selected {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--success) 28%, var(--border));
+}
+.fee-component-copy,
+.fee-component-money {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.fee-component-copy strong,
+.fee-component-money strong {
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.fee-component-copy small,
+.fee-component-money small {
+  color: var(--fg3);
+  font-size: 11px;
+}
+.fee-component-money {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fee-component-money strong {
+  white-space: nowrap;
+}
+.invoice-component-manager {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 15px;
+  background: var(--surface);
+}
+.invoice-component-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.invoice-component-head h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+.invoice-component-head p {
+  margin: 3px 0 0;
+  color: var(--fg3);
+  font-size: 11.5px;
+  max-width: 52ch;
+}
+.invoice-component-head > strong {
+  white-space: nowrap;
+  color: var(--daust-navy);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+.fee-component-pending,
+.fee-component-legacy-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 11px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+  color: var(--fg2);
+  background: color-mix(in srgb, var(--warning-400) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warning-400) 45%, var(--border));
+  font-size: 11.5px;
+}
+.fee-component-legacy-note {
+  margin: 0 0 14px;
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.fee-component-proposal {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.fee-component-proposal-title,
+.fee-component-submit,
+.fee-component-total-change {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fee-component-proposal-title {
+  font-size: 13.5px;
+  margin-bottom: 12px;
+}
+.fee-component-proposal-title button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--fg3);
+  padding: 4px;
+  font-size: 11.5px;
+}
+.fee-component-total-change {
+  justify-content: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.fee-component-total-change strong {
+  display: block;
+  color: var(--daust-navy);
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+.fee-split-preview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(95px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin: 10px 0 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--border);
+}
+.fee-split-preview > div {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  min-width: 0;
+  background: var(--surface);
+}
+.fee-split-preview span,
+.fee-split-preview small {
+  color: var(--fg3);
+  font-size: 10.5px;
+}
+.fee-split-preview span small {
+  display: block;
+}
+.fee-split-preview strong {
+  color: var(--fg1);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.fee-component-submit {
+  align-items: flex-end;
+  margin-top: 12px;
+}
+.fee-component-submit > span {
+  max-width: 50ch;
+  color: var(--fg3);
+  font-size: 10.5px;
+}
+.fee-component-error {
+  color: var(--danger);
+  font-size: 11.5px;
+  margin: 8px 0;
+}
+.fee-installment-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+.fee-installment-flow > div {
+  position: relative;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.fee-installment-flow > div:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 25px;
+  right: -11px;
+  z-index: 1;
+  width: 10px;
+  border-top: 1px solid var(--border-strong);
+}
+.fee-installment-flow span,
+.fee-installment-flow small {
+  display: block;
+}
+.fee-installment-flow span {
+  font-size: 11.5px;
+  color: var(--fg2);
+}
+.fee-installment-flow strong {
+  display: block;
+  margin: 3px 0;
+  color: var(--daust-navy);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.fee-installment-flow small {
+  color: var(--fg3);
+  font-size: 10.5px;
+}
+.fee-editor-component-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.2fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr)
+    auto;
+  gap: 10px;
+  align-items: end;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--divider);
+}
+.fee-editor-component-grid:last-child {
+  border-bottom: 0;
+}
+.fee-editor-schedule-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(145px, 0.8fr) minmax(
+      120px,
+      0.7fr
+    );
+  gap: 10px;
+  align-items: end;
+}
+.student-payment-date-row {
+  display: grid;
+  grid-template-columns: 42px minmax(140px, 1fr) 150px 150px 36px;
+}
+
+@media (max-width: 900px) {
+  .fee-page-grid {
+    grid-template-columns: 1fr;
+  }
+  .fee-installment-flow,
+  .fee-split-preview {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+  .fee-installment-flow > div::after {
+    display: none;
+  }
+  .fee-editor-component-grid {
+    grid-template-columns: minmax(150px, 1fr) minmax(120px, 0.8fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .fee-component-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+  }
+  .fee-component-money {
+    grid-column: 2;
+    text-align: left;
+  }
+  .fee-component-row > .sis-btn {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+  .fee-component-total-change,
+  .fee-component-submit,
+  .invoice-component-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .fee-component-submit > .sis-btn {
+    width: 100%;
+  }
+  .fee-installment-flow,
+  .fee-split-preview,
+  .fee-editor-component-grid,
+  .fee-editor-schedule-grid {
+    grid-template-columns: 1fr;
+  }
+  .student-payment-date-row {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+  .student-payment-date-row > strong {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .student-payment-date-row > input,
+  .student-payment-date-row > button,
+  .student-payment-date-row > span:last-child {
+    grid-column: 2;
+  }
+  .student-payment-date-row > button,
+  .student-payment-date-row > span:last-child {
+    justify-self: end;
+  }
+}

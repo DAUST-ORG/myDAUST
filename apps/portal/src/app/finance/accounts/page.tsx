@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, Check, FilePlus, Pencil } from "lucide-react";
 import {
+  type AccountInvoice,
   type FeePlan,
   type StudentAccountRow,
   assignStandardPackage,
@@ -12,6 +13,7 @@ import {
   restoreStandardPaymentPlan,
   updatePaymentPlan,
 } from "@/lib/api";
+import { InvoiceComponentManager } from "@/components/InvoiceComponentManager";
 import { formatXof } from "@/lib/format";
 import {
   AccountBalanceText,
@@ -54,10 +56,6 @@ function planLabel(value: string): string {
   return PLAN_OPTIONS.find((p) => p.value === value)?.label ?? value;
 }
 
-function toInt(v: string): number {
-  return Math.max(0, Math.round(Number(v.replace(/[^\d]/g, "")) || 0));
-}
-
 function toDateInput(iso: string | null): string {
   return iso ? iso.slice(0, 10) : "";
 }
@@ -78,6 +76,7 @@ interface BillingDraft {
   studentId: string;
   plan: string;
   planType?: StudentAccountRow["planType"];
+  invoice?: AccountInvoice;
   rows: DraftRow[];
 }
 
@@ -240,6 +239,7 @@ export default function FinanceAccounts() {
         studentId: row.id,
         plan: invoice.description === planLabel("tuition") ? "tuition" : "full",
         planType: invoice.planType,
+        invoice,
         rows: invoice.installments.map((i) => ({
           id: i.id,
           label: i.label ?? `Installment ${i.sequence}`,
@@ -495,8 +495,10 @@ export default function FinanceAccounts() {
                     </td>
                     <td style={{ textAlign: "right" }}>
                       <IconButton
-                        label={`Request an individual payment-plan change for ${r.name}`}
-                        disabled={busy}
+                        label={`Manage annual charges and payment dates for ${r.name}`}
+                        disabled={
+                          busy || r.specialAccount?.hasPendingPlanChange
+                        }
                         onClick={() => openEdit(r)}
                       >
                         <Pencil size={15} />
@@ -638,7 +640,7 @@ export default function FinanceAccounts() {
         <Modal
           open
           onClose={() => setDraft(null)}
-          title={draft.invoiceId ? "Edit Billing" : "New Billing"}
+          title={draft.invoiceId ? "Edit student billing" : "New Billing"}
           width={560}
           footer={
             <>
@@ -666,7 +668,7 @@ export default function FinanceAccounts() {
         >
           <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>
             {draft.invoiceId
-              ? "This changes only this student. Dates or amounts are applied after administrator approval and no longer follow future global schedule revisions."
+              ? "Annual charges set this student’s total. Approved component exceptions remain selected while later global fee amounts continue to apply; payment-date exceptions use an individual schedule."
               : "Assign the administrator-approved tuition, housing, and cafeteria package."}
           </p>
 
@@ -733,6 +735,17 @@ export default function FinanceAccounts() {
               />
             </Field>
 
+            {draft.invoice?.packageType === "standard_full" && (
+              <InvoiceComponentManager
+                invoice={draft.invoice}
+                onSubmitted={(message) => {
+                  setDraft(null);
+                  setNote(message);
+                  load();
+                }}
+              />
+            )}
+
             {draft.planType === "individual_override" && (
               <div
                 style={{
@@ -786,11 +799,11 @@ export default function FinanceAccounts() {
                     color: "var(--daust-navy)",
                   }}
                 >
-                  Installments
+                  Payment dates
                 </span>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {draft.invoiceId
-                    ? "Proposed individual schedule"
+                    ? "Amounts are calculated from annual charges"
                     : "From the approved global revision"}
                 </span>
               </div>
@@ -829,15 +842,15 @@ export default function FinanceAccounts() {
                   <span style={{ display: "grid", gap: 3 }}>
                     <Input
                       value={r.amountXof}
-                      onChange={(v) => editRow(i, { amountXof: toInt(v) })}
-                      disabled={!draft.invoiceId}
+                      onChange={() => {}}
+                      disabled
                       invalid={r.amountXof < (r.amountPaid ?? 0)}
                       align="right"
                       inputMode="numeric"
                     />
                     {(r.amountPaid ?? 0) > 0 && (
                       <span className="muted" style={{ fontSize: 10.5 }}>
-                        Minimum {formatXof(r.amountPaid ?? 0)} already paid
+                        {formatXof(r.amountPaid ?? 0)} already paid
                       </span>
                     )}
                   </span>
@@ -855,7 +868,7 @@ export default function FinanceAccounts() {
                 }}
               >
                 <span className="muted" style={{ fontSize: 12.5 }}>
-                  Billing total
+                  Annual charge total
                 </span>
                 <strong style={{ fontVariantNumeric: "tabular-nums" }}>
                   {formatXof(total)}
@@ -865,7 +878,7 @@ export default function FinanceAccounts() {
             {draft.invoiceId && (
               <Field
                 label="Reason for change"
-                hint="Sent to the administrator with the before/after schedule."
+                hint="Required for payment-date changes. Charge changes have their own approval reason above."
               >
                 <textarea
                   value={requestReason}

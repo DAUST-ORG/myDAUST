@@ -50,6 +50,7 @@ import {
   deriveAccountSpecialStatus,
   invoicePlanType,
 } from "./account-customization.js";
+import { displayFeeComponentLabel } from "./fee-components.js";
 
 // Shared fee constants are bootstrap fallbacks only. Standard billing always reads
 // the current administrator-approved FeeSchedule revision from the database.
@@ -680,13 +681,18 @@ export class FinanceService {
         status: null,
         approvedAt: null,
         rows: [],
+        components: [],
+        packageTotalXof: 0,
         totals: { full: 0, tuition: 0, housing: 0, cafeteria: 0 },
       };
 
     const schedule = await this.prisma.feeSchedule.findFirst({
       where: { academicYearLabel: year, status: "approved" },
       orderBy: { revision: "desc" },
-      include: { rows: { orderBy: { sequence: "asc" } } },
+      include: {
+        rows: { orderBy: { sequence: "asc" } },
+        components: { orderBy: [{ sortOrder: "asc" }, { key: "asc" }] },
+      },
     });
     const rows = schedule?.rows ?? [];
     return {
@@ -696,6 +702,10 @@ export class FinanceService {
       status: schedule?.status ?? null,
       approvedAt: schedule?.approvedAt ?? null,
       rows,
+      components: schedule?.components ?? [],
+      packageTotalXof: (schedule?.components ?? [])
+        .filter((component) => component.defaultSelected)
+        .reduce((sum, component) => sum + component.annualAmountXof, 0),
       totals: {
         full: rows.reduce((s, r) => s + r.amountFullXof, 0),
         tuition: rows.reduce((s, r) => s + r.amountTuitionXof, 0),
@@ -2550,7 +2560,10 @@ export class FinanceService {
           holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
           invoices: {
             orderBy: { createdAt: "desc" },
-            include: { plan: { include: { installments: true } } },
+            include: {
+              plan: { include: { installments: true } },
+              componentOverrides: true,
+            },
           },
         },
       }),
@@ -2664,6 +2677,11 @@ export class FinanceService {
           },
           payments: { orderBy: { createdAt: "desc" } },
           wireTransfers: { orderBy: { createdAt: "desc" } },
+          components: {
+            include: { allocations: true },
+            orderBy: { kind: "asc" },
+          },
+          componentOverrides: true,
         },
       }),
       this.prisma.studentHold.findMany({
@@ -2679,6 +2697,34 @@ export class FinanceService {
         select: { targetId: true },
       }),
     ]);
+
+    const academicYears = [
+      ...new Set(
+        invoices.flatMap((invoice) =>
+          invoice.academicYearLabel ? [invoice.academicYearLabel] : [],
+        ),
+      ),
+    ];
+    const schedules = academicYears.length
+      ? await this.prisma.feeSchedule.findMany({
+          where: {
+            status: "approved",
+            academicYearLabel: { in: academicYears },
+          },
+          orderBy: { revision: "desc" },
+          include: {
+            components: {
+              orderBy: [{ sortOrder: "asc" }, { key: "asc" }],
+            },
+          },
+        })
+      : [];
+    const latestScheduleByYear = new Map<string, (typeof schedules)[number]>();
+    for (const schedule of schedules) {
+      if (!latestScheduleByYear.has(schedule.academicYearLabel)) {
+        latestScheduleByYear.set(schedule.academicYearLabel, schedule);
+      }
+    }
 
     const position = deriveApiAccountPosition(invoices);
     const derived = derivedInstallmentsById(position);
@@ -2723,6 +2769,70 @@ export class FinanceService {
       invoices: invoices.map((inv) => {
         const summary = invoicePositionSummary(position, inv.id);
         const planType = invoicePlanType(inv);
+        const invoiceComponents = inv.components ?? [];
+        const selectedByKey = new Map(
+          invoiceComponents.map((component) => [component.kind, component]),
+        );
+        const latestCatalog = inv.academicYearLabel
+          ? (latestScheduleByYear.get(inv.academicYearLabel)?.components ?? [])
+          : [];
+        type AvailableComponent = {
+          id: string | null;
+          key: string;
+          label: string;
+          description: string | null;
+          costCenterCode: string;
+          annualAmountXof: number;
+          defaultSelected: boolean;
+          sortOrder: number;
+          selected: boolean;
+          invoiceComponentId: string | null;
+          allocatedXof: number;
+        };
+        const availableByKey = new Map<string, AvailableComponent>(
+          latestCatalog.map((component) => [
+            component.key,
+            {
+              id: component.id,
+              key: component.key,
+              label: component.label,
+              description: component.description,
+              costCenterCode: component.costCenterCode,
+              annualAmountXof: component.annualAmountXof,
+              defaultSelected: component.defaultSelected,
+              sortOrder: component.sortOrder,
+              selected: (selectedByKey.get(component.key)?.amountXof ?? 0) > 0,
+              invoiceComponentId: selectedByKey.get(component.key)?.id ?? null,
+              allocatedXof: (
+                selectedByKey.get(component.key)?.allocations ?? []
+              ).reduce(
+                (sum, allocation) =>
+                  sum + allocation.amountXof - allocation.refundedAmountXof,
+                0,
+              ),
+            },
+          ]),
+        );
+        for (const component of invoiceComponents) {
+          if (availableByKey.has(component.kind)) continue;
+          availableByKey.set(component.kind, {
+            id: component.scheduleComponentId,
+            key: component.kind,
+            label: component.label || displayFeeComponentLabel(component.kind),
+            description: null,
+            costCenterCode: component.costCenterCode,
+            annualAmountXof: component.amountXof,
+            defaultSelected: false,
+            sortOrder: 999,
+            selected: true,
+            invoiceComponentId: component.id,
+            allocatedXof: component.allocations.reduce(
+              (sum, allocation) =>
+                sum + allocation.amountXof - allocation.refundedAmountXof,
+              0,
+            ),
+          });
+        }
         return {
           id: inv.id,
           createdAt: inv.createdAt,
@@ -2734,6 +2844,8 @@ export class FinanceService {
           feeScheduleRevision: inv.feeScheduleRevision,
           planType,
           isIndividualPlanOverride: planType === "individual_override",
+          hasIndividualComponentOverride:
+            (inv.componentOverrides?.length ?? 0) > 0,
           hasPendingPlanChange: pendingPlanInvoiceIds.has(inv.id),
           total: inv.totalAmount,
           paid: inv.amountPaid,
@@ -2768,6 +2880,29 @@ export class FinanceService {
             createdAt: p.createdAt,
           })),
           wireTransfers: inv.wireTransfers.map((w) => this.wireSummary(w)),
+          availableComponents: [...availableByKey.values()].sort(
+            (a, b) => a.sortOrder - b.sortOrder || a.key.localeCompare(b.key),
+          ),
+          componentOverrides: inv.componentOverrides ?? [],
+          components: invoiceComponents.map((component) => {
+            const allocatedXof = component.allocations.reduce(
+              (sum, allocation) =>
+                sum + allocation.amountXof - allocation.refundedAmountXof,
+              0,
+            );
+            return {
+              id: component.id,
+              key: component.kind,
+              kind: component.kind,
+              label:
+                component.label || displayFeeComponentLabel(component.kind),
+              costCenterCode: component.costCenterCode,
+              amountXof: component.amountXof,
+              allocatedXof,
+              selected: component.amountXof > 0,
+              scheduleComponentId: component.scheduleComponentId,
+            };
+          }),
         };
       }),
     };
@@ -3379,28 +3514,11 @@ export class FinanceService {
     },
     actorId?: string,
   ) {
-    const expense = await this.prisma.expense.create({
-      data: {
-        costCenterCode: input.costCenterCode,
-        category: input.category,
-        description: input.description,
-        payee: input.payee,
-        amount: input.amount,
-        isEstimate: input.isEstimate,
-        incurredOn: new Date(input.incurredOn),
-        createdById: actorId,
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Expense",
-        entityId: expense.id,
-        action: "created",
-        actorId,
-        data: input,
-      },
-    });
-    return expense;
+    void input;
+    void actorId;
+    throw new BadRequestException(
+      "Expense creation requires an administrator approval request",
+    );
   }
 
   async updateExpense(
@@ -3416,58 +3534,25 @@ export class FinanceService {
     }>,
     actorId?: string,
   ) {
-    const existing = await this.prisma.expense.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException("Expense not found");
-    const expense = await this.prisma.expense.update({
-      where: { id },
-      data: {
-        ...(patch.costCenterCode !== undefined
-          ? { costCenterCode: patch.costCenterCode }
-          : {}),
-        ...(patch.category !== undefined ? { category: patch.category } : {}),
-        ...(patch.description !== undefined
-          ? { description: patch.description }
-          : {}),
-        ...(patch.payee !== undefined ? { payee: patch.payee } : {}),
-        ...(patch.amount !== undefined ? { amount: patch.amount } : {}),
-        ...(patch.isEstimate !== undefined
-          ? { isEstimate: patch.isEstimate }
-          : {}),
-        ...(patch.incurredOn !== undefined
-          ? { incurredOn: new Date(patch.incurredOn) }
-          : {}),
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Expense",
-        entityId: id,
-        action: "updated",
-        actorId,
-        data: patch,
-      },
-    });
-    return expense;
+    void id;
+    void patch;
+    void actorId;
+    throw new BadRequestException(
+      "Expense corrections require an administrator approval request",
+    );
   }
 
   async deleteExpense(id: string, actorId?: string) {
-    const existing = await this.prisma.expense.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException("Expense not found");
-    await this.prisma.expense.delete({ where: { id } });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Expense",
-        entityId: id,
-        action: "deleted",
-        actorId,
-        data: { amount: existing.amount, category: existing.category },
-      },
-    });
-    return { ok: true };
+    void id;
+    void actorId;
+    throw new BadRequestException(
+      "Approved expenses are immutable; submit a void approval request",
+    );
   }
 
   async listExpenses() {
     const rows = await this.prisma.expense.findMany({
+      where: { status: "approved" },
       orderBy: { incurredOn: "desc" },
       take: 200,
       include: { costCenter: true },
@@ -3772,6 +3857,7 @@ export class FinanceService {
       }),
       this.prisma.expense.groupBy({
         by: ["costCenterCode"],
+        where: { status: "approved", isEstimate: false },
         _sum: { amount: true },
       }),
       this.prisma.budget.findMany({ where: { fiscalYear } }),

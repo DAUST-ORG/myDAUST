@@ -9,7 +9,7 @@ export default function FinanceRequestsPage() {
       <PageHeader
         eyebrow="Finance · Change control"
         title="My Requests"
-        subtitle="Track fee and payment-plan changes submitted for administrator approval."
+        subtitle="Track budget, management actual, fee and payment-plan changes submitted for administrator approval."
       />
       <ApprovalRequestList mode="requester" />
     </>

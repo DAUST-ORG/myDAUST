@@ -99,6 +99,34 @@ enum ApprovalRequestKind {
   payment_plan
   discount
   scholarship
+  operating_budget
+  management_actual
+}
+
+enum OperatingBudgetStatus {
+  draft
+  pending
+  approved
+  rejected
+  superseded
+}
+
+enum ManagementCategoryKind {
+  income
+  expense
+}
+
+enum ManagementRecordStatus {
+  pending
+  approved
+  rejected
+  void
+  corrected
+}
+
+enum ManagementActualEntryType {
+  manual_income
+  adjustment
 }
 
 enum EnrollmentStatus {
@@ -142,39 +170,67 @@ enum CostCenterType {
 }
 
 model CostCenter {
-  code              String             @id
-  name              String
-  type              CostCenterType
-  parentCode        String?
-  parent            CostCenter?        @relation("CostCenterTree", fields: [parentCode], references: [code])
-  children          CostCenter[]       @relation("CostCenterTree")
-  invoices          Invoice[]
-  invoiceComponents InvoiceComponent[]
-  expenses          Expense[]
-  budgets           Budget[]
+  code                    String                  @id
+  name                    String
+  type                    CostCenterType
+  parentCode              String?
+  parent                  CostCenter?             @relation("CostCenterTree", fields: [parentCode], references: [code])
+  children                CostCenter[]            @relation("CostCenterTree")
+  invoices                Invoice[]
+  invoiceComponents       InvoiceComponent[]
+  feeScheduleComponents   FeeScheduleComponent[]
+  expenses                Expense[]
+  budgets                 Budget[]
+  managementActualEntries ManagementActualEntry[]
 
   @@index([parentCode])
 }
 
 // Management-accounting expense (manual/estimated). Financial accounting (GL) deferred to ERP.
 model Expense {
-  id             String     @id @default(uuid())
-  costCenterCode String
-  costCenter     CostCenter @relation(fields: [costCenterCode], references: [code])
-  category       String // Salary | Facilities | Procurement | IT | Operations | ...
-  description    String?
-  payee          String? // human-readable label only (vendor or employee display name)
+  id                    String                 @id @default(uuid())
+  costCenterCode        String
+  costCenter            CostCenter             @relation(fields: [costCenterCode], references: [code])
+  category              String // Legacy display label. New records also link managementCategoryKey.
+  managementCategoryKey String?
+  managementCategory    ManagementCategory?    @relation(fields: [managementCategoryKey], references: [key], onDelete: SetNull)
+  academicYearId        String?
+  academicYear          AcademicYear?          @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
+  description           String?
+  payee                 String? // human-readable label only (vendor or employee display name)
   // Canonical employee link for salary rows — payslips join on this, never on the mutable payee name.
-  personId       String?
-  amount         Int // integer XOF
-  isEstimate     Boolean    @default(false)
-  incurredOn     DateTime
-  createdById    String?
-  createdAt      DateTime   @default(now())
+  personId              String?
+  amount                Int // integer XOF
+  isEstimate            Boolean                @default(false)
+  incurredOn            DateTime
+  status                ManagementRecordStatus @default(approved)
+  revision              Int                    @default(0)
+  correctionOfId        String?
+  correctionOf          Expense?               @relation("ExpenseCorrection", fields: [correctionOfId], references: [id], onDelete: Restrict)
+  corrections           Expense[]              @relation("ExpenseCorrection")
+  approvalRequestId     String?                @unique
+  approvalRequest       ApprovalRequest?       @relation("ExpenseApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  voidApprovalRequestId String?                @unique
+  voidApprovalRequest   ApprovalRequest?       @relation("ExpenseVoidApproval", fields: [voidApprovalRequestId], references: [id], onDelete: SetNull)
+  createdById           String?
+  approvedById          String?
+  approvedBy            Person?                @relation("ExpenseApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt            DateTime?
+  voidedById            String?
+  voidedBy              Person?                @relation("ExpenseVoider", fields: [voidedById], references: [id], onDelete: SetNull)
+  voidedAt              DateTime?
+  voidReason            String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
   @@index([costCenterCode])
   @@index([incurredOn])
   @@index([personId])
+  @@index([academicYearId, status, incurredOn])
+  @@index([managementCategoryKey, status, incurredOn])
+  @@index([correctionOfId])
+  @@index([approvedById])
+  @@index([voidedById])
 }
 
 model Budget {
@@ -187,44 +243,160 @@ model Budget {
   @@unique([costCenterCode, fiscalYear])
 }
 
+/// Stable management-reporting categories shared by plans, approved expenses,
+/// non-Bursar income and signed actual corrections.
+model ManagementCategory {
+  key           String                  @id
+  label         String
+  kind          ManagementCategoryKind
+  sortOrder     Int
+  isActive      Boolean                 @default(true)
+  budgetLines   OperatingBudgetLine[]
+  expenses      Expense[]
+  actualEntries ManagementActualEntry[]
+
+  @@unique([kind, label])
+  @@index([kind, sortOrder])
+}
+
+/// One version of the institution's August-July operating plan. Approved
+/// revisions are immutable snapshots; later versions supersede rather than edit.
+model OperatingBudget {
+  id                String                @id @default(uuid())
+  academicYearId    String
+  academicYear      AcademicYear          @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  revision          Int
+  contentVersion    Int                   @default(0)
+  status            OperatingBudgetStatus @default(draft)
+  openingBalanceXof BigInt                @default(0)
+  reason            String?
+  baseRevision      Int                   @default(0)
+  approvalRequestId String?               @unique
+  approvalRequest   ApprovalRequest?      @relation("OperatingBudgetApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  createdById       String
+  createdBy         Person                @relation("OperatingBudgetCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewedById      String?
+  reviewedBy        Person?               @relation("OperatingBudgetReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  submittedAt       DateTime?
+  reviewedAt        DateTime?
+  approvedAt        DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  lines             OperatingBudgetLine[]
+
+  @@unique([academicYearId, revision])
+  @@index([academicYearId, status, createdAt])
+  @@index([createdById, createdAt])
+  @@index([reviewedById])
+}
+
+/// A planned category amount for one academic-year month. monthIndex is ordered
+/// from August (0) through July (11), independent of locale/time-zone parsing.
+model OperatingBudgetLine {
+  id          String             @id @default(uuid())
+  budgetId    String
+  budget      OperatingBudget    @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  categoryKey String
+  category    ManagementCategory @relation(fields: [categoryKey], references: [key], onDelete: Restrict)
+  monthIndex  Int
+  amountXof   BigInt
+
+  @@unique([budgetId, categoryKey, monthIndex])
+  @@index([categoryKey])
+}
+
+/// Approved non-Bursar income and signed management-reporting adjustments.
+/// Source payments and expenses remain immutable; aggregate cell edits append
+/// an adjustment whose signed amount reconciles baseActualXof to targetActualXof.
+model ManagementActualEntry {
+  id                    String                    @id @default(uuid())
+  academicYearId        String
+  academicYear          AcademicYear              @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  categoryKey           String
+  category              ManagementCategory        @relation(fields: [categoryKey], references: [key], onDelete: Restrict)
+  costCenterCode        String
+  costCenter            CostCenter                @relation(fields: [costCenterCode], references: [code], onDelete: Restrict)
+  type                  ManagementActualEntryType
+  status                ManagementRecordStatus    @default(pending)
+  amountXof             BigInt
+  baseActualXof         BigInt?
+  targetActualXof       BigInt?
+  occurredOn            DateTime                  @db.Date
+  description           String
+  revision              Int                       @default(0)
+  correctionOfId        String?
+  correctionOf          ManagementActualEntry?    @relation("ManagementActualCorrection", fields: [correctionOfId], references: [id], onDelete: Restrict)
+  corrections           ManagementActualEntry[]   @relation("ManagementActualCorrection")
+  approvalRequestId     String?                   @unique
+  approvalRequest       ApprovalRequest?          @relation("ManagementActualApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  voidApprovalRequestId String?                   @unique
+  voidApprovalRequest   ApprovalRequest?          @relation("ManagementActualVoidApproval", fields: [voidApprovalRequestId], references: [id], onDelete: SetNull)
+  createdById           String
+  createdBy             Person                    @relation("ManagementActualCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedById          String?
+  approvedBy            Person?                   @relation("ManagementActualApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt            DateTime?
+  voidedById            String?
+  voidedBy              Person?                   @relation("ManagementActualVoider", fields: [voidedById], references: [id], onDelete: SetNull)
+  voidedAt              DateTime?
+  voidReason            String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  @@index([academicYearId, status, occurredOn])
+  @@index([categoryKey, status, occurredOn])
+  @@index([costCenterCode, status, occurredOn])
+  @@index([correctionOfId])
+  @@index([createdById, createdAt])
+  @@index([approvedById])
+  @@index([voidedById])
+}
+
 model Person {
-  id                       String                    @id @default(uuid())
-  email                    String                    @unique
-  firstName                String
-  lastName                 String
-  kind                     PersonKind
+  id                        String                    @id @default(uuid())
+  email                     String                    @unique
+  firstName                 String
+  lastName                  String
+  kind                      PersonKind
   // App RBAC roles (a person can hold several). Validated against AppRole in code.
-  roles                    String[]                  @default([])
+  roles                     String[]                  @default([])
   // bcrypt hash; null until a password is set.
-  passwordHash             String?
+  passwordHash              String?
   // Set when a temp password was assigned; forces a change on next login.
-  mustChangePassword       Boolean                   @default(false)
-  createdAt                DateTime                  @default(now())
-  student                  Student?
-  taughtSections           Section[]                 @relation("Instructor")
-  threadParticipations     ThreadParticipant[]
-  messagesSent             Message[]
-  projectMemberships       ProjectMember[]
+  mustChangePassword        Boolean                   @default(false)
+  createdAt                 DateTime                  @default(now())
+  student                   Student?
+  taughtSections            Section[]                 @relation("Instructor")
+  threadParticipations      ThreadParticipant[]
+  messagesSent              Message[]
+  projectMemberships        ProjectMember[]
   // --- SIS redesign ---
-  guardianOf               GuardianStudent[]         @relation("GuardianOf")
-  guardianInvites          GuardianInvite[]          @relation("GuardianInvites")
-  studentInvites           StudentInvite[]           @relation("StudentInvites")
-  broadcasts               Broadcast[]               @relation("BroadcastSender")
+  guardianOf                GuardianStudent[]         @relation("GuardianOf")
+  guardianInvites           GuardianInvite[]          @relation("GuardianInvites")
+  studentInvites            StudentInvite[]           @relation("StudentInvites")
+  broadcasts                Broadcast[]               @relation("BroadcastSender")
   // Public website profile for faculty (see FacultyProfile).
-  facultyProfile           FacultyProfile?
-  wireTransfersSubmitted   WireTransferSubmission[]  @relation("WireTransferSubmitter")
-  wireTransfersReviewed    WireTransferSubmission[]  @relation("WireTransferReviewer")
-  transcriptImportBatches  TranscriptImportBatch[]   @relation("TranscriptImportBatchCreator")
-  transcriptEntriesCreated TranscriptEntry[]         @relation("TranscriptEntryCreator")
-  transcriptEntriesUpdated TranscriptEntry[]         @relation("TranscriptEntryUpdater")
-  transcriptEntriesVoided  TranscriptEntry[]         @relation("TranscriptEntryVoider")
-  paymentsInitiated        Payment[]                 @relation("PaymentInitiator")
-  feeSchedulesCreated      FeeSchedule[]             @relation("FeeScheduleCreator")
-  feeSchedulesApproved     FeeSchedule[]             @relation("FeeScheduleApprover")
-  approvalRequestsCreated  ApprovalRequest[]         @relation("ApprovalRequester")
-  approvalRequestsReviewed ApprovalRequest[]         @relation("ApprovalReviewer")
-  approvalEvents           ApprovalEvent[]           @relation("ApprovalEventActor")
-  directorWidgetPreference DirectorWidgetPreference?
+  facultyProfile            FacultyProfile?
+  wireTransfersSubmitted    WireTransferSubmission[]  @relation("WireTransferSubmitter")
+  wireTransfersReviewed     WireTransferSubmission[]  @relation("WireTransferReviewer")
+  transcriptImportBatches   TranscriptImportBatch[]   @relation("TranscriptImportBatchCreator")
+  transcriptEntriesCreated  TranscriptEntry[]         @relation("TranscriptEntryCreator")
+  transcriptEntriesUpdated  TranscriptEntry[]         @relation("TranscriptEntryUpdater")
+  transcriptEntriesVoided   TranscriptEntry[]         @relation("TranscriptEntryVoider")
+  paymentsInitiated         Payment[]                 @relation("PaymentInitiator")
+  feeSchedulesCreated       FeeSchedule[]             @relation("FeeScheduleCreator")
+  feeSchedulesApproved      FeeSchedule[]             @relation("FeeScheduleApprover")
+  approvalRequestsCreated   ApprovalRequest[]         @relation("ApprovalRequester")
+  approvalRequestsReviewed  ApprovalRequest[]         @relation("ApprovalReviewer")
+  approvalEvents            ApprovalEvent[]           @relation("ApprovalEventActor")
+  operatingBudgetsCreated   OperatingBudget[]         @relation("OperatingBudgetCreator")
+  operatingBudgetsReviewed  OperatingBudget[]         @relation("OperatingBudgetReviewer")
+  managementActualsCreated  ManagementActualEntry[]   @relation("ManagementActualCreator")
+  managementActualsApproved ManagementActualEntry[]   @relation("ManagementActualApprover")
+  managementActualsVoided   ManagementActualEntry[]   @relation("ManagementActualVoider")
+  expensesApproved          Expense[]                 @relation("ExpenseApprover")
+  expensesVoided            Expense[]                 @relation("ExpenseVoider")
+  directorWidgetPreference  DirectorWidgetPreference?
 }
 
 model Student {
@@ -341,34 +513,38 @@ model Term {
 }
 
 model Invoice {
-  id                  String                   @id @default(uuid())
+  id                  String                     @id @default(uuid())
   // Human-readable billing handle shown to staff, e.g. "BILL-2026-001".
-  number              String?                  @unique
+  number              String?                    @unique
   studentId           String
-  student             Student                  @relation(fields: [studentId], references: [id])
+  student             Student                    @relation(fields: [studentId], references: [id])
   termId              String
-  term                Term                     @relation(fields: [termId], references: [id])
+  term                Term                       @relation(fields: [termId], references: [id])
   totalAmount         Int
-  amountPaid          Int                      @default(0)
-  status              InvoiceStatus            @default(open)
+  amountPaid          Int                        @default(0)
+  status              InvoiceStatus              @default(open)
   // Human label for an ad-hoc charge (e.g. "Lab & technology fee"); null for tuition.
   description         String?
   // Revenue dimension for the director dashboard (tuition -> 9100).
-  costCenterCode      String                   @default("9100")
-  costCenter          CostCenter               @relation(fields: [costCenterCode], references: [code])
-  packageType         InvoicePackageType       @default(custom)
+  costCenterCode      String                     @default("9100")
+  costCenter          CostCenter                 @relation(fields: [costCenterCode], references: [code])
+  packageType         InvoicePackageType         @default(custom)
   academicYearLabel   String?
   feeScheduleId       String?
   feeScheduleRevision Int?
-  feeSchedule         FeeSchedule?             @relation(fields: [feeScheduleId], references: [id], onDelete: SetNull)
-  revision            Int                      @default(0)
+  feeSchedule         FeeSchedule?               @relation(fields: [feeScheduleId], references: [id], onDelete: SetNull)
+  /// True only when this invoice has custom installment dates/count. Component
+  /// selections use InvoiceComponentOverride and keep inheriting the schedule.
+  paymentPlanOverride Boolean                    @default(false)
+  revision            Int                        @default(0)
   components          InvoiceComponent[]
+  componentOverrides  InvoiceComponentOverride[]
   plan                PaymentPlan?
   payments            Payment[]
   wireTransfers       WireTransferSubmission[]
   piSpiRequests       PiSpiRequest[]
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
 
   @@index([studentId])
   @@index([termId])
@@ -441,19 +617,40 @@ model Payment {
 /// Authoritative package component carried by one invoice. Amounts always reconcile
 /// to Invoice.totalAmount for positive standard/custom charges.
 model InvoiceComponent {
-  id             String                       @id @default(uuid())
-  invoiceId      String
-  invoice        Invoice                      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  kind           String
-  costCenterCode String
-  costCenter     CostCenter                   @relation(fields: [costCenterCode], references: [code])
-  amountXof      Int
-  allocations    PaymentComponentAllocation[]
-  createdAt      DateTime                     @default(now())
-  updatedAt      DateTime                     @updatedAt
+  id                  String                       @id @default(uuid())
+  invoiceId           String
+  invoice             Invoice                      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  /// Stable catalog snapshot. `kind` remains the immutable component key on an invoice.
+  scheduleComponentId String?
+  scheduleComponent   FeeScheduleComponent?        @relation(fields: [scheduleComponentId], references: [id], onDelete: SetNull)
+  kind                String
+  label               String                       @default("")
+  costCenterCode      String
+  costCenter          CostCenter                   @relation(fields: [costCenterCode], references: [code])
+  amountXof           Int
+  allocations         PaymentComponentAllocation[]
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
 
   @@unique([invoiceId, kind])
   @@index([costCenterCode])
+  @@index([scheduleComponentId])
+}
+
+/// Explicit per-student selection relative to the approved package defaults.
+/// Absence means inherit `defaultSelected`; this preserves future global updates.
+model InvoiceComponentOverride {
+  id           String   @id @default(uuid())
+  invoiceId    String
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  componentKey String
+  included     Boolean
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([invoiceId, componentKey])
+  @@index([componentKey])
 }
 
 /// Exact component split frozen at settlement. A refund reverses these same rows
@@ -1364,16 +1561,19 @@ enum AcademicYearStatus {
 /// Catalog year (e.g. "2026-2027"). Exactly one is `active` at a time; activating
 /// another archives the previous one.
 model AcademicYear {
-  id           String             @id @default(uuid())
-  label        String             @unique
-  status       AcademicYearStatus @default(draft)
-  startsOn     DateTime?
-  endsOn       DateTime?
-  terms        Term[]
-  curricula    Curriculum[]
-  events       CalendarEvent[]
-  feeSchedules FeeSchedule[]
-  createdAt    DateTime           @default(now())
+  id                      String                  @id @default(uuid())
+  label                   String                  @unique
+  status                  AcademicYearStatus      @default(draft)
+  startsOn                DateTime?
+  endsOn                  DateTime?
+  terms                   Term[]
+  curricula               Curriculum[]
+  events                  CalendarEvent[]
+  feeSchedules            FeeSchedule[]
+  operatingBudgets        OperatingBudget[]
+  managementActualEntries ManagementActualEntry[]
+  expenses                Expense[]
+  createdAt               DateTime                @default(now())
 
   @@index([status])
 }
@@ -1789,48 +1989,75 @@ model FeePlanInstallment {
 /// Immutable revision of the institution-wide annual fee schedule. Exactly one
 /// approved revision per academic year is treated as active by application code.
 model FeeSchedule {
-  id                String               @id @default(uuid())
+  id                String                 @id @default(uuid())
   academicYearLabel String
-  academicYear      AcademicYear         @relation(fields: [academicYearLabel], references: [label])
+  academicYear      AcademicYear           @relation(fields: [academicYearLabel], references: [label])
   revision          Int
-  status            FeeScheduleStatus    @default(draft)
+  status            FeeScheduleStatus      @default(draft)
   reason            String?
   createdById       String?
-  createdBy         Person?              @relation("FeeScheduleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy         Person?                @relation("FeeScheduleCreator", fields: [createdById], references: [id], onDelete: SetNull)
   approvedById      String?
-  approvedBy        Person?              @relation("FeeScheduleApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedBy        Person?                @relation("FeeScheduleApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt        DateTime?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
   rows              FeePlanInstallment[]
+  components        FeeScheduleComponent[]
   invoices          Invoice[]
 
   @@unique([academicYearLabel, revision])
   @@index([academicYearLabel, status])
 }
 
+/// One annual charge in an immutable fee-schedule revision. Components own the
+/// money; FeePlanInstallment owns only the dates across which that total is split.
+model FeeScheduleComponent {
+  id                String             @id @default(uuid())
+  scheduleId        String
+  schedule          FeeSchedule        @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  key               String
+  label             String
+  description       String?
+  costCenterCode    String
+  costCenter        CostCenter         @relation(fields: [costCenterCode], references: [code])
+  annualAmountXof   Int
+  defaultSelected   Boolean            @default(true)
+  sortOrder         Int                @default(0)
+  invoiceComponents InvoiceComponent[]
+  createdAt         DateTime           @default(now())
+
+  @@unique([scheduleId, key])
+  @@index([costCenterCode])
+}
+
 /// Generic, version-checked request for a protected finance mutation.
 model ApprovalRequest {
-  id                String                @id @default(uuid())
-  kind              ApprovalRequestKind
-  status            ApprovalRequestStatus @default(pending)
-  targetType        String
-  targetId          String?
-  academicYearLabel String?
-  reason            String
-  beforeJson        Json?
-  afterJson         Json
-  baseRevision      Int
-  requestedById     String
-  requestedBy       Person                @relation("ApprovalRequester", fields: [requestedById], references: [id])
-  reviewedById      String?
-  reviewedBy        Person?               @relation("ApprovalReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
-  reviewedAt        DateTime?
-  appliedAt         DateTime?
-  decisionNote      String?
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  events            ApprovalEvent[]
+  id                   String                 @id @default(uuid())
+  kind                 ApprovalRequestKind
+  status               ApprovalRequestStatus  @default(pending)
+  targetType           String
+  targetId             String?
+  academicYearLabel    String?
+  reason               String
+  beforeJson           Json?
+  afterJson            Json
+  baseRevision         Int
+  requestedById        String
+  requestedBy          Person                 @relation("ApprovalRequester", fields: [requestedById], references: [id])
+  reviewedById         String?
+  reviewedBy           Person?                @relation("ApprovalReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt           DateTime?
+  appliedAt            DateTime?
+  decisionNote         String?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  events               ApprovalEvent[]
+  operatingBudget      OperatingBudget?       @relation("OperatingBudgetApproval")
+  expense              Expense?               @relation("ExpenseApproval")
+  expenseVoid          Expense?               @relation("ExpenseVoidApproval")
+  managementActual     ManagementActualEntry? @relation("ManagementActualApproval")
+  managementActualVoid ManagementActualEntry? @relation("ManagementActualVoidApproval")
 
   @@index([status, createdAt])
   @@index([requestedById, createdAt])

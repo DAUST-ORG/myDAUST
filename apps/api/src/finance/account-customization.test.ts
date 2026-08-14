@@ -26,6 +26,7 @@ describe("account customization flags", () => {
     expect(deriveAccountSpecialStatus([invoice()])).toEqual({
       isSpecial: false,
       hasIndividualPlan: false,
+      hasIndividualComponents: false,
       hasPendingPlanChange: false,
       reasons: [],
     });
