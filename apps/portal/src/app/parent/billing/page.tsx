@@ -10,17 +10,19 @@ import {
 } from "lucide-react";
 import {
   type PiSpiRequestSummary,
-  type PublicWireConfig,
+  type PaymentSubmissionSummary,
+  type ProofPaymentMethod,
   type Receipt,
   type StudentAccount,
   getChildAccount,
+  getChildPaymentAttempts,
   getChildPiSpiRequest,
   getChildReceipt,
   getPiSpiConfig,
-  getWireConfig,
+  changeResumablePaymentMethod,
   initiateChildPayment,
   submitChildPiSpi,
-  submitChildWire,
+  submitResumablePaymentProof,
   verifyPiSpiAlias,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
@@ -35,7 +37,7 @@ import {
   resolveAccountSummary,
 } from "@/components/AccountBalance";
 import { PiSpiPayForm } from "@/components/PiSpiPayForm";
-import { WireTransferForm } from "@/components/WireTransferForm";
+import { ProofPaymentPanel } from "@/components/ProofPaymentPanel";
 import {
   Badge,
   Button,
@@ -46,12 +48,6 @@ import {
 } from "@/components/ui";
 import { ChildSwitcher } from "../ChildSwitcher";
 import { useChildren } from "../useChildren";
-
-const CHECKOUT_METHODS = [
-  { value: "wave", label: "Wave" },
-  { value: "orange_money", label: "Orange Money" },
-  { value: "card", label: "Bank card" },
-];
 
 function paymentTone(
   status: string,
@@ -136,9 +132,13 @@ export default function ParentBilling() {
   const [account, setAccount] = useState<StudentAccount | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [method, setMethod] = useState("wave");
+  const [method, setMethod] = useState("proof");
   const [busy, setBusy] = useState(false);
-  const [wireConfig, setWireConfig] = useState<PublicWireConfig | null>(null);
+  const [paymentAttempt, setPaymentAttempt] =
+    useState<PaymentSubmissionSummary | null>(null);
+  const [paymentAttempts, setPaymentAttempts] = useState<
+    PaymentSubmissionSummary[]
+  >([]);
   const [piSpiEnabled, setPiSpiEnabled] = useState(false);
   const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(
     null,
@@ -169,9 +169,20 @@ export default function ParentBilling() {
       const requestId = ++accountRequest.current;
       if (isCurrentChild(snapshot)) setLoadError(null);
       try {
-        const next = await getChildAccount(snapshot.studentId);
+        const [next, attempts] = await Promise.all([
+          getChildAccount(snapshot.studentId),
+          getChildPaymentAttempts(snapshot.studentId),
+        ]);
         if (requestId === accountRequest.current && isCurrentChild(snapshot)) {
           setAccount(next);
+          setPaymentAttempt(
+            attempts.find((attempt) =>
+              ["awaiting_proof", "submitted"].includes(attempt.status),
+            ) ??
+              attempts[0] ??
+              null,
+          );
+          setPaymentAttempts(attempts);
         }
       } catch (cause) {
         if (requestId === accountRequest.current && isCurrentChild(snapshot)) {
@@ -187,9 +198,6 @@ export default function ParentBilling() {
   );
 
   useEffect(() => {
-    getWireConfig()
-      .then(setWireConfig)
-      .catch(() => setWireConfig(null));
     getPiSpiConfig()
       .then((config) => setPiSpiEnabled(config.enabled))
       .catch(() => setPiSpiEnabled(false));
@@ -201,6 +209,8 @@ export default function ParentBilling() {
     setAccount(null);
     setReceipt(null);
     setPiSpiRequest(null);
+    setPaymentAttempt(null);
+    setPaymentAttempts([]);
     setActionError(null);
     setBusy(false);
     if (context.studentId) {
@@ -270,15 +280,10 @@ export default function ParentBilling() {
     [account],
   );
 
-  async function pay() {
+  async function startProofPayment(nextMethod: ProofPaymentMethod) {
     const context = activeChildContext.current;
-    if (
-      !context.studentId ||
-      !target ||
-      !["wave", "orange_money", "card"].includes(method)
-    ) {
-      return;
-    }
+    if (!context.studentId || !target)
+      throw new Error("Nothing outstanding to pay");
     const snapshot: ChildRequestSnapshot = {
       studentId: context.studentId,
       version: context.version,
@@ -290,11 +295,16 @@ export default function ParentBilling() {
         snapshot.studentId,
         target.invoice.id,
         target.amountXof,
-        method as "wave" | "orange_money" | "card",
+        nextMethod,
       );
       if (isCurrentChild(snapshot)) {
-        window.location.assign(result.redirectUrl);
+        setPaymentAttempt(result);
+        setPaymentAttempts((current) => [
+          result,
+          ...current.filter((attempt) => attempt.id !== result.id),
+        ]);
       }
+      return result;
     } catch (cause) {
       if (isCurrentChild(snapshot)) {
         setActionError(
@@ -303,6 +313,7 @@ export default function ParentBilling() {
             : "Could not start the payment.",
         );
       }
+      throw cause;
     } finally {
       if (isCurrentChild(snapshot)) setBusy(false);
     }
@@ -341,20 +352,34 @@ export default function ParentBilling() {
     return summary;
   }
 
-  async function submitWire(proof: File) {
-    const context = activeChildContext.current;
-    if (!context.studentId || !target) return;
-    const snapshot: ChildRequestSnapshot = {
-      studentId: context.studentId,
-      version: context.version,
-    };
-    await submitChildWire({
-      studentId: snapshot.studentId,
-      invoiceId: target.invoice.id,
-      amountXof: target.amountXof,
+  async function changeProofMethod(id: string, nextMethod: ProofPaymentMethod) {
+    if (!paymentAttempt?.resumeToken)
+      throw new Error("Payment resume token is missing");
+    const next = await changeResumablePaymentMethod(
+      paymentAttempt.resumeToken,
+      id,
+      nextMethod,
+    );
+    setPaymentAttempt(next);
+    setPaymentAttempts((current) =>
+      current.map((attempt) => (attempt.id === next.id ? next : attempt)),
+    );
+    return next;
+  }
+
+  async function uploadProof(id: string, proof: File) {
+    if (!paymentAttempt?.resumeToken)
+      throw new Error("Payment resume token is missing");
+    const next = await submitResumablePaymentProof(
+      paymentAttempt.resumeToken,
+      id,
       proof,
-    });
-    if (isCurrentChild(snapshot)) await loadAccount(snapshot);
+    );
+    setPaymentAttempt(next);
+    setPaymentAttempts((current) =>
+      current.map((attempt) => (attempt.id === next.id ? next : attempt)),
+    );
+    return next;
   }
 
   async function showReceipt(paymentId: string) {
@@ -396,10 +421,6 @@ export default function ParentBilling() {
     installments: account?.invoices.flatMap((invoice) => invoice.installments),
   });
   const accountMeta = accountPresentation(accountSummary);
-  const pendingWire =
-    target?.invoice.wireTransfers.find((wire) => wire.status === "submitted") ??
-    null;
-
   return (
     <>
       <PageHeader
@@ -489,78 +510,54 @@ export default function ParentBilling() {
 
               {target && (
                 <div className="parent-payment-panel__actions">
-                  {pendingWire ? (
-                    <div
-                      className="parent-payment-panel__pending"
-                      role="status"
-                    >
-                      <Clock3 size={17} aria-hidden="true" />
-                      <span>
-                        <strong>Wire proof under review</strong>
-                        <small>
-                          {formatXof(pendingWire.submittedAmountXof)} submitted{" "}
-                          {formatDate(pendingWire.submittedAt)}. Other payment
-                          attempts are paused until Finance approves or rejects
-                          it.
-                        </small>
-                      </span>
-                    </div>
-                  ) : (
-                    <>
-                      <label className="parent-payment-panel__method">
-                        <span>Payment method</span>
-                        <Select
-                          value={method}
-                          onChange={setMethod}
-                          options={[
-                            ...CHECKOUT_METHODS,
-                            ...(piSpiEnabled
-                              ? [
-                                  {
-                                    value: "pi_spi",
-                                    label: "Instant payment (PI-SPI)",
-                                  },
-                                ]
-                              : []),
-                            ...(wireConfig?.enabled
-                              ? [{ value: "wire", label: "Bank wire transfer" }]
-                              : []),
-                          ]}
-                          style={{ width: "100%" }}
-                        />
-                      </label>
+                  <>
+                    <label className="parent-payment-panel__method">
+                      <span>Payment method</span>
+                      <Select
+                        value={method}
+                        onChange={setMethod}
+                        options={[
+                          {
+                            value: "proof",
+                            label: "Wave, Orange Money, or bank",
+                          },
+                          ...(piSpiEnabled
+                            ? [
+                                {
+                                  value: "pi_spi",
+                                  label: "Instant payment (PI-SPI)",
+                                },
+                              ]
+                            : []),
+                        ]}
+                        style={{ width: "100%" }}
+                      />
+                    </label>
 
-                      {method === "pi_spi" && piSpiEnabled ? (
-                        <PiSpiPayForm
-                          key={`${activeId}:pi-spi`}
-                          amountXof={target.amountXof}
-                          request={piSpiRequest}
-                          onVerifyAlias={verifyPiSpiAlias}
-                          onSend={(alias) => sendPiSpi(alias)}
-                          onPoll={pollPiSpi}
-                        />
-                      ) : method === "wire" && wireConfig?.enabled ? (
-                        <WireTransferForm
-                          key={`${activeId}:wire`}
-                          config={wireConfig}
-                          amountXof={target.amountXof}
-                          onSubmit={submitWire}
-                        />
-                      ) : (
-                        <div style={{ display: "grid" }}>
-                          <Button
-                            variant="primary"
-                            onClick={pay}
-                            disabled={busy}
-                          >
-                            {busy
-                              ? "Opening secure checkout…"
-                              : `Pay ${formatXof(target.amountXof)}`}
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  )}
+                    {method === "pi_spi" && piSpiEnabled ? (
+                      <PiSpiPayForm
+                        key={`${activeId}:pi-spi`}
+                        amountXof={target.amountXof}
+                        request={piSpiRequest}
+                        onVerifyAlias={verifyPiSpiAlias}
+                        onSend={(alias) => sendPiSpi(alias)}
+                        onPoll={pollPiSpi}
+                      />
+                    ) : (
+                      <ProofPaymentPanel
+                        key={`${activeId}:proof`}
+                        amountXof={target.amountXof}
+                        attempt={paymentAttempt}
+                        history={paymentAttempts.filter(
+                          (attempt) => attempt.invoiceId === target.invoice.id,
+                        )}
+                        onSelectAttempt={setPaymentAttempt}
+                        onStart={startProofPayment}
+                        onChangeMethod={changeProofMethod}
+                        onUploadProof={uploadProof}
+                      />
+                    )}
+                  </>
                 </div>
               )}
             </section>

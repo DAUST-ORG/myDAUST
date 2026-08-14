@@ -142,10 +142,8 @@ module "secrets" {
   env = "staging"
   # RESEND_API_KEY joins only when set — Secrets Manager rejects an empty SecretString.
   secrets = merge({
-    DATABASE_URL       = local.database_url
-    SESSION_SECRET     = var.session_secret
-    PAYTECH_API_KEY    = var.paytech_api_key
-    PAYTECH_API_SECRET = var.paytech_api_secret
+    DATABASE_URL   = local.database_url
+    SESSION_SECRET = var.session_secret
     },
     var.resend_api_key != "" ? { RESEND_API_KEY = var.resend_api_key } : {},
     var.tunnel_creds != "" ? { TUNNEL_CREDS = var.tunnel_creds } : {},
@@ -177,10 +175,6 @@ module "api_service" {
     { name = "WIRE_PROOFS_BUCKET", value = module.wire_proofs.name },
     { name = "MEDIA_BUCKET", value = module.media.name },
     { name = "TRANSCRIPT_IMPORT_BUCKET", value = module.transcript_imports.name },
-    { name = "PAYTECH_ENV", value = "test" },
-    { name = "PAYTECH_IPN_URL", value = "${local.public_url}/api/finance/webhook/paytech" },
-    { name = "PAYTECH_SUCCESS_URL", value = "${local.public_url}/student/billing" },
-    { name = "PAYTECH_CANCEL_URL", value = "${local.public_url}/student/billing" },
     { name = "MAIL_FROM", value = "myDAUST <no-reply@updates.daust.net>" },
   ]
 
@@ -188,8 +182,6 @@ module "api_service" {
     [
       { name = "DATABASE_URL", valueFrom = module.secrets.arns["DATABASE_URL"] },
       { name = "SESSION_SECRET", valueFrom = module.secrets.arns["SESSION_SECRET"] },
-      { name = "PAYTECH_API_KEY", valueFrom = module.secrets.arns["PAYTECH_API_KEY"] },
-      { name = "PAYTECH_API_SECRET", valueFrom = module.secrets.arns["PAYTECH_API_SECRET"] },
     ],
     var.resend_api_key != "" ? [{ name = "RESEND_API_KEY", valueFrom = module.secrets.arns["RESEND_API_KEY"] }] : [],
   )
@@ -199,9 +191,12 @@ module "api_service" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject"]
-        Resource = "${module.wire_proofs.arn}/wire-proofs/*"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject"]
+        Resource = [
+          "${module.wire_proofs.arn}/wire-proofs/*",
+          "${module.wire_proofs.arn}/payment-files/*",
+        ]
       },
       {
         Effect   = "Allow"

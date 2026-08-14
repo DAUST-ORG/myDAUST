@@ -40,7 +40,6 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
       prisma as never,
       {} as never,
       {} as never,
-      { name: "test" } as never,
       new Map() as never,
     );
     await prisma.costCenter.createMany({

@@ -14,6 +14,7 @@ import { standingLabel } from "../academics/academics.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
 import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
+import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
 
 /** Password-setup invites are short-lived; the registrar can always re-issue one. */
 const INVITE_TTL_HOURS = 72;
@@ -39,6 +40,7 @@ export class GuardiansService {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly finance: FinanceService,
+    private readonly paymentSubmissions: PaymentSubmissionsService,
     private readonly transcripts: TranscriptService = new TranscriptService(
       prisma,
     ),
@@ -586,14 +588,14 @@ export class GuardiansService {
     return invoice;
   }
 
-  /** Start a hosted checkout for a linked child, preserving who actually paid. */
+  /** Start or resume a proof-based payment for a linked child. */
   async initiateChildPayment(
     guardian: AuthUser,
     studentId: string,
     input: {
       invoiceId: string;
       amount: number;
-      method: "wave" | "orange_money" | "card";
+      method: "wave" | "orange_money" | "wire";
     },
   ) {
     await this.assertChildInvoice(
@@ -601,15 +603,18 @@ export class GuardiansService {
       studentId,
       input.invoiceId,
     );
-    const result = await this.finance.initiatePayment(studentId, input, {
+    const result = await this.paymentSubmissions.createForStudent({
+      studentId,
+      invoiceId: input.invoiceId,
+      amountXof: input.amount,
+      method: input.method,
       source: "parent_portal",
-      initiatedById: guardian.personId,
-      initiatedByEmail: guardian.email,
+      actor: guardian,
     });
     await this.prisma.auditLog.create({
       data: {
         entity: "Payment",
-        entityId: result.paymentId,
+        entityId: result.id,
         action: "parent-initiated",
         actorId: guardian.personId,
         data: { studentId, invoiceId: input.invoiceId, method: input.method },
@@ -653,6 +658,11 @@ export class GuardiansService {
   async childPiSpiStatus(guardianId: string, studentId: string, txId: string) {
     await this.assertGuardianOf(guardianId, studentId);
     return this.finance.getPiSpiRequest(txId, { studentId });
+  }
+
+  async childPaymentAttempts(guardianId: string, studentId: string) {
+    await this.assertGuardianOf(guardianId, studentId);
+    return this.paymentSubmissions.listForStudent(studentId);
   }
 
   /** Submit private proof for a linked child using the guardian's account email. */

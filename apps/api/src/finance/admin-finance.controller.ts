@@ -8,15 +8,9 @@ import {
   Post,
   Put,
   Query,
-  StreamableFile,
 } from "@nestjs/common";
 import { z } from "zod";
-import {
-  CreatePaymentPlanInput,
-  SetBudgetInput,
-  WireApprovalInput,
-  WirePaymentConfig,
-} from "@mydaust/shared";
+import { CreatePaymentPlanInput, SetBudgetInput } from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { FinanceService } from "./finance.service.js";
@@ -163,11 +157,7 @@ const RemoveInvoiceComponentInput = z.object({
 const CreatePlanRequestInput = CreatePaymentPlanInput.extend({
   requestReason: RequestReason,
 });
-const RejectWireInput = z.object({
-  reason: z.string().trim().min(1).max(1000),
-});
 const RemoveChargeInput = z.object({ reason: RequestReason });
-const WireStatusInput = z.enum(["submitted", "approved", "rejected"]);
 
 const OperatingBudgetKindInput = z.enum(["income", "expense"]);
 const OperatingBudgetCategoryKeyInput = z
@@ -310,58 +300,6 @@ export class AdminFinanceController {
     return this.finance.getCollectionSummary();
   }
 
-  @Get("wire-config")
-  wireConfig() {
-    return this.finance.getWirePaymentConfig();
-  }
-
-  @Patch("wire-config")
-  updateWireConfig(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    return this.finance.updateWirePaymentConfig(
-      WirePaymentConfig.parse(body),
-      user.personId,
-    );
-  }
-
-  @Get("wire-transfers")
-  wireTransfers(@Query("status") status?: string) {
-    return this.finance.listWireTransfers(
-      status ? WireStatusInput.parse(status) : undefined,
-    );
-  }
-
-  @Get("wire-transfers/:id/proof")
-  async wireProof(@Param("id") id: string) {
-    const proof = await this.finance.getWireProof(id);
-    return new StreamableFile(proof.data, {
-      type: proof.mimeType,
-      disposition: `inline; filename="${proof.fileName}"`,
-    });
-  }
-
-  @Post("wire-transfers/:id/approve")
-  approveWire(
-    @CurrentUser() user: AuthUser,
-    @Param("id") id: string,
-    @Body() body: unknown,
-  ) {
-    return this.finance.approveWireTransfer(
-      id,
-      WireApprovalInput.parse(body),
-      user,
-    );
-  }
-
-  @Post("wire-transfers/:id/reject")
-  rejectWire(
-    @CurrentUser() user: AuthUser,
-    @Param("id") id: string,
-    @Body() body: unknown,
-  ) {
-    const input = RejectWireInput.parse(body);
-    return this.finance.rejectWireTransfer(id, input.reason, user);
-  }
-
   @Get("links")
   links() {
     return this.finance.listPaymentLinks();
@@ -376,11 +314,6 @@ export class AdminFinanceController {
   @Post("links/:id/cancel")
   cancelLink(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.finance.cancelPaymentLink(id, user.personId);
-  }
-
-  @Post("links/:id/mark-paid")
-  markLinkPaid(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.finance.markPaymentLinkPaid(id, user.personId);
   }
 
   @Get("payments")
@@ -862,23 +795,6 @@ export class AdminFinanceController {
       reason,
       after,
     });
-  }
-
-  @Post("reconcile")
-  reconcile() {
-    return this.finance
-      .listStalePendingPayments(60)
-      .then((stale) => ({ stale }));
-  }
-
-  @Post("payments/:id/confirm")
-  confirmPayment(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.finance.confirmPaymentManually(id, user.personId);
-  }
-
-  @Post("payments/:id/cancel")
-  cancelPayment(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.finance.cancelPaymentManually(id, user.personId);
   }
 
   @Get("director-overview")

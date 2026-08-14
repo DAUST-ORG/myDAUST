@@ -4,7 +4,7 @@ Campus platform for DAUST. Monorepo (pnpm + Turborepo). See [`docs/production-st
 
 Current state — **core portals and AWS production infrastructure are live**; Phases 1–5 are implemented, and recent academics, payment, and media work is summarized in the production status document.
 
-- **Payments (P1)** — PayTech (Wave / Orange Money / card), signature-verified idempotent IPN, payment plans/installments, reconciliation cron, collections dashboard, receipts (email), refunds, A/R aging, 8 canned reports, director money-in/out by cost center.
+- **Payments (P1)** — resumable Wave, Orange Money, and bank proof submissions; PI-SPI request-to-pay; Finance verification; director audit; payment plans/installments; collections dashboard; receipts; internal refunds; A/R aging; reports; and money-in/out by cost center.
 - **Academics (P2)** — course catalog, seat-locked enrollment (concurrency-safe), prerequisites, faculty gradebook/attendance/assignments + submission grading, insights (grade distribution, at-risk), advising, schedule grids, GPA ring, printable transcript & enrollment verification, messaging/inbox, events, library.
 - **Admissions + Vitrine (P3)** — public marketing site (`apps/vitrine`, :3001) with anonymous Apply → applicant funnel + confirmation email; BAC merit-scholarship auto-award; fee structure; transactional email seam (Resend or dev-log).
 - **Dining + Student Affairs (P4)** — student dining pass (signed QR), weekend orders, meal plans; scanner station + orders kanban + menus + settlement console; housing assignment, roommate matching (weighted heuristic), conduct SLA workflow, clubs, co-curricular budget.
@@ -50,11 +50,9 @@ pnpm --filter @mydaust/vitrine dev
 
 Open http://localhost:3000/login (portal) and http://localhost:3001 (public site).
 
-### Real payments
+### Payment methods
 
-Set `PAYTECH_API_KEY`, `PAYTECH_API_SECRET` (sandbox), and `PAYTECH_IPN_URL` /
-`PAYTECH_SUCCESS_URL` / `PAYTECH_CANCEL_URL` in a gitignored `.env`. For local IPN delivery,
-expose the api with a tunnel: `cloudflared tunnel --url http://localhost:4000`.
+Finance configures Wave, Orange Money, and bank-transfer instructions in the Payment Reviews workspace. Proof and QR files use `WIRE_PROOFS_BUCKET` when configured, with local private storage in development. PI-SPI remains independently environment-configured.
 
 ### Transactional email
 

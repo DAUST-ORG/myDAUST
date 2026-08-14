@@ -16,20 +16,9 @@ export class FinanceTasks {
     if (n > 0) this.log.log(`Reconciled ${n} installment status row(s)`);
   }
 
-  // Surfaces stale pendings for bursar review — never auto-cancels (a lost IPN does not mean
-  // the customer didn't pay; the bursar verifies in the PayTech dashboard then confirms/cancels).
-  @Cron(CronExpression.EVERY_30_MINUTES)
-  async reconcile(): Promise<void> {
-    const stale = await this.finance.listStalePendingPayments(60);
-    if (stale.length > 0)
-      this.log.warn(
-        `${stale.length} stale pending payment(s) need bursar review`,
-      );
-  }
-
   /**
-   * Poll PI-SPI for requests whose webhook never landed. Unlike the PayTech sweep above
-   * this one does settle: the rail is the authority on whether a request-to-pay was
+   * Poll PI-SPI for requests whose webhook never landed. The rail is the authority on
+   * whether a request-to-pay was
    * approved, so a lost notification must not leave a paid invoice showing a balance.
    * No-ops when PI-SPI is unconfigured.
    */

@@ -1,59 +1,44 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import {
   Banknote,
   CalendarDays,
   CheckCircle2,
-  CreditCard,
   Info,
   Lock,
   ShieldCheck,
 } from "lucide-react";
 import {
   type PublicPaymentLink,
-  type PublicWireConfig,
-  checkoutPaymentLink,
+  type PaymentSubmissionSummary,
+  type ProofPaymentMethod,
+  changeResumablePaymentMethod,
+  createPaymentLinkAttempt,
   getPublicPaymentLink,
   getLinkPiSpiRequest,
   getPiSpiConfig,
-  getWireConfig,
+  listPaymentLinkAttempts,
   type PiSpiRequestSummary,
   submitLinkPiSpi,
-  submitPaymentLinkWire,
+  submitResumablePaymentProof,
   verifyPiSpiAlias,
 } from "@/lib/api";
 import { PiSpiPayForm } from "@/components/PiSpiPayForm";
-import { WireTransferForm } from "@/components/WireTransferForm";
+import { ProofPaymentPanel } from "@/components/ProofPaymentPanel";
 import { formatDate } from "@/lib/format";
 
 const fcfa = (n: number) => n.toLocaleString("fr-FR").replace(/ /g, " ");
 
 const METHODS = [
   {
-    key: "orange_money",
-    label: "Orange Money",
-    sub: "Mobile wallet",
-    badge: "OM",
+    key: "proof",
+    label: "Wave, Orange Money, or bank",
+    sub: "Pay from the displayed account and upload proof",
+    badge: "PAY",
     badgeBg: "#f48120",
-    kind: "gateway",
-  },
-  {
-    key: "wave",
-    label: "Wave",
-    sub: "Mobile wallet",
-    badge: "WV",
-    badgeBg: "#00b8d9",
-    kind: "gateway",
-  },
-  {
-    key: "card",
-    label: "Card",
-    sub: "Visa · Mastercard",
-    badge: null,
-    badgeBg: "#153b6a",
-    kind: "gateway",
+    kind: "offline",
   },
   {
     key: "pi_spi",
@@ -63,34 +48,39 @@ const METHODS = [
     badgeBg: "#1d6b34",
     kind: "offline",
   },
-  {
-    key: "wire",
-    label: "Wire transfer",
-    sub: "Upload bank proof",
-    badge: null,
-    badgeBg: "#8a97a8",
-    kind: "offline",
-  },
 ] as const;
 
 export default function PayLinkPage() {
   const { token } = useParams<{ token: string }>();
-  const search = useSearchParams();
   const [link, setLink] = useState<PublicPaymentLink | null>(null);
   const [missing, setMissing] = useState(false);
   const [method, setMethod] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [wireConfig, setWireConfig] = useState<PublicWireConfig | null>(null);
+  const [contactEmail, setContactEmail] = useState("");
+  const [paymentAttempt, setPaymentAttempt] =
+    useState<PaymentSubmissionSummary | null>(null);
+  const [paymentAttempts, setPaymentAttempts] = useState<
+    PaymentSubmissionSummary[]
+  >([]);
   const [piSpiEnabled, setPiSpiEnabled] = useState(false);
   const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(
     null,
   );
-  const polls = useRef(0);
 
   const load = useCallback(() => {
-    getPublicPaymentLink(token)
-      .then(setLink)
+    Promise.all([getPublicPaymentLink(token), listPaymentLinkAttempts(token)])
+      .then(([nextLink, attempts]) => {
+        setLink(nextLink);
+        setPaymentAttempts(attempts);
+        const current =
+          attempts.find((attempt) =>
+            ["awaiting_proof", "submitted"].includes(attempt.status),
+          ) ??
+          attempts[0] ??
+          null;
+        setPaymentAttempt(current);
+        if (current?.contactEmail) setContactEmail(current.contactEmail);
+      })
       .catch(() => setMissing(true));
   }, [token]);
   useEffect(() => load(), [load]);
@@ -98,42 +88,52 @@ export default function PayLinkPage() {
     getPiSpiConfig()
       .then((c) => setPiSpiEnabled(c.enabled))
       .catch(() => {});
-    getWireConfig()
-      .then(setWireConfig)
-      .catch(() => {});
   }, []);
 
-  // Back from the gateway: the IPN settles asynchronously, so poll briefly.
-  useEffect(() => {
-    if (!search.get("back") || link?.status !== "active") return;
-    const t = setInterval(() => {
-      polls.current += 1;
-      if (polls.current > 20) clearInterval(t);
-      load();
-    }, 3000);
-    return () => clearInterval(t);
-  }, [search, link?.status, load]);
-
-  async function pay() {
-    if (!method || method === "wire" || method === "pi_spi") return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const { redirectUrl } = await checkoutPaymentLink(token, method);
-      window.location.href = redirectUrl;
-    } catch (e) {
-      setErr(
-        (e as Error).message.includes("expired")
-          ? "This payment link has expired."
-          : "Payment could not be started. Try again or contact the Finance Office.",
-      );
-      setBusy(false);
+  async function startProofPayment(nextMethod: ProofPaymentMethod) {
+    if (!/^\S+@\S+\.\S+$/.test(contactEmail)) {
+      throw new Error("Enter a valid email for payment updates.");
     }
+    const next = await createPaymentLinkAttempt(token, {
+      method: nextMethod,
+      contactEmail: contactEmail.trim(),
+    });
+    setPaymentAttempt(next);
+    setPaymentAttempts((current) => [
+      next,
+      ...current.filter((attempt) => attempt.id !== next.id),
+    ]);
+    return next;
   }
 
-  async function submitWire(proof: File, contactEmail?: string) {
-    await submitPaymentLinkWire(token, contactEmail ?? "", proof);
-    load();
+  async function changeProofMethod(id: string, nextMethod: ProofPaymentMethod) {
+    if (!paymentAttempt?.resumeToken)
+      throw new Error("Resume token is missing");
+    const next = await changeResumablePaymentMethod(
+      paymentAttempt.resumeToken,
+      id,
+      nextMethod,
+    );
+    setPaymentAttempt(next);
+    setPaymentAttempts((current) =>
+      current.map((attempt) => (attempt.id === next.id ? next : attempt)),
+    );
+    return next;
+  }
+
+  async function uploadProof(id: string, proof: File) {
+    if (!paymentAttempt?.resumeToken)
+      throw new Error("Resume token is missing");
+    const next = await submitResumablePaymentProof(
+      paymentAttempt.resumeToken,
+      id,
+      proof,
+    );
+    setPaymentAttempt(next);
+    setPaymentAttempts((current) =>
+      current.map((attempt) => (attempt.id === next.id ? next : attempt)),
+    );
+    return next;
   }
 
   async function sendPiSpi(alias: string) {
@@ -666,9 +666,7 @@ export default function PayLinkPage() {
                     }}
                   >
                     {METHODS.filter(
-                      (m) =>
-                        (m.key !== "pi_spi" || piSpiEnabled) &&
-                        (m.key !== "wire" || wireConfig?.enabled),
+                      (m) => m.key !== "pi_spi" || piSpiEnabled,
                     ).map((m) => (
                       <button
                         key={m.key}
@@ -707,12 +705,7 @@ export default function PayLinkPage() {
                             flexShrink: 0,
                           }}
                         >
-                          {m.badge ??
-                            (m.kind === "gateway" ? (
-                              <CreditCard size={18} />
-                            ) : (
-                              <Banknote size={18} />
-                            ))}
+                          {m.badge ?? <Banknote size={18} />}
                         </span>
                         <span>
                           <span
@@ -747,20 +740,38 @@ export default function PayLinkPage() {
                       onSend={sendPiSpi}
                       onPoll={pollPiSpi}
                     />
-                  ) : method === "wire" && wireConfig?.enabled ? (
+                  ) : method === "proof" ? (
                     <div style={{ marginTop: 18 }}>
-                      <WireTransferForm
-                        config={wireConfig}
+                      {!paymentAttempt && (
+                        <input
+                          type="email"
+                          value={contactEmail}
+                          onChange={(event) =>
+                            setContactEmail(event.target.value)
+                          }
+                          placeholder="Email for payment updates"
+                          style={{
+                            width: "100%",
+                            padding: "11px 12px",
+                            border: "1px solid #ccd5df",
+                            borderRadius: 8,
+                            marginBottom: 10,
+                          }}
+                        />
+                      )}
+                      <ProofPaymentPanel
                         amountXof={link.amountXof}
-                        pending={link.wireTransfer}
-                        requireEmail
-                        onSubmit={submitWire}
+                        attempt={paymentAttempt}
+                        history={paymentAttempts}
+                        onSelectAttempt={setPaymentAttempt}
+                        onStart={startProofPayment}
+                        onChangeMethod={changeProofMethod}
+                        onUploadProof={uploadProof}
                       />
                     </div>
                   ) : (
                     <button
-                      onClick={pay}
-                      disabled={!method || busy}
+                      disabled
                       style={{
                         width: "100%",
                         marginTop: 18,
@@ -780,12 +791,7 @@ export default function PayLinkPage() {
                         gap: 9,
                       }}
                     >
-                      <Lock size={15} />{" "}
-                      {busy
-                        ? "Redirecting…"
-                        : method
-                          ? `Pay ${fcfa(link.amountXof)} FCFA`
-                          : "Select a payment method"}
+                      <Lock size={15} /> Select a payment method
                     </button>
                   )}
                   {err && (

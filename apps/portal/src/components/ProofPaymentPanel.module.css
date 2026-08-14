@@ -1,0 +1,245 @@
+.panel {
+  container-type: inline-size;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  background: color-mix(in srgb, var(--daust-navy) 96%, var(--surface));
+  color: #f6f8fb;
+}
+
+.eyebrow {
+  margin: 0 0 3px;
+  color: color-mix(in srgb, #f6f8fb 72%, var(--daust-navy));
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.amount {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(20px, 4cqi, 28px);
+  line-height: 1.1;
+}
+
+.status {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #f6f8fb;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.body {
+  padding: 18px;
+}
+
+.methodRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.select,
+.input,
+.file {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 10px 11px;
+  font: inherit;
+}
+
+.primary,
+.secondary,
+.copy {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 15px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--daust-orange);
+  color: #fffaf5;
+}
+
+.secondary {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.primary:disabled,
+.secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.instructions {
+  display: grid;
+  grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.qr {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.45fr) minmax(0, 1fr);
+  margin: 0;
+  border-top: 1px solid var(--divider);
+}
+
+.details dt,
+.details dd {
+  margin: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--divider);
+  font-size: 12.5px;
+}
+
+.details dt {
+  color: var(--fg2);
+}
+
+.details dd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.copy {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  background: var(--surface-2);
+  color: var(--fg2);
+}
+
+.note,
+.error,
+.success,
+.rejected {
+  margin: 12px 0 0;
+  border-radius: 8px;
+  padding: 10px 11px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.note {
+  background: var(--surface-2);
+  color: var(--fg2);
+}
+
+.error,
+.rejected {
+  background: color-mix(in srgb, var(--error-500) 10%, var(--surface));
+  color: var(--error-500);
+}
+
+.success {
+  background: color-mix(in srgb, var(--success-500) 11%, var(--surface));
+  color: var(--success-500);
+}
+
+.upload {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--divider);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid var(--divider);
+}
+
+.historyRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 8px 9px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.historyRow:hover,
+.historyRow[aria-current="true"] {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+.historyRow span:first-child {
+  text-transform: capitalize;
+}
+
+.historyRow strong {
+  color: var(--fg2);
+  font-size: 11px;
+}
+
+@container (max-width: 520px) {
+  .instructions,
+  .methodRow {
+    grid-template-columns: 1fr;
+  }
+
+  .qr {
+    width: min(100%, 240px);
+  }
+
+  .historyRow {
+    grid-template-columns: 1fr auto;
+  }
+
+  .historyRow strong {
+    grid-column: 1 / -1;
+  }
+}

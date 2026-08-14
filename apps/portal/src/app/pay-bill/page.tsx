@@ -5,18 +5,19 @@ import { useSearchParams } from "next/navigation";
 import {
   CalendarDays,
   CheckCircle2,
-  CreditCard,
   Lock,
   Search,
   ShieldCheck,
 } from "lucide-react";
 import {
   type BillLookup,
-  type PublicWireConfig,
+  type PaymentSubmissionSummary,
+  type ProofPaymentMethod,
+  changeResumablePaymentMethod,
   checkoutBill,
-  getWireConfig,
   lookupBill,
-  submitPublicBillWire,
+  listPublicBillPaymentAttempts,
+  submitResumablePaymentProof,
   getPiSpiConfig,
   getPublicBillPiSpiRequest,
   type PiSpiRequestSummary,
@@ -24,7 +25,7 @@ import {
   verifyPiSpiAlias,
 } from "@/lib/api";
 import { PiSpiPayForm } from "@/components/PiSpiPayForm";
-import { WireTransferForm } from "@/components/WireTransferForm";
+import { ProofPaymentPanel } from "@/components/ProofPaymentPanel";
 import { formatDate } from "@/lib/format";
 import {
   AccountStandingBadge,
@@ -41,25 +42,11 @@ const STORE_KEY = "daust-pay-bill";
 
 const METHODS = [
   {
-    key: "orange_money",
-    label: "Orange Money",
-    sub: "Mobile wallet",
-    badge: "OM",
+    key: "proof",
+    label: "Wave, Orange Money, or bank",
+    sub: "Upload proof after paying",
+    badge: "PAY",
     badgeBg: "#f48120",
-  },
-  {
-    key: "wave",
-    label: "Wave",
-    sub: "Mobile wallet",
-    badge: "WV",
-    badgeBg: "#00b8d9",
-  },
-  {
-    key: "card",
-    label: "Card",
-    sub: "Visa · Mastercard",
-    badge: null,
-    badgeBg: "#153b6a",
   },
   {
     key: "pi_spi",
@@ -67,13 +54,6 @@ const METHODS = [
     sub: "Approve in your bank app",
     badge: "PI",
     badgeBg: "#1d6b34",
-  },
-  {
-    key: "wire",
-    label: "Wire transfer",
-    sub: "Upload bank proof",
-    badge: "BT",
-    badgeBg: "#536579",
   },
 ] as const;
 
@@ -95,7 +75,11 @@ function PayBillInner() {
   const [method, setMethod] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [wireConfig, setWireConfig] = useState<PublicWireConfig | null>(null);
+  const [paymentAttempt, setPaymentAttempt] =
+    useState<PaymentSubmissionSummary | null>(null);
+  const [paymentAttempts, setPaymentAttempts] = useState<
+    PaymentSubmissionSummary[]
+  >([]);
   const [piSpiEnabled, setPiSpiEnabled] = useState(false);
   const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(
     null,
@@ -105,15 +89,23 @@ function PayBillInner() {
     getPiSpiConfig()
       .then((c) => setPiSpiEnabled(c.enabled))
       .catch(() => {});
-    getWireConfig()
-      .then(setWireConfig)
-      .catch(() => {});
   }, []);
 
   const runLookup = useCallback(async (c: Creds) => {
-    const data = await lookupBill(c.studentNo, c.dob);
+    const [data, attempts] = await Promise.all([
+      lookupBill(c.studentNo, c.dob),
+      listPublicBillPaymentAttempts(c.studentNo, c.dob),
+    ]);
     setBill(data);
     setCreds(c);
+    setPaymentAttempts(attempts);
+    setPaymentAttempt(
+      attempts.find((attempt) =>
+        ["awaiting_proof", "submitted"].includes(attempt.status),
+      ) ??
+        attempts[0] ??
+        null,
+    );
     setAmount(
       String(
         data.payableXof ??
@@ -147,23 +139,30 @@ function PayBillInner() {
     }
   }
 
-  async function pay() {
-    if (!creds || !method || method === "wire" || method === "pi_spi") return;
+  async function startProofPayment(nextMethod: ProofPaymentMethod) {
+    if (!creds) throw new Error("Look up your bill first");
     const amt = Number(String(amount).replace(/[^\d]/g, ""));
-    if (!amt || amt < 1) return setErr("Enter an amount to pay.");
+    if (!amt || amt < 1) throw new Error("Enter an amount to pay.");
     setBusy(true);
     setErr(null);
     try {
-      const { redirectUrl } = await checkoutBill({
+      const next = await checkoutBill({
         ...creds,
         amountXof: amt,
-        method,
+        method: nextMethod,
       });
-      window.location.href = redirectUrl;
-    } catch {
+      setPaymentAttempt(next);
+      setPaymentAttempts((current) => [
+        next,
+        ...current.filter((attempt) => attempt.id !== next.id),
+      ]);
+      return next;
+    } catch (cause) {
       setErr(
         "Payment could not be started. Please try again or contact the Finance Office.",
       );
+      throw cause;
+    } finally {
       setBusy(false);
     }
   }
@@ -186,22 +185,41 @@ function PayBillInner() {
     return summary;
   }
 
-  async function submitWire(proof: File, contactEmail?: string) {
-    if (!creds) return;
-    const amountXof = Number(String(amount).replace(/[^\d]/g, ""));
-    await submitPublicBillWire({
-      ...creds,
-      amountXof,
-      contactEmail: contactEmail ?? "",
+  async function changeProofMethod(id: string, nextMethod: ProofPaymentMethod) {
+    if (!paymentAttempt?.resumeToken)
+      throw new Error("Resume token is missing");
+    const next = await changeResumablePaymentMethod(
+      paymentAttempt.resumeToken,
+      id,
+      nextMethod,
+    );
+    setPaymentAttempt(next);
+    setPaymentAttempts((current) =>
+      current.map((attempt) => (attempt.id === next.id ? next : attempt)),
+    );
+    return next;
+  }
+
+  async function uploadProof(id: string, proof: File) {
+    if (!paymentAttempt?.resumeToken)
+      throw new Error("Resume token is missing");
+    const next = await submitResumablePaymentProof(
+      paymentAttempt.resumeToken,
+      id,
       proof,
-    });
-    await runLookup(creds);
+    );
+    setPaymentAttempt(next);
+    setPaymentAttempts((current) =>
+      current.map((attempt) => (attempt.id === next.id ? next : attempt)),
+    );
+    return next;
   }
 
   function reset() {
     setBill(null);
     setCreds(null);
     setMethod(null);
+    setPaymentAttempt(null);
     setErr(null);
     sessionStorage.removeItem(STORE_KEY);
   }
@@ -801,9 +819,7 @@ function PayBillInner() {
                   }}
                 >
                   {METHODS.filter(
-                    (m) =>
-                      (m.key !== "wire" || wireConfig?.enabled) &&
-                      (m.key !== "pi_spi" || piSpiEnabled),
+                    (m) => m.key !== "pi_spi" || piSpiEnabled,
                   ).map((m) => (
                     <button
                       key={m.key}
@@ -843,7 +859,7 @@ function PayBillInner() {
                           flexShrink: 0,
                         }}
                       >
-                        {m.badge ?? <CreditCard size={16} />}
+                        {m.badge}
                       </span>
                       <span style={{ minWidth: 0 }}>
                         <span
@@ -880,20 +896,21 @@ function PayBillInner() {
                     onSend={sendPiSpi}
                     onPoll={pollPiSpi}
                   />
-                ) : method === "wire" && wireConfig?.enabled ? (
-                  <WireTransferForm
-                    config={wireConfig}
+                ) : method === "proof" ? (
+                  <ProofPaymentPanel
                     amountXof={
                       Number(String(amount).replace(/[^\d]/g, "")) || 0
                     }
-                    pending={bill.pendingWires[0]}
-                    requireEmail
-                    onSubmit={submitWire}
+                    attempt={paymentAttempt}
+                    history={paymentAttempts}
+                    onSelectAttempt={setPaymentAttempt}
+                    onStart={startProofPayment}
+                    onChangeMethod={changeProofMethod}
+                    onUploadProof={uploadProof}
                   />
                 ) : (
                   <button
-                    onClick={pay}
-                    disabled={!method || busy}
+                    disabled
                     style={{
                       width: "100%",
                       padding: "14px",
@@ -912,12 +929,7 @@ function PayBillInner() {
                       gap: 9,
                     }}
                   >
-                    <Lock size={15} />{" "}
-                    {busy
-                      ? "Redirecting…"
-                      : method
-                        ? `Pay ${fcfa(Number(String(amount).replace(/[^\d]/g, "")) || 0)} FCFA`
-                        : "Select a payment method"}
+                    <Lock size={15} /> Select a payment method
                   </button>
                 )}
                 {err && (

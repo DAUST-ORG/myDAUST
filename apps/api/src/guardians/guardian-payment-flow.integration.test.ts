@@ -4,7 +4,7 @@ import { PrismaClient } from "@mydaust/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthService } from "../auth/auth.service.js";
 import { FinanceService } from "../finance/finance.service.js";
-import type { PaymentProvider } from "../finance/payment-provider.js";
+import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
 import {
   RequestToPayRegistry,
   type RequestToPayProvider,
@@ -34,31 +34,13 @@ const DB_URL = databaseUrl();
 const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
 let prisma: PrismaClient;
 let guardians: GuardiansService;
+let submissions: PaymentSubmissionsService;
 let auth: AuthService;
 let registrarId: string;
 let studentIds: string[];
 let invoiceIds: string[];
 let outsider: { studentId: string; invoiceId: string };
 const sentMail: { to: string | string[]; subject: string; html: string }[] = [];
-
-const checkoutProvider: PaymentProvider = {
-  name: "paytech",
-  async requestPayment({ ref }) {
-    return {
-      token: `token-${ref}`,
-      redirectUrl: `https://checkout.test/${encodeURIComponent(ref)}`,
-    };
-  },
-  verifyIpn() {
-    return {
-      valid: false,
-      ref: null,
-      token: null,
-      success: false,
-      method: null,
-    };
-  },
-};
 
 const piSpiProvider: RequestToPayProvider = {
   name: "pi_spi",
@@ -243,10 +225,78 @@ describe.skipIf(!DB_URL)("guardian account and payment lifecycle", () => {
       prisma as never,
       mail as never,
       proofStorage as never,
-      checkoutProvider,
       new RequestToPayRegistry([piSpiProvider]),
     );
-    guardians = new GuardiansService(prisma as never, mail as never, finance);
+    await prisma.appSetting.upsert({
+      where: { key: "payment_method_config" },
+      create: {
+        key: "payment_method_config",
+        valueJson: {
+          wave: {
+            enabled: true,
+            phoneNumber: "770000000",
+            merchantNumber: "",
+            instructions: "Pay DAUST",
+            qrAsset: {
+              objectKey: "test/qr.png",
+              fileName: "qr.png",
+              mimeType: "image/png",
+              size: 8,
+            },
+          },
+          orangeMoney: {
+            enabled: true,
+            phoneNumber: "780000000",
+            merchantNumber: "DAUST",
+            instructions: "Pay DAUST",
+            qrAsset: {
+              objectKey: "test/qr.png",
+              fileName: "qr.png",
+              mimeType: "image/png",
+              size: 8,
+            },
+          },
+          bank: {
+            enabled: true,
+            bankName: "Test Bank",
+            beneficiary: "DAUST",
+            accountNumber: "123",
+            iban: "SN00",
+            swift: "TESTSN",
+            branch: "Dakar",
+            instructions: "Use the reference",
+          },
+          notificationRecipients: ["finance@test.local"],
+        },
+      },
+      update: {},
+    });
+    const paymentFiles = {
+      async put(file: Express.Multer.File) {
+        const mime = validateWireProof(file);
+        return {
+          objectKey: `payment-files/test/${randomUUID()}`,
+          fileName: file.originalname,
+          mimeType: mime,
+          size: file.size,
+        };
+      },
+      async get() {
+        return proofFile.buffer;
+      },
+    };
+    submissions = new PaymentSubmissionsService(
+      prisma as never,
+      paymentFiles as never,
+      finance,
+      mail as never,
+    );
+    guardians = new GuardiansService(
+      prisma as never,
+      mail as never,
+      finance,
+      submissions,
+    );
     auth = new AuthService(prisma as never);
   }, 120_000);
 
@@ -402,20 +452,15 @@ describe.skipIf(!DB_URL)("guardian account and payment lifecycle", () => {
       name: "Family Guardian",
       roles: ["parent" as const],
     };
-    const checkoutIds: string[] = [];
-    for (const method of ["wave", "orange_money", "card"] as const) {
-      const checkout = await guardians.initiateChildPayment(
-        actor,
-        studentIds[0]!,
-        {
-          invoiceId: invoiceIds[0]!,
-          amount: 100,
-          method,
-        },
-      );
-      expect(checkout.redirectUrl).toContain("checkout.test");
-      checkoutIds.push(checkout.paymentId);
-    }
+    const checkout = await guardians.initiateChildPayment(
+      actor,
+      studentIds[0]!,
+      { invoiceId: invoiceIds[0]!, amount: 100, method: "wave" },
+    );
+    expect(checkout).toMatchObject({
+      status: "awaiting_proof",
+      method: "wave",
+    });
 
     const piSpi = await guardians.submitChildPiSpi(actor, studentIds[0]!, {
       invoiceId: invoiceIds[0]!,
@@ -429,22 +474,19 @@ describe.skipIf(!DB_URL)("guardian account and payment lifecycle", () => {
       amountXof: 100,
     });
 
-    const wire = await guardians.submitChildWire(
-      actor,
-      studentIds[0]!,
-      { invoiceId: invoiceIds[0]!, amountXof: 100 },
-      proofFile,
-    );
+    const wire = await submissions.submitProof(checkout.id, proofFile, {
+      resumeToken: checkout.resumeToken!,
+    });
     expect(wire).toMatchObject({
       status: "submitted",
-      submittedAmountXof: 100,
+      amountXof: 100,
     });
 
     const initiated = await prisma.payment.findMany({
       where: { studentId: studentIds[0]! },
       orderBy: { createdAt: "asc" },
     });
-    expect(initiated).toHaveLength(5);
+    expect(initiated).toHaveLength(2);
     expect(
       initiated.every((payment) => payment.source === "parent_portal"),
     ).toBe(true);
@@ -455,7 +497,7 @@ describe.skipIf(!DB_URL)("guardian account and payment lifecycle", () => {
       initiated.every((payment) => payment.initiatedByEmail === email),
     ).toBe(true);
     expect(
-      await prisma.wireTransferSubmission.findUniqueOrThrow({
+      await prisma.paymentSubmission.findUniqueOrThrow({
         where: { id: wire.id },
       }),
     ).toMatchObject({
@@ -465,24 +507,30 @@ describe.skipIf(!DB_URL)("guardian account and payment lifecycle", () => {
       contactEmail: email,
     });
 
+    const manualPaymentId = (
+      await prisma.paymentSubmission.findUniqueOrThrow({
+        where: { id: checkout.id },
+        select: { paymentId: true },
+      })
+    ).paymentId!;
     await prisma.payment.update({
-      where: { id: checkoutIds[0]! },
+      where: { id: manualPaymentId },
       data: { status: "success", settledAt: new Date() },
     });
     expect(
       await guardians.childPaymentStatus(
         created.id,
         studentIds[0]!,
-        checkoutIds[0]!,
+        manualPaymentId,
       ),
     ).toMatchObject({ status: "success", source: "parent_portal" });
     const receipt = await guardians.childPaymentReceipt(
       created.id,
       studentIds[0]!,
-      checkoutIds[0]!,
+      manualPaymentId,
     );
     expect(receipt).toMatchObject({
-      id: checkoutIds[0],
+      id: manualPaymentId,
       studentNo: expect.any(String),
     });
     expect(receipt).not.toHaveProperty("initiatedByEmail");
@@ -494,14 +542,14 @@ describe.skipIf(!DB_URL)("guardian account and payment lifecycle", () => {
       guardians.initiateChildPayment(actor, outsider.studentId, {
         invoiceId: outsider.invoiceId,
         amount: 100,
-        method: "card",
+        method: "wave",
       }),
     ).rejects.toThrow("You do not have access");
     await expect(
       guardians.childPaymentReceipt(
         created.id,
         outsider.studentId,
-        checkoutIds[0]!,
+        manualPaymentId,
       ),
     ).rejects.toThrow("You do not have access");
 

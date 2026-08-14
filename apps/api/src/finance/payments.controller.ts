@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -9,28 +8,15 @@ import {
   Param,
   Post,
   Req,
-  UploadedFile,
   UseGuards,
-  UseInterceptors,
 } from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
 import type { RawBodyRequest } from "@nestjs/common";
 import type { Request } from "express";
-import { InitiatePaymentInput } from "@mydaust/shared";
 import { z } from "zod";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Public, Roles } from "../auth/decorators.js";
 import { FinanceService } from "./finance.service.js";
-import { MAX_WIRE_PROOF_BYTES } from "./wire-proof.storage.js";
 import { BillThrottleGuard } from "./bill-throttle.guard.js";
-
-const StudentWireInput = z.object({
-  invoiceId: z.string().uuid(),
-  amountXof: z.coerce.number().int().positive().max(100_000_000),
-});
-const LinkWireInput = z.object({
-  contactEmail: z.string().trim().email().max(160),
-});
 
 /** A PI-SPI alias is a UUID v4 payment address, not a phone number. */
 const PiSpiAlias = z.string().trim().uuid();
@@ -59,90 +45,11 @@ export class PaymentsController {
     return this.finance.getStudentBillingSummary(user.studentId!);
   }
 
-  @Post("my/payments")
-  @Roles("student")
-  initiate(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    const input = InitiatePaymentInput.parse(body);
-    return this.finance.initiatePayment(user.studentId!, input, {
-      source: "student_portal",
-      initiatedById: user.personId,
-      initiatedByEmail: user.email,
-    });
-  }
-
-  @Get("wire/config")
-  @Public()
-  wireConfig() {
-    return this.finance.getPublicWirePaymentConfig();
-  }
-
-  @Post("my/wire-transfers")
-  @Roles("student")
-  @UseInterceptors(
-    FileInterceptor("proof", { limits: { fileSize: MAX_WIRE_PROOF_BYTES } }),
-  )
-  submitStudentWire(
-    @CurrentUser() user: AuthUser,
-    @Body() body: unknown,
-    @UploadedFile() proof: Express.Multer.File,
-  ) {
-    const input = StudentWireInput.parse(body);
-    return this.finance.submitStudentWire(
-      user.studentId!,
-      user,
-      input.invoiceId,
-      input.amountXof,
-      proof,
-    );
-  }
-
   /** Public standalone pay page data. The token is the only credential (unguessable). */
   @Get("links/:token")
   @Public()
   publicLink(@Param("token") token: string) {
     return this.finance.getPublicLink(token);
-  }
-
-  @Post("links/:token/checkout")
-  @Public()
-  checkoutLink(
-    @Param("token") token: string,
-    @Body() body: { method?: string },
-  ) {
-    if (
-      !body?.method ||
-      !["wave", "orange_money", "card"].includes(body.method)
-    ) {
-      throw new BadRequestException(
-        "method must be wave, orange_money or card",
-      );
-    }
-    return this.finance.checkoutLink(token, body.method);
-  }
-
-  @Post("links/:token/wire-transfers")
-  @Public()
-  @UseGuards(BillThrottleGuard)
-  @UseInterceptors(
-    FileInterceptor("proof", { limits: { fileSize: MAX_WIRE_PROOF_BYTES } }),
-  )
-  submitLinkWire(
-    @Param("token") token: string,
-    @Body() body: unknown,
-    @UploadedFile() proof: Express.Multer.File,
-  ) {
-    const input = LinkWireInput.parse(body);
-    return this.finance.submitPaymentLinkWire(token, input.contactEmail, proof);
-  }
-
-  /** PayTech IPN. Public (PayTech calls it); authenticity is verified inside the service. */
-  @Post("webhook/paytech")
-  @Public()
-  @HttpCode(200)
-  async webhook(@Body() payload: Record<string, unknown>) {
-    const { valid } = await this.finance.handleIpn(payload);
-    if (!valid) throw new ForbiddenException("IPN KO");
-    return "IPN OK";
   }
 
   // --- PI-SPI (request-to-pay) --------------------------------------------

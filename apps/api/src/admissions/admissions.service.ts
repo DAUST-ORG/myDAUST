@@ -1,13 +1,24 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import type { ApplicationInput } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { AppConfigService } from "../app-config/app-config.service.js";
-import { PAYMENT_PROVIDER, type PaymentProvider } from "../finance/payment-provider.js";
+import type { ProofPaymentMethod } from "@mydaust/shared";
+import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
 
 /** Escape user-supplied text before embedding it in email HTML (applications are anonymous/public). */
 const esc = (s: unknown): string =>
-  String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
 /** Optional applicant columns the registrar form captures beyond name + email. */
 export interface ApplicantFields {
@@ -39,37 +50,45 @@ export class AdmissionsService {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly appConfig: AppConfigService,
-    @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
+    private readonly paymentSubmissions: PaymentSubmissionsService,
   ) {}
 
   /**
-   * PayTech checkout for the 30k FCFA application fee. Anonymous (the applicant id is the
-   * capability); the verified IPN (ref APPFEE-<id>) flips feePaid — never this endpoint.
+   * Start or resume the proof-based application-fee payment. The applicant id is the
+   * capability; Finance verification flips feePaid.
    */
   /** Current application fee in XOF, for alternative rails that bill it themselves. */
   applicationFeeXof(): Promise<number> {
     return this.appConfig.applicationFee();
   }
 
-  async feeCheckout(applicantId: string) {
-    const applicant = await this.prisma.applicant.findUnique({ where: { id: applicantId } });
-    if (!applicant) throw new NotFoundException("Application not found");
-    if (applicant.feePaid) throw new BadRequestException("Application fee already paid");
-    if (!process.env.PAYTECH_API_KEY) {
-      throw new BadRequestException("Online fee payment is not available right now — pay at the Office of Admissions");
-    }
-    const fee = await this.appConfig.applicationFee();
-    const vitrine = process.env.VITRINE_ORIGIN ?? "http://localhost:3001";
-    const { redirectUrl } = await this.provider.requestPayment({
-      ref: `APPFEE-${applicant.id}`,
-      amount: fee,
-      itemName: "DAUST application fee",
-      customField: { applicantId: applicant.id },
-      // Applicants are anonymous — return them to the public site, not the portal.
-      successUrl: `${vitrine}/admissions?fee=paid`,
-      cancelUrl: `${vitrine}/admissions`,
+  async feeCheckout(applicantId: string, method: ProofPaymentMethod) {
+    const applicant = await this.prisma.applicant.findUnique({
+      where: { id: applicantId },
     });
-    return { redirectUrl };
+    if (!applicant) throw new NotFoundException("Application not found");
+    if (applicant.feePaid)
+      throw new BadRequestException("Application fee already paid");
+    const fee = await this.appConfig.applicationFee();
+    const attempt = await this.paymentSubmissions.createForApplicant(
+      applicant.id,
+      method,
+      fee,
+    );
+    if (!attempt.resumeToken) {
+      throw new BadRequestException("Payment resume capability is unavailable");
+    }
+    const resumeUrl = `${process.env.VITRINE_ORIGIN ?? "http://localhost:3001"}/admissions/payment?id=${encodeURIComponent(applicant.id)}&resume=${encodeURIComponent(attempt.resumeToken)}`;
+    await this.mail
+      .send({
+        to: applicant.email,
+        subject: "Resume your DAUST application fee payment",
+        html: `<h2>Your payment is saved</h2><p>You can upload proof now or return at any time using this private link:</p><p><a href="${resumeUrl}">Resume application fee payment</a></p>`,
+      })
+      .catch((error) =>
+        this.logger.warn(`payment resume email failed: ${String(error)}`),
+      );
+    return attempt;
   }
 
   /** Anonymous public application: persist applicant + send confirmation email. */
@@ -94,8 +113,12 @@ export class AdmissionsService {
         : "";
 
     const templates = await this.appConfig.emailTemplates();
-    const cc = templates.applicationCc?.length ? templates.applicationCc : undefined;
-    const bcc = templates.applicationBcc?.length ? templates.applicationBcc : undefined;
+    const cc = templates.applicationCc?.length
+      ? templates.applicationCc
+      : undefined;
+    const bcc = templates.applicationBcc?.length
+      ? templates.applicationBcc
+      : undefined;
 
     const interpolate = (str: string) =>
       str
@@ -110,7 +133,7 @@ export class AdmissionsService {
         cc,
         bcc,
         subject: interpolate(templates.applicationSubject),
-        html: interpolate(templates.applicationBody),
+        html: `${interpolate(templates.applicationBody)}<p><a href="${process.env.VITRINE_ORIGIN ?? "http://localhost:3001"}/admissions/payment?id=${encodeURIComponent(applicant.id)}">Pay or resume the application fee</a></p>`,
       });
     } catch (e) {
       this.logger.warn(`application email failed: ${String(e)}`);
@@ -123,7 +146,9 @@ export class AdmissionsService {
   async applicantDetail(id: string) {
     const a = await this.prisma.applicant.findUnique({ where: { id } });
     if (!a) throw new NotFoundException("Applicant not found");
-    const program = a.programCode ? await this.prisma.program.findUnique({ where: { code: a.programCode } }) : null;
+    const program = a.programCode
+      ? await this.prisma.program.findUnique({ where: { code: a.programCode } })
+      : null;
     const scholarship = await this.appConfig.awardFor(a.score);
     const appFee = await this.appConfig.applicationFee();
     return {
@@ -142,7 +167,9 @@ export class AdmissionsService {
       submittedAt: a.createdAt.toISOString(),
       // Extended application-form fields, surfaced so the detail page + edit modal prefill.
       phone: a.phone,
-      dateOfBirth: a.dateOfBirth ? a.dateOfBirth.toISOString().slice(0, 10) : null,
+      dateOfBirth: a.dateOfBirth
+        ? a.dateOfBirth.toISOString().slice(0, 10)
+        : null,
       gender: a.gender,
       nationality: a.nationality,
       city: a.city,
@@ -160,47 +187,93 @@ export class AdmissionsService {
     };
   }
 
-  private static readonly STAGES = ["submitted", "review", "interview", "offer", "accepted", "rejected"];
+  private static readonly STAGES = [
+    "submitted",
+    "review",
+    "interview",
+    "offer",
+    "accepted",
+    "rejected",
+  ];
 
   /** Registrar/admin: manually add an applicant to the pipeline. Audited. */
-  async adminCreateApplicant(actorId: string, input: ApplicantFields & { firstName: string; lastName: string; email: string }) {
+  async adminCreateApplicant(
+    actorId: string,
+    input: ApplicantFields & {
+      firstName: string;
+      lastName: string;
+      email: string;
+    },
+  ) {
     const applicant = await this.prisma.applicant.create({
-      data: { ...this.applicantData(input), firstName: input.firstName, lastName: input.lastName, email: input.email, stage: "submitted" },
+      data: {
+        ...this.applicantData(input),
+        firstName: input.firstName,
+        lastName: input.lastName,
+        email: input.email,
+        stage: "submitted",
+      },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "Applicant", entityId: applicant.id, action: "applicant-created", actorId },
+      data: {
+        entity: "Applicant",
+        entityId: applicant.id,
+        action: "applicant-created",
+        actorId,
+      },
     });
     return applicant;
   }
 
   /** Registrar/admin: edit an applicant's captured details (not the stage). Audited. */
-  async adminUpdateApplicant(actorId: string, id: string, input: ApplicantFields & { firstName?: string; lastName?: string; email?: string }) {
+  async adminUpdateApplicant(
+    actorId: string,
+    id: string,
+    input: ApplicantFields & {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+    },
+  ) {
     const applicant = await this.prisma.applicant.findUnique({ where: { id } });
     if (!applicant) throw new NotFoundException("Applicant not found");
     const updated = await this.prisma.applicant.update({
       where: { id },
       data: {
         ...this.applicantData(input),
-        ...(input.firstName !== undefined ? { firstName: input.firstName } : {}),
+        ...(input.firstName !== undefined
+          ? { firstName: input.firstName }
+          : {}),
         ...(input.lastName !== undefined ? { lastName: input.lastName } : {}),
         ...(input.email !== undefined ? { email: input.email } : {}),
       },
     });
     await this.prisma.auditLog.create({
-      data: { entity: "Applicant", entityId: id, action: "applicant-updated", actorId },
+      data: {
+        entity: "Applicant",
+        entityId: id,
+        action: "applicant-updated",
+        actorId,
+      },
     });
     return updated;
   }
 
   /** The optional application-form columns, undefined keys left untouched on update. */
   private applicantData(input: ApplicantFields) {
-    const set = <T>(v: T | undefined | null) => (v === undefined ? undefined : v ?? null);
+    const set = <T>(v: T | undefined | null) =>
+      v === undefined ? undefined : (v ?? null);
     return {
       programCode: set(input.programCode),
       country: set(input.country),
       score: set(input.score),
       phone: set(input.phone),
-      dateOfBirth: input.dateOfBirth === undefined ? undefined : input.dateOfBirth ? new Date(input.dateOfBirth) : null,
+      dateOfBirth:
+        input.dateOfBirth === undefined
+          ? undefined
+          : input.dateOfBirth
+            ? new Date(input.dateOfBirth)
+            : null,
       gender: set(input.gender),
       nationality: set(input.nationality),
       city: set(input.city),
@@ -219,33 +292,46 @@ export class AdmissionsService {
 
   /** Registrar/admin: advance/reject an applicant's pipeline stage. Audited. */
   async adminSetStage(actorId: string, id: string, stage: string) {
-    if (!AdmissionsService.STAGES.includes(stage)) throw new BadRequestException(`Invalid stage "${stage}"`);
+    if (!AdmissionsService.STAGES.includes(stage))
+      throw new BadRequestException(`Invalid stage "${stage}"`);
     const applicant = await this.prisma.applicant.findUnique({ where: { id } });
     if (!applicant) throw new NotFoundException("Applicant not found");
-    const updated = await this.prisma.applicant.update({ where: { id }, data: { stage } });
+    const updated = await this.prisma.applicant.update({
+      where: { id },
+      data: { stage },
+    });
     await this.prisma.auditLog.create({
-      data: { entity: "Applicant", entityId: id, action: `applicant-stage-${stage}`, actorId },
+      data: {
+        entity: "Applicant",
+        entityId: id,
+        action: `applicant-stage-${stage}`,
+        actorId,
+      },
     });
 
     if (stage === "accepted") {
       try {
         const templates = await this.appConfig.emailTemplates();
-        const cc = templates.acceptanceCc?.length ? templates.acceptanceCc : undefined;
-        const bcc = templates.acceptanceBcc?.length ? templates.acceptanceBcc : undefined;
+        const cc = templates.acceptanceCc?.length
+          ? templates.acceptanceCc
+          : undefined;
+        const bcc = templates.acceptanceBcc?.length
+          ? templates.acceptanceBcc
+          : undefined;
 
         const award = await this.appConfig.awardFor(applicant.score);
         const scholarshipLine =
           award.pct > 0
             ? `<p>Based on your reported BAC, you may qualify for a <strong>${award.pct}% merit scholarship</strong> (${award.band}).</p>`
             : "";
-        
+
         const interpolate = (str: string) =>
           str
             .replace(/\{\{firstName\}\}/g, esc(applicant.firstName))
             .replace(/\{\{lastName\}\}/g, esc(applicant.lastName))
             .replace(/\{\{scholarshipLine\}\}/g, scholarshipLine)
             .replace(/\{\{appFee\}\}/g, "");
-            
+
         await this.mail.send({
           to: applicant.email,
           cc,

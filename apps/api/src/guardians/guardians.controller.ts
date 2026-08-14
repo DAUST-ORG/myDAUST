@@ -6,14 +6,11 @@ import {
   Param,
   Patch,
   Post,
-  UploadedFile,
-  UseInterceptors,
 } from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
 import { z } from "zod";
+import { ProofPaymentMethod } from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Public, Roles } from "../auth/decorators.js";
-import { MAX_WIRE_PROOF_BYTES } from "../finance/wire-proof.storage.js";
 import { GuardiansService } from "./guardians.service.js";
 
 // Local zod (the api's own instance) — keeps the ESM/CJS dual-package hazard away from shared.
@@ -41,17 +38,12 @@ const RedeemInviteInput = z.object({
 const ParentCheckoutInput = z.object({
   invoiceId: z.string().uuid(),
   amount: z.coerce.number().int().positive().max(100_000_000),
-  method: z.enum(["wave", "orange_money", "card"]),
+  method: ProofPaymentMethod,
 });
 
 const ParentPiSpiInput = z.object({
   invoiceId: z.string().uuid(),
   alias: z.string().trim().uuid(),
-  amountXof: z.coerce.number().int().positive().max(100_000_000),
-});
-
-const ParentWireInput = z.object({
-  invoiceId: z.string().uuid(),
   amountXof: z.coerce.number().int().positive().max(100_000_000),
 });
 
@@ -169,6 +161,14 @@ export class ParentController {
     );
   }
 
+  @Get("children/:studentId/payment-attempts")
+  paymentAttempts(
+    @CurrentUser() user: AuthUser,
+    @Param("studentId") studentId: string,
+  ) {
+    return this.guardians.childPaymentAttempts(user.personId, studentId);
+  }
+
   @Get("children/:studentId/payments/:paymentId/status")
   paymentStatus(
     @CurrentUser() user: AuthUser,
@@ -215,23 +215,5 @@ export class ParentController {
     @Param("txId") txId: string,
   ) {
     return this.guardians.childPiSpiStatus(user.personId, studentId, txId);
-  }
-
-  @Post("children/:studentId/wire-transfers")
-  @UseInterceptors(
-    FileInterceptor("proof", { limits: { fileSize: MAX_WIRE_PROOF_BYTES } }),
-  )
-  submitWire(
-    @CurrentUser() user: AuthUser,
-    @Param("studentId") studentId: string,
-    @Body() body: unknown,
-    @UploadedFile() proof: Express.Multer.File,
-  ) {
-    return this.guardians.submitChildWire(
-      user,
-      studentId,
-      ParentWireInput.parse(body),
-      proof,
-    );
   }
 }

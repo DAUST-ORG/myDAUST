@@ -1,13 +1,4 @@
-/**
- * Request-to-pay seam — a second kind of payment rail, alongside the redirect-checkout
- * `PaymentProvider` that PayTech implements.
- *
- * The two are deliberately separate interfaces rather than one widened union: a redirect
- * rail hands the payer to a hosted page and settles on an IPN, while a request-to-pay rail
- * pushes a request at the payer's alias and settles whenever they approve it in their own
- * banking app. They share no response shape, and forcing them together would make every
- * existing PayTech call site narrow a union on the live money path for no benefit.
- */
+/** Automatic request-to-pay rail used by PI-SPI. */
 
 export const REQUEST_TO_PAY_PROVIDERS = Symbol("REQUEST_TO_PAY_PROVIDERS");
 
@@ -89,7 +80,10 @@ export interface RequestToPayProvider {
   /** Current state, for polling and for the reconciliation sweep. */
   getRequest(txId: string): Promise<RequestToPayResult | null>;
   /** Verify + decode a raw webhook body. Raw bytes, because the signature covers them. */
-  verifyWebhook(rawBody: Buffer | string, signature: string | undefined): WebhookVerification;
+  verifyWebhook(
+    rawBody: Buffer | string,
+    signature: string | undefined,
+  ): WebhookVerification;
 }
 
 /**

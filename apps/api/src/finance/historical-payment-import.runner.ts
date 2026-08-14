@@ -321,14 +321,14 @@ function jsonObject(
 function paymentReferenceEvidence(payment: {
   providerRef: string;
   ipnPayload: Prisma.JsonValue | null;
-  wireTransfer: { bankReference: string | null } | null;
+  submission: { bankReference: string | null } | null;
 }): { normalized: Set<string>; hashes: Set<string> } {
   const normalized = new Set<string>();
   const hashes = new Set<string>();
   const providerRef = normalizeExternalReference(payment.providerRef);
   if (providerRef) normalized.add(providerRef);
   const bankReference = normalizeExternalReference(
-    payment.wireTransfer?.bankReference,
+    payment.submission?.bankReference,
   );
   if (bankReference) normalized.add(bankReference);
 
@@ -368,7 +368,7 @@ function isExistingPaymentCandidate(
     settledAt: Date | null;
     providerRef: string;
     ipnPayload: Prisma.JsonValue | null;
-    wireTransfer: { bankReference: string | null } | null;
+    submission: { bankReference: string | null } | null;
   },
   studentId: string,
 ): boolean {
@@ -994,7 +994,7 @@ export async function planHistoricalPaymentImport(
           settledAt: true,
           providerRef: true,
           ipnPayload: true,
-          wireTransfer: { select: { bankReference: true } },
+          submission: { select: { bankReference: true } },
         },
       }),
       db.payment.findMany({

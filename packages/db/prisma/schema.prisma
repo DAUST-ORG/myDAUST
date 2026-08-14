@@ -27,7 +27,7 @@ enum PaymentMethod {
   // Historical/manual bank records may be settled by cheque. This remains an
   // accounting value only; payer-facing checkout endpoints do not offer it.
   cheque
-  // BCEAO instant-payment rail. Unlike the PayTech-backed methods above it is
+  // BCEAO instant-payment rail. Unlike proof-based methods it is
   // request-to-pay: the payer approves in their own banking app, so settlement is
   // asynchronous rather than a redirect return.
   pi_spi
@@ -60,10 +60,20 @@ enum PaymentImportBatchStatus {
   failed
 }
 
-enum WireTransferStatus {
+enum PaymentSubmissionStatus {
+  awaiting_proof
   submitted
   approved
   rejected
+  cancelled
+
+  @@map("WireTransferStatus")
+}
+
+enum PaymentAuditStatus {
+  unreviewed
+  reviewed
+  flagged
 }
 
 enum InstallmentStatus {
@@ -362,60 +372,61 @@ model ManagementActualEntry {
 }
 
 model Person {
-  id                        String                    @id @default(uuid())
-  email                     String                    @unique
-  firstName                 String
-  lastName                  String
-  kind                      PersonKind
+  id                         String                    @id @default(uuid())
+  email                      String                    @unique
+  firstName                  String
+  lastName                   String
+  kind                       PersonKind
   // App RBAC roles (a person can hold several). Validated against AppRole in code.
-  roles                     String[]                  @default([])
+  roles                      String[]                  @default([])
   // bcrypt hash; null until a password is set.
-  passwordHash              String?
+  passwordHash               String?
   // Set when a temp password was assigned; forces a change on next login.
-  mustChangePassword        Boolean                   @default(false)
-  createdAt                 DateTime                  @default(now())
-  student                   Student?
-  taughtSections            Section[]                 @relation("Instructor")
-  threadParticipations      ThreadParticipant[]
-  messagesSent              Message[]
-  projectMemberships        ProjectMember[]
+  mustChangePassword         Boolean                   @default(false)
+  createdAt                  DateTime                  @default(now())
+  student                    Student?
+  taughtSections             Section[]                 @relation("Instructor")
+  threadParticipations       ThreadParticipant[]
+  messagesSent               Message[]
+  projectMemberships         ProjectMember[]
   // --- SIS redesign ---
-  guardianOf                GuardianStudent[]         @relation("GuardianOf")
-  guardianInvites           GuardianInvite[]          @relation("GuardianInvites")
-  studentInvites            StudentInvite[]           @relation("StudentInvites")
-  broadcasts                Broadcast[]               @relation("BroadcastSender")
+  guardianOf                 GuardianStudent[]         @relation("GuardianOf")
+  guardianInvites            GuardianInvite[]          @relation("GuardianInvites")
+  studentInvites             StudentInvite[]           @relation("StudentInvites")
+  broadcasts                 Broadcast[]               @relation("BroadcastSender")
   // Public website profile for faculty (see FacultyProfile).
-  facultyProfile            FacultyProfile?
-  wireTransfersSubmitted    WireTransferSubmission[]  @relation("WireTransferSubmitter")
-  wireTransfersReviewed     WireTransferSubmission[]  @relation("WireTransferReviewer")
-  transcriptImportBatches   TranscriptImportBatch[]   @relation("TranscriptImportBatchCreator")
-  paymentImportBatches      PaymentImportBatch[]      @relation("PaymentImportBatchCreator")
-  transcriptEntriesCreated  TranscriptEntry[]         @relation("TranscriptEntryCreator")
-  transcriptEntriesUpdated  TranscriptEntry[]         @relation("TranscriptEntryUpdater")
-  transcriptEntriesVoided   TranscriptEntry[]         @relation("TranscriptEntryVoider")
-  paymentsInitiated         Payment[]                 @relation("PaymentInitiator")
-  feeSchedulesCreated       FeeSchedule[]             @relation("FeeScheduleCreator")
-  feeSchedulesApproved      FeeSchedule[]             @relation("FeeScheduleApprover")
-  approvalRequestsCreated   ApprovalRequest[]         @relation("ApprovalRequester")
-  approvalRequestsReviewed  ApprovalRequest[]         @relation("ApprovalReviewer")
-  approvalEvents            ApprovalEvent[]           @relation("ApprovalEventActor")
-  operatingBudgetsCreated   OperatingBudget[]         @relation("OperatingBudgetCreator")
-  operatingBudgetsReviewed  OperatingBudget[]         @relation("OperatingBudgetReviewer")
-  managementActualsCreated  ManagementActualEntry[]   @relation("ManagementActualCreator")
-  managementActualsApproved ManagementActualEntry[]   @relation("ManagementActualApprover")
-  managementActualsVoided   ManagementActualEntry[]   @relation("ManagementActualVoider")
-  expensesApproved          Expense[]                 @relation("ExpenseApprover")
-  expensesVoided            Expense[]                 @relation("ExpenseVoider")
-  directorWidgetPreference  DirectorWidgetPreference?
+  facultyProfile             FacultyProfile?
+  paymentSubmissionsStarted  PaymentSubmission[]       @relation("PaymentSubmissionInitiator")
+  paymentSubmissionsVerified PaymentSubmission[]       @relation("PaymentSubmissionVerifier")
+  paymentSubmissionsAudited  PaymentSubmission[]       @relation("PaymentSubmissionAuditor")
+  transcriptImportBatches    TranscriptImportBatch[]   @relation("TranscriptImportBatchCreator")
+  paymentImportBatches       PaymentImportBatch[]      @relation("PaymentImportBatchCreator")
+  transcriptEntriesCreated   TranscriptEntry[]         @relation("TranscriptEntryCreator")
+  transcriptEntriesUpdated   TranscriptEntry[]         @relation("TranscriptEntryUpdater")
+  transcriptEntriesVoided    TranscriptEntry[]         @relation("TranscriptEntryVoider")
+  paymentsInitiated          Payment[]                 @relation("PaymentInitiator")
+  feeSchedulesCreated        FeeSchedule[]             @relation("FeeScheduleCreator")
+  feeSchedulesApproved       FeeSchedule[]             @relation("FeeScheduleApprover")
+  approvalRequestsCreated    ApprovalRequest[]         @relation("ApprovalRequester")
+  approvalRequestsReviewed   ApprovalRequest[]         @relation("ApprovalReviewer")
+  approvalEvents             ApprovalEvent[]           @relation("ApprovalEventActor")
+  operatingBudgetsCreated    OperatingBudget[]         @relation("OperatingBudgetCreator")
+  operatingBudgetsReviewed   OperatingBudget[]         @relation("OperatingBudgetReviewer")
+  managementActualsCreated   ManagementActualEntry[]   @relation("ManagementActualCreator")
+  managementActualsApproved  ManagementActualEntry[]   @relation("ManagementActualApprover")
+  managementActualsVoided    ManagementActualEntry[]   @relation("ManagementActualVoider")
+  expensesApproved           Expense[]                 @relation("ExpenseApprover")
+  expensesVoided             Expense[]                 @relation("ExpenseVoider")
+  directorWidgetPreference   DirectorWidgetPreference?
 }
 
 model Student {
-  id                   String                   @id @default(uuid())
-  personId             String                   @unique
-  person               Person                   @relation(fields: [personId], references: [id])
-  studentNo            String                   @unique
+  id                   String                @id @default(uuid())
+  personId             String                @unique
+  person               Person                @relation(fields: [personId], references: [id])
+  studentNo            String                @unique
   programId            String?
-  program              Program?                 @relation(fields: [programId], references: [id])
+  program              Program?              @relation(fields: [programId], references: [id])
   // Date of birth (date only). Second factor for the public bill-payment lookup.
   dateOfBirth          DateTime?
   // Roster photo, resolved to an absolute URL (served from the vitrine bucket).
@@ -457,14 +468,14 @@ model Student {
   standing             String? // Good Standing | Probation | ...
   // Lifecycle of the SIS record itself. Archiving hides a student from active
   // rosters without deleting their academic or financial history.
-  recordStatus         StudentRecordStatus      @default(active)
+  recordStatus         StudentRecordStatus   @default(active)
   holds                StudentHold[]
   alerts               StudentAlert[]
   watchers             StaffWatch[]
   guardians            GuardianStudent[]
   invoices             Invoice[]
   payments             Payment[]
-  wireTransfers        WireTransferSubmission[]
+  paymentSubmissions   PaymentSubmission[]
   piSpiRequests        PiSpiRequest[]
   enrollments          Enrollment[]
   transcriptEntries    TranscriptEntry[]
@@ -475,7 +486,7 @@ model Student {
   housing              HousingAssignment?
   roommateProfile      RoommateProfile?
   documents            StudentDocument[]
-  createdAt            DateTime                 @default(now())
+  createdAt            DateTime              @default(now())
 
   @@index([recordStatus])
 }
@@ -551,7 +562,7 @@ model Invoice {
   componentOverrides  InvoiceComponentOverride[]
   plan                PaymentPlan?
   payments            Payment[]
-  wireTransfers       WireTransferSubmission[]
+  paymentSubmissions  PaymentSubmission[]
   piSpiRequests       PiSpiRequest[]
   createdAt           DateTime                   @default(now())
   updatedAt           DateTime                   @updatedAt
@@ -600,7 +611,7 @@ model Payment {
   amount               Int
   method               PaymentMethod
   status               PaymentStatus                @default(pending)
-  provider             String                       @default("paytech")
+  provider             String                       @default("manual")
   // Idempotency anchor: the gateway transaction reference is unique.
   providerRef          String                       @unique
   /// Durable origin of the payment attempt (student_portal, parent_portal, public_bill, ...).
@@ -620,7 +631,7 @@ model Payment {
   ipnPayload           Json?
   allocations          PaymentAllocation[]
   componentAllocations PaymentComponentAllocation[]
-  wireTransfer         WireTransferSubmission?
+  submission           PaymentSubmission?
   piSpiRequest         PiSpiRequest?
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
@@ -725,7 +736,7 @@ model PaymentComponentAllocation {
 
 /**
  * A PI-SPI request-to-pay we pushed at a payer's alias.
- * Mirrors WireTransferSubmission's polymorphic target (invoice | payment link | applicant
+ * Mirrors PaymentSubmission's polymorphic target (invoice | payment link | applicant
  * fee). `txId` is our own reference and `end2endId` is the rail-wide one carried on
  * webhooks — both are unique so a replayed notification can never settle twice.
  */
@@ -765,44 +776,67 @@ model PiSpiRequest {
   @@index([applicantId])
 }
 
-model WireTransferSubmission {
-  id                 String             @id @default(uuid())
-  status             WireTransferStatus @default(submitted)
-  source             String // student_portal | public_bill | payment_link
-  studentId          String?
-  student            Student?           @relation(fields: [studentId], references: [id])
-  invoiceId          String?
-  invoice            Invoice?           @relation(fields: [invoiceId], references: [id])
-  paymentId          String?            @unique
-  payment            Payment?           @relation(fields: [paymentId], references: [id])
-  paymentLinkId      String?
-  paymentLink        PaymentLink?       @relation(fields: [paymentLinkId], references: [id])
-  submittedAmountXof Int
-  confirmedAmountXof Int?
-  contactEmail       String
-  submittedById      String?
-  submittedBy        Person?            @relation("WireTransferSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
-  submittedByEmail   String?
-  proofObjectKey     String
-  proofFileName      String
-  proofMimeType      String
-  proofSize          Int
-  bankSnapshot       Json
-  bankReference      String?
-  confirmationNote   String?
-  reviewedById       String?
-  reviewedBy         Person?            @relation("WireTransferReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
-  reviewedByName     String?
-  reviewedByEmail    String?
-  reviewedAt         DateTime?
-  rejectionReason    String?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+model PaymentSubmission {
+  id                         String                  @id @default(uuid())
+  resumeToken                String?                 @unique
+  activeKey                  String?                 @unique
+  status                     PaymentSubmissionStatus @default(awaiting_proof)
+  auditStatus                PaymentAuditStatus      @default(unreviewed)
+  method                     PaymentMethod           @default(wire)
+  source                     String
+  studentId                  String?
+  student                    Student?                @relation(fields: [studentId], references: [id])
+  invoiceId                  String?
+  invoice                    Invoice?                @relation(fields: [invoiceId], references: [id])
+  paymentId                  String?                 @unique
+  payment                    Payment?                @relation(fields: [paymentId], references: [id])
+  paymentLinkId              String?
+  paymentLink                PaymentLink?            @relation(fields: [paymentLinkId], references: [id])
+  applicantId                String?
+  applicant                  Applicant?              @relation(fields: [applicantId], references: [id])
+  diningOrderId              String?
+  diningOrder                DiningOrder?            @relation(fields: [diningOrderId], references: [id])
+  submittedAmountXof         Int
+  confirmedAmountXof         Int?
+  contactEmail               String
+  submittedById              String?
+  submittedBy                Person?                 @relation("PaymentSubmissionInitiator", fields: [submittedById], references: [id], onDelete: SetNull)
+  submittedByEmail           String?
+  proofObjectKey             String?
+  proofFileName              String?
+  proofMimeType              String?
+  proofSize                  Int?
+  payerProofSubmittedAt      DateTime?
+  bankSnapshot               Json
+  bankReference              String?
+  confirmationNote           String?
+  verificationProofObjectKey String?
+  verificationProofFileName  String?
+  verificationProofMimeType  String?
+  verificationProofSize      Int?
+  reviewedById               String?
+  reviewedBy                 Person?                 @relation("PaymentSubmissionVerifier", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedByName             String?
+  reviewedByEmail            String?
+  reviewedAt                 DateTime?
+  rejectionReason            String?
+  auditedById                String?
+  auditedBy                  Person?                 @relation("PaymentSubmissionAuditor", fields: [auditedById], references: [id], onDelete: SetNull)
+  auditedByName              String?
+  auditedByEmail             String?
+  auditedAt                  DateTime?
+  auditNote                  String?
+  createdAt                  DateTime                @default(now())
+  updatedAt                  DateTime                @updatedAt
 
   @@index([status, createdAt])
+  @@index([auditStatus, reviewedAt])
   @@index([studentId])
   @@index([invoiceId])
   @@index([paymentLinkId])
+  @@index([applicantId])
+  @@index([diningOrderId])
+  @@map("WireTransferSubmission")
 }
 
 model PaymentAllocation {
@@ -901,37 +935,38 @@ model ContactMessage {
 }
 
 model Applicant {
-  id            String         @id @default(uuid())
-  firstName     String
-  lastName      String
-  email         String
-  programCode   String?
-  stage         String         @default("submitted") // submitted|review|interview|offer|accepted|rejected
-  score         Int? // BAC score (0–20)
-  country       String?
-  // 30k FCFA application fee, settled via the PayTech rail (IPN ref APPFEE-<id>).
-  feePaid       Boolean        @default(false)
+  id                 String              @id @default(uuid())
+  firstName          String
+  lastName           String
+  email              String
+  programCode        String?
+  stage              String              @default("submitted") // submitted|review|interview|offer|accepted|rejected
+  score              Int? // BAC score (0–20)
+  country            String?
+  // Application fee settles after Finance verifies both payment proofs.
+  feePaid            Boolean             @default(false)
   // --- Full application intake (SIS redesign; all optional) ---
-  phone         String?
-  dateOfBirth   DateTime?
-  gender        String?
-  nationality   String?
-  city          String?
+  phone              String?
+  dateOfBirth        DateTime?
+  gender             String?
+  nationality        String?
+  city               String?
   // "high-school" | "transfer" — decides whether `school` reads as HS or prior university.
-  origin        String?
-  school        String?
-  priorGpa      String? // free text: "17.2/20" (BAC) or "3.4/4" (transfer)
+  origin             String?
+  school             String?
+  priorGpa           String? // free text: "17.2/20" (BAC) or "3.4/4" (transfer)
   // Guardian contact captured on the application. NOT a portal Guardian account —
   // that is provisioned separately by the registrar after enrolment.
-  parentName    String?
-  parentPhone   String?
-  parentEmail   String?
-  allergies     String?
-  source        String? // how they heard about DAUST
-  essay         String?
-  term          String? // intake term, e.g. "Fall 2026"
-  piSpiRequests PiSpiRequest[]
-  createdAt     DateTime       @default(now())
+  parentName         String?
+  parentPhone        String?
+  parentEmail        String?
+  allergies          String?
+  source             String? // how they heard about DAUST
+  essay              String?
+  term               String? // intake term, e.g. "Fall 2026"
+  piSpiRequests      PiSpiRequest[]
+  paymentSubmissions PaymentSubmission[]
+  createdAt          DateTime            @default(now())
 
   @@index([stage])
 }
@@ -1180,7 +1215,7 @@ model LibraryResource {
   @@index([title])
 }
 
-// --- Dining: meal plans (weekday pass) + weekend orders (PayTech) + entrance scans. ---
+// --- Dining: meal plans, proof-paid weekend orders, and entrance scans. ---
 
 enum MealPeriod {
   breakfast
@@ -1232,14 +1267,15 @@ model MenuItem {
 }
 
 model DiningOrder {
-  id        String            @id @default(uuid())
-  studentId String
-  student   Student           @relation(fields: [studentId], references: [id])
-  status    DiningOrderStatus @default(cart)
-  totalXof  Int               @default(0)
-  pickupAt  DateTime?
-  createdAt DateTime          @default(now())
-  items     DiningOrderItem[]
+  id                 String              @id @default(uuid())
+  studentId          String
+  student            Student             @relation(fields: [studentId], references: [id])
+  status             DiningOrderStatus   @default(cart)
+  totalXof           Int                 @default(0)
+  pickupAt           DateTime?
+  createdAt          DateTime            @default(now())
+  items              DiningOrderItem[]
+  paymentSubmissions PaymentSubmission[]
 
   @@index([studentId])
   @@index([status])
@@ -1568,27 +1604,27 @@ model ProjectGlobalTask {
   @@unique([globalTaskId, projectId])
 }
 
-// Bursar-generated payment link: any amount/purpose, PayTech or manual settlement.
+// Bursar-generated payment link: any amount/purpose, settled by PI-SPI or Finance review.
 // Optional invoiceId puts the money on the normal tuition rail (Payment + allocations).
 model PaymentLink {
-  id             String                   @id @default(uuid())
-  token          String                   @unique // unguessable public slug
-  amountXof      Int
-  purpose        String
-  payeeName      String
-  payeeMeta      String? // e.g. "DA24003 · Computer Science"
-  studentId      String?
-  invoiceId      String?
-  costCenterCode String                   @default("9100")
-  dueDate        DateTime?
-  expiresAt      DateTime?
-  status         String                   @default("active") // active | paid | cancelled
-  method         String? // how it was settled (wave | orange_money | card | manual)
-  paidAt         DateTime?
-  createdById    String?
-  createdAt      DateTime                 @default(now())
-  wireTransfers  WireTransferSubmission[]
-  piSpiRequests  PiSpiRequest[]
+  id                 String              @id @default(uuid())
+  token              String              @unique // unguessable public slug
+  amountXof          Int
+  purpose            String
+  payeeName          String
+  payeeMeta          String? // e.g. "DA24003 · Computer Science"
+  studentId          String?
+  invoiceId          String?
+  costCenterCode     String              @default("9100")
+  dueDate            DateTime?
+  expiresAt          DateTime?
+  status             String              @default("active") // active | paid | cancelled
+  method             String? // how it was settled (wave | orange_money | card | manual)
+  paidAt             DateTime?
+  createdById        String?
+  createdAt          DateTime            @default(now())
+  paymentSubmissions PaymentSubmission[]
+  piSpiRequests      PiSpiRequest[]
 
   @@index([status])
 }

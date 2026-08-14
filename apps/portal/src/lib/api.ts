@@ -4,6 +4,10 @@ import type {
   AccountBalanceSummary,
   InstallmentDueState,
   InstallmentPaymentProgress,
+  PaymentMethodsConfig,
+  PaymentSubmissionSummary,
+  ProofPaymentMethod,
+  PublicProofMethodConfig,
   TranscriptView,
 } from "@mydaust/shared";
 export type {
@@ -11,6 +15,10 @@ export type {
   AccountStanding,
   InstallmentDueState,
   InstallmentPaymentProgress,
+  PaymentMethodsConfig,
+  PaymentSubmissionSummary,
+  ProofPaymentMethod,
+  PublicProofMethodConfig,
   TranscriptView,
 } from "@mydaust/shared";
 
@@ -320,17 +328,81 @@ export const getMyBilling = () =>
   request<BillingInvoice[]>("/finance/my/billing");
 export const getMyBillingSummary = () =>
   request<AccountBalanceSummary>("/finance/my/billing-summary");
-export const initiatePayment = (
-  invoiceId: string,
-  amount: number,
-  method: string,
-) =>
-  request<{ paymentId: string; redirectUrl: string }>("/finance/my/payments", {
+// --- Resumable proof-based payments ---
+export const getProofPaymentMethods = () =>
+  request<PublicProofMethodConfig[]>("/finance/payment-methods");
+export const listMyPaymentAttempts = () =>
+  request<PaymentSubmissionSummary[]>("/finance/my/payment-attempts");
+export const createMyPaymentAttempt = (input: {
+  invoiceId: string;
+  amountXof: number;
+  method: ProofPaymentMethod;
+}) =>
+  request<PaymentSubmissionSummary>("/finance/my/payment-attempts", {
     method: "POST",
-    body: JSON.stringify({ invoiceId, amount, method }),
+    body: JSON.stringify(input),
   });
-export const getWireConfig = () =>
-  request<PublicWireConfig>("/finance/wire/config");
+export const changeMyPaymentAttemptMethod = (
+  id: string,
+  method: ProofPaymentMethod,
+) =>
+  request<PaymentSubmissionSummary>(`/finance/my/payment-attempts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ method }),
+  });
+export function submitMyPaymentProof(id: string, proof: File) {
+  const form = new FormData();
+  form.append("proof", proof);
+  return multipartRequest<PaymentSubmissionSummary>(
+    `/finance/my/payment-attempts/${id}/proof`,
+    form,
+  );
+}
+export const getResumablePaymentAttempt = (token: string) =>
+  request<PaymentSubmissionSummary>(
+    `/finance/payment-attempts/resume/${encodeURIComponent(token)}`,
+  );
+export const changeResumablePaymentMethod = (
+  token: string,
+  id: string,
+  method: ProofPaymentMethod,
+) =>
+  request<PaymentSubmissionSummary>(
+    `/finance/payment-attempts/resume/${encodeURIComponent(token)}/${id}`,
+    { method: "PATCH", body: JSON.stringify({ method }) },
+  );
+export function submitResumablePaymentProof(
+  token: string,
+  id: string,
+  proof: File,
+) {
+  const form = new FormData();
+  form.append("proof", proof);
+  return multipartRequest<PaymentSubmissionSummary>(
+    `/finance/payment-attempts/resume/${encodeURIComponent(token)}/${id}/proof`,
+    form,
+  );
+}
+export const createPaymentLinkAttempt = (
+  token: string,
+  input: { method: ProofPaymentMethod; contactEmail: string },
+) =>
+  request<PaymentSubmissionSummary>(
+    `/finance/links/${encodeURIComponent(token)}/payment-attempts`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+export const listPaymentLinkAttempts = (token: string) =>
+  request<PaymentSubmissionSummary[]>(
+    `/finance/links/${encodeURIComponent(token)}/payment-attempts`,
+  );
+export const listPublicBillPaymentAttempts = (studentNo: string, dob: string) =>
+  request<PaymentSubmissionSummary[]>(
+    "/finance/public/bill/payment-attempts/history",
+    {
+      method: "POST",
+      body: JSON.stringify({ studentNo, dob }),
+    },
+  );
 
 // --- PI-SPI (BCEAO request-to-pay) ---
 import type { PiSpiRequestSummary } from "@mydaust/shared";
@@ -391,21 +463,6 @@ export const getPublicBillPiSpiRequest = (input: {
     method: "POST",
     body: JSON.stringify(input),
   });
-export function submitStudentWire(
-  invoiceId: string,
-  amountXof: number,
-  proof: File,
-) {
-  const form = new FormData();
-  form.append("invoiceId", invoiceId);
-  form.append("amountXof", String(amountXof));
-  form.append("proof", proof);
-  return multipartRequest<WireTransferSummary>(
-    "/finance/my/wire-transfers",
-    form,
-  );
-}
-
 // --- Finance: admin ---
 export interface CollectionSummary {
   currency: string;
@@ -1451,11 +1508,11 @@ export const createDiningOrder = (
     method: "POST",
     body: JSON.stringify({ items }),
   });
-export const payDiningOrder = (id: string) =>
-  request<{ paid: boolean; redirectUrl?: string }>(
-    `/dining/my/orders/${id}/pay`,
-    { method: "POST" },
-  );
+export const payDiningOrder = (id: string, method: ProofPaymentMethod) =>
+  request<PaymentSubmissionSummary>(`/dining/my/orders/${id}/pay`, {
+    method: "POST",
+    body: JSON.stringify({ method }),
+  });
 
 export interface ScanResult {
   result: string;
@@ -2233,6 +2290,65 @@ export const rejectWireTransfer = (id: string, reason: string) =>
     body: JSON.stringify({ reason }),
   });
 
+export interface AdminPaymentSubmission extends PaymentSubmissionSummary {
+  target: string;
+  purpose: string;
+  hasPayerProof: boolean;
+  hasVerificationProof: boolean;
+}
+export const getAdminPaymentMethods = () =>
+  request<PaymentMethodsConfig>("/finance/admin/payment-methods");
+export const updateAdminPaymentMethods = (config: PaymentMethodsConfig) =>
+  request<PaymentMethodsConfig>("/finance/admin/payment-methods", {
+    method: "PATCH",
+    body: JSON.stringify(config),
+  });
+export function uploadPaymentMethodQr(
+  method: "wave" | "orange_money",
+  qr: File,
+) {
+  const form = new FormData();
+  form.append("qr", qr);
+  return multipartRequest<{ objectKey: string; fileName: string }>(
+    `/finance/admin/payment-methods/${method}/qr`,
+    form,
+  );
+}
+export const listPaymentSubmissions = (status?: string) =>
+  request<AdminPaymentSubmission[]>(
+    `/finance/admin/payment-submissions${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+  );
+export async function getPaymentSubmissionFile(
+  id: string,
+  kind: "payer" | "verification",
+) {
+  const res = await fetch(
+    `${API_URL}/api/finance/admin/payment-submissions/${id}/files/${kind}`,
+    { credentials: "include" },
+  );
+  if (!res.ok) throw await toApiError(res);
+  return res.blob();
+}
+export function verifyPaymentSubmission(
+  id: string,
+  input: { transactionReference: string; note?: string },
+  verificationProof: File,
+) {
+  const form = new FormData();
+  form.append("transactionReference", input.transactionReference);
+  if (input.note) form.append("note", input.note);
+  form.append("verificationProof", verificationProof);
+  return multipartRequest<{ ok: boolean }>(
+    `/finance/admin/payment-submissions/${id}/verify`,
+    form,
+  );
+}
+export const rejectPaymentSubmission = (id: string, reason: string) =>
+  request<{ ok: boolean }>(`/finance/admin/payment-submissions/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+
 export interface OverdueRow {
   installmentId: string;
   student: string;
@@ -2437,6 +2553,49 @@ export const updateDirectorWidgets = (widgetKeys: DirectorWidgetKey[]) =>
     method: "PUT",
     body: JSON.stringify({ widgetKeys }),
   });
+
+export interface DirectorPaymentVerification {
+  kind: "manual" | "system" | "legacy";
+  id: string;
+  method: string;
+  status: string;
+  auditStatus: string;
+  amountXof: number;
+  confirmedAmountXof: number | null;
+  target: string;
+  purpose: string;
+  verifiedByName: string | null;
+  verifiedByEmail: string | null;
+  verifiedAt: string | null;
+  createdAt: string;
+  hasPayerProof?: boolean;
+  hasVerificationProof?: boolean;
+  auditNote?: string | null;
+}
+export const listDirectorPaymentVerifications = () =>
+  request<DirectorPaymentVerification[]>("/director/payment-verifications");
+export const getDirectorUnauditedPaymentCount = () =>
+  request<{ count: number }>("/director/payment-verifications/unaudited-count");
+export const auditDirectorPayment = (
+  id: string,
+  outcome: "reviewed" | "flagged",
+  note?: string,
+) =>
+  request<{ ok: boolean; auditStatus: string }>(
+    `/director/payment-verifications/${id}/audit`,
+    { method: "POST", body: JSON.stringify({ outcome, note }) },
+  );
+export async function getDirectorPaymentFile(
+  id: string,
+  kind: "payer" | "verification",
+) {
+  const res = await fetch(
+    `${API_URL}/api/director/payment-verifications/${id}/files/${kind}`,
+    { credentials: "include" },
+  );
+  if (!res.ok) throw await toApiError(res);
+  return res.blob();
+}
 
 export interface FinanceReports {
   collections: CollectionSummary;
@@ -3191,30 +3350,8 @@ export const cancelPaymentLink = (id: string) =>
   request<PaymentLinkRow>(`/finance/admin/links/${id}/cancel`, {
     method: "POST",
   });
-export const markPaymentLinkPaid = (id: string) =>
-  request<PaymentLinkRow>(`/finance/admin/links/${id}/mark-paid`, {
-    method: "POST",
-  });
 export const getPublicPaymentLink = (token: string) =>
   request<PublicPaymentLink>(`/finance/links/${token}`);
-export const checkoutPaymentLink = (token: string, method: string) =>
-  request<{ redirectUrl: string }>(`/finance/links/${token}/checkout`, {
-    method: "POST",
-    body: JSON.stringify({ method }),
-  });
-export function submitPaymentLinkWire(
-  token: string,
-  contactEmail: string,
-  proof: File,
-) {
-  const form = new FormData();
-  form.append("contactEmail", contactEmail);
-  form.append("proof", proof);
-  return multipartRequest<WireTransferSummary>(
-    `/finance/links/${token}/wire-transfers`,
-    form,
-  );
-}
 
 // --- Public bill portal (payment.daust.net): pay a real student account by ID + DOB ---
 export interface BillCharge {
@@ -3257,31 +3394,12 @@ export const checkoutBill = (input: {
   studentNo: string;
   dob: string;
   amountXof: number;
-  method: string;
+  method: ProofPaymentMethod;
 }) =>
-  request<{ redirectUrl: string }>("/finance/public/bill/checkout", {
+  request<PaymentSubmissionSummary>("/finance/public/bill/checkout", {
     method: "POST",
     body: JSON.stringify(input),
   });
-export function submitPublicBillWire(input: {
-  studentNo: string;
-  dob: string;
-  amountXof: number;
-  contactEmail: string;
-  proof: File;
-}) {
-  const form = new FormData();
-  form.append("studentNo", input.studentNo);
-  form.append("dob", input.dob);
-  form.append("amountXof", String(input.amountXof));
-  form.append("contactEmail", input.contactEmail);
-  form.append("proof", input.proof);
-  return multipartRequest<WireTransferSummary>(
-    "/finance/public/bill/wire-transfers",
-    form,
-  );
-}
-
 // --- Parent portal (guardian access) ---
 export interface ChildSummary {
   studentId: string;
@@ -3324,13 +3442,18 @@ export const getChildAttendance = (studentId: string) =>
 export const getChildAccount = (studentId: string) =>
   request<StudentAccount>(`/parent/children/${studentId}/account`);
 
+export const getChildPaymentAttempts = (studentId: string) =>
+  request<PaymentSubmissionSummary[]>(
+    `/parent/children/${encodeURIComponent(studentId)}/payment-attempts`,
+  );
+
 export const initiateChildPayment = (
   studentId: string,
   invoiceId: string,
   amount: number,
-  method: "wave" | "orange_money" | "card",
+  method: ProofPaymentMethod,
 ) =>
-  request<{ paymentId: string; redirectUrl: string }>(
+  request<PaymentSubmissionSummary>(
     `/parent/children/${encodeURIComponent(studentId)}/payments`,
     {
       method: "POST",
@@ -3383,22 +3506,6 @@ export const getChildPiSpiRequest = (studentId: string, txId: string) =>
   request<PiSpiRequestSummary>(
     `/parent/children/${encodeURIComponent(studentId)}/pi-spi/${encodeURIComponent(txId)}`,
   );
-
-export function submitChildWire(input: {
-  studentId: string;
-  invoiceId: string;
-  amountXof: number;
-  proof: File;
-}) {
-  const form = new FormData();
-  form.append("invoiceId", input.invoiceId);
-  form.append("amountXof", String(input.amountXof));
-  form.append("proof", input.proof);
-  return multipartRequest<WireTransferSummary>(
-    `/parent/children/${encodeURIComponent(input.studentId)}/wire-transfers`,
-    form,
-  );
-}
 
 // --- Registrar: guardian administration ---
 export interface GuardianRow {

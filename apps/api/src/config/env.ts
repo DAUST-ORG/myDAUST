@@ -1,10 +1,6 @@
 import { z } from "zod";
 
-/**
- * Boot-time env validation. Core vars are required; PayTech vars are optional so the
- * app (and the read-only tracking UI) runs before sandbox keys are set — the PayTech
- * provider throws a clear error if a payment is initiated without them.
- */
+/** Boot-time environment validation. */
 const schema = z
   .object({
     NODE_ENV: z
@@ -14,7 +10,7 @@ const schema = z
     DATABASE_URL: z.string().url(),
     PORTAL_ORIGIN: z.string().url().default("http://localhost:3001"),
     VITRINE_ORIGIN: z.string().url().default("http://localhost:3000"),
-    // Public bill-payment portal (payment.daust.net); drives its PayTech return URLs.
+    // Public bill-payment portal (payment.daust.net).
     PAYMENT_ORIGIN: z.string().url().default("http://localhost:3000"),
     WIRE_PROOFS_BUCKET: z.string().min(3).optional(),
     MEDIA_BUCKET: z.string().min(3).optional(),
@@ -25,20 +21,16 @@ const schema = z
       .default("dev-only-session-secret-change-me"),
     COOKIE_SECURE: z.enum(["true", "false"]).optional(),
 
-    PAYTECH_ENV: z.enum(["test", "prod"]).default("test"),
-    PAYTECH_API_KEY: z.string().optional(),
-    PAYTECH_API_SECRET: z.string().optional(),
-    PAYTECH_IPN_URL: z.string().url().optional(),
-    PAYTECH_SUCCESS_URL: z.string().url().optional(),
-    PAYTECH_CANCEL_URL: z.string().url().optional(),
-
-    // PI-SPI (BCEAO instant-payment rail). All optional on the PayTech precedent: the app
+    // PI-SPI (BCEAO instant-payment rail). The app
     // boots without them and the provider reports itself unconfigured, which keeps the
     // method hidden from payers rather than failing at checkout. Calling the Business API
     // needs all four of client id/secret, api key and the mTLS certificate pair — the
     // gateway drops the TLS connection outright when no client certificate is presented.
     PI_SPI_ENABLED: z.enum(["true", "false"]).default("false"),
-    PI_SPI_BASE_URL: z.string().url().default("https://sandbox.api.pi-bceao.com/piz/v1"),
+    PI_SPI_BASE_URL: z
+      .string()
+      .url()
+      .default("https://sandbox.api.pi-bceao.com/piz/v1"),
     PI_SPI_TOKEN_URL: z.string().url().optional(),
     PI_SPI_CLIENT_ID: z.string().optional(),
     PI_SPI_CLIENT_SECRET: z.string().optional(),
@@ -51,7 +43,12 @@ const schema = z
     PI_SPI_CLIENT_CERT: z.string().optional(),
     PI_SPI_CLIENT_KEY: z.string().optional(),
     /** Hours a tuition request-to-pay stays payable before the rail expires it. */
-    PI_SPI_REQUEST_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(72),
+    PI_SPI_REQUEST_TTL_HOURS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(720)
+      .default(72),
   })
   .superRefine((env, ctx) => {
     if (

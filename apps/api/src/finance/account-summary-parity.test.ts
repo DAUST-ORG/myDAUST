@@ -37,7 +37,7 @@ const invoices = [
       ],
     },
     payments: [],
-    wireTransfers: [],
+    paymentSubmissions: [],
   },
   {
     id: "credit",
@@ -52,7 +52,7 @@ const invoices = [
     term,
     plan: null,
     payments: [],
-    wireTransfers: [],
+    paymentSubmissions: [],
   },
   {
     id: "no-plan",
@@ -67,7 +67,7 @@ const invoices = [
     term,
     plan: null,
     payments: [],
-    wireTransfers: [],
+    paymentSubmissions: [],
   },
 ];
 
@@ -143,7 +143,6 @@ function service() {
     finance: new FinanceService(
       prisma as never,
       { send: vi.fn() } as never,
-      {} as never,
       {} as never,
       {} as never,
     ),

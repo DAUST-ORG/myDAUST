@@ -173,7 +173,7 @@ function settlementFixture(options?: { retryOnce?: boolean }) {
     },
     piSpiRequest: { update: vi.fn() },
     paymentLink: { update: vi.fn() },
-    wireTransferSubmission: { update: vi.fn() },
+    paymentSubmission: { update: vi.fn() },
   };
   let transactionCalls = 0;
   const prisma: any = {
@@ -188,13 +188,11 @@ function settlementFixture(options?: { retryOnce?: boolean }) {
       return work(tx);
     }),
   };
-  const provider = { refund: vi.fn(async () => ({ ok: true })) };
   const mail = { send: vi.fn(async () => undefined) };
   const finance = new FinanceService(
     prisma,
     mail as never,
     {} as never,
-    provider as never,
     new Map() as never,
   );
   const settle = (finance as any).settlePayment.bind(finance) as (

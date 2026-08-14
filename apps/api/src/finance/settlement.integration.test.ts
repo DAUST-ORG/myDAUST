@@ -206,7 +206,6 @@ describe.skipIf(noDb)("settlement money path", () => {
       prisma as never,
       { send: async () => undefined } as never,
       {} as never,
-      { refund: async () => ({ ok: true }) } as never,
       new Map() as never,
     );
   }, 120_000);

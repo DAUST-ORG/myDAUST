@@ -12,8 +12,8 @@ const emptyCounts = {
   guardianInvites: 0,
   studentInvites: 0,
   broadcasts: 0,
-  wireTransfersSubmitted: 0,
-  wireTransfersReviewed: 0,
+  paymentSubmissionsStarted: 0,
+  paymentSubmissionsVerified: 0,
 };
 
 describe("FacultyService login management", () => {

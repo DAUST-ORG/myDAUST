@@ -1,5 +1,10 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
-import { ChoosePlanInput, CreateOrderInput, type MealPeriod } from "@mydaust/shared";
+import {
+  ChoosePlanInput,
+  CreateOrderInput,
+  ProofPaymentMethod,
+  type MealPeriod,
+} from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { DiningService } from "./dining.service.js";
@@ -23,7 +28,10 @@ export class DiningController {
   @Post("my/plan")
   @Roles("student")
   choosePlan(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    return this.dining.choosePlan(user.studentId!, ChoosePlanInput.parse(body).type);
+    return this.dining.choosePlan(
+      user.studentId!,
+      ChoosePlanInput.parse(body).type,
+    );
   }
 
   @Get("menu")
@@ -47,12 +55,24 @@ export class DiningController {
   @Post("my/orders")
   @Roles("student")
   createOrder(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    return this.dining.createOrder(user.studentId!, CreateOrderInput.parse(body).items);
+    return this.dining.createOrder(
+      user.studentId!,
+      CreateOrderInput.parse(body).items,
+    );
   }
 
   @Post("my/orders/:id/pay")
   @Roles("student")
-  payOrder(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.dining.payOrder(user.studentId!, id);
+  payOrder(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.dining.payOrder(
+      user.studentId!,
+      id,
+      ProofPaymentMethod.parse((body as { method?: unknown })?.method),
+      user,
+    );
   }
 }

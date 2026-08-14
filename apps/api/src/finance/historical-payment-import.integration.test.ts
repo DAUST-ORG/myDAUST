@@ -378,7 +378,7 @@ describe.skipIf(noDb)("historical payment import ledger", () => {
         settledAt: new Date("2026-01-01T12:00:00.000Z"),
       },
     });
-    await prisma.wireTransferSubmission.create({
+    await prisma.paymentSubmission.create({
       data: {
         status: "approved",
         source: "student_portal",

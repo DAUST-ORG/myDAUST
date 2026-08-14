@@ -1,4 +1,14 @@
-import type { ApplicationInput, ContactInput, PublicFacultyMember, PublicNewsArticle, PublicNewsArticleFull, SiteOverrides } from "@mydaust/shared";
+import type {
+  ApplicationInput,
+  ContactInput,
+  PaymentSubmissionSummary,
+  ProofPaymentMethod,
+  PublicFacultyMember,
+  PublicNewsArticle,
+  PublicNewsArticleFull,
+  PublicProofMethodConfig,
+  SiteOverrides,
+} from "@mydaust/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -18,9 +28,13 @@ export async function getPublishedContent(): Promise<SiteOverrides | null> {
 }
 
 /** Preview mode: the pending draft, fetched by capability token (works cross-domain, no cookie). */
-export async function getPreviewContent(token: string): Promise<SiteOverrides | null> {
+export async function getPreviewContent(
+  token: string,
+): Promise<SiteOverrides | null> {
   try {
-    const res = await fetch(`${API_URL}/api/content/preview/${encodeURIComponent(token)}`);
+    const res = await fetch(
+      `${API_URL}/api/content/preview/${encodeURIComponent(token)}`,
+    );
     if (!res.ok) return null;
     return (await res.json()) as SiteOverrides;
   } catch {
@@ -33,7 +47,9 @@ export interface ApplyResult {
   scholarship: { pct: number; band: string };
 }
 
-export async function submitApplication(input: ApplicationInput): Promise<ApplyResult> {
+export async function submitApplication(
+  input: ApplicationInput,
+): Promise<ApplyResult> {
   const res = await fetch(`${API_URL}/api/applications`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -44,7 +60,9 @@ export async function submitApplication(input: ApplicationInput): Promise<ApplyR
 }
 
 /** The real SIS programs for the apply form (so a choice always resolves). Null on failure → static fallback. */
-export async function getPrograms(): Promise<{ code: string; name: string }[] | null> {
+export async function getPrograms(): Promise<
+  { code: string; name: string }[] | null
+> {
   try {
     const res = await fetch(`${API_URL}/api/config/programs`);
     if (!res.ok) return null;
@@ -67,9 +85,13 @@ export async function getNews(): Promise<PublicNewsArticle[]> {
 }
 
 /** One published article (with body) for the article view. */
-export async function getNewsArticle(slug: string): Promise<PublicNewsArticleFull | null> {
+export async function getNewsArticle(
+  slug: string,
+): Promise<PublicNewsArticleFull | null> {
   try {
-    const res = await fetch(`${API_URL}/api/news/article/${encodeURIComponent(slug)}`);
+    const res = await fetch(
+      `${API_URL}/api/news/article/${encodeURIComponent(slug)}`,
+    );
     if (!res.ok) return null;
     return (await res.json()) as PublicNewsArticleFull;
   } catch {
@@ -98,18 +120,96 @@ export async function getPublicFaculty(): Promise<PublicFacultyMember[]> {
   }
 }
 
-/** PayTech checkout for the 30k FCFA application fee. */
-export async function feeCheckout(applicantId: string): Promise<{ redirectUrl: string }> {
-  const res = await fetch(`${API_URL}/api/applications/${applicantId}/fee-checkout`, { method: "POST" });
+/** Start or resume a proof-based application-fee payment. */
+export async function feeCheckout(
+  applicantId: string,
+  method: ProofPaymentMethod,
+): Promise<PaymentSubmissionSummary> {
+  const res = await fetch(
+    `${API_URL}/api/applications/${applicantId}/fee-checkout`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method }),
+    },
+  );
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-  return res.json() as Promise<{ redirectUrl: string }>;
+  return res.json() as Promise<PaymentSubmissionSummary>;
 }
 
+export async function proofPaymentMethods(): Promise<
+  PublicProofMethodConfig[]
+> {
+  const res = await fetch(`${API_URL}/api/finance/payment-methods`);
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json() as Promise<PublicProofMethodConfig[]>;
+}
+
+export async function resumePaymentAttempt(
+  token: string,
+): Promise<PaymentSubmissionSummary> {
+  const res = await fetch(
+    `${API_URL}/api/finance/payment-attempts/resume/${encodeURIComponent(token)}`,
+  );
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json() as Promise<PaymentSubmissionSummary>;
+}
+
+export async function listApplicationPaymentAttempts(
+  applicantId: string,
+): Promise<PaymentSubmissionSummary[]> {
+  const res = await fetch(
+    `${API_URL}/api/finance/applications/${encodeURIComponent(applicantId)}/payment-attempts`,
+  );
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json() as Promise<PaymentSubmissionSummary[]>;
+}
+
+export async function changePaymentMethod(
+  token: string,
+  id: string,
+  method: ProofPaymentMethod,
+): Promise<PaymentSubmissionSummary> {
+  const res = await fetch(
+    `${API_URL}/api/finance/payment-attempts/resume/${encodeURIComponent(token)}/${id}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method }),
+    },
+  );
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json() as Promise<PaymentSubmissionSummary>;
+}
+
+export async function uploadPaymentProof(
+  token: string,
+  id: string,
+  proof: File,
+): Promise<PaymentSubmissionSummary> {
+  const form = new FormData();
+  form.append("proof", proof);
+  const res = await fetch(
+    `${API_URL}/api/finance/payment-attempts/resume/${encodeURIComponent(token)}/${id}/proof`,
+    { method: "POST", body: form },
+  );
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json() as Promise<PaymentSubmissionSummary>;
+}
+
+export const paymentQrUrl = (path?: string) =>
+  path ? `${API_URL}${path}` : undefined;
+
 // --- PI-SPI (BCEAO instant payment) for the application fee ---
-export interface PiSpiAliasLookup { alias: string; name: string; country: string | null }
+export interface PiSpiAliasLookup {
+  alias: string;
+  name: string;
+  country: string | null;
+}
 export interface PiSpiRequest {
   txId: string;
-  status: "initiated" | "sent" | "settled" | "cancelled" | "rejected" | "expired";
+  status:
+    "initiated" | "sent" | "settled" | "cancelled" | "rejected" | "expired";
   statusReason: string | null;
   payerName: string | null;
   amountXof: number;
@@ -130,7 +230,9 @@ export async function piSpiEnabled(): Promise<boolean> {
 }
 
 /** Resolve an alias to its owner so the applicant confirms who is being billed. */
-export async function verifyPiSpiAlias(alias: string): Promise<PiSpiAliasLookup> {
+export async function verifyPiSpiAlias(
+  alias: string,
+): Promise<PiSpiAliasLookup> {
   const res = await fetch(`${API_URL}/api/finance/pi-spi/verify-alias`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -140,17 +242,26 @@ export async function verifyPiSpiAlias(alias: string): Promise<PiSpiAliasLookup>
   return res.json() as Promise<PiSpiAliasLookup>;
 }
 
-export async function feePiSpi(applicantId: string, alias: string): Promise<PiSpiRequest> {
-  const res = await fetch(`${API_URL}/api/applications/${applicantId}/fee-pi-spi`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ alias }),
-  });
+export async function feePiSpi(
+  applicantId: string,
+  alias: string,
+): Promise<PiSpiRequest> {
+  const res = await fetch(
+    `${API_URL}/api/applications/${applicantId}/fee-pi-spi`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alias }),
+    },
+  );
   if (!res.ok) throw new Error(`${res.status}`);
   return res.json() as Promise<PiSpiRequest>;
 }
 
-export async function feePiSpiStatus(applicantId: string, txId: string): Promise<PiSpiRequest> {
+export async function feePiSpiStatus(
+  applicantId: string,
+  txId: string,
+): Promise<PiSpiRequest> {
   const res = await fetch(
     `${API_URL}/api/applications/${applicantId}/fee-pi-spi/${encodeURIComponent(txId)}`,
   );

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
-import { ApplicationInput } from "@mydaust/shared";
+import { ApplicationInput, ProofPaymentMethod } from "@mydaust/shared";
 import { z } from "zod";
 import { Public } from "../auth/decorators.js";
 import { BillThrottleGuard } from "../finance/bill-throttle.guard.js";
@@ -7,6 +7,7 @@ import { FinanceService } from "../finance/finance.service.js";
 import { AdmissionsService } from "./admissions.service.js";
 
 const FeePiSpiInput = z.object({ alias: z.string().trim().uuid() });
+const FeeProofInput = z.object({ method: ProofPaymentMethod });
 
 @Controller("applications")
 export class AdmissionsController {
@@ -23,11 +24,11 @@ export class AdmissionsController {
     return this.admissions.apply(input);
   }
 
-  /** Public: PayTech checkout for the application fee (applicant id = capability). */
+  /** Public: start/resume proof-based application-fee payment. */
   @Public()
   @Post(":id/fee-checkout")
-  feeCheckout(@Param("id") id: string) {
-    return this.admissions.feeCheckout(id);
+  feeCheckout(@Param("id") id: string, @Body() body: unknown) {
+    return this.admissions.feeCheckout(id, FeeProofInput.parse(body).method);
   }
 
   /** Public: pay the application fee over PI-SPI instead of the hosted checkout. */

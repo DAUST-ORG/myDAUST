@@ -4,8 +4,9 @@ import { Xof } from "./money.js";
 /**
  * Canonical ledger payment methods.
  *
- * `wave` / `orange_money` / `card` all hand off to PayTech's hosted checkout; `wire` is
- * proof-of-transfer with bursar review; `pi_spi` is the BCEAO request-to-pay rail, where
+ * `wave` / `orange_money` / `wire` are proof-based payments with Finance review;
+ * `card` is retained for historical ledger rows only; `pi_spi` is the BCEAO
+ * request-to-pay rail, where
  * the payer approves in their own banking app and settlement arrives asynchronously.
  * `cheque` is an accounting-only value for reviewed historical/manual records and is
  * intentionally not exposed by payer-facing checkout endpoints.
@@ -24,11 +25,25 @@ export type PaymentMethod = z.infer<typeof PaymentMethod>;
 export const PayerPaymentMethod = z.enum([
   "wave",
   "orange_money",
-  "card",
   "wire",
   "pi_spi",
 ]);
 export type PayerPaymentMethod = z.infer<typeof PayerPaymentMethod>;
+
+export const ProofPaymentMethod = z.enum(["wave", "orange_money", "wire"]);
+export type ProofPaymentMethod = z.infer<typeof ProofPaymentMethod>;
+
+export const PaymentSubmissionStatus = z.enum([
+  "awaiting_proof",
+  "submitted",
+  "verified",
+  "rejected",
+  "cancelled",
+]);
+export type PaymentSubmissionStatus = z.infer<typeof PaymentSubmissionStatus>;
+
+export const PaymentAuditStatus = z.enum(["unreviewed", "reviewed", "flagged"]);
+export type PaymentAuditStatus = z.infer<typeof PaymentAuditStatus>;
 
 /** Lifecycle of a PI-SPI request-to-pay, mirroring the Prisma enum. */
 export const PiSpiStatus = z.enum([
@@ -112,6 +127,79 @@ export const WirePaymentConfig = z.object({
 });
 export type WirePaymentConfig = z.infer<typeof WirePaymentConfig>;
 
+const StoredQrAsset = z.object({
+  objectKey: z.string().min(1),
+  fileName: z.string().min(1).max(255),
+  mimeType: z.enum(["image/jpeg", "image/png"]),
+  size: z.number().int().positive(),
+});
+export type StoredQrAsset = z.infer<typeof StoredQrAsset>;
+
+export const MobileMoneyMethodConfig = z.object({
+  enabled: z.boolean().default(false),
+  phoneNumber: z.string().trim().max(40).default(""),
+  merchantNumber: z.string().trim().max(80).default(""),
+  instructions: z.string().trim().max(1000).default(""),
+  qrAsset: StoredQrAsset.nullable().default(null),
+});
+export type MobileMoneyMethodConfig = z.infer<typeof MobileMoneyMethodConfig>;
+
+export const PaymentMethodsConfig = z.object({
+  wave: MobileMoneyMethodConfig,
+  orangeMoney: MobileMoneyMethodConfig,
+  bank: WirePaymentConfig.omit({ notificationRecipients: true }),
+  notificationRecipients: z.array(z.string().email()).max(20).default([]),
+});
+export type PaymentMethodsConfig = z.infer<typeof PaymentMethodsConfig>;
+
+export interface PublicProofMethodConfig {
+  method: ProofPaymentMethod;
+  enabled: boolean;
+  label: string;
+  phoneNumber?: string;
+  merchantNumber?: string;
+  instructions: string;
+  qrUrl?: string;
+  bankName?: string;
+  beneficiary?: string;
+  accountNumber?: string;
+  iban?: string;
+  swift?: string;
+  branch?: string;
+}
+
+export interface PaymentSubmissionSummary {
+  id: string;
+  resumeToken?: string | null;
+  status: PaymentSubmissionStatus;
+  auditStatus: PaymentAuditStatus;
+  method: ProofPaymentMethod;
+  source: string;
+  studentId?: string | null;
+  invoiceId?: string | null;
+  paymentLinkId?: string | null;
+  applicantId?: string | null;
+  diningOrderId?: string | null;
+  amountXof: number;
+  confirmedAmountXof: number | null;
+  contactEmail?: string;
+  details: PublicProofMethodConfig;
+  payerProofFileName: string | null;
+  payerProofSubmittedAt: string | null;
+  transactionReference: string | null;
+  verificationNote: string | null;
+  verifiedByName: string | null;
+  verifiedByEmail: string | null;
+  verifiedAt: string | null;
+  rejectionReason: string | null;
+  auditedByName: string | null;
+  auditedByEmail: string | null;
+  auditedAt: string | null;
+  auditNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const WireApprovalInput = z
   .object({
     // Upper bound matches every other Xof input; the service still caps this against the
@@ -172,13 +260,6 @@ export const InitiatePaymentInput = z.object({
   method: PayerPaymentMethod,
 });
 export type InitiatePaymentInput = z.infer<typeof InitiatePaymentInput>;
-
-/** What the create-payment endpoint returns: where to send the student to pay. */
-export const InitiatePaymentResult = z.object({
-  paymentId: z.string().uuid(),
-  redirectUrl: z.string().url(),
-});
-export type InitiatePaymentResult = z.infer<typeof InitiatePaymentResult>;
 
 /** Management-accounting expense (manual/estimated), tagged to a cost center. */
 export const ExpenseCategory = z.enum([

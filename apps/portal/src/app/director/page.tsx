@@ -7,6 +7,7 @@ import {
   ArrowUp,
   Check,
   ClipboardCheck,
+  ShieldCheck,
   SlidersHorizontal,
 } from "lucide-react";
 import {
@@ -14,6 +15,7 @@ import {
   type DirectorWidgetKey,
   type DirectorWidgetPreferences,
   getDirectorPortalOverview,
+  getDirectorUnauditedPaymentCount,
   getDirectorWidgets,
   updateDirectorWidgets,
 } from "@/lib/api";
@@ -35,17 +37,20 @@ export default function DirectorOverviewPage() {
   const [customizing, setCustomizing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unauditedPayments, setUnauditedPayments] = useState(0);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [nextOverview, nextPreferences] = await Promise.all([
+      const [nextOverview, nextPreferences, paymentCount] = await Promise.all([
         getDirectorPortalOverview(),
         getDirectorWidgets(),
+        getDirectorUnauditedPaymentCount(),
       ]);
       setOverview(nextOverview);
       setPreferences(nextPreferences);
       setDraft(nextPreferences.selected);
+      setUnauditedPayments(paymentCount.count);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -130,6 +135,34 @@ export default function DirectorOverviewPage() {
           </>
         }
       />
+
+      <Link
+        href="/director/payments"
+        className="card"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+          marginBottom: 18,
+          textDecoration: "none",
+          color: "inherit",
+        }}
+      >
+        <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <ShieldCheck size={22} aria-hidden="true" />
+          <span>
+            <strong>Finance payment audit</strong>
+            <span className="muted" style={{ display: "block", marginTop: 3 }}>
+              Review evidence and verifier accountability.
+            </span>
+          </span>
+        </span>
+        <strong style={{ color: "var(--daust-orange)", fontSize: 24 }}>
+          {unauditedPayments}
+          <span className="sr-only"> unaudited payments</span>
+        </strong>
+      </Link>
 
       {error && !customizing && (
         <div

@@ -5,23 +5,25 @@ import {
   type BillingInvoice,
   type AccountBalanceSummary,
   type MyProfile,
-  type PublicWireConfig,
+  type PaymentSubmissionSummary,
+  type ProofPaymentMethod,
+  changeMyPaymentAttemptMethod,
+  createMyPaymentAttempt,
   getCurrentTerm,
   getMyBilling,
   getMyBillingSummary,
   getMyProfile,
   getMyPiSpiRequest,
   getPiSpiConfig,
-  getWireConfig,
-  initiatePayment,
+  listMyPaymentAttempts,
   type PiSpiRequestSummary,
   submitStudentPiSpi,
-  submitStudentWire,
+  submitMyPaymentProof,
   verifyPiSpiAlias,
 } from "@/lib/api";
 import { Card, EmptyState, PageHeader, Select } from "@/components/ui";
 import { PiSpiPayForm } from "@/components/PiSpiPayForm";
-import { WireTransferForm } from "@/components/WireTransferForm";
+import { ProofPaymentPanel } from "@/components/ProofPaymentPanel";
 import { formatDate, formatXof } from "@/lib/format";
 import {
   AccountStandingBadge,
@@ -32,12 +34,6 @@ import {
   resolveAccountSummary,
   type InstallmentPositionLike,
 } from "@/components/AccountBalance";
-
-const METHODS = [
-  { value: "wave", label: "Wave" },
-  { value: "orange_money", label: "Orange Money" },
-  { value: "card", label: "Bank card" },
-];
 
 interface ChargeRow extends InstallmentPositionLike {
   id: string | null;
@@ -108,11 +104,13 @@ export default function BillingPage() {
     useState<AccountBalanceSummary | null>(null);
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [term, setTerm] = useState("");
-  const [method, setMethod] = useState("wave");
+  const [method, setMethod] = useState("proof");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [wireConfig, setWireConfig] = useState<PublicWireConfig | null>(null);
+  const [paymentAttempts, setPaymentAttempts] = useState<
+    PaymentSubmissionSummary[]
+  >([]);
   const [piSpiEnabled, setPiSpiEnabled] = useState(false);
   const [piSpiRequest, setPiSpiRequest] = useState<PiSpiRequestSummary | null>(
     null,
@@ -132,8 +130,8 @@ export default function BillingPage() {
     getCurrentTerm()
       .then((t) => setTerm(t.name))
       .catch(() => {});
-    getWireConfig()
-      .then(setWireConfig)
+    listMyPaymentAttempts()
+      .then(setPaymentAttempts)
       .catch(() => {});
     getPiSpiConfig()
       .then((c) => setPiSpiEnabled(c.enabled))
@@ -223,12 +221,15 @@ export default function BillingPage() {
   });
   const accountMeta = accountPresentation(accountSummary);
   const nextCharge = charges.find((c) => c.outstanding > 0);
-  const nextInvoice = nextCharge
-    ? invoices.find((invoice) => invoice.id === nextCharge.invoiceId)
-    : null;
-  const pendingWire =
-    nextInvoice?.wireTransfers.find((wire) => wire.status === "submitted") ??
-    null;
+  const activeAttempt =
+    paymentAttempts.find(
+      (attempt) =>
+        attempt.invoiceId === nextCharge?.invoiceId &&
+        ["awaiting_proof", "submitted"].includes(attempt.status),
+    ) ?? null;
+  const targetAttempts = paymentAttempts.filter(
+    (attempt) => attempt.invoiceId === nextCharge?.invoiceId,
+  );
   const settled = accountSummary.outstandingXof <= 0;
 
   async function refreshBilling() {
@@ -240,21 +241,34 @@ export default function BillingPage() {
     setBillingSummary(nextSummary);
   }
 
-  async function pay() {
-    if (!nextCharge || method === "wire" || method === "pi_spi") return;
-    setBusy(true);
-    setError(null);
-    try {
-      const { redirectUrl } = await initiatePayment(
-        nextCharge.invoiceId,
-        nextCharge.outstanding,
-        method,
-      );
-      window.location.href = redirectUrl; // hand off to PayTech checkout
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
-    }
+  async function startProofPayment(nextMethod: ProofPaymentMethod) {
+    if (!nextCharge) throw new Error("Nothing outstanding to pay");
+    const attempt = await createMyPaymentAttempt({
+      invoiceId: nextCharge.invoiceId,
+      amountXof: nextCharge.outstanding,
+      method: nextMethod,
+    });
+    setPaymentAttempts((rows) => [
+      attempt,
+      ...rows.filter((row) => row.id !== attempt.id),
+    ]);
+    return attempt;
+  }
+
+  async function changeProofMethod(id: string, nextMethod: ProofPaymentMethod) {
+    const attempt = await changeMyPaymentAttemptMethod(id, nextMethod);
+    setPaymentAttempts((rows) =>
+      rows.map((row) => (row.id === id ? attempt : row)),
+    );
+    return attempt;
+  }
+
+  async function uploadProof(id: string, proof: File) {
+    const attempt = await submitMyPaymentProof(id, proof);
+    setPaymentAttempts((rows) =>
+      rows.map((row) => (row.id === id ? attempt : row)),
+    );
+    return attempt;
   }
 
   async function sendPiSpi(alias: string, saveAlias: boolean) {
@@ -275,16 +289,6 @@ export default function BillingPage() {
     setPiSpiRequest(summary);
     if (summary.status === "settled") await refreshBilling();
     return summary;
-  }
-
-  async function submitWire(proof: File) {
-    if (!nextCharge) return;
-    await submitStudentWire(
-      nextCharge.invoiceId,
-      nextCharge.outstanding,
-      proof,
-    );
-    await refreshBilling();
   }
 
   return (
@@ -390,12 +394,9 @@ export default function BillingPage() {
                   value={method}
                   onChange={setMethod}
                   options={[
-                    ...METHODS,
+                    { value: "proof", label: "Wave, Orange Money, or bank" },
                     ...(piSpiEnabled
                       ? [{ value: "pi_spi", label: "Instant payment (PI-SPI)" }]
-                      : []),
-                    ...(wireConfig?.enabled
-                      ? [{ value: "wire", label: "Bank wire transfer" }]
                       : []),
                   ]}
                   style={{ width: "100%" }}
@@ -410,34 +411,15 @@ export default function BillingPage() {
                     onSend={sendPiSpi}
                     onPoll={pollPiSpi}
                   />
-                ) : method === "wire" && wireConfig?.enabled ? (
-                  <WireTransferForm
-                    config={wireConfig}
-                    amountXof={nextCharge.outstanding}
-                    pending={pendingWire}
-                    onSubmit={submitWire}
-                  />
                 ) : (
-                  <button
-                    disabled={busy}
-                    onClick={pay}
-                    style={{
-                      width: "100%",
-                      padding: "11px 18px",
-                      borderRadius: "var(--radius-pill)",
-                      border: "1px solid transparent",
-                      background: "var(--daust-orange)",
-                      color: "#fff",
-                      fontWeight: 700,
-                      fontSize: 13.5,
-                      cursor: busy ? "not-allowed" : "pointer",
-                      opacity: busy ? 0.6 : 1,
-                    }}
-                  >
-                    {busy
-                      ? "Redirecting…"
-                      : `Pay ${formatXof(nextCharge.outstanding)}`}
-                  </button>
+                  <ProofPaymentPanel
+                    amountXof={nextCharge.outstanding}
+                    attempt={activeAttempt}
+                    history={targetAttempts}
+                    onStart={startProofPayment}
+                    onChangeMethod={changeProofMethod}
+                    onUploadProof={uploadProof}
+                  />
                 )}
               </div>
             )}

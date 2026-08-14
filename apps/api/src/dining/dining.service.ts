@@ -1,6 +1,12 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
-import { PAYMENT_PROVIDER, type PaymentProvider } from "../finance/payment-provider.js";
+import type { ProofPaymentMethod } from "@mydaust/shared";
+import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
 import { signPass, verifyPass } from "./pass-token.js";
 
 const PERIODS = ["breakfast", "lunch", "dinner"] as const;
@@ -10,16 +16,17 @@ type Period = (typeof PERIODS)[number];
 export class DiningService {
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
+    private readonly paymentSubmissions: PaymentSubmissionsService,
   ) {}
 
   private secret() {
     return process.env.SESSION_SECRET ?? "dev-only-session-secret-change-me";
   }
 
-
   private dayOnly(d = new Date()) {
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    return new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+    );
   }
 
   // --- Student ---
@@ -47,7 +54,10 @@ export class DiningService {
   }
 
   async menu() {
-    return this.prisma.menuItem.findMany({ where: { available: true }, orderBy: { name: "asc" } });
+    return this.prisma.menuItem.findMany({
+      where: { available: true },
+      orderBy: { name: "asc" },
+    });
   }
 
   /** Which meal periods the student has already been served today (for the home hub). */
@@ -70,13 +80,22 @@ export class DiningService {
       status: o.status,
       totalXof: o.totalXof,
       createdAt: o.createdAt,
-      items: o.items.map((i) => ({ name: i.menuItem.name, qty: i.qty, priceXof: i.priceXof })),
+      items: o.items.map((i) => ({
+        name: i.menuItem.name,
+        qty: i.qty,
+        priceXof: i.priceXof,
+      })),
     }));
   }
 
-  async createOrder(studentId: string, items: { menuItemId: string; qty: number }[]) {
+  async createOrder(
+    studentId: string,
+    items: { menuItemId: string; qty: number }[],
+  ) {
     if (items.length === 0) throw new BadRequestException("Order is empty");
-    const menuItems = await this.prisma.menuItem.findMany({ where: { id: { in: items.map((i) => i.menuItemId) } } });
+    const menuItems = await this.prisma.menuItem.findMany({
+      where: { id: { in: items.map((i) => i.menuItemId) } },
+    });
     const byId = new Map(menuItems.map((m) => [m.id, m]));
     let total = 0;
     const orderItems = items.map((i) => {
@@ -87,68 +106,108 @@ export class DiningService {
       return { menuItemId: m.id, qty, priceXof: m.priceXof };
     });
     return this.prisma.diningOrder.create({
-      data: { studentId, status: "cart", totalXof: total, items: { create: orderItems } },
+      data: {
+        studentId,
+        status: "cart",
+        totalXof: total,
+        items: { create: orderItems },
+      },
     });
   }
 
   /**
-   * Pay for a weekend order via the shared PayTech rail: checkout redirect now, the verified
-   * IPN (ref DINE-<orderId>) marks it paid. Falls back to direct settle only when no gateway
-   * is configured (local dev without keys).
+   * Start or resume a proof-based weekend-order payment. The order remains a cart until
+   * Finance verifies both pieces of evidence.
    */
-  async payOrder(studentId: string, orderId: string): Promise<{ paid: boolean; redirectUrl?: string }> {
-    const order = await this.prisma.diningOrder.findUnique({ where: { id: orderId } });
-    if (!order) throw new NotFoundException("Order not found");
-    if (order.studentId !== studentId) throw new ForbiddenException("Not your order");
-    if (order.status !== "cart") throw new BadRequestException("Order is not payable");
-
-    if (!process.env.PAYTECH_API_KEY) {
-      await this.prisma.diningOrder.update({ where: { id: orderId }, data: { status: "paid" } });
-      return { paid: true };
-    }
-
-    const portal = process.env.PORTAL_ORIGIN ?? "http://localhost:3000";
-    const { redirectUrl } = await this.provider.requestPayment({
-      ref: `DINE-${order.id}`,
-      amount: order.totalXof,
-      itemName: "DAUST weekend dining order",
-      customField: { orderId: order.id, studentId },
-      successUrl: `${portal}/student/dining`,
-      cancelUrl: `${portal}/student/dining`,
+  async payOrder(
+    studentId: string,
+    orderId: string,
+    method: ProofPaymentMethod,
+    actor: { personId: string; email: string },
+  ) {
+    const order = await this.prisma.diningOrder.findUnique({
+      where: { id: orderId },
     });
-    return { paid: false, redirectUrl };
+    if (!order) throw new NotFoundException("Order not found");
+    if (order.studentId !== studentId)
+      throw new ForbiddenException("Not your order");
+    if (order.status !== "cart")
+      throw new BadRequestException("Order is not payable");
+
+    return this.paymentSubmissions.createForDining(
+      studentId,
+      orderId,
+      method,
+      actor,
+    );
   }
 
   // --- Scanner station ---
 
   async scan(token: string, period: Period) {
     const studentId = verifyPass(token, this.secret());
-    if (!studentId) return { result: "turned_away" as const, reason: "Invalid pass", name: null, studentNo: null };
+    if (!studentId)
+      return {
+        result: "turned_away" as const,
+        reason: "Invalid pass",
+        name: null,
+        studentNo: null,
+      };
 
     const student = await this.prisma.student.findUnique({
       where: { id: studentId },
       include: { person: true, mealPlan: true },
     });
-    if (!student) return { result: "turned_away" as const, reason: "Unknown student", name: null, studentNo: null };
+    if (!student)
+      return {
+        result: "turned_away" as const,
+        reason: "Unknown student",
+        name: null,
+        studentNo: null,
+      };
 
     const name = `${student.person.firstName} ${student.person.lastName}`;
     const base = { name, studentNo: student.studentNo };
     const date = this.dayOnly();
 
     if (!student.mealPlan?.active) {
-      await this.recordScan(studentId, period, date, "turned_away", "No active meal plan");
-      return { result: "turned_away" as const, reason: "No active meal plan", ...base };
+      await this.recordScan(
+        studentId,
+        period,
+        date,
+        "turned_away",
+        "No active meal plan",
+      );
+      return {
+        result: "turned_away" as const,
+        reason: "No active meal plan",
+        ...base,
+      };
     }
     if (student.mealPlan.type === "half" && period === "dinner") {
-      await this.recordScan(studentId, period, date, "turned_away", "Half plan — dinner not covered");
-      return { result: "turned_away" as const, reason: "Half plan — dinner not covered", ...base };
+      await this.recordScan(
+        studentId,
+        period,
+        date,
+        "turned_away",
+        "Half plan — dinner not covered",
+      );
+      return {
+        result: "turned_away" as const,
+        reason: "Half plan — dinner not covered",
+        ...base,
+      };
     }
 
     const existing = await this.prisma.diningScan.findUnique({
       where: { studentId_period_date: { studentId, period, date } },
     });
     if (existing?.result === "served") {
-      return { result: "turned_away" as const, reason: "Already served", ...base };
+      return {
+        result: "turned_away" as const,
+        reason: "Already served",
+        ...base,
+      };
     }
 
     await this.recordScan(studentId, period, date, "served", null);
@@ -162,10 +221,21 @@ export class DiningService {
       include: { person: true },
     });
     if (!student) {
-      return { result: "turned_away" as const, reason: "Unknown student number", name: null, studentNo: null };
+      return {
+        result: "turned_away" as const,
+        reason: "Unknown student number",
+        name: null,
+        studentNo: null,
+      };
     }
     const date = this.dayOnly();
-    await this.recordScan(student.id, period, date, "served", "Manual override");
+    await this.recordScan(
+      student.id,
+      period,
+      date,
+      "served",
+      "Manual override",
+    );
     await this.prisma.auditLog.create({
       data: {
         entity: "DiningScan",
@@ -183,7 +253,13 @@ export class DiningService {
     };
   }
 
-  private async recordScan(studentId: string, period: Period, date: Date, result: "served" | "turned_away", reason: string | null) {
+  private async recordScan(
+    studentId: string,
+    period: Period,
+    date: Date,
+    result: "served" | "turned_away",
+    reason: string | null,
+  ) {
     await this.prisma.diningScan.upsert({
       where: { studentId_period_date: { studentId, period, date } },
       update: { result, reason },
@@ -226,18 +302,34 @@ export class DiningService {
   async adminOverview() {
     const date = this.dayOnly();
     const [byPeriod, plans, orders] = await Promise.all([
-      this.prisma.diningScan.groupBy({ by: ["period", "result"], where: { date }, _count: true }),
-      this.prisma.mealPlan.groupBy({ by: ["type"], where: { active: true }, _count: true }),
-      this.prisma.diningOrder.findMany({ where: { status: { in: ["paid", "preparing", "ready"] } } }),
+      this.prisma.diningScan.groupBy({
+        by: ["period", "result"],
+        where: { date },
+        _count: true,
+      }),
+      this.prisma.mealPlan.groupBy({
+        by: ["type"],
+        where: { active: true },
+        _count: true,
+      }),
+      this.prisma.diningOrder.findMany({
+        where: { status: { in: ["paid", "preparing", "ready"] } },
+      }),
     ]);
     const periods = PERIODS.map((p) => ({
       period: p,
-      served: byPeriod.find((b) => b.period === p && b.result === "served")?._count ?? 0,
-      turnedAway: byPeriod.find((b) => b.period === p && b.result === "turned_away")?._count ?? 0,
+      served:
+        byPeriod.find((b) => b.period === p && b.result === "served")?._count ??
+        0,
+      turnedAway:
+        byPeriod.find((b) => b.period === p && b.result === "turned_away")
+          ?._count ?? 0,
     }));
     return {
       periods,
-      activePlans: plans.filter((p) => p.type !== "none").reduce((s, p) => s + p._count, 0),
+      activePlans: plans
+        .filter((p) => p.type !== "none")
+        .reduce((s, p) => s + p._count, 0),
       planMix: plans.map((p) => ({ type: p.type, count: p._count })),
       openOrders: orders.length,
       weekendRevenue: orders.reduce((s, o) => s + o.totalXof, 0),
@@ -248,7 +340,10 @@ export class DiningService {
     const orders = await this.prisma.diningOrder.findMany({
       where: { status: { not: "cart" } },
       orderBy: { createdAt: "desc" },
-      include: { student: { include: { person: true } }, items: { include: { menuItem: true } } },
+      include: {
+        student: { include: { person: true } },
+        items: { include: { menuItem: true } },
+      },
     });
     return orders.map((o) => ({
       id: o.id,
@@ -263,13 +358,22 @@ export class DiningService {
   async advanceOrder(orderId: string, status: string) {
     const flow = ["paid", "preparing", "ready", "collected"];
     if (!flow.includes(status)) throw new BadRequestException("Invalid status");
-    return this.prisma.diningOrder.update({ where: { id: orderId }, data: { status: status as never } });
+    return this.prisma.diningOrder.update({
+      where: { id: orderId },
+      data: { status: status as never },
+    });
   }
 
   async settlement() {
-    const paid = await this.prisma.diningOrder.findMany({ where: { status: { in: ["paid", "preparing", "ready", "collected"] } } });
+    const paid = await this.prisma.diningOrder.findMany({
+      where: { status: { in: ["paid", "preparing", "ready", "collected"] } },
+    });
     const revenue = paid.reduce((s, o) => s + o.totalXof, 0);
-    return { orders: paid.length, revenue, settledTo: "Cost center 3600 — Dining / Auxiliary Services" };
+    return {
+      orders: paid.length,
+      revenue,
+      settledTo: "Cost center 3600 — Dining / Auxiliary Services",
+    };
   }
 
   /** Meal-plan roster: every student holding a plan record + how many meals they scanned today. */
@@ -310,7 +414,11 @@ export class DiningService {
         where: { date: { gte: start } },
         _count: true,
       }),
-      this.prisma.mealPlan.groupBy({ by: ["type"], where: { active: true }, _count: true }),
+      this.prisma.mealPlan.groupBy({
+        by: ["type"],
+        where: { active: true },
+        _count: true,
+      }),
       this.prisma.diningOrder.findMany({
         where: { status: { in: ["paid", "preparing", "ready", "collected"] } },
         select: { totalXof: true },
@@ -329,8 +437,15 @@ export class DiningService {
       d.setUTCDate(d.getUTCDate() + i);
       const key = d.toISOString().slice(0, 10);
       const count = (result: string) =>
-        scanGroups.find((g) => g.date.toISOString().slice(0, 10) === key && g.result === result)?._count ?? 0;
-      return { date: key, served: count("served"), turnedAway: count("turned_away") };
+        scanGroups.find(
+          (g) =>
+            g.date.toISOString().slice(0, 10) === key && g.result === result,
+        )?._count ?? 0;
+      return {
+        date: key,
+        served: count("served"),
+        turnedAway: count("turned_away"),
+      };
     });
 
     const menuItems = await this.prisma.menuItem.findMany({
@@ -351,10 +466,18 @@ export class DiningService {
   }
 
   async adminMenu() {
-    return this.prisma.menuItem.findMany({ orderBy: [{ category: "asc" }, { name: "asc" }] });
+    return this.prisma.menuItem.findMany({
+      orderBy: [{ category: "asc" }, { name: "asc" }],
+    });
   }
 
-  async createMenuItem(input: { name: string; description?: string; category: string; priceXof: number; imageUrl?: string }) {
+  async createMenuItem(input: {
+    name: string;
+    description?: string;
+    category: string;
+    priceXof: number;
+    imageUrl?: string;
+  }) {
     return this.prisma.menuItem.create({
       data: {
         name: input.name,
@@ -368,11 +491,19 @@ export class DiningService {
 
   async setMenuItemImage(id: string, imageUrl: string) {
     await this.prisma.menuItem.findUniqueOrThrow({ where: { id } });
-    return this.prisma.menuItem.update({ where: { id }, data: { imageUrl: imageUrl || null } });
+    return this.prisma.menuItem.update({
+      where: { id },
+      data: { imageUrl: imageUrl || null },
+    });
   }
 
   async toggleMenuItem(id: string) {
-    const item = await this.prisma.menuItem.findUniqueOrThrow({ where: { id } });
-    return this.prisma.menuItem.update({ where: { id }, data: { available: !item.available } });
+    const item = await this.prisma.menuItem.findUniqueOrThrow({
+      where: { id },
+    });
+    return this.prisma.menuItem.update({
+      where: { id },
+      data: { available: !item.available },
+    });
   }
 }

@@ -3,16 +3,6 @@ variable "session_secret" {
   sensitive = true
 }
 
-variable "paytech_api_key" {
-  type      = string
-  sensitive = true
-}
-
-variable "paytech_api_secret" {
-  type      = string
-  sensitive = true
-}
-
 variable "resend_api_key" {
   type      = string
   sensitive = true

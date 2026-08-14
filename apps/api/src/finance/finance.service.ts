@@ -17,13 +17,11 @@ import {
   toDakarDateKey,
   type CreatePaymentPlanInput,
   type AccountBalanceSummary,
-  type InitiatePaymentInput,
   type WireApprovalInput,
   type WirePaymentConfig,
 } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
-import { PAYMENT_PROVIDER, type PaymentProvider } from "./payment-provider.js";
 import {
   REQUEST_TO_PAY_PROVIDERS,
   type RequestToPayRegistry,
@@ -144,7 +142,6 @@ export class FinanceService {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly wireProofs: WireProofStorage,
-    @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
     @Inject(REQUEST_TO_PAY_PROVIDERS)
     private readonly rtpRails: RequestToPayRegistry,
   ) {}
@@ -347,7 +344,7 @@ export class FinanceService {
       input.amountXof,
       invoice.id,
     );
-    const active = await this.prisma.wireTransferSubmission.findFirst({
+    const active = await this.prisma.paymentSubmission.findFirst({
       where: { invoiceId: invoice.id, status: "submitted" },
     });
     if (active)
@@ -372,7 +369,7 @@ export class FinanceService {
           initiatedByEmail: input.submittedByEmail ?? input.contactEmail,
         },
       });
-      const created = await tx.wireTransferSubmission.create({
+      const created = await tx.paymentSubmission.create({
         data: {
           source: input.source,
           studentId: input.studentId,
@@ -487,7 +484,7 @@ export class FinanceService {
     if (link.status === "paid") throw new BadRequestException("Already paid");
     if (link.expiresAt && link.expiresAt.getTime() < Date.now())
       throw new BadRequestException("This payment link has expired");
-    const active = await this.prisma.wireTransferSubmission.findFirst({
+    const active = await this.prisma.paymentSubmission.findFirst({
       where: { paymentLinkId: link.id, status: "submitted" },
     });
     if (active)
@@ -511,7 +508,7 @@ export class FinanceService {
 
     const stored = await this.wireProofs.put(file);
     const wire = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.wireTransferSubmission.create({
+      const created = await tx.paymentSubmission.create({
         data: {
           source: "payment_link",
           paymentLinkId: link.id,
@@ -551,7 +548,7 @@ export class FinanceService {
         term: true,
         plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
         payments: { orderBy: { createdAt: "desc" } },
-        wireTransfers: { orderBy: { createdAt: "desc" } },
+        paymentSubmissions: { orderBy: { createdAt: "desc" } },
       },
     });
     const position = deriveApiAccountPosition(invoices);
@@ -594,7 +591,7 @@ export class FinanceService {
           refundedAt: p.refundedAt,
           createdAt: p.createdAt,
         })),
-        wireTransfers: inv.wireTransfers.map((w) => this.wireSummary(w)),
+        wireTransfers: inv.paymentSubmissions.map((w) => this.wireSummary(w)),
       };
     });
   }
@@ -1034,157 +1031,6 @@ export class FinanceService {
     });
   }
 
-  /** Student initiates a payment toward an invoice they own. Returns the gateway redirect. */
-  async initiatePayment(
-    studentId: string,
-    input: InitiatePaymentInput,
-    context: {
-      source?: string;
-      initiatedById?: string;
-      initiatedByEmail?: string;
-    } = {},
-  ) {
-    if (input.method === "wire") {
-      throw new BadRequestException(
-        "Wire transfers must include a proof of payment",
-      );
-    }
-    const requested = await this.prisma.invoice.findUnique({
-      where: { id: input.invoiceId },
-      select: { id: true, studentId: true },
-    });
-    if (!requested) throw new NotFoundException("Invoice not found");
-    if (requested.studentId !== studentId)
-      throw new ForbiddenException("Not your invoice");
-    const account = await this.loadPayableAccount(studentId);
-    const { amount, invoice } = this.requirePayableTarget(
-      account,
-      input.amount,
-      input.invoiceId,
-    );
-    if (
-      await this.prisma.wireTransferSubmission.findFirst({
-        where: { invoiceId: invoice.id, status: "submitted" },
-      })
-    ) {
-      throw new BadRequestException(
-        "A wire transfer is already under review for this charge",
-      );
-    }
-
-    const ref = `MD-${randomUUID()}`;
-    const payment = await this.prisma.payment.create({
-      data: {
-        invoiceId: invoice.id,
-        studentId,
-        amount,
-        method: input.method,
-        status: "pending",
-        providerRef: ref,
-        source: context.source ?? "student_portal",
-        initiatedById: context.initiatedById,
-        initiatedByEmail: context.initiatedByEmail,
-      },
-    });
-
-    const { redirectUrl } = await this.provider.requestPayment({
-      ref,
-      amount,
-      itemName: `Tuition — ${invoice.term.name}`,
-      customField: { invoiceId: invoice.id, studentId, paymentId: payment.id },
-    });
-
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Payment",
-        entityId: payment.id,
-        action: "initiated",
-        actorId: context.initiatedById,
-        data: {
-          amount,
-          method: input.method,
-          source: context.source ?? "student_portal",
-        },
-      },
-    });
-
-    return { paymentId: payment.id, redirectUrl };
-  }
-
-  /**
-   * Handle a PayTech IPN. The webhook — never the browser redirect — is the source of truth.
-   * Verified, idempotent (dedupe by token + guarded state transition), transactional.
-   * Returns whether the payload was authentic (controller maps to 200/403).
-   */
-  async handleIpn(
-    payload: Record<string, unknown>,
-  ): Promise<{ valid: boolean }> {
-    const v = this.provider.verifyIpn(payload);
-    if (!v.valid || !v.ref || !v.token) return { valid: v.valid };
-
-    // Record each delivery once. A duplicate still runs the idempotent downstream
-    // settler: a prior delivery may have inserted this row before settlement failed.
-    try {
-      await this.prisma.webhookEvent.create({
-        data: { token: v.token, paymentRef: v.ref, payload: payload as object },
-      });
-    } catch (error) {
-      const duplicate =
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "P2002";
-      if (!duplicate) throw error;
-    }
-
-    // Non-tuition charges ride the same verified rail, routed by ref prefix.
-    if (v.ref.startsWith("DINE-")) {
-      await this.settleDiningOrder(v.ref.slice(5), v.success);
-      return { valid: true };
-    }
-    if (v.ref.startsWith("APPFEE-")) {
-      await this.settleApplicationFee(v.ref.slice(7), v.success);
-      return { valid: true };
-    }
-    if (v.ref.startsWith("PLINK-")) {
-      await this.settlePaymentLinkIpn(
-        v.ref.slice(6),
-        v.success,
-        payload as object,
-        v.method,
-      );
-      return { valid: true };
-    }
-    // Public bill portal (payment.daust.net): the ref IS the Payment.providerRef.
-    if (v.ref.startsWith("BILL-")) {
-      await this.settleBillIpn(v.ref, v.success, payload as object, v.method);
-      return { valid: true };
-    }
-
-    const payment = await this.prisma.payment.findUnique({
-      where: { providerRef: v.ref },
-    });
-    if (!payment) return { valid: true };
-
-    if (!v.success) {
-      if (payment.status === "pending") {
-        await this.prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: "cancelled", ipnPayload: payload as object },
-        });
-        await this.audit(payment.id, "cancelled", payload);
-      }
-      return { valid: true };
-    }
-
-    await this.settlePayment(payment.id, {
-      via: "ipn",
-      payload: payload as object,
-      method: v.method,
-    });
-    return { valid: true };
-  }
-
   /**
    * Apply a successful payment: allocate to installments oldest-due-first, roll up the invoice,
    * audit, and email the receipt. Idempotent (no-op when already success). Shared by the IPN
@@ -1203,10 +1049,17 @@ export class FinanceService {
       wireReview?: {
         id: string;
         paymentLinkId?: string | null;
+        method?: "wave" | "orange_money" | "wire";
         bankReference?: string;
         confirmationNote?: string;
         reviewedByName: string;
         reviewedByEmail: string;
+        verificationProof?: {
+          objectKey: string;
+          fileName: string;
+          mimeType: string;
+          size: number;
+        };
       };
     },
   ) {
@@ -1249,6 +1102,7 @@ export class FinanceService {
             data: {
               status: "success",
               amount,
+              method: (opts.method ?? payment.method) as typeof payment.method,
               settledAt: new Date(),
               ...(opts.payload ? { ipnPayload: opts.payload } : {}),
             },
@@ -1447,7 +1301,7 @@ export class FinanceService {
           }
 
           if (opts.wireReview) {
-            await tx.wireTransferSubmission.update({
+            await tx.paymentSubmission.update({
               where: { id: opts.wireReview.id },
               data: {
                 status: "approved",
@@ -1458,12 +1312,29 @@ export class FinanceService {
                 reviewedByName: opts.wireReview.reviewedByName,
                 reviewedByEmail: opts.wireReview.reviewedByEmail,
                 reviewedAt: new Date(),
+                activeKey: null,
+                ...(opts.wireReview.verificationProof
+                  ? {
+                      verificationProofObjectKey:
+                        opts.wireReview.verificationProof.objectKey,
+                      verificationProofFileName:
+                        opts.wireReview.verificationProof.fileName,
+                      verificationProofMimeType:
+                        opts.wireReview.verificationProof.mimeType,
+                      verificationProofSize:
+                        opts.wireReview.verificationProof.size,
+                    }
+                  : {}),
               },
             });
             if (opts.wireReview.paymentLinkId) {
               await tx.paymentLink.update({
                 where: { id: opts.wireReview.paymentLinkId },
-                data: { status: "paid", method: "wire", paidAt: new Date() },
+                data: {
+                  status: "paid",
+                  method: opts.wireReview.method ?? "wire",
+                  paidAt: new Date(),
+                },
               });
             }
             await tx.auditLog.create({
@@ -1506,68 +1377,44 @@ export class FinanceService {
     if (didSettle) await this.emailReceipt(paymentId);
   }
 
-  /** Bursar verified the money in the PayTech dashboard but the IPN never arrived. */
-  async confirmPaymentManually(paymentId: string, actorId: string) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: paymentId },
-    });
-    if (!payment) throw new NotFoundException("Payment not found");
-    if (payment.status !== "pending")
-      throw new BadRequestException("Only pending payments can be confirmed");
-    await this.settlePayment(paymentId, { via: "manual", actorId });
-    return { ok: true };
-  }
-
-  /** Bursar confirmed the checkout was abandoned; explicitly cancel the stale pending payment. */
-  async cancelPaymentManually(paymentId: string, actorId: string) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: paymentId },
-    });
-    if (!payment) throw new NotFoundException("Payment not found");
-    if (payment.status !== "pending")
-      throw new BadRequestException("Only pending payments can be cancelled");
-    await this.prisma.payment.update({
-      where: { id: paymentId },
-      data: { status: "cancelled" },
-    });
-    await this.audit(paymentId, "manually-cancelled", { actorId });
-    return { ok: true };
-  }
-
-  /** IPN said a weekend dining order was paid. Idempotent: only a cart order transitions. */
-  private async settleDiningOrder(orderId: string, success: boolean) {
-    if (!success) return;
-    await this.prisma.diningOrder.updateMany({
-      where: { id: orderId, status: "cart" },
-      data: { status: "paid" },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "DiningOrder",
-        entityId: orderId,
-        action: "paid-via-ipn",
+  /** Settle an invoice-backed proof submission and its ledger rows in one transaction. */
+  async settleVerifiedSubmission(input: {
+    submissionId: string;
+    paymentId: string;
+    paymentLinkId?: string | null;
+    method: "wave" | "orange_money" | "wire";
+    amountXof: number;
+    transactionReference: string;
+    note?: string;
+    reviewer: { personId: string; email: string; name: string };
+    verificationProof: {
+      objectKey: string;
+      fileName: string;
+      mimeType: string;
+      size: number;
+    };
+  }) {
+    await this.settlePayment(input.paymentId, {
+      via: "manual",
+      actorId: input.reviewer.personId,
+      method: input.method,
+      confirmedAmount: input.amountXof,
+      wireReview: {
+        id: input.submissionId,
+        paymentLinkId: input.paymentLinkId,
+        method: input.method,
+        bankReference: input.transactionReference,
+        confirmationNote: input.note,
+        reviewedByName: input.reviewer.name,
+        reviewedByEmail: input.reviewer.email,
+        verificationProof: input.verificationProof,
       },
     });
-  }
-
-  /** IPN said an application fee was paid. Idempotent boolean flip. */
-  private async settleApplicationFee(applicantId: string, success: boolean) {
-    if (!success) return;
-    await this.prisma.applicant.updateMany({
-      where: { id: applicantId, feePaid: false },
-      data: { feePaid: true },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Applicant",
-        entityId: applicantId,
-        action: "application-fee-paid",
-      },
-    });
+    return { ok: true };
   }
 
   async listWireTransfers(status?: "submitted" | "approved" | "rejected") {
-    const rows = await this.prisma.wireTransferSubmission.findMany({
+    const rows = await this.prisma.paymentSubmission.findMany({
       where: status ? { status } : undefined,
       orderBy: { createdAt: "desc" },
       take: 300,
@@ -1602,10 +1449,13 @@ export class FinanceService {
   }
 
   async getWireProof(id: string) {
-    const wire = await this.prisma.wireTransferSubmission.findUnique({
+    const wire = await this.prisma.paymentSubmission.findUnique({
       where: { id },
     });
     if (!wire) throw new NotFoundException("Wire transfer not found");
+    if (!wire.proofObjectKey || !wire.proofFileName || !wire.proofMimeType) {
+      throw new NotFoundException("Transfer proof not found");
+    }
     return {
       data: await this.wireProofs.get(wire.proofObjectKey),
       fileName: wire.proofFileName.replace(/[\r\n"]/g, ""),
@@ -1618,7 +1468,7 @@ export class FinanceService {
     input: WireApprovalInput,
     reviewer: { personId: string; email: string; name: string },
   ) {
-    const wire = await this.prisma.wireTransferSubmission.findUnique({
+    const wire = await this.prisma.paymentSubmission.findUnique({
       where: { id },
       include: { payment: true, invoice: true, paymentLink: true },
     });
@@ -1664,7 +1514,7 @@ export class FinanceService {
       });
     } else if (wire.paymentLink) {
       const changed = await this.prisma.$transaction(async (tx) => {
-        const claimed = await tx.wireTransferSubmission.updateMany({
+        const claimed = await tx.paymentSubmission.updateMany({
           where: { id: wire.id, status: "submitted" },
           data: {
             status: "approved",
@@ -1712,7 +1562,7 @@ export class FinanceService {
     reason: string,
     reviewer: { personId: string; email: string; name: string },
   ) {
-    const wire = await this.prisma.wireTransferSubmission.findUnique({
+    const wire = await this.prisma.paymentSubmission.findUnique({
       where: { id },
     });
     if (!wire) throw new NotFoundException("Wire transfer not found");
@@ -1725,7 +1575,7 @@ export class FinanceService {
     if (!cleanReason)
       throw new BadRequestException("A rejection reason is required");
     await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.wireTransferSubmission.updateMany({
+      const claimed = await tx.paymentSubmission.updateMany({
         where: { id, status: "submitted" },
         data: {
           status: "rejected",
@@ -1854,7 +1704,7 @@ export class FinanceService {
     }
 
     // The rail caps txId at 35 chars, so this is deliberately short — not the MD-<uuid>
-    // format the PayTech path uses (38 chars, which the rail would reject).
+    // format legacy redirect rails used (38 chars, which PI-SPI would reject).
     const txId = `PIS${randomUUID().replace(/-/g, "").slice(0, 20)}`;
     const expiresAt = new Date(
       Date.now() + loadEnv().PI_SPI_REQUEST_TTL_HOURS * 3600_000,
@@ -2079,7 +1929,7 @@ export class FinanceService {
 
   /**
    * Application fee via instant payment. The applicant id is the capability (same model
-   * as the PayTech fee checkout); there is no invoice, so settlement flips `feePaid`.
+   * as the application-fee checkout); there is no invoice, so settlement flips `feePaid`.
    */
   async submitApplicantPiSpi(
     applicantId: string,
@@ -2315,7 +2165,7 @@ export class FinanceService {
     financeRecipients: string[],
     studentEmail?: string,
   ) {
-    const wire = await this.prisma.wireTransferSubmission.findUnique({
+    const wire = await this.prisma.paymentSubmission.findUnique({
       where: { id },
       include: { student: { include: { person: true } }, paymentLink: true },
     });
@@ -2346,7 +2196,7 @@ export class FinanceService {
     id: string,
     decision: "approved" | "rejected",
   ) {
-    const wire = await this.prisma.wireTransferSubmission.findUnique({
+    const wire = await this.prisma.paymentSubmission.findUnique({
       where: { id },
       include: { student: { include: { person: true } } },
     });
@@ -2676,7 +2526,7 @@ export class FinanceService {
             include: { installments: { orderBy: { sequence: "asc" } } },
           },
           payments: { orderBy: { createdAt: "desc" } },
-          wireTransfers: { orderBy: { createdAt: "desc" } },
+          paymentSubmissions: { orderBy: { createdAt: "desc" } },
           components: {
             include: { allocations: true },
             orderBy: { kind: "asc" },
@@ -2879,7 +2729,7 @@ export class FinanceService {
             refundedAt: p.refundedAt,
             createdAt: p.createdAt,
           })),
-          wireTransfers: inv.wireTransfers.map((w) => this.wireSummary(w)),
+          wireTransfers: inv.paymentSubmissions.map((w) => this.wireSummary(w)),
           availableComponents: [...availableByKey.values()].sort(
             (a, b) => a.sortOrder - b.sortOrder || a.key.localeCompare(b.key),
           ),
@@ -3468,34 +3318,6 @@ export class FinanceService {
     return changes.length;
   }
 
-  /**
-   * Reconciliation surfaces stale pendings for HUMAN review — it never auto-cancels, because a
-   * payment whose IPN was lost may be genuinely paid; the bursar checks the PayTech dashboard
-   * and uses confirm/cancel. (If PayTech exposes a status API later, poll it here instead.)
-   */
-  async listStalePendingPayments(graceMinutes = 60) {
-    const cutoff = new Date(Date.now() - graceMinutes * 60_000);
-    const stale = await this.prisma.payment.findMany({
-      where: { status: "pending", createdAt: { lt: cutoff } },
-      orderBy: { createdAt: "asc" },
-      include: {
-        student: { include: { person: true } },
-        invoice: { include: { term: true } },
-      },
-    });
-    return stale.map((p) => ({
-      id: p.id,
-      student: `${p.student.person.firstName} ${p.student.person.lastName}`,
-      studentNo: p.student.studentNo,
-      term: p.invoice.term.name,
-      amount: p.amount,
-      method: p.method,
-      providerRef: p.providerRef,
-      createdAt: p.createdAt,
-      ageMinutes: Math.round((Date.now() - p.createdAt.getTime()) / 60_000),
-    }));
-  }
-
   // --- Management accounting: cost centers, expenses, budgets, director money-in/out ---
 
   listCostCenters() {
@@ -3971,8 +3793,7 @@ export class FinanceService {
   }
 
   /**
-   * Refund a successful payment: reverse its installment/invoice allocations, mark it refunded,
-   * attempt a gateway refund when the provider supports it, audit, and email the student.
+   * Refund a successful payment through DAUST's internal Finance reversal process.
    */
   async refundPayment(
     paymentId: string,
@@ -3991,20 +3812,11 @@ export class FinanceService {
     if (payment.status === "refunded") {
       return { ok: true, refundedAmount: payment.amount, gatewayRefund: false };
     }
-    const requiresGatewayRefund =
-      payment.provider === this.provider.name && Boolean(this.provider.refund);
-    const resumesInternalRefund =
-      payment.status === "refund_pending" && !requiresGatewayRefund;
-    if (payment.status === "refund_pending" && requiresGatewayRefund) {
-      throw new BadRequestException(
-        "This gateway refund needs Finance reconciliation before it can be retried",
-      );
-    }
+    const resumesInternalRefund = payment.status === "refund_pending";
     if (payment.status !== "success" && !resumesInternalRefund)
       throw new BadRequestException("Only successful payments can be refunded");
 
-    // Claim before touching the gateway. Concurrent requests cannot both refund,
-    // and a gateway rejection leaves invoice/installment/component ledgers intact.
+    // Claim before reversing the ledgers so concurrent requests cannot both refund.
     if (!resumesInternalRefund) {
       const refundClaim = await this.prisma.payment.updateMany({
         where: { id: payment.id, status: "success" },
@@ -4012,33 +3824,6 @@ export class FinanceService {
       });
       if (refundClaim.count === 0) {
         throw new BadRequestException("This payment is no longer refundable");
-      }
-    }
-
-    let gateway: { ok: boolean; ref?: string } = { ok: false };
-    if (requiresGatewayRefund) {
-      try {
-        gateway = await this.provider.refund!(
-          payment.providerRef,
-          payment.amount,
-        );
-      } catch (error) {
-        await this.prisma.payment.updateMany({
-          where: { id: payment.id, status: "refund_pending" },
-          data: { status: "success" },
-        });
-        throw new BadRequestException(
-          `The payment gateway did not confirm the refund: ${error instanceof Error ? error.message : "unknown error"}`,
-        );
-      }
-      if (!gateway.ok) {
-        await this.prisma.payment.updateMany({
-          where: { id: payment.id, status: "refund_pending" },
-          data: { status: "success" },
-        });
-        throw new BadRequestException(
-          "The payment gateway did not confirm the refund",
-        );
       }
     }
 
@@ -4193,7 +3978,7 @@ export class FinanceService {
     return {
       ok: true,
       refundedAmount: payment.amount,
-      gatewayRefund: gateway.ok,
+      gatewayRefund: false,
     };
   }
 
@@ -4582,7 +4367,9 @@ export class FinanceService {
   async getPublicLink(token: string) {
     const link = await this.prisma.paymentLink.findUnique({
       where: { token },
-      include: { wireTransfers: { orderBy: { createdAt: "desc" }, take: 1 } },
+      include: {
+        paymentSubmissions: { orderBy: { createdAt: "desc" }, take: 1 },
+      },
     });
     if (!link || link.status === "cancelled")
       throw new NotFoundException("Link not found");
@@ -4601,126 +4388,10 @@ export class FinanceService {
       status: expired ? "expired" : link.status,
       method: link.method,
       paidAt: link.paidAt,
-      wireTransfer: link.wireTransfers[0]
-        ? this.publicWireSummary(link.wireTransfers[0])
+      submission: link.paymentSubmissions[0]
+        ? this.publicWireSummary(link.paymentSubmissions[0])
         : null,
     };
-  }
-
-  /** Public: start a gateway checkout for an active link. */
-  async checkoutLink(token: string, method: string) {
-    const link = await this.prisma.paymentLink.findUnique({ where: { token } });
-    if (!link || link.status === "cancelled")
-      throw new NotFoundException("Link not found");
-    if (link.status === "paid") throw new BadRequestException("Already paid");
-    if (link.expiresAt && link.expiresAt.getTime() < Date.now()) {
-      throw new BadRequestException("This payment link has expired");
-    }
-    if (
-      await this.prisma.wireTransferSubmission.findFirst({
-        where: { paymentLinkId: link.id, status: "submitted" },
-      })
-    ) {
-      throw new BadRequestException(
-        "A wire transfer is already under review for this payment link",
-      );
-    }
-
-    const ref = `PLINK-${link.id}`;
-    if (link.invoiceId) {
-      const invoice = await this.prisma.invoice.findUniqueOrThrow({
-        where: { id: link.invoiceId },
-        select: { id: true, studentId: true },
-      });
-      const studentId = link.studentId ?? invoice.studentId;
-      const account = await this.loadPayableAccount(studentId);
-      const { amount } = this.requirePayableTarget(
-        account,
-        link.amountXof,
-        invoice.id,
-      );
-      await this.prisma.payment.upsert({
-        where: { providerRef: ref },
-        update: {},
-        create: {
-          invoiceId: invoice.id,
-          studentId,
-          amount,
-          method: (["wave", "orange_money", "card"].includes(method)
-            ? method
-            : "card") as never,
-          status: "pending",
-          providerRef: ref,
-          source: "payment_link",
-        },
-      });
-    }
-
-    const payUrl = `${loadEnv().PORTAL_ORIGIN}/pay/${link.token}`;
-    const { redirectUrl } = await this.provider.requestPayment({
-      ref,
-      amount: link.amountXof,
-      itemName: link.purpose,
-      customField: { paymentLinkId: link.id },
-      // Anonymous payers must land back on the pay page, never inside the portal.
-      successUrl: `${payUrl}?back=1`,
-      cancelUrl: payUrl,
-    });
-    return { redirectUrl };
-  }
-
-  private async settlePaymentLinkIpn(
-    linkId: string,
-    success: boolean,
-    payload: object,
-    method: string | null,
-  ) {
-    const link = await this.prisma.paymentLink.findUnique({
-      where: { id: linkId },
-    });
-    if (!link) return;
-
-    const payment = await this.prisma.payment.findUnique({
-      where: { providerRef: `PLINK-${linkId}` },
-    });
-    if (!success) {
-      if (payment?.status === "pending") {
-        await this.prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: "cancelled", ipnPayload: payload },
-        });
-      }
-      await this.prisma.auditLog.create({
-        data: {
-          entity: "PaymentLink",
-          entityId: linkId,
-          action: "link-payment-failed",
-          data: payload,
-        },
-      });
-      return;
-    }
-
-    if (payment)
-      await this.settlePayment(payment.id, { via: "ipn", payload, method });
-    if (link.status !== "paid") {
-      await this.prisma.paymentLink.update({
-        where: { id: linkId },
-        data: {
-          status: "paid",
-          method: method ?? "unknown",
-          paidAt: new Date(),
-        },
-      });
-      await this.prisma.auditLog.create({
-        data: {
-          entity: "PaymentLink",
-          entityId: linkId,
-          action: "link-paid",
-          data: payload,
-        },
-      });
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -4740,7 +4411,7 @@ export class FinanceService {
       include: {
         term: true,
         plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
-        wireTransfers: {
+        paymentSubmissions: {
           where: { status: "submitted" },
           orderBy: { createdAt: "desc" },
         },
@@ -4790,81 +4461,31 @@ export class FinanceService {
       summary: position.summary,
       charges,
       pendingWires: invoices.flatMap((invoice) =>
-        invoice.wireTransfers.map((wire) => this.publicWireSummary(wire)),
+        invoice.paymentSubmissions.map((wire) => this.publicWireSummary(wire)),
       ),
     };
   }
 
-  /** Public: start a PayTech checkout of `amountXof` toward the student's oldest open invoice. */
-  async checkoutBill(
+  /** Resolve the authenticated public-bill payer to the canonical oldest invoice. */
+  async publicBillPaymentTarget(
     studentNo: string,
     dob: string,
     amountXof: number,
-    method: string,
   ) {
     const student = await this.findStudentForBill(studentNo, dob);
     const account = await this.loadPayableAccount(student.id);
     const { amount, invoice } = this.requirePayableTarget(account, amountXof);
-    if (
-      await this.prisma.wireTransferSubmission.findFirst({
-        where: { invoiceId: invoice.id, status: "submitted" },
-      })
-    ) {
-      throw new BadRequestException(
-        "A wire transfer is already under review for this charge",
-      );
-    }
-    const ref = `BILL-${randomUUID()}`;
-    await this.prisma.payment.create({
-      data: {
-        invoiceId: invoice.id,
-        studentId: student.id,
-        amount,
-        method: (["wave", "orange_money", "card"].includes(method)
-          ? method
-          : "card") as never,
-        status: "pending",
-        providerRef: ref,
-        source: "public_bill",
-      },
-    });
-
-    const payUrl = `${loadEnv().PAYMENT_ORIGIN}/pay-bill`;
-    const { redirectUrl } = await this.provider.requestPayment({
-      ref,
-      amount,
-      itemName: `DAUST tuition · ${student.studentNo}`,
-      customField: { studentNo: student.studentNo },
-      successUrl: `${payUrl}?paid=1`,
-      cancelUrl: payUrl,
-    });
-    return { redirectUrl };
+    return {
+      studentId: student.id,
+      invoiceId: invoice.id,
+      amountXof: amount,
+      contactEmail: student.person.email,
+    };
   }
 
-  /** IPN settler for a BILL- payment: the ref is the Payment.providerRef verbatim. */
-  private async settleBillIpn(
-    ref: string,
-    success: boolean,
-    payload: object,
-    method: string | null,
-  ) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { providerRef: ref },
-    });
-    if (!payment) return;
-    if (!success) {
-      if (payment.status === "pending") {
-        await this.prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: "cancelled", ipnPayload: payload },
-        });
-        await this.audit(payment.id, "cancelled", payload);
-      }
-      return;
-    }
-    await this.settlePayment(payment.id, { via: "ipn", payload, method });
+  async publicBillStudentId(studentNo: string, dob: string) {
+    return (await this.findStudentForBill(studentNo, dob)).id;
   }
-
   // Hard bound on wrong-DOB guesses per ID across ALL sources — the real defense
   // against enumerating a student's balance by brute-forcing their date of birth
   // (the IP-based guard is spoofable on a directly-reachable origin). In-memory is

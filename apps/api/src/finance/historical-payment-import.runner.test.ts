@@ -133,7 +133,7 @@ function existingPayment(overrides: Record<string, unknown> = {}) {
     settledAt: new Date("2026-08-04T12:00:00.000Z"),
     providerRef: "GATEWAY-EXISTING-1",
     ipnPayload: null,
-    wireTransfer: null,
+    submission: null,
     ...overrides,
   };
 }
@@ -150,7 +150,7 @@ function fakeDb(
       settledAt: Date | null;
       providerRef: string;
       ipnPayload: Record<string, unknown> | null;
-      wireTransfer: { bankReference: string | null } | null;
+      submission: { bankReference: string | null } | null;
     }[];
     providerConflicts?: { id: string; providerRef: string }[];
     existingBatch?: Record<string, unknown> | null;
@@ -457,7 +457,7 @@ describe("historical payment import planning", () => {
     const wireReferenceMatch = existingPayment({
       providerRef: "WIRE-53ff91c2-64f6-40e2-9baf-a204a3da41fa",
       settledAt: new Date("2027-02-01T12:00:00.000Z"),
-      wireTransfer: { bankReference: "CBAO-DEPOT-8821" },
+      submission: { bankReference: "CBAO-DEPOT-8821" },
     });
     const byReviewedWireReference = await planHistoricalPaymentImport(
       fakeDb({ existingPayments: [wireReferenceMatch] }),

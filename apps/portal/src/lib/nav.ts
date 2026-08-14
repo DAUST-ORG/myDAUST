@@ -243,6 +243,11 @@ export const DIRECTOR_NAV: PortalNav = {
         icon: ClipboardCheck,
         badgeKey: "approvalRequests",
       },
+      {
+        href: "/director/payments",
+        label: "Payment Verifications",
+        icon: Banknote,
+      },
     ]),
   ],
 };
@@ -266,7 +271,11 @@ export const FINANCE_NAV: PortalNav = {
         icon: Receipt,
       },
       { href: "/finance/accounts", label: "Student Accounts", icon: Wallet },
-      { href: "/finance/wires", label: "Wire Transfers", icon: Banknote },
+      {
+        href: "/finance/payment-reviews",
+        label: "Payment Reviews",
+        icon: Banknote,
+      },
       {
         href: "/finance/requests",
         label: "My Requests",
@@ -430,6 +439,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Wire Transfers",
     crumb: "Bank settings and proof review · Finance",
   },
+  "/finance/payment-reviews": {
+    title: "Payment Reviews",
+    crumb: "Proof review and payment settings · Finance",
+  },
   // communications (site CMS)
   "/comms": { title: "Dashboard", crumb: "Public website · Communications" },
   "/comms/site": {
@@ -487,6 +500,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/director/approvals": {
     title: "Approvals",
     crumb: "Finance change control · Administration",
+  },
+  "/director/payments": {
+    title: "Payment Verifications",
+    crumb: "Collections assurance · Administration",
   },
   "/finance/requests": {
     title: "My Requests",

@@ -76,7 +76,6 @@ function service(students: ReturnType<typeof student>[]) {
     prisma as never,
     { send: vi.fn() } as never,
     {} as never,
-    {} as never,
     new Map() as never,
   );
 }
