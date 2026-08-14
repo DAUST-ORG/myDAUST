@@ -20,8 +20,8 @@ import {
   WalletCards,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BudgetCashflowChart } from "@/components/BudgetCashflowChart";
 import { BudgetMatrix, type BudgetMatrixMode } from "@/components/BudgetMatrix";
-import { CashflowSimulation } from "@/components/CashflowSimulation";
 import { Badge, Button, Drawer, Modal, PageHeader } from "@/components/ui";
 import {
   ApiError,
@@ -30,6 +30,7 @@ import {
   type Me,
   type OperatingBudgetActualEntries,
   type OperatingBudgetActualEntry,
+  type OperatingBudgetForecast,
   type OperatingBudgetKind,
   type OperatingBudgetMatrix,
   type OperatingBudgetMatrixRow,
@@ -37,6 +38,7 @@ import {
   createOperatingBudgetAdjustment,
   createOperatingBudgetExpense,
   createOperatingBudgetManualIncome,
+  forecastOperatingBudget,
   getCostCenters,
   getMe,
   getOperatingBudget,
@@ -56,6 +58,7 @@ import {
 } from "@/lib/xof-input";
 import styles from "./budget.module.css";
 
+type Scenario = "conservative" | "base" | "optimistic";
 type DraftValues = Record<string, Record<string, number>>;
 type ActualSelection = {
   row: OperatingBudgetMatrixRow;
@@ -293,6 +296,7 @@ function formDefaults(
 export default function BudgetingCashflowPage() {
   const requestVersion = useRef(0);
   const actualRequestVersion = useRef(0);
+  const forecastRequestVersion = useRef(0);
   const [data, setData] = useState<OperatingBudgetView | null>(null);
   const [selectedYear, setSelectedYear] = useState("");
   const [me, setMe] = useState<Me | null>(null);
@@ -309,6 +313,15 @@ export default function BudgetingCashflowPage() {
   const [reason, setReason] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [scenario, setScenario] = useState<Scenario>("base");
+  const [collectionRate, setCollectionRate] = useState(100);
+  const [expenseGrowth, setExpenseGrowth] = useState(0);
+  const [forecast, setForecast] = useState<OperatingBudgetForecast | null>(
+    null,
+  );
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [forecastError, setForecastError] = useState<string | null>(null);
 
   const [actualSelection, setActualSelection] =
     useState<ActualSelection | null>(null);
@@ -336,6 +349,7 @@ export default function BudgetingCashflowPage() {
     ) => {
       const version = ++requestVersion.current;
       actualRequestVersion.current += 1;
+      forecastRequestVersion.current += 1;
       setLoading(true);
       setError(null);
       if (!options?.preserveLocalDraft) setStale(false);
@@ -391,6 +405,38 @@ export default function BudgetingCashflowPage() {
       .then(setMe)
       .catch(() => setMe(null));
   }, [load]);
+
+  useEffect(() => {
+    if (!data) return;
+    const timer = window.setTimeout(async () => {
+      const version = ++forecastRequestVersion.current;
+      setForecastLoading(true);
+      setForecastError(null);
+      try {
+        const result = await forecastOperatingBudget({
+          academicYear: data.academicYear.label,
+          scenario,
+          collectionRatePercent: collectionRate,
+          expenseGrowthPercent: expenseGrowth,
+        });
+        if (version === forecastRequestVersion.current) setForecast(result);
+      } catch (cause) {
+        if (version === forecastRequestVersion.current) {
+          setForecast(null);
+          setForecastError(
+            cause instanceof Error ? cause.message : "Forecast is unavailable.",
+          );
+        }
+      } finally {
+        if (version === forecastRequestVersion.current)
+          setForecastLoading(false);
+      }
+    }, 280);
+    return () => {
+      forecastRequestVersion.current += 1;
+      window.clearTimeout(timer);
+    };
+  }, [collectionRate, data, expenseGrowth, scenario]);
 
   const loadActuals = useCallback(
     async (selection: ActualSelection, cursor?: string) => {
@@ -845,6 +891,10 @@ export default function BudgetingCashflowPage() {
   const actualIncome = data.actual.income.totalXof;
   const actualExpense = data.actual.expense.totalXof;
   const currentClosing = closingActual(data);
+  const projectedClosing =
+    forecast?.projectedClosingBalanceXof ??
+    forecast?.months.at(-1)?.balanceXof ??
+    currentClosing;
   const activeActualAmount = actualSelection
     ? (actualSelection.row.months[actualSelection.month] ?? 0)
     : 0;
@@ -1165,15 +1215,105 @@ export default function BudgetingCashflowPage() {
             {formatXofCompact(currentClosing)}
           </strong>
           <span className={styles.kpiSub}>
-            Opening cash plus approved ledger actuals
+            Scenario projects {formatXofCompact(projectedClosing)} at year end
           </span>
         </article>
       </section>
 
-      <CashflowSimulation
-        key={`${data.academicYear.id}:${data.revision?.id ?? "none"}:${data.revision?.contentVersion ?? 0}`}
-        data={data}
-      />
+      <div className={styles.chartLayout}>
+        <BudgetCashflowChart
+          months={data.months}
+          cashflow={data.cashflow}
+          forecast={forecast}
+          forecastLoading={forecastLoading}
+        />
+        <aside
+          className={styles.forecastPanel}
+          aria-labelledby="forecast-title"
+        >
+          <h2 id="forecast-title">Forecast studio</h2>
+          <p>
+            Explore assumptions only. These controls never save or alter an
+            approved plan.
+          </p>
+          <div
+            className={styles.scenario}
+            role="group"
+            aria-label="Forecast scenario"
+          >
+            {(
+              [
+                ["conservative", "Conservative"],
+                ["base", "Base"],
+                ["optimistic", "Optimistic"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={scenario === value}
+                onClick={() => setScenario(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className={styles.sliderGroup}>
+            <label className={styles.sliderLabel}>
+              Collection rate
+              <output>{collectionRate}%</output>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={collectionRate}
+                onChange={(event) =>
+                  setCollectionRate(Number(event.target.value))
+                }
+              />
+              <small>Applies to live remaining approved installments.</small>
+            </label>
+            <label className={styles.sliderLabel}>
+              Monthly expense growth
+              <output>
+                {expenseGrowth > 0 ? "+" : ""}
+                {expenseGrowth}%
+              </output>
+              <input
+                type="range"
+                min="-10"
+                max="20"
+                step="0.5"
+                value={expenseGrowth}
+                onChange={(event) =>
+                  setExpenseGrowth(Number(event.target.value))
+                }
+              />
+              <small>Compounds only forecast expense months.</small>
+            </label>
+          </div>
+          <div className={styles.forecastResult}>
+            <div>
+              <span>Projected closing cash</span>
+              <strong title={formatXof(projectedClosing)}>
+                {forecastLoading
+                  ? "Updating…"
+                  : formatXofCompact(projectedClosing)}
+              </strong>
+            </div>
+            <p>
+              {forecastError
+                ? `Forecast unavailable: ${forecastError}`
+                : forecast?.metadata.forecastStatus === "insufficient_data"
+                  ? "There is not enough ledger history for a reliable projection."
+                  : forecast
+                    ? `Based on approved revision ${forecast.metadata.basisRevision}. Dashed values are exploratory and are not stored.`
+                    : "Dashed chart values are exploratory and are not stored."}
+            </p>
+          </div>
+        </aside>
+      </div>
 
       <section className={styles.workbook} aria-labelledby="workbook-title">
         <div className={styles.workbookHead}>
