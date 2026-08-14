@@ -24,6 +24,9 @@ enum PaymentMethod {
   orange_money
   card
   wire
+  // Historical/manual bank records may be settled by cheque. This remains an
+  // accounting value only; payer-facing checkout endpoints do not offer it.
+  cheque
   // BCEAO instant-payment rail. Unlike the PayTech-backed methods above it is
   // request-to-pay: the payer approves in their own banking app, so settlement is
   // asynchronous rather than a redirect return.
@@ -49,6 +52,12 @@ enum PaymentStatus {
   failed
   cancelled
   refunded
+}
+
+enum PaymentImportBatchStatus {
+  pending
+  imported
+  failed
 }
 
 enum WireTransferStatus {
@@ -380,6 +389,7 @@ model Person {
   wireTransfersSubmitted    WireTransferSubmission[]  @relation("WireTransferSubmitter")
   wireTransfersReviewed     WireTransferSubmission[]  @relation("WireTransferReviewer")
   transcriptImportBatches   TranscriptImportBatch[]   @relation("TranscriptImportBatchCreator")
+  paymentImportBatches      PaymentImportBatch[]      @relation("PaymentImportBatchCreator")
   transcriptEntriesCreated  TranscriptEntry[]         @relation("TranscriptEntryCreator")
   transcriptEntriesUpdated  TranscriptEntry[]         @relation("TranscriptEntryUpdater")
   transcriptEntriesVoided   TranscriptEntry[]         @relation("TranscriptEntryVoider")
@@ -600,6 +610,13 @@ model Payment {
   initiatedByEmail     String?
   settledAt            DateTime?
   refundedAt           DateTime?
+  /// Present only for reviewed historical-workbook imports. The source row is
+  /// immutable provenance; it never replaces the canonical payment ledger.
+  importBatchId        String?
+  importBatch          PaymentImportBatch?          @relation(fields: [importBatchId], references: [id], onDelete: Restrict)
+  importRowKey         String?
+  importSheetName      String?
+  importRowNumber      Int?
   ipnPayload           Json?
   allocations          PaymentAllocation[]
   componentAllocations PaymentComponentAllocation[]
@@ -608,10 +625,47 @@ model Payment {
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
 
+  @@unique([importBatchId, importRowKey])
   @@index([invoiceId])
   @@index([status])
   @@index([settledAt])
   @@index([initiatedById])
+  @@index([importBatchId])
+}
+
+/// One reviewed, idempotent historical-payment workbook load. The source hash
+/// prevents exact-workbook reruns; row keys and Payment.providerRef protect
+/// individual rows and concurrent retries.
+model PaymentImportBatch {
+  id                     String                   @id @default(uuid())
+  sourceFileName         String
+  sourceSha256           String                   @unique
+  sourceExtractionSha256 String
+  manifestSha256         String
+  status                 PaymentImportBatchStatus @default(pending)
+  academicYear           String
+  sourceGroupCount       Int                      @default(0)
+  totalRows              Int                      @default(0)
+  importedRows           Int                      @default(0)
+  alreadyRecordedRows    Int                      @default(0)
+  excludedSourceGroups   Int                      @default(0)
+  skippedRows            Int                      @default(0)
+  errorRows              Int                      @default(0)
+  sourceTotalXof         BigInt                   @default(0)
+  importedXof            BigInt                   @default(0)
+  alreadyRecordedXof     BigInt                   @default(0)
+  excludedXof            BigInt                   @default(0)
+  errorSummary           Json?
+  note                   String?
+  createdById            String
+  createdBy              Person                   @relation("PaymentImportBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  importedAt             DateTime?
+  payments               Payment[]
+
+  @@index([status, createdAt])
+  @@index([createdById, createdAt])
 }
 
 /// Authoritative package component carried by one invoice. Amounts always reconcile
