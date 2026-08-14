@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  InitiatePaymentInput,
   PLAN_TEMPLATES,
   PaymentMethod,
   PiSpiAliasInput,
@@ -40,6 +41,20 @@ describe("wire payment contracts", () => {
     expect(PaymentMethod.parse("wire")).toBe("wire");
   });
 
+  it("recognizes cheque for accounting-only historical records", () => {
+    expect(PaymentMethod.parse("cheque")).toBe("cheque");
+  });
+
+  it("rejects cheque from payer-facing checkout initiation", () => {
+    expect(
+      InitiatePaymentInput.safeParse({
+        invoiceId: "2afba2e0-c43a-4870-845a-c7510faaf110",
+        amount: 315_000,
+        method: "cheque",
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires approval evidence and a positive confirmed amount", () => {
     expect(
       WireApprovalInput.safeParse({ confirmedAmountXof: 1000 }).success,
@@ -69,19 +84,30 @@ describe("PI-SPI contracts", () => {
 
   it("requires the alias to be a UUID, not a phone number or free text", () => {
     expect(
-      PiSpiAliasInput.safeParse({ alias: "550e8400-e29b-41d4-a716-446655440000" })
-        .success,
+      PiSpiAliasInput.safeParse({
+        alias: "550e8400-e29b-41d4-a716-446655440000",
+      }).success,
     ).toBe(true);
-    expect(PiSpiAliasInput.safeParse({ alias: "+221771234567" }).success).toBe(false);
+    expect(PiSpiAliasInput.safeParse({ alias: "+221771234567" }).success).toBe(
+      false,
+    );
     expect(PiSpiAliasInput.safeParse({ alias: "" }).success).toBe(false);
   });
 
   it("rejects a zero, negative or non-integer amount", () => {
     const alias = "550e8400-e29b-41d4-a716-446655440000";
-    expect(PiSpiInitiateInput.safeParse({ alias, amountXof: 0 }).success).toBe(false);
-    expect(PiSpiInitiateInput.safeParse({ alias, amountXof: -100 }).success).toBe(false);
-    expect(PiSpiInitiateInput.safeParse({ alias, amountXof: 12.5 }).success).toBe(false);
-    expect(PiSpiInitiateInput.safeParse({ alias, amountXof: 450000 }).success).toBe(true);
+    expect(PiSpiInitiateInput.safeParse({ alias, amountXof: 0 }).success).toBe(
+      false,
+    );
+    expect(
+      PiSpiInitiateInput.safeParse({ alias, amountXof: -100 }).success,
+    ).toBe(false);
+    expect(
+      PiSpiInitiateInput.safeParse({ alias, amountXof: 12.5 }).success,
+    ).toBe(false);
+    expect(
+      PiSpiInitiateInput.safeParse({ alias, amountXof: 450000 }).success,
+    ).toBe(true);
   });
 
   it("maps rail reason codes to human copy and never leaks a bare code", () => {
