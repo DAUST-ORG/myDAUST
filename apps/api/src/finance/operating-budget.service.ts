@@ -15,7 +15,6 @@ import { type AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { deriveApiAccountPosition } from "./account-position.js";
 import {
-  CASHFLOW_SIMULATION_PRESETS,
   OPERATING_BUDGET_CATEGORIES,
   UNCLASSIFIED_COLLECTION_CATEGORY,
   UNCLASSIFIED_EXPENSE_CATEGORY,
@@ -25,13 +24,12 @@ import {
   matrixFromCells,
   monthKeyInDakar,
   operatingBudgetMonths,
+  scheduledReceivableForecastMonth,
   validateBudgetCells,
   validateOperatingBudgetAggregateBounds,
   type ActualCell,
   type BudgetCell,
-  type CashflowSimulationAssumptions,
-  type CashflowSimulationCase,
-  type CashflowSimulationShock,
+  type ForecastScenario,
   type OperatingBudgetKind,
 } from "./operating-budget.js";
 
@@ -1211,124 +1209,76 @@ export class OperatingBudgetService {
     };
   }
 
-  private async remainingBursarReceivables(year: {
+  private async remainingScheduledBursarByMonth(year: {
     id: string;
     label: string;
   }) {
-    const { start, endExclusive } = academicYearBounds(year.label);
-    const endExclusiveDateKey = endExclusive.toISOString().slice(0, 10);
     const students = await this.prisma.student.findMany({
       where: {
         invoices: {
           some: {
             status: { not: "void" },
             totalAmount: { gt: 0 },
+            OR: [
+              { academicYearLabel: year.label },
+              { term: { academicYearId: year.id } },
+            ],
           },
         },
       },
       include: {
         invoices: {
           include: {
-            term: { include: { academicYear: true } },
+            term: true,
             plan: { include: { installments: true } },
           },
         },
       },
     });
-    const scheduledByMonth: Record<string, number> = {};
-    let unscheduledXof = 0;
+    const result: Record<string, number> = {};
+    const months = new Set(
+      operatingBudgetMonths(year.label).map((month) => month.key),
+    );
     for (const student of students) {
       const position = deriveApiAccountPosition(student.invoices);
-      const collectibleInvoiceIds = new Set(
-        student.invoices
-          .filter(
-            (invoice) => invoice.status !== "void" && invoice.totalAmount > 0,
-          )
-          .map((invoice) => invoice.id),
-      );
-      const selectedYearInvoiceIds = new Set(
+      const targetIds = new Set(
         student.invoices
           .filter(
             (invoice) =>
-              collectibleInvoiceIds.has(invoice.id) &&
+              invoice.status !== "void" &&
+              invoice.totalAmount > 0 &&
               (invoice.academicYearLabel === year.label ||
                 invoice.term.academicYearId === year.id),
           )
           .map((invoice) => invoice.id),
       );
-      const futureYearInvoiceIds = new Set(
-        student.invoices
-          .filter((invoice) => {
-            if (
-              !collectibleInvoiceIds.has(invoice.id) ||
-              selectedYearInvoiceIds.has(invoice.id)
-            ) {
-              return false;
-            }
-            const originStarts = [
-              invoice.academicYearLabel,
-              invoice.term.academicYear?.label,
-            ].flatMap((originLabel) => {
-              if (!originLabel) return [];
-              try {
-                return [academicYearBounds(originLabel).start];
-              } catch {
-                return [];
-              }
-            });
-            if (originStarts.some((originStart) => originStart > start)) {
-              return true;
-            }
-            // Prior-year and unparseable/unlabeled legacy invoices are then
-            // classified by due date rather than silently discarded.
-            return false;
-          })
-          .map((invoice) => invoice.id),
-      );
       for (const line of position.installments) {
         if (
-          !collectibleInvoiceIds.has(line.invoiceId) ||
+          !targetIds.has(line.invoiceId) ||
+          !line.dueDate ||
           line.outstandingXof <= 0
         ) {
           continue;
         }
-        const selectedYear = selectedYearInvoiceIds.has(line.invoiceId);
-        // Institutional cashflow includes collectible debt already due before
-        // the selected July close, even when the charge originated in a prior
-        // year. All selected-year debt remains visible, including null or
-        // post-year custom dates. Unrelated future-year debt stays out.
-        if (
-          futureYearInvoiceIds.has(line.invoiceId) ||
-          (!selectedYear &&
-            (!line.dueDate || line.dueDate >= endExclusiveDateKey))
-        ) {
-          continue;
-        }
-        if (!line.dueDate) {
-          unscheduledXof = toApiXof(
-            unscheduledXof + line.outstandingXof,
-            "Unscheduled Bursar receivables",
-          );
-          continue;
-        }
         const dueMonth = line.dueDate.slice(0, 7);
-        scheduledByMonth[dueMonth] = toApiXof(
-          (scheduledByMonth[dueMonth] ?? 0) + line.outstandingXof,
+        const month = scheduledReceivableForecastMonth(
+          dueMonth,
+          monthKeyInDakar(new Date()),
+          months,
+        );
+        if (!month) continue;
+        result[month] = toApiXof(
+          (result[month] ?? 0) + line.outstandingXof,
           "Scheduled Bursar collections",
         );
       }
     }
-    return { scheduledByMonth, unscheduledXof };
+    return result;
   }
 
   async forecast(input: {
     academicYear: string;
-    case?: CashflowSimulationCase;
-    customAssumptions?: CashflowSimulationAssumptions;
-    minimumReserveXof?: number;
-    shock?: CashflowSimulationShock;
-    /** Rolling-deploy compatibility for the previous portal. */
-    scenario?: "conservative" | "base" | "optimistic";
+    scenario: ForecastScenario;
     collectionRatePercent?: number;
     expenseGrowthPercent?: number;
   }) {
@@ -1341,12 +1291,6 @@ export class OperatingBudgetService {
     if (!budget) {
       throw new BadRequestException(
         "An administrator-approved operating budget is required before forecasting",
-      );
-    }
-    const asOf = new Date();
-    if (asOf >= academicYearBounds(year.label).endExclusive) {
-      throw new BadRequestException(
-        "Cashflow simulation is available only for current or future academic years; use actuals and deviation for a completed year",
       );
     }
     if (
@@ -1365,137 +1309,41 @@ export class OperatingBudgetService {
         "Monthly expense growth must be between -100 and 100",
       );
     }
-    const [records, receivables] = await Promise.all([
+    const [records, scheduledBursarByMonth] = await Promise.all([
       this.actualRecords(this.prisma, year),
-      this.remainingBursarReceivables(year),
+      this.remainingScheduledBursarByMonth(year),
     ]);
-    const legacyScenario = input.scenario;
-    const legacyCase =
-      legacyScenario === "conservative"
-        ? ("stress" as const)
-        : legacyScenario === "optimistic"
-          ? ("upside" as const)
-          : ("approved_plan" as const);
-    const requestedCase = input.case ?? legacyCase;
-    let selectedCase = requestedCase;
-    let selectedCustomAssumptions = input.customAssumptions;
-    if (legacyScenario) {
-      const preset = CASHFLOW_SIMULATION_PRESETS[legacyCase];
-      const incomeFactor =
-        legacyScenario === "conservative"
-          ? 0.9
-          : legacyScenario === "optimistic"
-            ? 1.08
-            : 1;
-      const expenseFactor =
-        legacyScenario === "conservative"
-          ? 1.05
-          : legacyScenario === "optimistic"
-            ? 0.97
-            : 1;
-      selectedCase = "custom";
-      selectedCustomAssumptions = {
-        eventualRealizationPercent: Math.min(
-          100,
-          (input.collectionRatePercent ?? 100) * incomeFactor,
-        ),
-        collectionTimingPercent: {
-          ...preset.collectionTimingPercent,
-        },
-        // Legacy monthly growth has no exact equivalent. During the rolling
-        // deploy it becomes a bounded one-time variance, avoiding compounding.
-        remainingExpenseVariancePercent: Math.max(
-          -100,
-          Math.min(
-            100,
-            ((1 + (input.expenseGrowthPercent ?? 0) / 100) * expenseFactor -
-              1) *
-              100,
-          ),
-        ),
-      };
-    }
-    const common = {
+    const asOf = new Date();
+    const result = forecastOperatingBudget({
       label: year.label,
       openingBalanceXof: toApiXof(budget.openingBalanceXof, "Opening balance"),
       planned: this.plannedCells(year.label, budget.lines),
       actual: this.toActualCells(records),
+      scenario: input.scenario,
       today: asOf,
-      scheduledBursarByMonth: receivables.scheduledByMonth,
-      unscheduledBursarXof: receivables.unscheduledXof,
-      minimumReserveXof: input.minimumReserveXof,
-      shock: input.shock,
-    };
-    const result = forecastOperatingBudget({
-      ...common,
-      case: selectedCase,
-      customAssumptions: selectedCustomAssumptions,
+      collectionRatePercent: input.collectionRatePercent,
+      expenseGrowthPercent: input.expenseGrowthPercent,
+      scheduledBursarByMonth,
     });
-    const presetComparisons = (
-      ["approved_plan", "stress", "upside"] as const
-    ).map((simulationCase) => {
-      const simulation = forecastOperatingBudget({
-        ...common,
-        case: simulationCase,
-      });
-      return {
-        case: simulation.case,
-        assumptions: simulation.assumptions,
-        summary: simulation.summary,
-      };
-    });
-    const comparison = [
-      ...presetComparisons,
-      ...(selectedCase === "custom"
-        ? [
-            {
-              case: result.case,
-              assumptions: result.assumptions,
-              summary: result.summary,
-            },
-          ]
-        : []),
-    ];
-    const responseMonths = result.months.map((month) => ({
-      ...month,
-      // Legacy aliases are additive and can be removed after both ECS services
-      // have run the new portal for one full release window.
-      incomeXof: month.projectedIncomeXof,
-      expenseXof: month.projectedExpenseXof,
-      balanceXof: month.projectedBalanceXof,
-      source:
-        month.state === "recorded_actual"
-          ? ("actual" as const)
-          : ("forecast" as const),
-    }));
-    const responseScenario =
-      legacyScenario ??
-      (requestedCase === "stress"
-        ? "conservative"
-        : requestedCase === "upside"
-          ? "optimistic"
-          : "base");
     return {
-      case: result.case,
-      assumptions: result.assumptions,
+      scenario: result.scenario,
+      collectionRatePercent: result.metadata.collectionRatePercent,
+      expenseGrowthPercent: result.metadata.expenseGrowthPercent,
       metadata: {
         asOfDate: asOf.toISOString(),
         actualThroughMonth: monthKeyInDakar(asOf),
         forecastStatus: "ready" as const,
         basisStatus: "approved" as const,
         basisRevision: budget.revision,
-        persisted: false as const,
-        currency: "XOF" as const,
       },
-      summary: result.summary,
-      driverBridge: result.driverBridge,
-      months: responseMonths,
-      comparison,
-      warnings: result.warnings,
-      scenario: responseScenario,
-      collectionRatePercent: result.assumptions.eventualRealizationPercent,
-      expenseGrowthPercent: result.assumptions.remainingExpenseVariancePercent,
-      projectedClosingBalanceXof: result.summary.projectedYearEndCashXof,
+      months: result.months.map((month) => ({
+        month: month.month,
+        incomeXof: month.forecastIncomeXof,
+        expenseXof: month.forecastExpenseXof,
+        balanceXof: month.forecastBalanceXof,
+        source: month.source,
+      })),
+      projectedClosingBalanceXof: result.projectedClosingBalanceXof,
     };
   }
 

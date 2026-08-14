@@ -1,25 +1,33 @@
 "use client";
 
-import { ChevronDown, ChevronUp } from "lucide-react";
 import { useId, useMemo, useState, type KeyboardEvent } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import type {
+  OperatingBudgetCashflowMonth,
   OperatingBudgetForecast,
-  OperatingBudgetForecastMonth,
   OperatingBudgetMonth,
 } from "@/lib/api";
 import { formatXof, formatXofCompact } from "@/lib/format";
 import styles from "./BudgetCashflowChart.module.css";
 
-const WIDTH = 1080;
-const HEIGHT = 408;
-const PLOT = { left: 76, right: 88, top: 54, bottom: 66 };
+const WIDTH = 980;
+const HEIGHT = 390;
+const PLOT = { left: 76, right: 78, top: 46, bottom: 62 };
+const BAR_BOTTOM = HEIGHT - PLOT.bottom;
 
-type ChartPoint = OperatingBudgetForecastMonth & { label: string };
+type ChartPoint = {
+  month: string;
+  label: string;
+  incomeXof: number;
+  expenseXof: number;
+  balanceXof: number;
+  source: "actual" | "forecast";
+};
+
 type VisibleSeries = {
   income: boolean;
   expense: boolean;
-  selectedCash: boolean;
-  approvedCash: boolean;
+  balance: boolean;
 };
 
 function compactTick(value: number): string {
@@ -33,40 +41,43 @@ function compactTick(value: number): string {
   return `${value}`;
 }
 
-function stateLabel(state: OperatingBudgetForecastMonth["state"]): string {
-  if (state === "recorded_actual") return "Recorded actual";
-  if (state === "actual_plus_projection")
-    return "Actual through today + projected remainder";
-  return "Future projection";
-}
-
-function pathForIndexes(
+function linePath(
   points: ChartPoint[],
-  indexes: number[],
-  value: (point: ChartPoint) => number,
+  source: "actual" | "forecast",
   x: (index: number) => number,
-  y: (amount: number) => number,
+  y: (value: number) => number,
 ): string {
-  return indexes
+  const firstForecast = points.findIndex(
+    (point) => point.source === "forecast",
+  );
+  const matching = points
+    .map((point, index) => ({ point, index }))
+    .filter(({ point, index }) => {
+      if (source === "actual") return point.source === "actual";
+      return firstForecast >= 0 && index >= Math.max(0, firstForecast - 1);
+    });
+
+  return matching
     .map(
-      (index, pathIndex) =>
-        `${pathIndex === 0 ? "M" : "L"}${x(index).toFixed(1)},${y(value(points[index]!)).toFixed(1)}`,
+      ({ point, index }, pathIndex) =>
+        `${pathIndex === 0 ? "M" : "L"}${x(index).toFixed(1)},${y(point.balanceXof).toFixed(1)}`,
     )
     .join(" ");
 }
 
-function signedCompact(value: number): string {
-  if (value === 0) return formatXofCompact(0);
-  return `${value > 0 ? "+" : "−"}${formatXofCompact(Math.abs(value))}`;
+function sourceLabel(source: ChartPoint["source"]): string {
+  return source === "actual" ? "Recorded actual" : "Forecast";
 }
 
 export function BudgetCashflowChart({
   months,
+  cashflow,
   forecast,
   forecastLoading = false,
 }: {
   months: OperatingBudgetMonth[];
-  forecast: OperatingBudgetForecast;
+  cashflow: OperatingBudgetCashflowMonth[];
+  forecast: OperatingBudgetForecast | null;
   forecastLoading?: boolean;
 }) {
   const titleId = useId();
@@ -78,23 +89,54 @@ export function BudgetCashflowChart({
   const [visible, setVisible] = useState<VisibleSeries>({
     income: true,
     expense: true,
-    selectedCash: true,
-    approvedCash: true,
+    balance: true,
   });
 
   const points = useMemo<ChartPoint[]>(() => {
-    const labels = new Map(months.map((month) => [month.key, month.label]));
-    return forecast.months.map((point) => ({
-      ...point,
-      label: labels.get(point.month) ?? point.month,
-    }));
-  }, [forecast.months, months]);
+    const base = new Map(cashflow.map((point) => [point.month, point]));
+    const projected = new Map(
+      (forecast?.months ?? []).map((point) => [point.month, point]),
+    );
+
+    return months.map((month) => {
+      const raw = base.get(month.key);
+      const projection = projected.get(month.key);
+      const source =
+        projection?.source ??
+        (raw?.actualBalanceXof === null ? "forecast" : "actual");
+      return {
+        month: month.key,
+        label: month.label,
+        incomeXof:
+          projection?.incomeXof ??
+          (source === "forecast"
+            ? (raw?.forecastIncomeXof ?? raw?.plannedIncomeXof ?? 0)
+            : (raw?.actualIncomeXof ?? 0)),
+        expenseXof:
+          projection?.expenseXof ??
+          (source === "forecast"
+            ? (raw?.forecastExpenseXof ?? raw?.plannedExpenseXof ?? 0)
+            : (raw?.actualExpenseXof ?? 0)),
+        balanceXof:
+          projection?.balanceXof ??
+          (source === "forecast"
+            ? (raw?.forecastBalanceXof ?? raw?.plannedBalanceXof ?? 0)
+            : (raw?.actualBalanceXof ?? 0)),
+        source,
+      };
+    });
+  }, [cashflow, forecast?.months, months]);
 
   if (points.length === 0) {
     return (
-      <section className={styles.chartCard}>
-        <h3>Monthly cash outlook</h3>
-        <p>Monthly results will appear when the simulation has plan data.</p>
+      <section className="card" style={{ margin: 0 }}>
+        <h2 className="h1" style={{ fontSize: 17 }}>
+          Monthly cashflow
+        </h2>
+        <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>
+          Cashflow will appear after this academic year has budget or actual
+          entries.
+        </p>
       </section>
     );
   }
@@ -104,27 +146,22 @@ export function BudgetCashflowChart({
   const step = plotWidth / points.length;
   const x = (index: number) => PLOT.left + step * index + step / 2;
   const flowValues = points.flatMap((point) => [
-    point.projectedIncomeXof,
-    point.projectedExpenseXof,
+    point.incomeXof,
+    point.expenseXof,
   ]);
   const flowMin = Math.min(0, ...flowValues);
   const flowMax = Math.max(1, ...flowValues);
   const flowSpan = Math.max(1, flowMax - flowMin);
-  const flowY = (value: number) =>
-    PLOT.top + ((flowMax - value) / flowSpan) * plotHeight;
-  const flowZeroY = flowY(0);
-  const reserveXof = forecast.assumptions.minimumReserveXof;
-  const balanceValues = points.flatMap((point) => [
-    point.projectedBalanceXof,
-    point.approvedPlanBalanceXof,
-  ]);
-  balanceValues.push(0, reserveXof);
+  const balanceValues = points.map((point) => point.balanceXof);
   const balanceMin = Math.min(0, ...balanceValues);
   const balanceMax = Math.max(1, ...balanceValues);
   const balanceSpan = Math.max(1, balanceMax - balanceMin);
+  const flowY = (value: number) =>
+    PLOT.top + ((flowMax - value) / flowSpan) * plotHeight;
+  const flowZeroY = flowY(0);
   const balanceY = (value: number) =>
     PLOT.top + ((balanceMax - value) / balanceSpan) * plotHeight;
-  const barWidth = Math.min(20, step * 0.27);
+  const barWidth = Math.min(18, step * 0.25);
   const flowTicks = [
     ...new Set(
       [0, 0.25, 0.5, 0.75, 1]
@@ -138,54 +175,20 @@ export function BudgetCashflowChart({
     const value = balanceMin + balanceSpan * ratio;
     return { value, y: balanceY(value) };
   });
-  const currentIndex = points.findIndex(
-    (point) => point.state === "actual_plus_projection",
+  const firstForecast = points.findIndex(
+    (point) => point.source === "forecast",
   );
-  const firstFutureIndex = points.findIndex(
-    (point) => point.state === "future_projection",
-  );
-  const firstProjectedIndex = points.findIndex(
-    (point) => point.state !== "recorded_actual",
-  );
-  const recordedIndexes = points
-    .map((point, index) => ({ point, index }))
-    .filter(({ point }) => point.state === "recorded_actual")
-    .map(({ index }) => index);
-  const projectedIndexes =
-    firstProjectedIndex < 0
-      ? []
-      : points
-          .map((_, index) => index)
-          .filter((index) => index >= Math.max(0, firstProjectedIndex - 1));
-  const allIndexes = points.map((_, index) => index);
-  const defaultIndex =
-    currentIndex >= 0
-      ? currentIndex
-      : Math.max(0, recordedIndexes.at(-1) ?? firstFutureIndex ?? 0);
   const selectedIndex = activeIndex ?? pinnedIndex;
-  const detailIndex = selectedIndex ?? defaultIndex;
-  const selected = points[detailIndex]!;
+  const selected = selectedIndex === null ? null : points[selectedIndex];
+  const accessibleIndex = selectedIndex ?? 0;
+  const accessiblePoint = points[accessibleIndex]!;
 
   function moveSelection(nextIndex: number) {
     setActiveIndex(Math.min(points.length - 1, Math.max(0, nextIndex)));
   }
 
-  function indexFromPointer(
-    clientX: number,
-    bounds: Pick<DOMRect, "left" | "width">,
-  ): number {
-    const ratio = Math.max(
-      0,
-      Math.min(1, (clientX - bounds.left) / bounds.width),
-    );
-    return Math.min(
-      points.length - 1,
-      Math.max(0, Math.floor(ratio * points.length)),
-    );
-  }
-
   function handleKeyDown(event: KeyboardEvent<SVGRectElement>) {
-    const current = selectedIndex ?? defaultIndex;
+    const current = selectedIndex ?? 0;
     if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
       event.preventDefault();
       moveSelection(current - 1);
@@ -211,29 +214,58 @@ export function BudgetCashflowChart({
 
   return (
     <section
-      className={styles.chartCard}
+      className="card"
+      style={{ margin: 0, padding: 0, overflow: "hidden" }}
       aria-labelledby={titleId}
-      aria-busy={forecastLoading}
     >
-      <div className={styles.chartHead}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 18,
+          flexWrap: "wrap",
+          padding: "18px 18px 8px",
+        }}
+      >
         <div>
-          <span className={styles.eyebrow}>Monthly outlook</span>
-          <h3 id={titleId}>Actual cash and simulated path</h3>
-          <p id={descriptionId}>
-            Monthly income and expense use the left scale; cash balances use the
-            right. The approved-plan line remains visible for comparison.
+          <h2 id={titleId} className="h1" style={{ fontSize: 17 }}>
+            Monthly cashflow
+          </h2>
+          <p
+            id={descriptionId}
+            className="muted"
+            style={{ margin: "4px 0 0", fontSize: 12.5 }}
+          >
+            Signed income and expense use the left scale; closing cash uses the
+            right. Negative net flows extend below zero. Future months follow
+            the selected scenario.
           </p>
         </div>
-        <div className={styles.legend} role="group" aria-label="Chart series">
+        <div
+          role="group"
+          aria-label="Chart series"
+          style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+        >
           {(
             [
-              ["income", "Income", "income"],
-              ["expense", "Expense", "expense"],
-              ["selectedCash", "Selected cash", "selected"],
-              ["approvedCash", "Approved plan", "approved"],
+              ["income", "Income", "var(--success-500)"],
+              ["expense", "Expense", "var(--daust-orange-600)"],
+              ["balance", "Closing cash", "var(--accent)"],
             ] as const
-          ).map(([key, label, swatch]) => (
-            <label key={key}>
+          ).map(([key, label, color]) => (
+            <label
+              key={key}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11.5,
+                fontWeight: 600,
+                color: "var(--fg2)",
+                cursor: "pointer",
+              }}
+            >
               <input
                 type="checkbox"
                 checked={visible[key]}
@@ -243,79 +275,78 @@ export function BudgetCashflowChart({
                     [key]: event.target.checked,
                   }))
                 }
+                style={{
+                  width: 14,
+                  height: 14,
+                  padding: 0,
+                  accentColor: color,
+                }}
               />
-              <span className={styles.legendSwatch} data-swatch={swatch} />
+              <span
+                aria-hidden="true"
+                style={{
+                  display: "inline-block",
+                  width: key === "balance" ? 16 : 8,
+                  height: key === "balance" ? 2 : 8,
+                  borderRadius: key === "balance" ? 999 : 2,
+                  background: color,
+                }}
+              />
               {label}
             </label>
           ))}
         </div>
       </div>
 
-      <div className={styles.stateKey} aria-label="Time-state key">
-        <span data-state="actual">Recorded actual</span>
-        <span data-state="current">Actual + projected remainder</span>
-        <span data-state="future">Future projection</span>
-        {reserveXof > 0 && (
-          <span data-state="reserve">
-            Reserve threshold {formatXofCompact(reserveXof)}
-          </span>
-        )}
-      </div>
-
-      <div className={styles.plotScroller}>
+      <div style={{ position: "relative", overflowX: "auto" }}>
         {forecastLoading && (
-          <span className={styles.loadingPill} role="status">
-            Updating simulation…
-          </span>
+          <div
+            role="status"
+            style={{
+              position: "absolute",
+              right: 18,
+              top: 6,
+              zIndex: 2,
+              padding: "5px 9px",
+              borderRadius: 999,
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              color: "var(--fg3)",
+              fontSize: 11,
+            }}
+          >
+            Updating forecast…
+          </div>
         )}
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           role="group"
           aria-labelledby={`${titleId} ${descriptionId}`}
-          className={styles.chart}
+          style={{ display: "block", width: "100%", minWidth: 720 }}
         >
-          {currentIndex >= 0 && (
+          {firstForecast >= 0 && (
             <g aria-hidden="true">
               <rect
-                x={x(currentIndex) - step / 2}
+                x={Math.max(PLOT.left, x(firstForecast) - step / 2)}
                 y={PLOT.top}
-                width={step}
+                width={
+                  WIDTH -
+                  PLOT.right -
+                  Math.max(PLOT.left, x(firstForecast) - step / 2)
+                }
                 height={plotHeight}
-                fill="var(--daust-orange)"
-                opacity="0.055"
-              />
-              <text
-                x={x(currentIndex)}
-                y={PLOT.top + 14}
-                textAnchor="middle"
-                fill="var(--chart-warning)"
-                fontSize="8.5"
-                fontWeight="700"
-                letterSpacing=".05em"
-              >
-                ACTUAL + PROJECTION
-              </text>
-            </g>
-          )}
-          {firstFutureIndex >= 0 && (
-            <g aria-hidden="true">
-              <rect
-                x={x(firstFutureIndex) - step / 2}
-                y={PLOT.top}
-                width={WIDTH - PLOT.right - (x(firstFutureIndex) - step / 2)}
-                height={plotHeight}
-                fill="var(--accent-bg)"
+                fill="var(--bg-tint)"
                 opacity="0.58"
               />
               <text
-                x={x(firstFutureIndex) - step / 2 + 9}
-                y={PLOT.top + 14}
+                x={Math.max(PLOT.left + 8, x(firstForecast) - step / 2 + 9)}
+                y={PLOT.top + 15}
                 fill="var(--fg3)"
-                fontSize="8.5"
+                fontSize="10.5"
                 fontWeight="700"
                 letterSpacing=".06em"
               >
-                FUTURE PROJECTION
+                FORECAST
               </text>
             </g>
           )}
@@ -330,14 +361,14 @@ export function BudgetCashflowChart({
                 stroke={
                   tick.value === 0 ? "var(--border-strong)" : "var(--divider)"
                 }
-                strokeWidth={tick.value === 0 ? 1.4 : 1}
+                strokeWidth={tick.value === 0 ? "1.4" : "1"}
               />
               <text
                 x={PLOT.left - 10}
                 y={tick.y + 4}
                 textAnchor="end"
                 fill="var(--fg3)"
-                fontSize="10"
+                fontSize="10.5"
               >
                 {compactTick(tick.value)}
               </text>
@@ -349,70 +380,49 @@ export function BudgetCashflowChart({
               x={WIDTH - PLOT.right + 10}
               y={tick.y + 4}
               fill="var(--fg3)"
-              fontSize="10"
+              fontSize="10.5"
               aria-hidden="true"
             >
               {compactTick(tick.value)}
             </text>
           ))}
 
-          {reserveXof > 0 && (
-            <g aria-hidden="true">
-              <line
-                x1={PLOT.left}
-                x2={WIDTH - PLOT.right}
-                y1={balanceY(reserveXof)}
-                y2={balanceY(reserveXof)}
-                stroke="var(--error-500)"
-                strokeWidth="1.4"
-                strokeDasharray="4 4"
-              />
-              <text
-                x={WIDTH - PLOT.right - 5}
-                y={balanceY(reserveXof) - 6}
-                textAnchor="end"
-                fill="var(--chart-danger)"
-                fontSize="9"
-                fontWeight="700"
-              >
-                RESERVE
-              </text>
-            </g>
-          )}
-
           {points.map((point, index) => {
             const center = x(index);
-            const projected = point.state !== "recorded_actual";
             return (
               <g key={point.month} aria-hidden="true">
                 {visible.income && (
                   <rect
                     x={center - barWidth - 2}
-                    y={Math.min(flowZeroY, flowY(point.projectedIncomeXof))}
+                    y={Math.min(flowZeroY, flowY(point.incomeXof))}
                     width={barWidth}
-                    height={Math.abs(
-                      flowZeroY - flowY(point.projectedIncomeXof),
-                    )}
-                    rx="2.5"
+                    height={Math.abs(flowZeroY - flowY(point.incomeXof))}
+                    rx="3"
                     fill="var(--success-500)"
-                    opacity={projected ? 0.42 : 0.86}
-                    stroke={projected ? "var(--success-500)" : "none"}
-                    strokeDasharray={projected ? "3 2" : undefined}
+                    opacity={point.source === "forecast" ? 0.44 : 0.88}
+                    stroke={
+                      point.source === "forecast"
+                        ? "var(--success-500)"
+                        : "none"
+                    }
+                    strokeDasharray="3 2"
                   />
                 )}
                 {visible.expense && (
                   <rect
                     x={center + 2}
-                    y={Math.min(flowZeroY, flowY(point.projectedExpenseXof))}
+                    y={Math.min(flowZeroY, flowY(point.expenseXof))}
                     width={barWidth}
-                    height={Math.abs(
-                      flowZeroY - flowY(point.projectedExpenseXof),
-                    )}
-                    rx="2.5"
+                    height={Math.abs(flowZeroY - flowY(point.expenseXof))}
+                    rx="3"
                     fill="var(--daust-orange-600)"
-                    opacity={projected ? 0.4 : 0.84}
-                    stroke={projected ? "var(--daust-orange-600)" : "none"}
-                    strokeDasharray={projected ? "3 2" : undefined}
+                    opacity={point.source === "forecast" ? 0.42 : 0.86}
+                    stroke={
+                      point.source === "forecast"
+                        ? "var(--daust-orange-600)"
+                        : "none"
+                    }
+                    strokeDasharray="3 2"
                   />
                 )}
                 <text
@@ -420,8 +430,8 @@ export function BudgetCashflowChart({
                   y={HEIGHT - 30}
                   textAnchor="middle"
                   fill="var(--fg3)"
-                  fontSize="10"
-                  fontWeight={detailIndex === index ? "700" : "500"}
+                  fontSize="10.5"
+                  fontWeight={selectedIndex === index ? "700" : "500"}
                 >
                   {point.label}
                 </text>
@@ -429,65 +439,31 @@ export function BudgetCashflowChart({
             );
           })}
 
-          {visible.approvedCash && (
-            <path
-              d={pathForIndexes(
-                points,
-                allIndexes,
-                (point) => point.approvedPlanBalanceXof,
-                x,
-                balanceY,
-              )}
-              fill="none"
-              stroke="var(--fg-faint)"
-              strokeWidth="2"
-              strokeDasharray="2 5"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              aria-hidden="true"
-            />
-          )}
-          {visible.selectedCash && (
+          {visible.balance && (
             <g aria-hidden="true">
-              {recordedIndexes.length > 0 && (
-                <path
-                  d={pathForIndexes(
-                    points,
-                    recordedIndexes,
-                    (point) => point.projectedBalanceXof,
-                    x,
-                    balanceY,
-                  )}
-                  fill="none"
-                  stroke="var(--accent)"
-                  strokeWidth="3"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-              )}
-              {projectedIndexes.length > 0 && (
-                <path
-                  d={pathForIndexes(
-                    points,
-                    projectedIndexes,
-                    (point) => point.projectedBalanceXof,
-                    x,
-                    balanceY,
-                  )}
-                  fill="none"
-                  stroke="var(--accent)"
-                  strokeWidth="3"
-                  strokeDasharray="7 6"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-              )}
+              <path
+                d={linePath(points, "actual", x, balanceY)}
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth="3"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+              <path
+                d={linePath(points, "forecast", x, balanceY)}
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth="3"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                strokeDasharray="7 6"
+              />
               {points.map((point, index) => (
                 <circle
                   key={point.month}
                   cx={x(index)}
-                  cy={balanceY(point.projectedBalanceXof)}
-                  r={detailIndex === index ? 4.8 : 3}
+                  cy={balanceY(point.balanceXof)}
+                  r={selectedIndex === index ? 5 : 3}
                   fill="var(--surface)"
                   stroke="var(--accent)"
                   strokeWidth="2"
@@ -496,98 +472,81 @@ export function BudgetCashflowChart({
             </g>
           )}
 
-          {selectedIndex !== null && (
+          {selected && selectedIndex !== null && (
             <g aria-hidden="true">
               <line
-                x1={x(detailIndex)}
-                x2={x(detailIndex)}
+                x1={x(selectedIndex)}
+                x2={x(selectedIndex)}
                 y1={PLOT.top}
-                y2={PLOT.top + plotHeight}
+                y2={BAR_BOTTOM}
                 stroke="var(--fg3)"
                 strokeDasharray="2 4"
               />
               <rect
                 x={Math.min(
-                  WIDTH - 316,
-                  Math.max(PLOT.left, x(detailIndex) - 130),
+                  WIDTH - 282,
+                  Math.max(PLOT.left, x(selectedIndex) - 120),
                 )}
-                y={PLOT.top + 20}
-                width="274"
-                height="120"
-                rx="9"
+                y={PLOT.top + 12}
+                width="248"
+                height="96"
+                rx="10"
                 fill="var(--surface)"
                 stroke="var(--border-strong)"
               />
               <text
                 x={
                   Math.min(
-                    WIDTH - 316,
-                    Math.max(PLOT.left, x(detailIndex) - 130),
+                    WIDTH - 282,
+                    Math.max(PLOT.left, x(selectedIndex) - 120),
                   ) + 14
                 }
-                y={PLOT.top + 42}
+                y={PLOT.top + 34}
                 fill="var(--fg1)"
-                fontSize="11.5"
+                fontSize="12"
                 fontWeight="700"
               >
-                {selected.label} · {stateLabel(selected.state)}
+                {selected.label} · {sourceLabel(selected.source)}
               </text>
               <text
                 x={
                   Math.min(
-                    WIDTH - 316,
-                    Math.max(PLOT.left, x(detailIndex) - 130),
+                    WIDTH - 282,
+                    Math.max(PLOT.left, x(selectedIndex) - 120),
                   ) + 14
                 }
-                y={PLOT.top + 63}
+                y={PLOT.top + 55}
                 fill="var(--success-500)"
-                fontSize="10.5"
+                fontSize="11"
               >
-                Income {formatXofCompact(selected.projectedIncomeXof)}
+                Income {formatXofCompact(selected.incomeXof)}
               </text>
               <text
                 x={
                   Math.min(
-                    WIDTH - 316,
-                    Math.max(PLOT.left, x(detailIndex) - 130),
+                    WIDTH - 282,
+                    Math.max(PLOT.left, x(selectedIndex) - 120),
                   ) + 14
                 }
-                y={PLOT.top + 82}
-                fill="var(--chart-warning)"
-                fontSize="10.5"
+                y={PLOT.top + 74}
+                fill="var(--daust-orange-600)"
+                fontSize="11"
               >
-                Expense {formatXofCompact(selected.projectedExpenseXof)}
+                Expense {formatXofCompact(selected.expenseXof)}
               </text>
               <text
                 x={
                   Math.min(
-                    WIDTH - 316,
-                    Math.max(PLOT.left, x(detailIndex) - 130),
+                    WIDTH - 282,
+                    Math.max(PLOT.left, x(selectedIndex) - 120),
                   ) + 14
                 }
-                y={PLOT.top + 101}
-                fill="var(--accent)"
-                fontSize="10.5"
+                y={PLOT.top + 93}
+                fill="var(--fg2)"
+                fontSize="11"
                 fontWeight="700"
               >
-                Selected cash {formatXofCompact(selected.projectedBalanceXof)}
-              </text>
-              <text
-                x={
-                  Math.min(
-                    WIDTH - 316,
-                    Math.max(PLOT.left, x(detailIndex) - 130),
-                  ) + 14
-                }
-                y={PLOT.top + 120}
-                fill="var(--fg3)"
-                fontSize="10"
-              >
-                vs approved{" "}
-                {signedCompact(
-                  selected.projectedBalanceXof -
-                    selected.approvedPlanBalanceXof,
-                )}
+                Closing cash {formatXofCompact(selected.balanceXof)}
               </text>
             </g>
           )}
@@ -601,115 +560,131 @@ export function BudgetCashflowChart({
             fill="transparent"
             tabIndex={0}
             role="slider"
-            aria-label="Cashflow chart month"
+            aria-label="Chart month"
             aria-describedby={interactionId}
             aria-valuemin={1}
             aria-valuemax={points.length}
-            aria-valuenow={detailIndex + 1}
-            aria-valuetext={`${selected.label}. ${stateLabel(selected.state)}. Income ${formatXof(selected.projectedIncomeXof)}. Expense ${formatXof(selected.projectedExpenseXof)}. Selected closing cash ${formatXof(selected.projectedBalanceXof)}. Approved-plan closing cash ${formatXof(selected.approvedPlanBalanceXof)}.`}
+            aria-valuenow={accessibleIndex + 1}
+            aria-valuetext={`${accessiblePoint.label}. ${sourceLabel(accessiblePoint.source)}. Income ${formatXof(accessiblePoint.incomeXof)}. Expense ${formatXof(accessiblePoint.expenseXof)}. Closing cash ${formatXof(accessiblePoint.balanceXof)}.`}
             aria-orientation="horizontal"
             onKeyDown={handleKeyDown}
             onFocus={() =>
-              setActiveIndex(
-                (current) => current ?? pinnedIndex ?? defaultIndex,
-              )
+              setActiveIndex((current) => current ?? pinnedIndex ?? 0)
             }
             onBlur={() => setActiveIndex(null)}
             onMouseLeave={() => setActiveIndex(null)}
             onMouseMove={(event) => {
               const bounds = event.currentTarget.getBoundingClientRect();
-              setActiveIndex(indexFromPointer(event.clientX, bounds));
+              const ratio = Math.max(
+                0,
+                Math.min(1, (event.clientX - bounds.left) / bounds.width),
+              );
+              setActiveIndex(
+                Math.min(
+                  points.length - 1,
+                  Math.max(0, Math.floor(ratio * points.length)),
+                ),
+              );
             }}
             onClick={(event) => {
-              const bounds = event.currentTarget.getBoundingClientRect();
-              const clickedIndex = indexFromPointer(event.clientX, bounds);
-              setActiveIndex(clickedIndex);
-              setPinnedIndex(clickedIndex);
               event.currentTarget.focus();
+              if (activeIndex !== null) setPinnedIndex(activeIndex);
             }}
           />
         </svg>
       </div>
 
-      <div className={styles.mobileMonthDetail} aria-live="polite">
-        <strong>{selected.label}</strong>
-        <span>{stateLabel(selected.state)}</span>
-        <dl>
-          <div>
-            <dt>Income</dt>
-            <dd>{formatXof(selected.projectedIncomeXof)}</dd>
-          </div>
-          <div>
-            <dt>Expense</dt>
-            <dd>{formatXof(selected.projectedExpenseXof)}</dd>
-          </div>
-          <div>
-            <dt>Closing cash</dt>
-            <dd>{formatXof(selected.projectedBalanceXof)}</dd>
-          </div>
-        </dl>
-      </div>
-
-      <p id={interactionId} className={styles.srOnly}>
-        Use the arrow keys to move between months. Home and End jump to the
-        first or last month. Enter or Space pins a month. Escape clears it.
-      </p>
-      <p role="status" aria-live="polite" className={styles.srOnly}>
-        {selectedIndex === null
-          ? ""
-          : `${selected.label}. ${stateLabel(selected.state)}. Income ${formatXof(selected.projectedIncomeXof)}. Expense ${formatXof(selected.projectedExpenseXof)}. Selected closing cash ${formatXof(selected.projectedBalanceXof)}.`}
+      <p
+        id={interactionId}
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+        }}
+      >
+        Use the left and right arrow keys to move between months. Home and End
+        jump to the first or last month. Press Enter or Space to pin a month.
+        Press Escape to clear the pinned month.
       </p>
 
-      <div className={styles.tableDisclosure}>
+      <p
+        role="status"
+        aria-live="polite"
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+        }}
+      >
+        {selected
+          ? `${selected.label}. ${sourceLabel(selected.source)}. Income ${formatXof(selected.incomeXof)}. Expense ${formatXof(selected.expenseXof)}. Closing cash ${formatXof(selected.balanceXof)}.`
+          : ""}
+      </p>
+
+      <div style={{ borderTop: "1px solid var(--divider)" }}>
         <button
           type="button"
           onClick={() => setShowTable((current) => !current)}
           aria-expanded={showTable}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            width: "100%",
+            padding: "10px 18px",
+            border: 0,
+            borderRadius: 0,
+            background: "transparent",
+            color: "var(--fg2)",
+            fontSize: 12,
+            fontWeight: 600,
+          }}
         >
           {showTable ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {showTable ? "Hide" : "Show"} exact monthly data
+          {showTable ? "Hide" : "Show"} accessible data table
         </button>
         {showTable && (
-          <div className={styles.tableScroller}>
+          <div style={{ overflowX: "auto", padding: "0 18px 16px" }}>
             <table>
-              <caption>Monthly cashflow simulation in exact XOF</caption>
+              <caption
+                style={{
+                  textAlign: "left",
+                  color: "var(--fg3)",
+                  fontSize: 12,
+                  padding: "6px 0 10px",
+                }}
+              >
+                Monthly cashflow figures in FCFA
+              </caption>
               <thead>
                 <tr>
                   <th>Month</th>
-                  <th>Time state</th>
-                  <th>Income</th>
-                  <th>Expense</th>
-                  <th>Selected closing cash</th>
-                  <th>Approved-plan closing cash</th>
-                  <th>Difference</th>
-                  <th>Reserve status</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: "right" }}>Income</th>
+                  <th style={{ textAlign: "right" }}>Expense</th>
+                  <th style={{ textAlign: "right" }}>Closing cash</th>
                 </tr>
               </thead>
               <tbody>
-                {points.map((point) => {
-                  const difference =
-                    point.projectedBalanceXof - point.approvedPlanBalanceXof;
-                  return (
-                    <tr key={point.month}>
-                      <th scope="row">{point.label}</th>
-                      <td>{stateLabel(point.state)}</td>
-                      <td>{formatXof(point.projectedIncomeXof)}</td>
-                      <td>{formatXof(point.projectedExpenseXof)}</td>
-                      <td>{formatXof(point.projectedBalanceXof)}</td>
-                      <td>{formatXof(point.approvedPlanBalanceXof)}</td>
-                      <td>
-                        {difference === 0
-                          ? formatXof(0)
-                          : `${difference > 0 ? "+" : "−"}${formatXof(Math.abs(difference))}`}
-                      </td>
-                      <td>
-                        {point.projectedBalanceXof >= reserveXof
-                          ? "At or above reserve"
-                          : `Below reserve by ${formatXof(reserveXof - point.projectedBalanceXof)}`}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {points.map((point) => (
+                  <tr key={point.month}>
+                    <td>{point.label}</td>
+                    <td>{sourceLabel(point.source)}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {formatXof(point.incomeXof)}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {formatXof(point.expenseXof)}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {formatXof(point.balanceXof)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
