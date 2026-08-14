@@ -120,7 +120,7 @@ export default function Site() {
     );
     els.forEach((el) => io.observe(el));
     return () => io.disconnect();
-  }, [page, lang, articleSlug]);
+  }, [page, lang, articleSlug, newsList]);
 
   const c = buildSiteContent(lang, overrides ?? undefined);
   const { tx } = c;
