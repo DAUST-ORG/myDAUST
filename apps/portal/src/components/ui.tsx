@@ -5,7 +5,7 @@
 // Drawer, Modal, SearchInput, Select) plus a small column-sort helper.
 // All styling rides the existing globals.css tokens.
 
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
 // ---------- PageHeader ----------
@@ -240,6 +240,72 @@ export function Select({
 }
 
 // ---------- Drawer (right slide-over) ----------
+const DIALOG_FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+function useDialogA11y(open: boolean, onClose: () => void) {
+  const panelRef = useRef<HTMLElement>(null);
+  const titleId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const preferred = panel.querySelector<HTMLElement>("[autofocus]");
+      const first = panel.querySelector<HTMLElement>(DIALOG_FOCUSABLE);
+      (preferred ?? first ?? panel).focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      previousFocus?.focus();
+    };
+  }, [open]);
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const panel = panelRef.current;
+    if (!panel) return;
+    const focusable = Array.from(
+      panel.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE),
+    ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+    if (focusable.length === 0) {
+      event.preventDefault();
+      panel.focus();
+      return;
+    }
+
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !panel.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  return { panelRef, titleId, onKeyDown };
+}
+
 export function Drawer({
   open,
   onClose,
@@ -255,11 +321,18 @@ export function Drawer({
   footer?: React.ReactNode;
   width?: number;
 }) {
+  const dialog = useDialogA11y(open, onClose);
   if (!open) return null;
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200 }}>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.34)", backdropFilter: "blur(2px)" }} />
+      <div aria-hidden="true" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.34)", backdropFilter: "blur(2px)" }} />
       <aside
+        ref={dialog.panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={dialog.titleId}
+        tabIndex={-1}
+        onKeyDown={dialog.onKeyDown}
         style={{
           position: "absolute",
           top: 0,
@@ -275,7 +348,7 @@ export function Drawer({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
-          <h3 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 16.5, fontWeight: 700 }}>{title}</h3>
+          <h3 id={dialog.titleId} style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 16.5, fontWeight: 700 }}>{title}</h3>
           <button onClick={onClose} aria-label="Close" style={{ width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
             <X size={17} />
           </button>
@@ -303,11 +376,18 @@ export function Modal({
   footer?: React.ReactNode;
   width?: number;
 }) {
+  const dialog = useDialogA11y(open, onClose);
   if (!open) return null;
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.34)", backdropFilter: "blur(2px)" }} />
+    <div style={{ position: "fixed", inset: 0, zIndex: 220, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div aria-hidden="true" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.34)", backdropFilter: "blur(2px)" }} />
       <div
+        ref={dialog.panelRef as React.RefObject<HTMLDivElement | null>}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={dialog.titleId}
+        tabIndex={-1}
+        onKeyDown={dialog.onKeyDown}
         style={{
           position: "relative",
           width: "min(100%, " + width + "px)",
@@ -322,7 +402,7 @@ export function Modal({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
-          <h3 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 16.5, fontWeight: 700 }}>{title}</h3>
+          <h3 id={dialog.titleId} style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 16.5, fontWeight: 700 }}>{title}</h3>
           <button onClick={onClose} aria-label="Close" style={{ width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
             <X size={17} />
           </button>

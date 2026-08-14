@@ -1,6 +1,7 @@
 /* Montserrat (body/UI) + IBM Plex Mono (code) from Google; Saira is self-hosted below.
    Fraunces is used only by the login-page pull quote. */
 @import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Montserrat:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import "../styles/fee-components.css";
 
 /* Self-hosted variable Saira (width 50-125%, weight 100-900) — shipped by the DAUST
    design system. Replaces the Google-hosted static cuts: gives us the width axis the
@@ -799,6 +800,31 @@ input {
   }
   .content {
     padding: 16px;
+  }
+}
+@media (max-width: 560px) {
+  .topbar {
+    height: 62px;
+    gap: 8px;
+    padding: 0 12px;
+  }
+  .topbar-title,
+  .topbar .spacer {
+    display: none;
+  }
+  .topbar > div:has(.search) {
+    min-width: 0;
+  }
+  .topbar .search {
+    width: 100%;
+    min-width: 0;
+  }
+  .topbar .search input {
+    min-width: 0;
+  }
+  .topbar-user {
+    padding-left: 0 !important;
+    border-left: 0 !important;
   }
 }
 @media (max-width: 820px) {

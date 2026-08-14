@@ -1,0 +1,9 @@
+.interactionTarget {
+  cursor: crosshair;
+  outline: none;
+}
+
+.interactionTarget:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}

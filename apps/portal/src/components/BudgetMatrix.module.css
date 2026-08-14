@@ -1,0 +1,351 @@
+.section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.section + .section {
+  margin-top: 18px;
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.titleGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.marker {
+  width: 5px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  flex: none;
+}
+
+.markerIncome {
+  background: var(--success-500);
+}
+
+.markerExpense {
+  background: var(--daust-orange);
+}
+
+.heading h3 {
+  font: 700 16px/1.15 var(--font-display);
+}
+
+.heading p {
+  margin: 2px 0 0;
+  color: var(--fg3);
+  font-size: 11.5px;
+}
+
+.tableWrap {
+  overflow: auto;
+  max-height: min(68vh, 720px);
+  scrollbar-gutter: stable;
+}
+
+.table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.table th,
+.table td {
+  height: 49px;
+  min-width: 112px;
+  padding: 7px 9px;
+  text-align: right;
+  border-right: 1px solid var(--divider);
+  border-bottom: 1px solid var(--divider);
+  background: var(--surface);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  height: 42px;
+  background: var(--surface-2);
+  color: var(--fg3);
+  font-size: 10.5px;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.table .category {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 260px;
+  min-width: 260px;
+  max-width: 260px;
+  text-align: left;
+  white-space: normal;
+  font-weight: 650;
+  color: var(--fg2);
+  box-shadow: 1px 0 0 var(--divider);
+}
+
+.table thead .category {
+  z-index: 6;
+  background: var(--surface-2);
+}
+
+.table .annual {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  min-width: 132px;
+  border-right: 0;
+  background: color-mix(in srgb, var(--surface-2) 68%, var(--surface));
+  box-shadow: -1px 0 0 var(--divider);
+  font-weight: 750;
+}
+
+.table thead .annual {
+  z-index: 6;
+  background: var(--surface-2);
+}
+
+.table tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--daust-navy-deep);
+  color: #fff;
+  font-weight: 750;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.table tfoot .category {
+  z-index: 5;
+  background: var(--daust-navy-deep);
+  color: #fff;
+}
+
+.table tfoot .annual {
+  z-index: 5;
+  background: var(--daust-navy-deep);
+}
+
+.valueButton {
+  width: 100%;
+  padding: 7px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg1);
+  text-align: right;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.valueButton:hover,
+.valueButton:focus-visible {
+  background: var(--bg-tint);
+  border-color: var(--border-strong);
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.valueButton::after {
+  content: "\2192";
+  margin-left: 5px;
+  color: var(--fg-faint);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-standard);
+}
+
+.valueButton:hover::after,
+.valueButton:focus-visible::after {
+  opacity: 1;
+}
+
+.inputWrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+  background: var(--surface);
+}
+
+.inputWrap:focus-within {
+  border-color: var(--daust-navy-700);
+  box-shadow: var(--focus-ring);
+}
+
+.inputWrap input {
+  width: 64px;
+  min-width: 0;
+  padding: 7px 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg1);
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.unit {
+  color: var(--fg-faint);
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.empty {
+  color: var(--fg-faint);
+}
+
+.variance {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.variance strong {
+  font-size: 12.5px;
+}
+
+.variance span {
+  font-size: 9.5px;
+  font-weight: 650;
+}
+
+.favorable {
+  color: var(--success-500);
+}
+
+.unfavorable {
+  color: var(--error-500);
+}
+
+.neutral {
+  color: var(--fg3);
+}
+
+.mobile {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .tableWrap {
+    display: none;
+  }
+
+  .mobile {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .mobileCard {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--surface);
+  }
+
+  .mobileCardHead {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .mobileCardHead strong {
+    font-size: 12.5px;
+    line-height: 1.35;
+  }
+
+  .mobileCardHead span {
+    flex: none;
+    text-align: right;
+    font: 700 13px/1.2 var(--font-display);
+  }
+
+  .mobileCardHead > .variance {
+    flex: 0 1 52%;
+    justify-items: end;
+  }
+
+  .mobileCardHead > .variance span {
+    white-space: normal;
+    font: 650 9.5px/1.35 var(--font-body);
+  }
+
+  .mobileMonths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mobileMonth {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    padding: 10px 12px;
+    border-right: 1px solid var(--divider);
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .mobileMonth:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .mobileMonth:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .mobileMonth > span:first-child {
+    color: var(--fg3);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .mobileMonth .valueButton {
+    padding: 6px 0;
+    text-align: left;
+  }
+
+  .mobileMonth .inputWrap input {
+    width: 100%;
+    text-align: left;
+  }
+
+  .mobileMonth .variance {
+    justify-items: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .valueButton::after {
+    transition: none;
+  }
+}

@@ -9,7 +9,7 @@ export default function DirectorApprovalsPage() {
       <PageHeader
         eyebrow="Director · Change control"
         title="Approvals"
-        subtitle="Review protected Finance changes before they affect student accounts or the institution-wide fee schedule."
+        subtitle="Review protected budgets, management actuals, fees and payment schedules before they affect institutional records."
       />
       <ApprovalRequestList mode="director" />
     </>

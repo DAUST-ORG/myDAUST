@@ -203,7 +203,7 @@ export function Topbar({
       <button className="nav-burger" onClick={onToggleNav} aria-label="Menu">
         <Menu size={20} />
       </button>
-      <div style={{ minWidth: 0 }}>
+      <div className="topbar-title" style={{ minWidth: 0 }}>
         <span className="page">{pageTitle}</span>
         {pageCrumb && <span className="crumb">{pageCrumb}</span>}
       </div>
@@ -252,7 +252,7 @@ export function Topbar({
       <span className="spacer" />
 
       {/* Announcements bell */}
-      <div style={{ position: "relative" }}>
+      <div className="topbar-bell" style={{ position: "relative" }}>
         <button onClick={openBell} aria-label="Announcements" style={{ position: "relative", width: 38, height: 38, borderRadius: 10, border: "1px solid var(--gray-100)", background: "var(--surface, #fff)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
           <Bell size={17} color="var(--daust-navy)" />
           {unread > 0 && <span style={{ position: "absolute", top: 6, right: 6, minWidth: 8, height: 8, borderRadius: 99, background: "var(--daust-orange)", border: "1.5px solid var(--surface, #fff)" }} />}
@@ -280,7 +280,7 @@ export function Topbar({
       </div>
 
       {/* User block — name + email beside the avatar, per the design's right cluster */}
-      <div style={{ position: "relative", paddingLeft: 16, borderLeft: "1px solid var(--border)" }}>
+      <div className="topbar-user" style={{ position: "relative", paddingLeft: 16, borderLeft: "1px solid var(--border)" }}>
         <button onClick={() => setOpen(open === "user" ? null : "user")} style={{ display: "flex", alignItems: "center", gap: 11, border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
           <span className="user-name" style={{ textAlign: "right", lineHeight: 1.25 }}>
             <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--fg1)" }}>{me.name}</span>

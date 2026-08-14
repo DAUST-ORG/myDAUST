@@ -1845,10 +1845,12 @@ export type AccountPlanType =
 export interface AccountSpecialStatus {
   isSpecial: boolean;
   hasIndividualPlan: boolean;
+  hasIndividualComponents?: boolean;
   hasPendingPlanChange: boolean;
   reasons: {
     code:
       | "individual_plan_override"
+      | "individual_component_override"
       | "pending_plan_change"
       | "legacy_package"
       | "custom_charge"
@@ -1870,6 +1872,14 @@ export interface AccountInvoice {
   feeScheduleRevision: number | null;
   planType?: AccountPlanType;
   isIndividualPlanOverride?: boolean;
+  hasIndividualComponentOverride?: boolean;
+  componentOverrides?: {
+    id: string;
+    componentKey: string;
+    included: boolean;
+    createdAt: string;
+    updatedAt: string;
+  }[];
   hasPendingPlanChange?: boolean;
   total: number;
   paid: number;
@@ -1881,9 +1891,42 @@ export interface AccountInvoice {
   effectiveStatus?: AccountBalanceSummary["standing"];
   status: string;
   hasPlan: boolean;
+  /** Annual package charges. These are the billing source of truth; installments
+   * are the dated split of their combined amount. */
+  components?: InvoiceFeeComponent[];
+  /** Approved institution-wide component catalog for this invoice's year. */
+  availableComponents?: AvailableFeeComponent[];
   installments: AccountInstallment[];
   payments: BillingPayment[];
   wireTransfers: WireTransferSummary[];
+}
+
+export interface InvoiceFeeComponent {
+  id: string;
+  key: string;
+  /** Compatibility name used by invoices created before fee-component catalogs. */
+  kind: string;
+  label: string;
+  costCenterCode: string;
+  amountXof: number;
+  /** Cash already allocated to this component; removal cannot erase it. */
+  allocatedXof: number;
+  selected: boolean;
+  scheduleComponentId: string | null;
+}
+
+export interface AvailableFeeComponent {
+  id: string | null;
+  key: string;
+  label: string;
+  description: string | null;
+  costCenterCode: string;
+  annualAmountXof: number;
+  defaultSelected: boolean;
+  sortOrder: number;
+  selected: boolean;
+  invoiceComponentId: string | null;
+  allocatedXof: number;
 }
 export interface StudentAccount {
   student: { studentNo: string; name: string; program: string; email: string };
@@ -2115,6 +2158,29 @@ export const restoreStandardPaymentPlan = (
     },
   );
 
+export const addInvoiceFeeComponent = (
+  invoiceId: string,
+  componentKey: string,
+  requestReason: string,
+) =>
+  request<FinanceChangeResult>(`/finance/admin/plans/${invoiceId}/components`, {
+    method: "POST",
+    body: JSON.stringify({ componentKey, requestReason }),
+  });
+
+export const removeInvoiceFeeComponent = (
+  invoiceId: string,
+  componentKey: string,
+  requestReason: string,
+) =>
+  request<FinanceChangeResult>(
+    `/finance/admin/plans/${invoiceId}/components/${encodeURIComponent(componentKey)}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ requestReason }),
+    },
+  );
+
 export interface AdminWireTransfer extends WireTransferSummary {
   source: string;
   student: string;
@@ -2259,7 +2325,9 @@ export type ApprovalRequestKind =
   | "charge_removal"
   | "payment_plan"
   | "discount"
-  | "scholarship";
+  | "scholarship"
+  | "operating_budget"
+  | "management_actual";
 export type ApprovalRequestStatus =
   "pending" | "approved" | "rejected" | "cancelled" | "stale";
 
@@ -2495,6 +2563,326 @@ export interface DirectorOverview {
 export const getDirectorOverview = () =>
   request<DirectorOverview>("/finance/admin/director-overview");
 
+// --- Finance operating budget (August–July) ---
+export type OperatingBudgetKind = "income" | "expense";
+export type OperatingBudgetStatus =
+  "draft" | "pending" | "approved" | "rejected" | "superseded";
+
+export interface OperatingBudgetAcademicYear {
+  id: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+}
+
+export interface OperatingBudgetMonth {
+  /** Stable calendar key, for example `2026-08`. */
+  key: string;
+  label: string;
+}
+
+export interface OperatingBudgetCategory {
+  key: string;
+  label: string;
+  kind: OperatingBudgetKind;
+  sortOrder: number;
+}
+
+export interface OperatingBudgetMatrixRow {
+  categoryKey: string;
+  label: string;
+  kind: OperatingBudgetKind;
+  months: Record<string, number>;
+  totalXof: number;
+}
+
+export interface OperatingBudgetMatrix {
+  rows: OperatingBudgetMatrixRow[];
+  monthTotalsXof: Record<string, number>;
+  totalXof: number;
+}
+
+export interface OperatingBudgetDeviationRow extends OperatingBudgetMatrixRow {
+  variancePercentByMonth: Record<string, number | null>;
+  unbudgetedByMonth: Record<string, boolean>;
+  annualVariancePercent: number | null;
+  annualUnbudgeted: boolean;
+}
+
+export interface OperatingBudgetDeviationMatrix extends Omit<
+  OperatingBudgetMatrix,
+  "rows"
+> {
+  rows: OperatingBudgetDeviationRow[];
+}
+
+export interface OperatingBudgetRevision {
+  id: string;
+  revision: number;
+  contentVersion: number;
+  status: OperatingBudgetStatus;
+  openingBalanceXof: number;
+  reason: string;
+  createdAt: string;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  approvedAt: string | null;
+}
+
+export interface OperatingBudgetCashflowMonth {
+  month: string;
+  plannedIncomeXof: number;
+  plannedExpenseXof: number;
+  actualIncomeXof: number;
+  actualExpenseXof: number;
+  plannedBalanceXof: number;
+  actualBalanceXof: number | null;
+  forecastIncomeXof?: number | null;
+  forecastExpenseXof?: number | null;
+  forecastBalanceXof: number | null;
+}
+
+export interface OperatingBudgetView {
+  academicYear: OperatingBudgetAcademicYear;
+  months: OperatingBudgetMonth[];
+  categories: OperatingBudgetCategory[];
+  availableAcademicYears?: OperatingBudgetAcademicYear[];
+  revision: OperatingBudgetRevision | null;
+  pendingApprovalId?: string | null;
+  defaultOpeningBalanceXof: number;
+  openingBalanceXof: number;
+  openingBalanceSource: "approved_override" | "carry_forward" | "zero";
+  integrityWarnings: {
+    code:
+      | "unclassified_expenses"
+      | "unclassified_collections"
+      | "ambiguous_legacy_payment_dates";
+    count: number;
+    amountXof: number;
+    message: string;
+  }[];
+  summary: {
+    openingBalanceXof: number;
+    actualIncomeXof: number;
+    actualExpenseXof: number;
+    actualClosingBalanceXof: number;
+    plannedClosingBalanceXof: number;
+  };
+  budget: {
+    income: OperatingBudgetMatrix;
+    expense: OperatingBudgetMatrix;
+  };
+  actual: {
+    income: OperatingBudgetMatrix;
+    expense: OperatingBudgetMatrix;
+  };
+  deviation: {
+    income: OperatingBudgetDeviationMatrix;
+    expense: OperatingBudgetDeviationMatrix;
+  };
+  cashflow: OperatingBudgetCashflowMonth[];
+}
+
+export interface OperatingBudgetLineInput {
+  categoryKey: string;
+  month: string;
+  amountXof: number;
+}
+
+export interface OperatingBudgetForecastMonth {
+  month: string;
+  incomeXof: number;
+  expenseXof: number;
+  balanceXof: number;
+  source: "actual" | "forecast";
+}
+
+export interface OperatingBudgetForecast {
+  scenario: "conservative" | "base" | "optimistic";
+  collectionRatePercent: number;
+  expenseGrowthPercent: number;
+  metadata: {
+    asOfDate: string;
+    actualThroughMonth: string | null;
+    forecastStatus: "ready" | "insufficient_data";
+    basisStatus: "approved";
+    basisRevision: number;
+  };
+  months: OperatingBudgetForecastMonth[];
+  projectedClosingBalanceXof: number;
+}
+
+export interface OperatingBudgetActualEntry {
+  id: string;
+  source:
+    | "bursar"
+    | "payment"
+    | "legacy_payment"
+    | "expense"
+    | "manual_income"
+    | "adjustment"
+    | "refund"
+    | "unallocated_credit";
+  kind: OperatingBudgetKind;
+  categoryKey: string;
+  categoryLabel?: string;
+  costCenterCode: string | null;
+  costCenterName?: string | null;
+  occurredOn: string;
+  amountXof: number;
+  description: string | null;
+  payee?: string | null;
+  isEstimate?: boolean;
+  status: string;
+  approvalRequestId?: string | null;
+}
+
+export interface OperatingBudgetActualEntries {
+  items: OperatingBudgetActualEntry[];
+  nextCursor: string | null;
+  total: number;
+  totalXof: number;
+  excludedEstimateXof: number;
+}
+
+export const getOperatingBudget = (academicYear?: string) =>
+  request<OperatingBudgetView>(
+    `/finance/admin/operating-budget${academicYear ? `?academicYear=${encodeURIComponent(academicYear)}` : ""}`,
+  );
+
+export const updateOperatingBudget = (input: {
+  academicYear: string;
+  action: "save" | "submit";
+  reason: string;
+  openingBalanceXof?: number;
+  lines: OperatingBudgetLineInput[];
+  expectedBudgetId: string | null;
+  expectedContentVersion: number | null;
+}) =>
+  request<OperatingBudgetView | FinanceChangeResult>(
+    "/finance/admin/operating-budget",
+    { method: "PUT", body: JSON.stringify(input) },
+  );
+
+export const forecastOperatingBudget = (input: {
+  academicYear: string;
+  scenario: "conservative" | "base" | "optimistic";
+  collectionRatePercent?: number;
+  expenseGrowthPercent?: number;
+}) =>
+  request<OperatingBudgetForecast>("/finance/admin/operating-budget/forecast", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+export const getOperatingBudgetActuals = (filters: {
+  academicYear: string;
+  kind?: OperatingBudgetKind;
+  categoryKey?: string;
+  month?: string;
+  costCenterCode?: string;
+  source?: OperatingBudgetActualEntry["source"] | "bursar";
+  cursor?: string;
+}) => {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  return request<OperatingBudgetActualEntries>(
+    `/finance/admin/operating-budget/actuals?${params.toString()}`,
+  );
+};
+
+export const createOperatingBudgetManualIncome = (input: {
+  academicYear: string;
+  categoryKey: string;
+  costCenterCode: string;
+  amountXof: number;
+  occurredOn: string;
+  description?: string;
+  reason: string;
+}) =>
+  request<FinanceChangeResult>(
+    "/finance/admin/operating-budget/manual-income",
+    { method: "POST", body: JSON.stringify(input) },
+  );
+
+export const createOperatingBudgetExpense = (input: {
+  academicYear: string;
+  categoryKey: string;
+  costCenterCode: string;
+  amountXof: number;
+  occurredOn: string;
+  description?: string;
+  payee?: string;
+  isEstimate?: boolean;
+  reason: string;
+}) =>
+  request<FinanceChangeResult>("/finance/admin/operating-budget/expenses", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+export const updateOperatingBudgetExpense = (
+  id: string,
+  input: Partial<{
+    categoryKey: string;
+    costCenterCode: string;
+    amountXof: number;
+    occurredOn: string;
+    description: string;
+    payee: string;
+    isEstimate: boolean;
+  }> & { reason: string },
+) =>
+  request<FinanceChangeResult>(
+    `/finance/admin/operating-budget/expenses/${id}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+
+export const voidOperatingBudgetExpense = (id: string, reason: string) =>
+  request<FinanceChangeResult>(
+    `/finance/admin/operating-budget/expenses/${id}`,
+    { method: "DELETE", body: JSON.stringify({ reason }) },
+  );
+
+export const updateOperatingBudgetActualEntry = (
+  id: string,
+  input: Partial<{
+    academicYear: string;
+    categoryKey: string;
+    costCenterCode: string;
+    amountXof: number;
+    occurredOn: string;
+    description: string;
+  }> & { reason: string },
+) =>
+  request<FinanceChangeResult>(
+    `/finance/admin/operating-budget/actual-entries/${id}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+
+export const voidOperatingBudgetActualEntry = (id: string, reason: string) =>
+  request<FinanceChangeResult>(
+    `/finance/admin/operating-budget/actual-entries/${id}`,
+    { method: "DELETE", body: JSON.stringify({ reason }) },
+  );
+
+export const createOperatingBudgetAdjustment = (input: {
+  academicYear: string;
+  kind: OperatingBudgetKind;
+  categoryKey: string;
+  costCenterCode: string;
+  month: string;
+  requestedActualXof: number;
+  reason: string;
+  description?: string;
+}) =>
+  request<FinanceChangeResult>("/finance/admin/operating-budget/adjustments", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
 export interface CostCenter {
   code: string;
   name: string;
@@ -2673,6 +3061,9 @@ export interface FeeItem {
   period: string;
   note: string | null;
   sortOrder: number;
+  /** Package components are edited through the approved fee schedule, never here. */
+  editable?: boolean;
+  managedBy?: "fee_schedule" | "settings";
 }
 export const getFeeConfig = () => request<FeeItem[]>("/config/fees");
 export const updateFeeItem = (
@@ -3086,12 +3477,25 @@ export interface FeePlanRow {
   amountHousingXof: number;
   amountCafeteriaXof: number;
 }
+export interface FeePlanComponent {
+  id?: string;
+  key: string;
+  label: string;
+  description?: string | null;
+  costCenterCode: string;
+  annualAmountXof: number;
+  defaultSelected: boolean;
+  sortOrder: number;
+}
 export interface FeePlan {
   scheduleId?: string | null;
   academicYearLabel: string | null;
   revision?: number | null;
   status?: "draft" | "approved" | "superseded" | null;
   rows: FeePlanRow[];
+  /** Annual charges selected by default for the standard package. */
+  components?: FeePlanComponent[];
+  packageTotalXof?: number;
   totals: { full: number; tuition: number; housing: number; cafeteria: number };
 }
 export const getFeePlan = (year?: string) =>
@@ -3128,10 +3532,21 @@ export const replaceFeePlan = (input: {
     id: string;
     label: string;
     dueOn: string;
-    amountFullXof: number;
-    amountTuitionXof: number;
-    amountHousingXof: number;
-    amountCafeteriaXof: number;
+    /** Accepted by older API tasks during a rolling deployment. */
+    amountFullXof?: number;
+    amountTuitionXof?: number;
+    amountHousingXof?: number;
+    amountCafeteriaXof?: number;
+  }[];
+  components?: {
+    id?: string;
+    key: string;
+    label: string;
+    description?: string;
+    costCenterCode: string;
+    annualAmountXof: number;
+    defaultSelected?: boolean;
+    sortOrder?: number;
   }[];
 }) =>
   request<FinanceChangeResult>("/finance/admin/fee-plan", {
