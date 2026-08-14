@@ -1,3 +1,181 @@
+.chartCard {
+  --chart-warning: var(--warning);
+  --chart-danger: var(--danger);
+  min-width: 0;
+  margin: 0 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+:global(:root[data-theme="dark"]) .chartCard,
+:global(.dark) .chartCard {
+  --chart-warning: var(--warning-400);
+  --chart-danger: var(--error-400);
+}
+
+.chartCard > h3,
+.chartCard > p {
+  margin: 18px;
+}
+
+.chartCard > p {
+  color: var(--fg3);
+  font-size: 11px;
+}
+
+.chartHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 17px 18px 11px;
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--chart-warning);
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chartHead h3 {
+  margin: 0;
+  color: var(--fg1);
+  font: 720 16px/1.2 var(--font-display);
+}
+
+.chartHead p {
+  max-width: 620px;
+  margin: 4px 0 0;
+  color: var(--fg3);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.legend label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg2);
+  cursor: pointer;
+  font-size: 9.5px;
+  font-weight: 650;
+}
+
+.legend input {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.legendSwatch {
+  display: inline-block;
+  width: 9px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--success-500);
+}
+
+.legendSwatch[data-swatch="expense"] {
+  background: var(--daust-orange-600);
+}
+
+.legendSwatch[data-swatch="selected"],
+.legendSwatch[data-swatch="approved"] {
+  width: 16px;
+  height: 0;
+  border-top: 2px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+}
+
+.legendSwatch[data-swatch="approved"] {
+  border-color: var(--fg-faint);
+  border-top-style: dotted;
+}
+
+.stateKey {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 0 18px 9px;
+  color: var(--fg3);
+  font-size: 8.5px;
+  font-weight: 650;
+}
+
+.stateKey span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.stateKey span::before {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface);
+  content: "";
+}
+
+.stateKey span[data-state="current"]::before {
+  border-color: color-mix(in srgb, var(--daust-orange) 40%, var(--border));
+  background: color-mix(in srgb, var(--daust-orange) 12%, var(--surface));
+}
+
+.stateKey span[data-state="future"]::before {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: var(--accent-bg);
+}
+
+.stateKey span[data-state="reserve"]::before {
+  height: 0;
+  border: 0;
+  border-top: 1.5px dashed var(--error-500);
+  border-radius: 0;
+  background: transparent;
+}
+
+.plotScroller {
+  position: relative;
+  overflow-x: auto;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  min-width: 760px;
+}
+
+.loadingPill {
+  position: absolute;
+  top: 6px;
+  right: 18px;
+  z-index: 2;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--fg3);
+  font-size: 9px;
+  font-weight: 650;
+}
+
 .interactionTarget {
   cursor: crosshair;
   outline: none;
@@ -6,4 +184,159 @@
 .interactionTarget:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -3px;
+}
+
+.mobileMonthDetail {
+  display: none;
+}
+
+.tableDisclosure {
+  border-top: 1px solid var(--divider);
+}
+
+.tableDisclosure > button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg2);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.tableDisclosure > button:hover {
+  background: var(--surface-2);
+}
+
+.tableScroller {
+  overflow-x: auto;
+  padding: 0 18px 16px;
+}
+
+.tableScroller table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  font-size: 9.5px;
+}
+
+.tableScroller caption {
+  padding: 6px 0 10px;
+  color: var(--fg3);
+  font-size: 10px;
+  text-align: left;
+}
+
+.tableScroller th,
+.tableScroller td {
+  padding: 8px 7px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--fg2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.tableScroller thead th {
+  color: var(--fg3);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tableScroller th:first-child,
+.tableScroller td:first-child,
+.tableScroller th:nth-child(2),
+.tableScroller td:nth-child(2) {
+  text-align: left;
+}
+
+.tableScroller tbody th {
+  color: var(--fg1);
+  font-weight: 700;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 700px) {
+  .chartCard {
+    margin-inline: 15px;
+  }
+
+  .chartHead {
+    flex-direction: column;
+  }
+
+  .legend {
+    justify-content: flex-start;
+  }
+
+  .chart {
+    min-width: 720px;
+  }
+
+  .mobileMonthDetail {
+    display: block;
+    padding: 11px 14px;
+    border-top: 1px solid var(--divider);
+    background: var(--surface-2);
+  }
+
+  .mobileMonthDetail > strong,
+  .mobileMonthDetail > span {
+    display: block;
+  }
+
+  .mobileMonthDetail > strong {
+    color: var(--fg1);
+    font: 700 12px/1.2 var(--font-display);
+  }
+
+  .mobileMonthDetail > span {
+    margin-top: 2px;
+    color: var(--fg3);
+    font-size: 8.5px;
+  }
+
+  .mobileMonthDetail dl {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    margin: 10px 0 0;
+  }
+
+  .mobileMonthDetail dl div {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .mobileMonthDetail dt,
+  .mobileMonthDetail dd {
+    margin: 0;
+    color: var(--fg2);
+    font-size: 9.5px;
+  }
+
+  .mobileMonthDetail dd {
+    color: var(--fg1);
+    font-family: var(--font-mono);
+    font-weight: 650;
+    text-align: right;
+  }
 }

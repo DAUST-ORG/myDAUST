@@ -212,12 +212,79 @@ const OperatingBudgetInput = z
       (value.expectedContentVersion === null),
     "Expected budget id and content version must both be null or both be provided",
   );
-const OperatingBudgetForecastInput = z.object({
+const LegacyOperatingBudgetForecastInput = z.object({
   academicYear: AcademicYearLabelInput,
   scenario: z.enum(["conservative", "base", "optimistic"]),
   collectionRatePercent: z.number().min(0).max(100).optional(),
   expenseGrowthPercent: z.number().min(-100).max(100).optional(),
 });
+const SimulationPercentInput = z
+  .number()
+  .min(0)
+  .max(100)
+  .refine(
+    (value) =>
+      Math.abs(value * 1_000_000 - Math.round(value * 1_000_000)) <= 0.000_001,
+    "Simulation percentages support at most six decimal places",
+  );
+const SignedSimulationPercentInput = z
+  .number()
+  .min(-100)
+  .max(100)
+  .refine(
+    (value) =>
+      Math.abs(value * 1_000_000 - Math.round(value * 1_000_000)) <= 0.000_001,
+    "Simulation percentages support at most six decimal places",
+  );
+const CollectionTimingInput = z
+  .object({
+    due: SimulationPercentInput,
+    plus30: SimulationPercentInput,
+    plus60: SimulationPercentInput,
+    plus90OrLater: SimulationPercentInput,
+  })
+  .refine(
+    (value) =>
+      [value.due, value.plus30, value.plus60, value.plus90OrLater].reduce(
+        (sum, percent) => sum + Math.round(percent * 1_000_000),
+        0,
+      ) === 100_000_000,
+    "Collection timing percentages must total exactly 100",
+  );
+const CashflowSimulationInput = z
+  .object({
+    academicYear: AcademicYearLabelInput,
+    case: z.enum(["approved_plan", "stress", "upside", "custom"]),
+    customAssumptions: z
+      .object({
+        eventualRealizationPercent: SimulationPercentInput,
+        collectionTimingPercent: CollectionTimingInput,
+        remainingExpenseVariancePercent: SignedSimulationPercentInput,
+      })
+      .optional(),
+    minimumReserveXof: SafeWholeXofInput.optional(),
+    shock: z
+      .object({
+        kind: OperatingBudgetKindInput,
+        amountXof: SafePositiveXofInput,
+        month: z.string().regex(/^\d{4}-\d{2}$/),
+        label: z.string().trim().min(1).max(120).optional(),
+      })
+      .optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.case === "custom" && !value.customAssumptions) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["customAssumptions"],
+        message: "Custom assumptions are required for a custom case",
+      });
+    }
+  });
+const OperatingBudgetForecastInput = z.union([
+  CashflowSimulationInput,
+  LegacyOperatingBudgetForecastInput,
+]);
 const ManagementActualInput = z.object({
   academicYear: AcademicYearLabelInput,
   kind: OperatingBudgetKindInput,

@@ -346,11 +346,25 @@ describe.skipIf(!DB_URL)("operating budget PostgreSQL flow", () => {
     expect(forecast.metadata).toMatchObject({
       basisStatus: "approved",
       basisRevision: 2,
+      forecastStatus: "ready",
+      persisted: false,
     });
+    expect(forecast).toMatchObject({
+      scenario: "base",
+      projectedClosingBalanceXof: forecast.summary.projectedYearEndCashXof,
+    });
+    expect(forecast.comparison.map((row) => row.case)).toEqual([
+      "approved_plan",
+      "stress",
+      "upside",
+      "custom",
+    ]);
     expect(
       forecast.months.find((month) => month.month === "2026-08"),
     ).toMatchObject({
       incomeXof: 2_200,
+      projectedIncomeXof: 2_200,
+      state: "actual_plus_projection",
       source: "forecast",
     });
     expect(
@@ -359,6 +373,164 @@ describe.skipIf(!DB_URL)("operating budget PostgreSQL flow", () => {
       incomeXof: 1_000,
       source: "forecast",
     });
+    const bridge = forecast.driverBridge;
+    expect(
+      bridge.openingBalanceXof +
+        bridge.actualIncomeXof -
+        bridge.actualExpenseXof +
+        bridge.projectedStudentCollectionsXof +
+        bridge.projectedOtherIncomeXof -
+        bridge.remainingApprovedExpensesXof +
+        bridge.expenseVarianceImpactXof +
+        bridge.shockImpactXof,
+    ).toBe(forecast.summary.projectedYearEndCashXof);
+
+    const stress = await budgets.forecast({
+      academicYear: "2026–2027",
+      case: "stress",
+      minimumReserveXof: 10_000,
+    });
+    expect(stress).toMatchObject({
+      case: "stress",
+      assumptions: {
+        source: "preset",
+        eventualRealizationPercent: 90,
+        remainingExpenseVariancePercent: 5,
+        minimumReserveXof: 10_000,
+      },
+    });
+    expect(stress.comparison.map((row) => row.case)).toEqual([
+      "approved_plan",
+      "stress",
+      "upside",
+    ]);
+  });
+
+  it("includes prior-year overdue debt but excludes unrelated post-horizon debt", async () => {
+    const before = await budgets.forecast({
+      academicYear: "2026–2027",
+      case: "approved_plan",
+    });
+    const [priorYear, futureYear] = await Promise.all([
+      prisma.academicYear.create({
+        data: { label: "2025–2026", status: "archived" },
+      }),
+      prisma.academicYear.create({
+        data: { label: "2027–2028", status: "draft" },
+      }),
+    ]);
+    const [priorTerm, futureTerm] = await Promise.all([
+      prisma.term.create({
+        data: {
+          academicYearId: priorYear.id,
+          name: `Prior debt ${randomUUID().slice(0, 6)}`,
+          startDate: new Date("2025-08-01"),
+          endDate: new Date("2026-07-31"),
+        },
+      }),
+      prisma.term.create({
+        data: {
+          academicYearId: futureYear.id,
+          name: `Future debt ${randomUUID().slice(0, 6)}`,
+          startDate: new Date("2027-08-01"),
+          endDate: new Date("2028-07-31"),
+        },
+      }),
+    ]);
+    const [priorInvoice, futureInvoice] = await Promise.all([
+      prisma.invoice.create({
+        data: {
+          studentId: budgetStudentId,
+          termId: priorTerm.id,
+          totalAmount: 300,
+          status: "open",
+          academicYearLabel: priorYear.label,
+          costCenterCode: "9100",
+          plan: {
+            create: {
+              installments: {
+                create: {
+                  sequence: 1,
+                  dueDate: new Date("2026-07-15"),
+                  amountDue: 300,
+                },
+              },
+            },
+          },
+        },
+        include: { plan: true },
+      }),
+      prisma.invoice.create({
+        data: {
+          studentId: budgetStudentId,
+          termId: futureTerm.id,
+          totalAmount: 400,
+          status: "open",
+          academicYearLabel: futureYear.label,
+          costCenterCode: "9100",
+          plan: {
+            create: {
+              installments: {
+                create: {
+                  sequence: 1,
+                  // Even an inconsistent advance date inside the selected
+                  // horizon must not pull a future-year invoice into cash.
+                  dueDate: new Date("2027-07-15"),
+                  amountDue: 400,
+                },
+              },
+            },
+          },
+        },
+        include: { plan: true },
+      }),
+    ]);
+    const accountCredit = await prisma.invoice.create({
+      data: {
+        studentId: budgetStudentId,
+        termId: priorTerm.id,
+        totalAmount: -50,
+        status: "open",
+        academicYearLabel: priorYear.label,
+        costCenterCode: "9100",
+        description: "Prior-year account credit",
+      },
+    });
+    try {
+      const after = await budgets.forecast({
+        academicYear: "2026–2027",
+        case: "approved_plan",
+      });
+      expect(after.driverBridge.remainingScheduledReceivablesXof).toBe(
+        before.driverBridge.remainingScheduledReceivablesXof + 250,
+      );
+      expect(after.driverBridge.projectedStudentCollectionsXof).toBe(
+        before.driverBridge.projectedStudentCollectionsXof + 250,
+      );
+      expect(after.driverBridge.unscheduledReceivablesXof).toBe(
+        before.driverBridge.unscheduledReceivablesXof,
+      );
+      expect(after.summary.endingReceivablesXof).toBe(
+        before.summary.endingReceivablesXof,
+      );
+    } finally {
+      const planIds = [priorInvoice.plan!.id, futureInvoice.plan!.id];
+      await prisma.installment.deleteMany({
+        where: { planId: { in: planIds } },
+      });
+      await prisma.paymentPlan.deleteMany({ where: { id: { in: planIds } } });
+      await prisma.invoice.deleteMany({
+        where: {
+          id: { in: [priorInvoice.id, futureInvoice.id, accountCredit.id] },
+        },
+      });
+      await prisma.term.deleteMany({
+        where: { id: { in: [priorTerm.id, futureTerm.id] } },
+      });
+      await prisma.academicYear.deleteMany({
+        where: { id: { in: [priorYear.id, futureYear.id] } },
+      });
+    }
   });
 
   it("carries the prior approved actual closing into a zero-data year", async () => {
@@ -404,6 +576,12 @@ describe.skipIf(!DB_URL)("operating budget PostgreSQL flow", () => {
         status: "approved",
       },
     });
+    await expect(
+      budgets.forecast({
+        academicYear: "2024–2025",
+        case: "approved_plan",
+      }),
+    ).rejects.toThrow(/current or future academic years/);
     await prisma.academicYear.create({
       data: { label: "2025–2026", status: "archived" },
     });
