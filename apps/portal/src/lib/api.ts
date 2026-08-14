@@ -2689,27 +2689,103 @@ export interface OperatingBudgetLineInput {
   amountXof: number;
 }
 
+export type OperatingBudgetForecastCase =
+  "approved_plan" | "stress" | "upside" | "custom";
+
+export interface OperatingBudgetCollectionTiming {
+  due: number;
+  plus30: number;
+  plus60: number;
+  plus90OrLater: number;
+}
+
+export interface OperatingBudgetForecastShock {
+  kind: "income" | "expense";
+  amountXof: number;
+  month: string;
+  label?: string;
+}
+
+export interface OperatingBudgetForecastAssumptions {
+  source: "preset" | "custom";
+  eventualRealizationPercent: number;
+  collectionTimingPercent: OperatingBudgetCollectionTiming;
+  remainingExpenseVariancePercent: number;
+  minimumReserveXof: number;
+  shock: OperatingBudgetForecastShock | null;
+}
+
+export interface OperatingBudgetForecastSummary {
+  projectedYearEndCashXof: number;
+  lowestBalanceXof: number;
+  lowestBalanceMonth: string;
+  deficitMonthCount: number;
+  firstDeficitMonth: string | null;
+  reserveBreachMonthCount: number;
+  firstReserveBreachMonth: string | null;
+  peakFundingGapXof: number;
+  endingReceivablesXof: number;
+  projectedUncollectibleXof: number;
+  projectedIncomeXof: number;
+  projectedExpenseXof: number;
+  approvedPlanYearEndCashXof: number;
+  varianceToApprovedPlanXof: number;
+}
+
 export interface OperatingBudgetForecastMonth {
   month: string;
-  incomeXof: number;
-  expenseXof: number;
-  balanceXof: number;
-  source: "actual" | "forecast";
+  state: "recorded_actual" | "actual_plus_projection" | "future_projection";
+  approvedPlanIncomeXof: number;
+  approvedPlanExpenseXof: number;
+  approvedPlanBalanceXof: number;
+  actualIncomeXof: number;
+  actualExpenseXof: number;
+  projectedStudentCollectionsXof: number;
+  projectedOtherIncomeXof: number;
+  projectedIncomeXof: number;
+  projectedExpenseXof: number;
+  projectedBalanceXof: number;
+}
+
+export interface OperatingBudgetForecastComparison {
+  case: OperatingBudgetForecastCase;
+  assumptions: OperatingBudgetForecastAssumptions;
+  summary: OperatingBudgetForecastSummary;
 }
 
 export interface OperatingBudgetForecast {
-  scenario: "conservative" | "base" | "optimistic";
-  collectionRatePercent: number;
-  expenseGrowthPercent: number;
+  case: OperatingBudgetForecastCase;
   metadata: {
     asOfDate: string;
     actualThroughMonth: string | null;
-    forecastStatus: "ready" | "insufficient_data";
     basisStatus: "approved";
     basisRevision: number;
+    persisted: false;
+    currency: "XOF";
+  };
+  assumptions: OperatingBudgetForecastAssumptions;
+  summary: OperatingBudgetForecastSummary;
+  driverBridge: {
+    openingBalanceXof: number;
+    actualIncomeXof: number;
+    actualExpenseXof: number;
+    remainingScheduledReceivablesXof: number;
+    unscheduledReceivablesXof: number;
+    projectedStudentCollectionsXof: number;
+    projectedUncollectibleXof: number;
+    projectedOtherIncomeXof: number;
+    remainingApprovedExpensesXof: number;
+    expenseVarianceImpactXof: number;
+    shockImpactXof: number;
+    endingReceivablesXof: number;
   };
   months: OperatingBudgetForecastMonth[];
-  projectedClosingBalanceXof: number;
+  comparison: OperatingBudgetForecastComparison[];
+  warnings: {
+    code: string;
+    message: string;
+    amountXof?: number;
+  }[];
 }
 
 export interface OperatingBudgetActualEntry {
@@ -2766,9 +2842,14 @@ export const updateOperatingBudget = (input: {
 
 export const forecastOperatingBudget = (input: {
   academicYear: string;
-  scenario: "conservative" | "base" | "optimistic";
-  collectionRatePercent?: number;
-  expenseGrowthPercent?: number;
+  case: OperatingBudgetForecastCase;
+  customAssumptions?: {
+    eventualRealizationPercent: number;
+    collectionTimingPercent: OperatingBudgetCollectionTiming;
+    remainingExpenseVariancePercent: number;
+  };
+  minimumReserveXof?: number;
+  shock?: OperatingBudgetForecastShock;
 }) =>
   request<OperatingBudgetForecast>("/finance/admin/operating-budget/forecast", {
     method: "POST",
