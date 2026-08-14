@@ -78,7 +78,7 @@ export class AdmissionsService {
     if (!attempt.resumeToken) {
       throw new BadRequestException("Payment resume capability is unavailable");
     }
-    const resumeUrl = `${process.env.VITRINE_ORIGIN ?? "http://localhost:3001"}/admissions/payment?id=${encodeURIComponent(applicant.id)}&resume=${encodeURIComponent(attempt.resumeToken)}`;
+    const resumeUrl = `${process.env.VITRINE_ORIGIN ?? "http://localhost:3001"}/admissions/payment/?id=${encodeURIComponent(applicant.id)}&resume=${encodeURIComponent(attempt.resumeToken)}`;
     await this.mail
       .send({
         to: applicant.email,
@@ -133,7 +133,7 @@ export class AdmissionsService {
         cc,
         bcc,
         subject: interpolate(templates.applicationSubject),
-        html: `${interpolate(templates.applicationBody)}<p><a href="${process.env.VITRINE_ORIGIN ?? "http://localhost:3001"}/admissions/payment?id=${encodeURIComponent(applicant.id)}">Pay or resume the application fee</a></p>`,
+        html: `${interpolate(templates.applicationBody)}<p><a href="${process.env.VITRINE_ORIGIN ?? "http://localhost:3001"}/admissions/payment/?id=${encodeURIComponent(applicant.id)}">Pay or resume the application fee</a></p>`,
       });
     } catch (e) {
       this.logger.warn(`application email failed: ${String(e)}`);

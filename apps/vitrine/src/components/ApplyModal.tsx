@@ -306,7 +306,7 @@ export function ApplyModal({
 
   async function payFee() {
     if (!result) return;
-    window.location.href = `/admissions/payment?id=${encodeURIComponent(result.id)}`;
+    window.location.href = `/admissions/payment/?id=${encodeURIComponent(result.id)}`;
   }
 
   const ghostBtn: React.CSSProperties = {
