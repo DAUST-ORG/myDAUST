@@ -22,12 +22,14 @@ import { PrismaModule } from "./prisma/prisma.module.js";
 import { RegistrarModule } from "./registrar/registrar.module.js";
 import { UploadsModule } from "./uploads/uploads.module.js";
 import { TranscriptModule } from "./transcript/transcript.module.js";
+import { AcademicCatalogModule } from "./academic-catalog/academic-catalog.module.js";
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     ConfigModule,
     PrismaModule,
+    AcademicCatalogModule,
     MailModule,
     AppConfigModule,
     AuthModule,

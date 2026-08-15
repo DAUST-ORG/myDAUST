@@ -21,6 +21,7 @@ import {
 } from "@/components/ui";
 
 const KIND_LABEL: Record<ApprovalRequestRow["kind"], string> = {
+  academic_catalog: "Academic catalog",
   global_fee_schedule: "Fees & payment schedule",
   custom_charge: "Custom charge",
   charge_removal: "Charge removal",
@@ -123,6 +124,35 @@ function changedBudgetCells(before: unknown, after: unknown): number {
 }
 
 function requestMetrics(request: ApprovalRequestRow): SnapshotMetric[] | null {
+  if (request.kind === "academic_catalog") {
+    const before = object(request.beforeJson);
+    const after = object(request.afterJson);
+    const defaultLevels = Array.isArray(after?.defaultLevels)
+      ? after.defaultLevels.length
+      : 0;
+    const programs = Array.isArray(after?.programs) ? after.programs : [];
+    const custom = programs.filter(
+      (program) => object(program)?.progressionMode === "custom",
+    ).length;
+    return [
+      {
+        label: "Catalog label",
+        before: text(before?.yearLabel),
+        after: text(after?.yearLabel),
+      },
+      {
+        label: "Revision",
+        before: text(before?.revision),
+        after: text(after?.revision),
+      },
+      { label: "Default levels", before: "—", after: String(defaultLevels) },
+      {
+        label: "Programme configurations",
+        before: "—",
+        after: `${programs.length} total · ${custom} custom`,
+      },
+    ];
+  }
   if (request.kind === "operating_budget") {
     const before = budgetSnapshot(request.beforeJson);
     const after = budgetSnapshot(request.afterJson);
@@ -214,6 +244,13 @@ function requestMetrics(request: ApprovalRequestRow): SnapshotMetric[] | null {
 }
 
 function requestPreview(request: ApprovalRequestRow): string | null {
+  if (request.kind === "academic_catalog") {
+    const after = object(request.afterJson);
+    const programmes = Array.isArray(after?.programs)
+      ? after.programs.length
+      : 0;
+    return `${text(after?.yearLabel)} · revision ${text(after?.revision)} · ${programmes} programmes`;
+  }
   if (request.kind === "operating_budget") {
     const after = budgetSnapshot(request.afterJson);
     if (!after) return null;
@@ -474,8 +511,8 @@ export function ApprovalRequestList({
             }
             note={
               mode === "director"
-                ? "Finance changes requiring administrator review will appear here."
-                : "Changes you submit for administrator approval will appear here."
+                ? "Academic and Finance changes requiring administrator review will appear here."
+                : "Protected changes you submit for administrator approval will appear here."
             }
           />
         ) : (

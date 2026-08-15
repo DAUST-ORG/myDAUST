@@ -2,14 +2,8 @@ import { Controller, Get } from "@nestjs/common";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
-
-/** Class standing by year of study, for the student's sidebar identity line. */
-const STANDING_BY_YEAR: Record<number, string> = {
-  1: "Freshman",
-  2: "Sophomore",
-  3: "Junior",
-  4: "Senior",
-};
+import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
+import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
 
 /** Applicant stages still awaiting a decision — what the Admissions badge counts. */
 const OPEN_APPLICANT_STAGES = ["submitted", "review", "interview", "offer"];
@@ -24,7 +18,12 @@ const OPEN_APPLICANT_STAGES = ["submitted", "review", "interview", "offer"];
  */
 @Controller("nav")
 export class NavController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly catalogs: AcademicCatalogService = new AcademicCatalogService(
+      prisma,
+    ),
+  ) {}
 
   /**
    * The sidebar identity line. The design shows what the person *is* in context
@@ -42,11 +41,30 @@ export class NavController {
     if (user.studentId) {
       const student = await this.prisma.student.findUnique({
         where: { id: user.studentId },
-        include: { program: true },
+        include: {
+          program: true,
+          transcriptEntries: { where: { voidedAt: null } },
+          enrollments: {
+            where: { status: "enrolled" },
+            include: { section: { include: { course: true } } },
+          },
+        },
       });
       if (!student) return null;
+      const transcript = summarizeTranscriptRows(student.transcriptEntries);
+      const inProgressCredits = student.enrollments.reduce(
+        (sum, enrollment) => sum + enrollment.section.course.credits,
+        0,
+      );
+      const progress = await this.catalogs.progress({
+        programId: student.programId,
+        catalogYearId: student.catalogYearId,
+        catalogYearLabel: student.catalogYear,
+        earnedCredits: transcript.completedCredits,
+        inProgressCredits,
+      });
       const parts = [
-        STANDING_BY_YEAR[student.yearLevel ?? 0],
+        progress.level ? `Level ${progress.level.code}` : null,
         student.program?.name,
       ].filter(Boolean);
       return parts.length > 0 ? parts.join(" · ") : null;

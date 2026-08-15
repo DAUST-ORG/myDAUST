@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { BookOpen, CheckCheck, ClipboardList, FileText, TrendingUp, Wallet } from "lucide-react";
+import {
+  BookOpen,
+  CheckCheck,
+  ClipboardList,
+  FileText,
+  TrendingUp,
+  Wallet,
+} from "lucide-react";
 import {
   type Announcement,
   type AccountBalanceSummary,
@@ -24,7 +31,12 @@ import {
   getMySummary,
 } from "@/lib/api";
 import { formatDateShort, formatXof } from "@/lib/format";
-import { accountBalanceLabel, accountPresentation, installmentOutstanding, resolveAccountSummary } from "@/components/AccountBalance";
+import {
+  accountBalanceLabel,
+  accountPresentation,
+  installmentOutstanding,
+  resolveAccountSummary,
+} from "@/components/AccountBalance";
 import { Card, Progress, Stat } from "@/components/ui";
 import { COURSE_COLORS, parseDayIndexes } from "@/lib/student-schedule";
 
@@ -43,7 +55,8 @@ export default function StudentDashboard() {
   const [term, setTerm] = useState("");
   const [summary, setSummary] = useState<MySummary | null>(null);
   const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
-  const [billingSummary, setBillingSummary] = useState<AccountBalanceSummary | null>(null);
+  const [billingSummary, setBillingSummary] =
+    useState<AccountBalanceSummary | null>(null);
   const [courses, setCourses] = useState<MyEnrollment[]>([]);
   const [news, setNews] = useState<Announcement[]>([]);
   const [assignments, setAssignments] = useState<MyAssignment[]>([]);
@@ -51,16 +64,36 @@ export default function StudentDashboard() {
   const [degree, setDegree] = useState<DegreeAudit | null>(null);
 
   useEffect(() => {
-    getMe().then((me) => setFirst(me.name.split(" ")[0] ?? "")).catch(() => {});
-    getCurrentTerm().then((t) => setTerm(t.name)).catch(() => {});
-    getMySummary().then(setSummary).catch(() => {});
-    getMyBilling().then(setInvoices).catch(() => {});
-    getMyBillingSummary().then(setBillingSummary).catch(() => {});
-    getMyEnrollments().then(setCourses).catch(() => {});
-    getAnnouncements().then(setNews).catch(() => {});
-    getMyAssignments().then(setAssignments).catch(() => {});
-    getMyAttendance().then(setAttendance).catch(() => {});
-    getDegreeAudit().then(setDegree).catch(() => {});
+    getMe()
+      .then((me) => setFirst(me.name.split(" ")[0] ?? ""))
+      .catch(() => {});
+    getCurrentTerm()
+      .then((t) => setTerm(t.name))
+      .catch(() => {});
+    getMySummary()
+      .then(setSummary)
+      .catch(() => {});
+    getMyBilling()
+      .then(setInvoices)
+      .catch(() => {});
+    getMyBillingSummary()
+      .then(setBillingSummary)
+      .catch(() => {});
+    getMyEnrollments()
+      .then(setCourses)
+      .catch(() => {});
+    getAnnouncements()
+      .then(setNews)
+      .catch(() => {});
+    getMyAssignments()
+      .then(setAssignments)
+      .catch(() => {});
+    getMyAttendance()
+      .then(setAttendance)
+      .catch(() => {});
+    getDegreeAudit()
+      .then(setDegree)
+      .catch(() => {});
   }, []);
 
   const balance = invoices.reduce((b, i) => b + i.balance, 0);
@@ -123,8 +156,18 @@ export default function StudentDashboard() {
         Here&apos;s where things stand this term.
       </p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 18 }}>
-        <Link href="/student/schedule" style={{ textDecoration: "none", color: "inherit" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 16,
+          marginBottom: 18,
+        }}
+      >
+        <Link
+          href="/student/schedule"
+          style={{ textDecoration: "none", color: "inherit" }}
+        >
           <Stat
             label="Enrolled courses"
             value={summary?.enrolledCourses ?? "—"}
@@ -132,16 +175,26 @@ export default function StudentDashboard() {
             icon={<BookOpen size={16} />}
           />
         </Link>
-        <Link href="/student/grades" style={{ textDecoration: "none", color: "inherit" }}>
+        <Link
+          href="/student/grades"
+          style={{ textDecoration: "none", color: "inherit" }}
+        >
           <Stat
             label="Cumulative GPA"
             value={summary ? summary.gpa.toFixed(2) : "—"}
-            sub={`${summary?.completedCredits ?? 0} credits completed`}
+            sub={
+              summary
+                ? `${summary.completedCredits}${summary.academicProgress.requiredCredits ? ` / ${summary.academicProgress.requiredCredits}` : ""} credits earned · ${summary.academicProgress.level ? `Level ${summary.academicProgress.level.code}` : "level pending"}`
+                : "—"
+            }
             tone="var(--daust-navy)"
             icon={<TrendingUp size={16} />}
           />
         </Link>
-        <Link href="/student/billing" style={{ textDecoration: "none", color: "inherit" }}>
+        <Link
+          href="/student/billing"
+          style={{ textDecoration: "none", color: "inherit" }}
+        >
           <Stat
             label="Account balance"
             value={accountBalanceLabel(accountSummary)}
@@ -162,10 +215,17 @@ export default function StudentDashboard() {
             icon={<Wallet size={16} />}
           />
         </Link>
-        <Link href="/student/attendance" style={{ textDecoration: "none", color: "inherit" }}>
+        <Link
+          href="/student/attendance"
+          style={{ textDecoration: "none", color: "inherit" }}
+        >
           <Stat
             label="Attendance"
-            value={attendance?.overall === null || attendance?.overall === undefined ? "—" : `${attendance.overall}%`}
+            value={
+              attendance?.overall === null || attendance?.overall === undefined
+                ? "—"
+                : `${attendance.overall}%`
+            }
             sub="This term"
             tone="var(--success-500)"
             icon={<CheckCheck size={16} />}
@@ -173,28 +233,63 @@ export default function StudentDashboard() {
         </Link>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 16, alignItems: "start" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 16,
+          marginBottom: 16,
+          alignItems: "start",
+        }}
+      >
         <div style={{ gridColumn: "span 1", minWidth: 0 }}>
           <Card
             title="Today's schedule"
             action={
-              <Link href="/student/schedule" style={{ fontSize: 12.5, fontWeight: 600 }}>
+              <Link
+                href="/student/schedule"
+                style={{ fontSize: 12.5, fontWeight: 600 }}
+              >
                 Full week →
               </Link>
             }
           >
             {todayClasses.length === 0 ? (
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>No classes scheduled.</p>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                No classes scheduled.
+              </p>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+              >
                 {todayClasses.map((c, i) => (
-                  <div key={c.enrollmentId} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ width: 4, alignSelf: "stretch", minHeight: 38, borderRadius: 2, background: colorOf(c.courseCode) }} />
-                    <span style={{ width: 96, fontSize: 12.5, color: "var(--fg2)", fontVariantNumeric: "tabular-nums" }}>
+                  <div
+                    key={c.enrollmentId}
+                    style={{ display: "flex", alignItems: "center", gap: 12 }}
+                  >
+                    <span
+                      style={{
+                        width: 4,
+                        alignSelf: "stretch",
+                        minHeight: 38,
+                        borderRadius: 2,
+                        background: colorOf(c.courseCode),
+                      }}
+                    />
+                    <span
+                      style={{
+                        width: 96,
+                        fontSize: 12.5,
+                        color: "var(--fg2)",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
                       {c.startTime}–{c.endTime}
                     </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>{c.title}</div>
+                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                        {c.title}
+                      </div>
                       <div className="muted" style={{ fontSize: 11.5 }}>
                         {c.courseCode} · {c.room ?? "room TBA"}
                       </div>
@@ -205,7 +300,8 @@ export default function StudentDashboard() {
                         borderRadius: "var(--radius-pill)",
                         fontSize: 11.5,
                         fontWeight: 600,
-                        background: i === 0 ? "rgba(237,132,37,.14)" : "var(--bg-subtle)",
+                        background:
+                          i === 0 ? "rgba(237,132,37,.14)" : "var(--bg-subtle)",
                         color: i === 0 ? "#a85f16" : "var(--fg3)",
                       }}
                     >
@@ -220,15 +316,31 @@ export default function StudentDashboard() {
 
         <Card title="To-do">
           {todos.length === 0 ? (
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>Nothing needs your attention.</p>
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              Nothing needs your attention.
+            </p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {todos.map((t) => (
-                <Link key={t.key} href={t.href} style={{ display: "flex", gap: 10, alignItems: "flex-start", textDecoration: "none", color: "inherit" }}>
+                <Link
+                  key={t.key}
+                  href={t.href}
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "flex-start",
+                    textDecoration: "none",
+                    color: "inherit",
+                  }}
+                >
                   <span style={{ marginTop: 1 }}>{t.icon}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>{t.title}</div>
-                    <div className="muted" style={{ fontSize: 11.5 }}>{t.due}</div>
+                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                      {t.title}
+                    </div>
+                    <div className="muted" style={{ fontSize: 11.5 }}>
+                      {t.due}
+                    </div>
                   </div>
                 </Link>
               ))}
@@ -237,21 +349,47 @@ export default function StudentDashboard() {
         </Card>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, alignItems: "start" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 16,
+          alignItems: "start",
+        }}
+      >
         <Card
           title="Degree progress"
           action={
-            <Link href="/student/degree" style={{ fontSize: 12.5, fontWeight: 600 }}>
+            <Link
+              href="/student/degree"
+              style={{ fontSize: 12.5, fontWeight: 600 }}
+            >
               Audit →
             </Link>
           }
         >
           {!degree ? (
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>Loading…</p>
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              Loading…
+            </p>
           ) : (
             <>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12 }}>
-                <span style={{ fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 800, color: "var(--daust-navy)" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 10,
+                  marginBottom: 12,
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    fontSize: 30,
+                    fontWeight: 800,
+                    color: "var(--daust-navy)",
+                  }}
+                >
                   {degree.pctComplete}%
                 </span>
                 <span className="muted" style={{ fontSize: 12.5 }}>
@@ -259,9 +397,15 @@ export default function StudentDashboard() {
                 </span>
               </div>
               <Progress pct={degree.pctComplete} height={10} />
-              <p className="muted" style={{ margin: "12px 0 0", fontSize: 12.5 }}>
-                Cumulative GPA <strong style={{ color: "var(--fg1)" }}>{summary ? summary.gpa.toFixed(2) : "—"}</strong> ·{" "}
-                {degree.inProgress} credits in progress
+              <p
+                className="muted"
+                style={{ margin: "12px 0 0", fontSize: 12.5 }}
+              >
+                Cumulative GPA{" "}
+                <strong style={{ color: "var(--fg1)" }}>
+                  {summary ? summary.gpa.toFixed(2) : "—"}
+                </strong>{" "}
+                · {degree.inProgress} credits in progress
               </p>
             </>
           )}
@@ -270,21 +414,36 @@ export default function StudentDashboard() {
         <Card
           title="Announcements"
           action={
-            <Link href="/student/announcements" style={{ fontSize: 12.5, fontWeight: 600 }}>
+            <Link
+              href="/student/announcements"
+              style={{ fontSize: 12.5, fontWeight: 600 }}
+            >
               View all
             </Link>
           }
         >
           {news.length === 0 ? (
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>No campus updates.</p>
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              No campus updates.
+            </p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {news.slice(0, 3).map((a) => (
                 <div key={a.id}>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--daust-navy-700)" }}>
+                  <div
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: ".1em",
+                      textTransform: "uppercase",
+                      color: "var(--daust-navy-700)",
+                    }}
+                  >
                     {a.category}
                   </div>
-                  <div style={{ fontWeight: 600, fontSize: 13.5 }}>{a.title}</div>
+                  <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                    {a.title}
+                  </div>
                 </div>
               ))}
             </div>

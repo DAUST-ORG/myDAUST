@@ -205,8 +205,26 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
         />
         <SummaryMetric
           label="Earned credits"
-          value={view ? String(view.totals.earnedCredits) : "—"}
-          detail="Retakes counted once"
+          value={
+            view
+              ? `${view.totals.earnedCredits}${view.academicProgress.requiredCredits ? ` / ${view.academicProgress.requiredCredits}` : ""}`
+              : "—"
+          }
+          detail={
+            view?.academicProgress.requiredCredits
+              ? "Earned / programme total"
+              : "Requirements not configured"
+          }
+        />
+        <SummaryMetric
+          label="Academic level"
+          value={view?.academicProgress.level?.code ?? "—"}
+          detail={view?.academicProgress.level?.name ?? "Earned-credit level"}
+        />
+        <SummaryMetric
+          label="In progress"
+          value={view ? String(view.academicProgress.inProgressCredits) : "—"}
+          detail="Not counted toward level"
         />
       </div>
 
@@ -253,6 +271,34 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
               onAction={(type, entry) => setAction({ type, entry })}
             />
           ))}
+        </div>
+      )}
+
+      {view && view.inProgressCourses.length > 0 && (
+        <div className="transcript-progress-section">
+          <div className="transcript-progress-head">
+            <div>
+              <strong>Courses in progress</strong>
+              <span>
+                Current enrollment · excluded from GPA and academic level
+              </span>
+            </div>
+            <Badge tone="info">
+              {view.academicProgress.inProgressCredits} credits
+            </Badge>
+          </div>
+          <div className="transcript-progress-table">
+            {view.inProgressCourses.map((course) => (
+              <div key={course.enrollmentId}>
+                <strong>{course.courseCode}</strong>
+                <span>{course.title}</span>
+                <span>
+                  {course.term} · {course.sectionCode}
+                </span>
+                <Badge tone="info">{course.credits} cr · In progress</Badge>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -361,7 +407,7 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
         }
         .transcript-summary {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(5, minmax(0, 1fr));
           background: var(--transcript-navy);
           color: #f7f9fc;
         }
@@ -370,6 +416,46 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
         }
         .transcript-summary-item + .transcript-summary-item {
           border-left: 1px solid rgba(255, 255, 255, 0.16);
+        }
+        .transcript-progress-section {
+          margin: 18px 20px 20px;
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          overflow: hidden;
+        }
+        .transcript-progress-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          padding: 12px 14px;
+          background: var(--bg-tint);
+        }
+        .transcript-progress-head > div {
+          display: grid;
+          gap: 2px;
+        }
+        .transcript-progress-head strong {
+          font-size: 13.5px;
+        }
+        .transcript-progress-head span {
+          color: var(--fg3);
+          font-size: 11.5px;
+        }
+        .transcript-progress-table > div {
+          display: grid;
+          grid-template-columns: 82px minmax(150px, 1fr) minmax(
+              150px,
+              auto
+            ) auto;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 14px;
+          font-size: 12.5px;
+          border-top: 1px solid var(--divider);
+        }
+        .transcript-progress-table > div > span {
+          color: var(--fg2);
         }
         .transcript-summary-label {
           color: rgba(247, 249, 252, 0.7);

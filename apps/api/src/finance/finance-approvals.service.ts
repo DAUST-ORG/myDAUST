@@ -7,7 +7,11 @@ import {
   Optional,
 } from "@nestjs/common";
 import { Prisma, type ApprovalRequestKind } from "@mydaust/db";
-import { COST_CENTER_TUITION, toDakarDateKey } from "@mydaust/shared";
+import {
+  AcademicCatalogDraftInput,
+  COST_CENTER_TUITION,
+  toDakarDateKey,
+} from "@mydaust/shared";
 import type { AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { projectedInstallmentStatus } from "./account-position.js";
@@ -527,6 +531,12 @@ export class FinanceApprovalsService {
           "stale",
           actor.personId,
         );
+        if (request.kind === "academic_catalog" && request.targetId) {
+          await tx.academicCatalogRevision.updateMany({
+            where: { id: request.targetId, status: "pending" },
+            data: { status: "rejected" },
+          });
+        }
         const stale = await tx.approvalRequest.update({
           where: { id },
           data: {
@@ -631,6 +641,12 @@ export class FinanceApprovalsService {
         throw new BadRequestException(`Request is already ${current.status}`);
       }
       await this.operatingBudget.markDecision(tx, request, status, actorId);
+      if (request.kind === "academic_catalog" && request.targetId) {
+        await tx.academicCatalogRevision.updateMany({
+          where: { id: request.targetId, status: "pending" },
+          data: { status: status === "rejected" ? "rejected" : "cancelled" },
+        });
+      }
       await tx.approvalEvent.create({
         data: { requestId: id, action: status, actorId, data: { note } },
       });
@@ -651,6 +667,26 @@ export class FinanceApprovalsService {
     tx: Prisma.TransactionClient,
     request: StoredApproval,
   ): Promise<string | null> {
+    if (request.kind === "academic_catalog") {
+      const revision = request.targetId
+        ? await tx.academicCatalogRevision.findUnique({
+            where: { id: request.targetId },
+          })
+        : null;
+      if (!revision || revision.status !== "pending") {
+        return "The academic catalog draft is no longer awaiting approval";
+      }
+      const approved = await tx.academicCatalogRevision.findFirst({
+        where: {
+          academicYearId: revision.academicYearId,
+          status: "approved",
+        },
+        orderBy: { revision: "desc" },
+      });
+      return (approved?.revision ?? 0) === request.baseRevision
+        ? null
+        : "The approved academic catalog changed after this revision was submitted";
+    }
     if (
       request.kind === "operating_budget" ||
       request.kind === "management_actual"
@@ -688,6 +724,8 @@ export class FinanceApprovalsService {
   ) {
     const after = request.afterJson as Record<string, unknown>;
     switch (request.kind) {
+      case "academic_catalog":
+        return this.applyAcademicCatalog(tx, request, actorId);
       case "global_fee_schedule":
         return this.applyScheduleRevision(tx, request, after, actorId);
       case "custom_charge":
@@ -708,6 +746,122 @@ export class FinanceApprovalsService {
       case "management_actual":
         return this.operatingBudget.applyApproval(tx, request, actorId);
     }
+  }
+
+  private async applyAcademicCatalog(
+    tx: Prisma.TransactionClient,
+    request: StoredApproval,
+    actorId: string,
+  ) {
+    if (!request.targetId) {
+      throw new BadRequestException(
+        "Academic catalog revision target is missing",
+      );
+    }
+    const revision = await tx.academicCatalogRevision.findUnique({
+      where: { id: request.targetId },
+    });
+    if (!revision || revision.status !== "pending") {
+      throw new BadRequestException(
+        "Academic catalog revision is no longer awaiting approval",
+      );
+    }
+    const parsed = AcademicCatalogDraftInput.parse({
+      yearLabel: revision.yearLabel,
+      startsOn: revision.startsOn?.toISOString().slice(0, 10) ?? null,
+      endsOn: revision.endsOn?.toISOString().slice(0, 10) ?? null,
+      defaultLevels: revision.defaultLevels,
+      programs: revision.programConfigurations,
+      reason: revision.reason,
+      activateYear: revision.activateYear,
+    });
+    const currentPrograms = await tx.program.findMany({
+      select: { id: true },
+    });
+    const configuredProgramIds = new Set(
+      parsed.programs.map((program) => program.programId),
+    );
+    if (
+      currentPrograms.length !== parsed.programs.length ||
+      currentPrograms.some((program) => !configuredProgramIds.has(program.id))
+    ) {
+      throw new BadRequestException(
+        "The programme catalog changed after this revision was submitted",
+      );
+    }
+    const duplicateLabel = await tx.academicYear.findFirst({
+      where: {
+        label: revision.yearLabel,
+        id: { not: revision.academicYearId },
+      },
+      select: { id: true },
+    });
+    if (duplicateLabel) {
+      throw new BadRequestException(
+        `Academic year label ${revision.yearLabel} is already in use`,
+      );
+    }
+    await tx.academicCatalogRevision.updateMany({
+      where: {
+        academicYearId: revision.academicYearId,
+        status: "approved",
+        id: { not: revision.id },
+      },
+      data: { status: "superseded" },
+    });
+    const approvedAt = new Date();
+    await tx.academicCatalogRevision.update({
+      where: { id: revision.id },
+      data: { status: "approved", approvedById: actorId, approvedAt },
+    });
+    if (revision.activateYear) {
+      await tx.academicYear.updateMany({
+        where: { status: "active", id: { not: revision.academicYearId } },
+        data: { status: "archived" },
+      });
+    }
+    const previousYear = await tx.academicYear.findUniqueOrThrow({
+      where: { id: revision.academicYearId },
+    });
+    const year = await tx.academicYear.update({
+      where: { id: revision.academicYearId },
+      data: {
+        label: revision.yearLabel,
+        startsOn: revision.startsOn,
+        endsOn: revision.endsOn,
+        ...(revision.activateYear ? { status: "active" } : {}),
+      },
+    });
+    await tx.programRequirement.deleteMany({
+      where: {
+        catalogYear: {
+          in: [...new Set([previousYear.label, year.label])],
+        },
+      },
+    });
+    const requirementRows = parsed.programs.flatMap((program) =>
+      program.requirements.map((requirement, position) => ({
+        programId: program.programId,
+        catalogYear: year.label,
+        category: requirement.category,
+        requiredCredits: requirement.requiredCredits,
+        position,
+      })),
+    );
+    if (requirementRows.length > 0) {
+      await tx.programRequirement.createMany({ data: requirementRows });
+    }
+    await tx.student.updateMany({
+      where: { catalogYearId: year.id },
+      data: { catalogYear: year.label },
+    });
+    return {
+      academicYearId: year.id,
+      label: year.label,
+      revision: revision.revision,
+      levels: parsed.defaultLevels.length,
+      programs: parsed.programs.length,
+    };
   }
 
   private normalizedLegacyScheduleRow(

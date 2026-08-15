@@ -4,6 +4,7 @@ export * from "./finance.js";
 export * from "./roles.js";
 export * from "./auth.js";
 export * from "./academics.js";
+export * from "./academic-catalog.js";
 export * from "./comms.js";
 export * from "./admissions.js";
 export * from "./dining.js";

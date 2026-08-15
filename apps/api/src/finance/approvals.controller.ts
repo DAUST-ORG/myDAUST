@@ -16,6 +16,7 @@ export class ApprovalsController {
   constructor(private readonly approvals: FinanceApprovalsService) {}
 
   @Get()
+  @Roles("bursar", "registrar", "admin")
   list(
     @CurrentUser() user: AuthUser,
     @Query("view") view?: string,
@@ -49,6 +50,7 @@ export class ApprovalsController {
   }
 
   @Post(":id/cancel")
+  @Roles("bursar", "registrar", "admin")
   cancel(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
