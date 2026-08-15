@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
+import type { AcademicStanding } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
   bestPointsByCourse,
@@ -14,6 +15,10 @@ import {
 import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
 import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
+import {
+  AcademicStandingService,
+  type StandingOverrideInput,
+} from "../academic-catalog/academic-standing.service.js";
 
 export const GRADE_POINTS: Record<string, number> = {
   "A+": 4.0,
@@ -47,13 +52,6 @@ export function computeGpa(rows: { grade: string; credits: number }[]) {
         : Math.round((points / completedCredits) * 100) / 100,
     completedCredits,
   };
-}
-
-/** Academic standing label derived from GPA (0 = no graded credits yet → treated as Good Standing). */
-export function standingLabel(gpa: number): string {
-  if (gpa >= 3.7) return "Dean's List";
-  if (gpa > 0 && gpa < 2) return "Academic Probation";
-  return "Good Standing";
 }
 
 /**
@@ -277,10 +275,16 @@ export interface UpdateStudentFields {
 export class AcademicsService {
   private readonly transcript: TranscriptService;
   private readonly catalogs: AcademicCatalogService;
+  private readonly standings: AcademicStandingService;
 
   constructor(private readonly prisma: PrismaService) {
     this.catalogs = new AcademicCatalogService(prisma);
-    this.transcript = new TranscriptService(prisma, this.catalogs);
+    this.standings = new AcademicStandingService(prisma, this.catalogs);
+    this.transcript = new TranscriptService(
+      prisma,
+      this.catalogs,
+      this.standings,
+    );
   }
 
   /** The active/upcoming term (the one registration targets). */
@@ -871,7 +875,8 @@ export class AcademicsService {
       gpa,
       completedCredits,
       academicProgress: transcript.academicProgress,
-      standing: s.standing ?? standingLabel(gpa),
+      standing: transcript.academicStanding.label,
+      academicStanding: transcript.academicStanding,
       // Saved instant-payment alias, so the billing screen can prefill it.
       piSpiAlias: s.piSpiAlias,
       personal: {
@@ -1717,6 +1722,7 @@ export class AcademicsService {
       gpa: transcript.totals.gpa ?? 0,
       completedCredits: transcript.totals.earnedCredits,
       academicProgress: transcript.academicProgress,
+      academicStanding: transcript.academicStanding,
     };
   }
 
@@ -1771,6 +1777,7 @@ export class AcademicsService {
   private mapAdminStudentRoster(
     s: AdminStudentRosterRecord,
     academicProgress?: Awaited<ReturnType<AcademicCatalogService["progress"]>>,
+    academicStanding?: AcademicStanding,
   ) {
     const { gpa, completedCredits } = summarizeTranscriptRows(
       s.transcriptEntries,
@@ -1791,6 +1798,7 @@ export class AcademicsService {
       programName: s.program?.name ?? null,
       yearLevel: s.yearLevel,
       academicLevel: academicProgress?.level ?? null,
+      academicStanding: academicStanding ?? null,
       cohort: s.cohort,
       gpa,
       completedCredits,
@@ -1801,7 +1809,7 @@ export class AcademicsService {
       status:
         s.recordStatus === "archived"
           ? "archived"
-          : gpa > 0 && gpa < 2
+          : academicStanding?.code === "academic_probation"
             ? "probation"
             : "active",
       recordStatus: s.recordStatus,
@@ -1901,20 +1909,40 @@ export class AcademicsService {
         }),
       ]);
 
-    const academicProgress = await this.catalogs.progressMany(
-      records.map((student) => {
-        const summary = summarizeTranscriptRows(student.transcriptEntries);
-        return {
-          programId: student.programId,
-          catalogYearId: student.catalogYearId,
-          catalogYearLabel: student.catalogYear,
-          earnedCredits: summary.completedCredits,
-          inProgressCredits: 0,
-        };
-      }),
+    const transcriptSummaries = records.map((student) =>
+      summarizeTranscriptRows(student.transcriptEntries),
+    );
+    const progressInputs = records.map((student, index) => ({
+      programId: student.programId,
+      catalogYearId: student.catalogYearId,
+      catalogYearLabel: student.catalogYear,
+      earnedCredits: transcriptSummaries[index]!.completedCredits,
+      inProgressCredits: 0,
+    }));
+    const standingContexts = records.map((student, index) => ({
+      studentId: student.id,
+      programId: student.programId,
+      catalogYearId: student.catalogYearId,
+      catalogYearLabel: student.catalogYear,
+      cumulativeGpa:
+        transcriptSummaries[index]!.attemptedCredits > 0
+          ? transcriptSummaries[index]!.gpa
+          : null,
+      hasGpaBearingCoursework: transcriptSummaries[index]!.attemptedCredits > 0,
+    }));
+    const catalogResults =
+      await this.catalogs.progressAndStandingPoliciesMany(progressInputs);
+    const academicProgress = catalogResults.map((result) => result.progress);
+    const academicStandings = await this.standings.resolveMany(
+      standingContexts,
+      catalogResults.map((result) => result.standingPolicy),
     );
     let items = records.map((student, index) =>
-      this.mapAdminStudentRoster(student, academicProgress[index]),
+      this.mapAdminStudentRoster(
+        student,
+        academicProgress[index],
+        academicStandings[index],
+      ),
     );
     if (derivedSort) {
       const direction = query.direction === "asc" ? 1 : -1;
@@ -1930,7 +1958,7 @@ export class AcademicsService {
               ? left.gpa
               : query.sort === "balance"
                 ? left.balance
-                : left.status;
+                : (left.academicStanding?.label ?? left.status);
         const rightValue =
           query.sort === "level"
             ? (right.academicLevel?.creditCeiling ?? 0)
@@ -1938,7 +1966,7 @@ export class AcademicsService {
               ? right.gpa
               : query.sort === "balance"
                 ? right.balance
-                : right.status;
+                : (right.academicStanding?.label ?? right.status);
         const compared =
           typeof leftValue === "number" && typeof rightValue === "number"
             ? leftValue - rightValue
@@ -1997,20 +2025,37 @@ export class AcademicsService {
       select: ADMIN_STUDENT_ROSTER_SELECT,
       orderBy: { studentNo: "asc" },
     });
-    const academicProgress = await this.catalogs.progressMany(
-      students.map((student) => {
-        const summary = summarizeTranscriptRows(student.transcriptEntries);
-        return {
-          programId: student.programId,
-          catalogYearId: student.catalogYearId,
-          catalogYearLabel: student.catalogYear,
-          earnedCredits: summary.completedCredits,
-          inProgressCredits: 0,
-        };
-      }),
+    const summaries = students.map((student) =>
+      summarizeTranscriptRows(student.transcriptEntries),
+    );
+    const progressInputs = students.map((student, index) => ({
+      programId: student.programId,
+      catalogYearId: student.catalogYearId,
+      catalogYearLabel: student.catalogYear,
+      earnedCredits: summaries[index]!.completedCredits,
+      inProgressCredits: 0,
+    }));
+    const catalogResults =
+      await this.catalogs.progressAndStandingPoliciesMany(progressInputs);
+    const academicProgress = catalogResults.map((result) => result.progress);
+    const academicStandings = await this.standings.resolveMany(
+      students.map((student, index) => ({
+        studentId: student.id,
+        programId: student.programId,
+        catalogYearId: student.catalogYearId,
+        catalogYearLabel: student.catalogYear,
+        cumulativeGpa:
+          summaries[index]!.attemptedCredits > 0 ? summaries[index]!.gpa : null,
+        hasGpaBearingCoursework: summaries[index]!.attemptedCredits > 0,
+      })),
+      catalogResults.map((result) => result.standingPolicy),
     );
     return students.map((student, index) =>
-      this.mapAdminStudentRoster(student, academicProgress[index]),
+      this.mapAdminStudentRoster(
+        student,
+        academicProgress[index],
+        academicStandings[index],
+      ),
     );
   }
 
@@ -2087,17 +2132,33 @@ export class AcademicsService {
       where: { departmentId: program.departmentId },
       orderBy: { code: "asc" },
     });
-    const programmeProgress = await this.catalogs.progressMany(
-      program.students.map((student) => {
-        const summary = summarizeTranscriptRows(student.transcriptEntries);
-        return {
-          programId: student.programId,
-          catalogYearId: student.catalogYearId,
-          catalogYearLabel: student.catalogYear,
-          earnedCredits: summary.completedCredits,
-          inProgressCredits: 0,
-        };
-      }),
+    const programmeSummaries = program.students.map((student) =>
+      summarizeTranscriptRows(student.transcriptEntries),
+    );
+    const programmeInputs = program.students.map((student, index) => ({
+      programId: student.programId,
+      catalogYearId: student.catalogYearId,
+      catalogYearLabel: student.catalogYear,
+      earnedCredits: programmeSummaries[index]!.completedCredits,
+      inProgressCredits: 0,
+    }));
+    const programmeCatalog =
+      await this.catalogs.progressAndStandingPoliciesMany(programmeInputs);
+    const programmeProgress = programmeCatalog.map((result) => result.progress);
+    const programmeStanding = await this.standings.resolveMany(
+      program.students.map((student, index) => ({
+        studentId: student.id,
+        programId: student.programId,
+        catalogYearId: student.catalogYearId,
+        catalogYearLabel: student.catalogYear,
+        cumulativeGpa:
+          programmeSummaries[index]!.attemptedCredits > 0
+            ? programmeSummaries[index]!.gpa
+            : null,
+        hasGpaBearingCoursework:
+          programmeSummaries[index]!.attemptedCredits > 0,
+      })),
+      programmeCatalog.map((result) => result.standingPolicy),
     );
     const students = program.students.map((s, index) => {
       const { gpa, completedCredits } = summarizeTranscriptRows(
@@ -2111,13 +2172,17 @@ export class AcademicsService {
         photoUrl: s.photoUrl,
         yearLevel: s.yearLevel,
         academicLevel: programmeProgress[index]?.level ?? null,
+        academicStanding: programmeStanding[index] ?? null,
         gpa,
         completedCredits,
         balance: summary.balanceXof,
         summary,
         hasActiveHold: s.holds.length > 0,
         activeHoldCount: s.holds.length,
-        status: gpa > 0 && gpa < 2 ? "probation" : "active",
+        status:
+          programmeStanding[index]?.code === "academic_probation"
+            ? "probation"
+            : "active",
       };
     });
     const billed = program.students.reduce(
@@ -2699,7 +2764,7 @@ export class AcademicsService {
 
   /** Registrar/admin: one student's academic file (profile, enrollments, transcript, GPA, balance). */
   async adminStudentDetail(studentId: string) {
-    const [student, transcriptView] = await Promise.all([
+    const [student, transcriptView, standingPolicy] = await Promise.all([
       this.prisma.student.findUnique({
         where: { id: studentId },
         include: {
@@ -2721,6 +2786,7 @@ export class AcademicsService {
         },
       }),
       this.transcript.view(studentId),
+      this.standings.policyForStudent(studentId),
     ]);
     if (!student) throw new NotFoundException("Student not found");
     const { gpa, completedCredits } = summarizeTranscriptRows(
@@ -2747,11 +2813,13 @@ export class AcademicsService {
       completedCredits,
       currentTermCredits,
       academicProgress: transcriptView.academicProgress,
-      standing: standingLabel(gpa),
+      standing: transcriptView.academicStanding.label,
+      academicStanding: transcriptView.academicStanding,
+      standingPolicy,
       status:
         student.recordStatus === "archived"
           ? "archived"
-          : gpa > 0 && gpa < 2
+          : transcriptView.academicStanding.code === "academic_probation"
             ? "probation"
             : "active",
       recordStatus: student.recordStatus,
@@ -2813,6 +2881,26 @@ export class AcademicsService {
         grade: e.grade,
       })),
     };
+  }
+
+  setStudentStandingOverride(
+    actorId: string,
+    studentId: string,
+    input: StandingOverrideInput,
+  ) {
+    return this.standings.setOverride(actorId, studentId, input);
+  }
+
+  clearStudentStandingOverride(
+    actorId: string,
+    studentId: string,
+    reason: string,
+  ) {
+    return this.standings.clearOverride(actorId, studentId, reason);
+  }
+
+  currentStandingOverrides() {
+    return this.standings.currentOverrides();
   }
 
   /** Registrar/admin: per-student activity timeline (account, payments, enrollments). */
@@ -3299,20 +3387,38 @@ export class AcademicsService {
     });
     const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
 
-    const advisees = await Promise.all(
-      studentIds.map(async (sid) => {
-        const s = enrollments.find((e) => e.studentId === sid)!.student;
-        const { gpa } = summarizeTranscriptRows(s.transcriptEntries);
-        return {
-          studentNo: s.studentNo,
-          name: `${s.person.firstName} ${s.person.lastName}`,
-          program: s.program?.code ?? "—",
-          gpa,
-          atRisk: gpa > 0 && gpa < 2.5,
-          deansList: gpa >= 3.7,
-        };
-      }),
+    const adviseeRecords = studentIds.map(
+      (sid) =>
+        enrollments.find((enrollment) => enrollment.studentId === sid)!.student,
     );
+    const adviseeSummaries = adviseeRecords.map((student) =>
+      summarizeTranscriptRows(student.transcriptEntries),
+    );
+    const adviseeStandings = await this.standings.resolveMany(
+      adviseeRecords.map((student, index) => ({
+        studentId: student.id,
+        programId: student.programId,
+        catalogYearId: student.catalogYearId,
+        catalogYearLabel: student.catalogYear,
+        cumulativeGpa:
+          adviseeSummaries[index]!.attemptedCredits > 0
+            ? adviseeSummaries[index]!.gpa
+            : null,
+        hasGpaBearingCoursework: adviseeSummaries[index]!.attemptedCredits > 0,
+      })),
+    );
+    const advisees = adviseeRecords.map((student, index) => {
+      const gpa = adviseeSummaries[index]!.gpa;
+      return {
+        studentNo: student.studentNo,
+        name: `${student.person.firstName} ${student.person.lastName}`,
+        program: student.program?.code ?? "—",
+        gpa,
+        atRisk: gpa > 0 && gpa < 2.5,
+        deansList: adviseeStandings[index]?.code === "deans_list",
+        academicStanding: adviseeStandings[index] ?? null,
+      };
+    });
     advisees.sort((a, b) => a.name.localeCompare(b.name));
     return advisees;
   }

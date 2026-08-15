@@ -76,6 +76,19 @@ function view(count = 42): TranscriptView {
         fallback: false,
       },
     },
+    academicStanding: {
+      code: "deans_list",
+      label: "Dean's List",
+      tone: "honor",
+      source: "computed",
+      catalog: {
+        academicYearId: "year-1",
+        label: "2026–2027",
+        revision: 1,
+        fallback: false,
+      },
+      override: null,
+    },
     inProgressCourses: [
       {
         enrollmentId: "enrollment-current",

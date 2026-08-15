@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { extname, resolve } from "node:path";
+import type { Readable } from "node:stream";
 import {
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -48,8 +52,10 @@ const INLINE_SAFE = new Set([
 /** Identify a file by its magic bytes. Returns null when nothing matches. */
 export function detectedUploadMime(buffer: Buffer): string | null {
   if (buffer.length < 4) return null;
-  if (buffer.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  if (buffer.subarray(0, 5).toString("ascii") === "%PDF-")
+    return "application/pdf";
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff)
+    return "image/jpeg";
   if (
     buffer
       .subarray(0, 8)
@@ -92,6 +98,36 @@ export function validateUpload(
   return mime;
 }
 
+export function detectedSiteVideoMime(buffer: Buffer): string | null {
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(4, 8).toString("ascii") === "ftyp"
+  ) {
+    const brand = buffer.subarray(8, 12).toString("ascii");
+    if (/^(?:isom|iso2|mp41|mp42|avc1|dash|M4V )$/.test(brand)) {
+      return "video/mp4";
+    }
+  }
+  if (
+    buffer.length >= 4 &&
+    buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))
+  ) {
+    return "video/webm";
+  }
+  return null;
+}
+
+export function validateSiteVideo(
+  file?: Pick<Express.Multer.File, "buffer" | "size" | "mimetype">,
+): "video/mp4" | "video/webm" {
+  if (!file?.buffer) throw new BadRequestException("No video provided");
+  const mime = detectedSiteVideoMime(file.buffer);
+  if (mime !== "video/mp4" && mime !== "video/webm") {
+    throw new BadRequestException("Upload a valid MP4 or WebM video");
+  }
+  return mime;
+}
+
 /** Whether a stored object may be rendered inline rather than downloaded. */
 export function isInlineSafe(contentType: string): boolean {
   return INLINE_SAFE.has(contentType);
@@ -118,6 +154,8 @@ export function contentTypeForFilename(filename: string): string {
       ".pdf": "application/pdf",
       ".png": "image/png",
       ".webp": "image/webp",
+      ".mp4": "video/mp4",
+      ".webm": "video/webm",
       // No ".svg" entry on purpose — see ALLOWED_UPLOAD_MIME. Anything already stored
       // with that extension now falls through to octet-stream and downloads instead of
       // rendering, which defuses previously uploaded files too.
@@ -151,6 +189,105 @@ export class UploadsStorage {
       await writeFile(resolve(UPLOADS_DIR, filename), file.buffer);
     }
     return filename;
+  }
+
+  async putSiteVideo(file: Express.Multer.File) {
+    const mime = validateSiteVideo(file);
+    const filename = `${randomUUID()}${mime === "video/mp4" ? ".mp4" : ".webm"}`;
+    if (this.env.MEDIA_BUCKET) {
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: this.env.MEDIA_BUCKET,
+          Key: `uploads/site-media/${filename}`,
+          Body: file.buffer,
+          ContentType: mime,
+          CacheControl: "public, max-age=31536000, immutable",
+          ServerSideEncryption: "AES256",
+        }),
+      );
+    } else {
+      const directory = resolve(UPLOADS_DIR, "site-media");
+      await mkdir(directory, { recursive: true });
+      await writeFile(resolve(directory, filename), file.buffer);
+    }
+    return filename;
+  }
+
+  async streamSiteVideo(
+    filename: string,
+    range?: string,
+  ): Promise<{
+    body: Readable;
+    contentType: string;
+    size: number;
+    start: number;
+    end: number;
+    partial: boolean;
+  }> {
+    if (!validUploadFilename(filename) || !/\.(?:mp4|webm)$/i.test(filename)) {
+      throw new NotFoundException("Video not found");
+    }
+    try {
+      const size = this.env.MEDIA_BUCKET
+        ? Number(
+            (
+              await this.s3.send(
+                new HeadObjectCommand({
+                  Bucket: this.env.MEDIA_BUCKET,
+                  Key: `uploads/site-media/${filename}`,
+                }),
+              )
+            ).ContentLength ?? 0,
+          )
+        : (await stat(resolve(UPLOADS_DIR, "site-media", filename))).size;
+      if (!size) throw new NotFoundException("Video not found");
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range ?? "");
+      const requestedStart = match?.[1] ? Number(match[1]) : 0;
+      const requestedEnd = match?.[2] ? Number(match[2]) : size - 1;
+      const start = Math.max(0, Math.min(requestedStart, size - 1));
+      const end = Math.max(start, Math.min(requestedEnd, size - 1));
+      const partial = Boolean(match);
+      if (this.env.MEDIA_BUCKET) {
+        const result = await this.s3.send(
+          new GetObjectCommand({
+            Bucket: this.env.MEDIA_BUCKET,
+            Key: `uploads/site-media/${filename}`,
+            ...(partial ? { Range: `bytes=${start}-${end}` } : {}),
+          }),
+        );
+        if (!result.Body) throw new NotFoundException("Video not found");
+        return {
+          body: result.Body as unknown as Readable,
+          contentType: result.ContentType || contentTypeForFilename(filename),
+          size,
+          start,
+          end,
+          partial,
+        };
+      }
+      return {
+        body: createReadStream(resolve(UPLOADS_DIR, "site-media", filename), {
+          start,
+          end,
+        }),
+        contentType: contentTypeForFilename(filename),
+        size,
+        start,
+        end,
+        partial,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      const detail = error as { name?: string; code?: string };
+      if (
+        ["ENOENT", "NoSuchKey", "NotFound"].includes(
+          detail.name ?? detail.code ?? "",
+        )
+      ) {
+        throw new NotFoundException("Video not found");
+      }
+      throw error;
+    }
   }
 
   async get(filename: string): Promise<{ body: Buffer; contentType: string }> {

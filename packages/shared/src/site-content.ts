@@ -628,6 +628,55 @@ export function safeLink(v: string | undefined): string {
   if (/^[\w-]+(\.[\w-]+)+([/?#].*)?$/.test(s)) return `https://${s}`.slice(0, 300);
   return "";
 }
+
+export type HeroMedia =
+  | { kind: "image" }
+  | { kind: "uploaded"; url: string }
+  | { kind: "direct"; url: string }
+  | { kind: "youtube"; videoId: string }
+  | { kind: "vimeo"; videoId: string };
+
+/** Normalize supported external video URLs without accepting arbitrary embed HTML. */
+export function normalizeHeroMediaUrl(value: string): HeroMedia | null {
+  const source = value.trim();
+  const parsed = /^https:\/\/([^/?#]+)([^?#]*)?(?:\?([^#]*))?(?:#.*)?$/i.exec(source);
+  if (!parsed) return null;
+  const host = parsed[1]!.toLowerCase().replace(/^www\./, "");
+  const pathname = parsed[2] || "/";
+  const pathParts = pathname.split("/").filter(Boolean);
+  const query = new Map<string, string>();
+  for (const part of (parsed[3] ?? "").split("&").filter(Boolean)) {
+    const [key, raw = ""] = part.split("=", 2);
+    try {
+      query.set(key!, decodeURIComponent(raw.replace(/\+/g, " ")));
+    } catch {
+      return null;
+    }
+  }
+  const youtubeIdPattern = /^[A-Za-z0-9_-]{6,20}$/;
+  const vimeoIdPattern = /^\d{5,12}$/;
+
+  if (host === "youtu.be") {
+    const videoId = pathParts[0] ?? "";
+    return youtubeIdPattern.test(videoId) ? { kind: "youtube", videoId } : null;
+  }
+  if (host === "youtube.com" || host === "youtube-nocookie.com") {
+    const embeddedId = ["embed", "shorts"].includes(pathParts[0] ?? "")
+      ? pathParts[1]
+      : query.get("v");
+    return embeddedId && youtubeIdPattern.test(embeddedId)
+      ? { kind: "youtube", videoId: embeddedId }
+      : null;
+  }
+  if (host === "vimeo.com" || host === "player.vimeo.com") {
+    const videoId = [...pathParts].reverse().find((part) => vimeoIdPattern.test(part));
+    return videoId ? { kind: "vimeo", videoId } : null;
+  }
+  if (/\.(mp4|webm)$/i.test(pathname)) {
+    return { kind: "direct", url: source.slice(0, 1000) };
+  }
+  return null;
+}
 const bi = (b: { en?: string; fr?: string } | undefined) => ({ en: (b?.en ?? "").slice(0, 4000), fr: (b?.fr ?? "").slice(0, 4000) });
 
 /**
@@ -666,11 +715,33 @@ export function sanitizeSiteOverrides(raw: SiteOverrides): SiteOverrides {
       name: (d.name ?? "").slice(0, 120), initials: (d.initials ?? "").slice(0, 4), role: bi(d.role),
     }));
   }
+  const configuredHeroMedia = raw.heroMedia;
+  let heroMedia: HeroMedia = { kind: "image" };
+  if (
+    configuredHeroMedia?.kind === "uploaded" &&
+    /^\/uploads\/site-media\/[A-Za-z0-9._-]+$/.test(configuredHeroMedia.url)
+  ) {
+    heroMedia = configuredHeroMedia;
+  } else if (configuredHeroMedia?.kind === "direct") {
+    const normalized = normalizeHeroMediaUrl(configuredHeroMedia.url);
+    if (normalized?.kind === "direct") heroMedia = normalized;
+  } else if (
+    configuredHeroMedia?.kind === "youtube" &&
+    /^[A-Za-z0-9_-]{6,20}$/.test(configuredHeroMedia.videoId)
+  ) {
+    heroMedia = configuredHeroMedia;
+  } else if (
+    configuredHeroMedia?.kind === "vimeo" &&
+    /^\d{5,12}$/.test(configuredHeroMedia.videoId)
+  ) {
+    heroMedia = configuredHeroMedia;
+  }
   return {
     text: { en: pickText(raw.text?.en ?? {}), fr: pickText(raw.text?.fr ?? {}) },
     images,
     hidden: [...new Set((raw.hidden ?? []).filter((k) => allowedHidden.has(k)))],
     collections,
+    heroMedia,
   };
 }
 
@@ -767,6 +838,22 @@ export const DirectorItemInput = z.object({
 });
 export type DirectorItem = z.infer<typeof DirectorItemInput>;
 
+const HeroMediaInput = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("image") }),
+  z.object({
+    kind: z.literal("uploaded"),
+    url: z.string().regex(/^\/uploads\/site-media\/[A-Za-z0-9._-]+$/),
+  }),
+  z.object({
+    kind: z.literal("direct"),
+    url: z.string().max(1000).refine((value) => normalizeHeroMediaUrl(value)?.kind === "direct", {
+      message: "Use a direct HTTPS MP4 or WebM URL",
+    }),
+  }),
+  z.object({ kind: z.literal("youtube"), videoId: z.string().regex(/^[A-Za-z0-9_-]{6,20}$/) }),
+  z.object({ kind: z.literal("vimeo"), videoId: z.string().regex(/^\d{5,12}$/) }),
+]);
+
 export const SiteOverridesInput = z.object({
   text: z.object({
     en: z.record(z.string(), z.string()),
@@ -774,6 +861,7 @@ export const SiteOverridesInput = z.object({
   }),
   images: z.record(z.string(), z.string()),
   hidden: z.array(z.string()),
+  heroMedia: HeroMediaInput.default({ kind: "image" }),
   // Authored collections replace the built-in list for that key when present.
   collections: z
     .object({
@@ -785,7 +873,13 @@ export const SiteOverridesInput = z.object({
 });
 export type SiteOverrides = z.infer<typeof SiteOverridesInput>;
 
-export const EMPTY_SITE_OVERRIDES: SiteOverrides = { text: { en: {}, fr: {} }, images: {}, hidden: [], collections: {} };
+export const EMPTY_SITE_OVERRIDES: SiteOverrides = {
+  text: { en: {}, fr: {} },
+  images: {},
+  hidden: [],
+  collections: {},
+  heroMedia: { kind: "image" },
+};
 
 /** Reshape a flat image map into the structured IMG object the vitrine renders from. */
 export function siteImgMap(images: Record<string, string>) {
