@@ -9,6 +9,9 @@ function student(overrides: Record<string, unknown> = {}) {
     studentNo: "DAUST-2026-001",
     photoUrl: null,
     yearLevel: 1,
+    programId: "program-1",
+    catalogYearId: "year-1",
+    catalogYear: "2026–2027",
     cohort: "2026",
     recordStatus: "active",
     person: {
@@ -40,6 +43,34 @@ function service(records = [student()]) {
         .fn()
         .mockResolvedValue([{ code: "BSCS", name: "Computer Science" }]),
     },
+    academicCatalogRevision: {
+      findMany: vi.fn().mockResolvedValue([
+        {
+          academicYearId: "year-1",
+          yearLabel: "2026–2027",
+          revision: 2,
+          approvedAt: new Date("2026-08-15T00:00:00.000Z"),
+          defaultLevels: Array.from({ length: 10 }, (_, index) => ({
+            code: `S${index + 1}`,
+            name: `Semester ${index + 1}`,
+            creditCeiling: (index + 1) * 30,
+          })),
+          programConfigurations: [
+            {
+              programId: "program-1",
+              programCode: "BSCS",
+              programName: "Computer Science",
+              progressionMode: "default",
+              customLevels: [],
+              requirements: [
+                { category: "Degree curriculum", requiredCredits: 300 },
+              ],
+            },
+          ],
+          academicYear: { label: "2026–2027" },
+        },
+      ]),
+    },
   };
   return { service: new AcademicsService(prisma as never), prisma };
 }
@@ -68,6 +99,7 @@ describe("registrar student roster", () => {
       hasActiveHold: true,
       activeHoldCount: 1,
       program: "BSCS",
+      academicLevel: { code: "S1", creditCeiling: 30 },
     });
     expect(prisma.student.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -91,6 +123,40 @@ describe("registrar student roster", () => {
         person: { is: { passwordHash: null } },
       },
     });
+  });
+
+  it("sorts the list by the earned-credit catalog level", async () => {
+    const { service: academics, prisma } = service([
+      student({
+        id: "student-s2",
+        studentNo: "DAUST-2026-002",
+        transcriptEntries: [
+          {
+            courseId: "course-s2",
+            courseCode: "CS 201",
+            credits: 31,
+            earnedCredits: 31,
+            gradePoints: 4,
+            countsTowardGpa: true,
+            countsTowardCredits: true,
+          },
+        ],
+      }),
+      student({ id: "student-s1", studentNo: "DAUST-2026-001" }),
+    ]);
+
+    const result = await academics.adminStudentRoster({
+      page: 1,
+      pageSize: 50,
+      sort: "level",
+      direction: "asc",
+    });
+
+    expect(result.items.map((row) => row.academicLevel?.code)).toEqual([
+      "S1",
+      "S2",
+    ]);
+    expect(prisma.academicCatalogRevision.findMany).toHaveBeenCalledTimes(1);
   });
 
   it("matches a multi-token full name across first and last name", async () => {

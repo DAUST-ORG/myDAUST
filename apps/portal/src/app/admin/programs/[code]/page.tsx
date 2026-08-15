@@ -19,7 +19,6 @@ function gpaColor(gpa: number): string {
   if (gpa > 0 && gpa < 2) return "var(--danger)";
   return "var(--fg1)";
 }
-
 function ProgramBalance({ student }: { student: ProgramDetail["students"][number] }) {
   const summary = resolveAccountSummary(student.summary, { balanceXof: student.balance });
   return (
@@ -151,7 +150,7 @@ export default function ProgramDetailPage() {
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ overflowX: "auto" }}>
             <table>
-              <thead><tr><th>Student</th><th>Year</th><th>GPA</th><th>Credits</th><th style={{ textAlign: "right" }}>Balance</th><th>Status</th><th /></tr></thead>
+              <thead><tr><th>Student</th><th>Level</th><th>GPA</th><th>Credits</th><th style={{ textAlign: "right" }}>Balance</th><th>Status</th><th /></tr></thead>
               <tbody>
                 {p.students.map((s) => (
                   <tr key={s.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/admin/students/${s.id}`)}>
@@ -164,7 +163,7 @@ export default function ProgramDetailPage() {
                         </div>
                       </div>
                     </td>
-                    <td>{s.yearLevel ? `Year ${s.yearLevel}` : "—"}</td>
+                    <td>{s.academicLevel ? <Badge tone="neutral">{s.academicLevel.code}</Badge> : "—"}</td>
                     <td><span style={{ fontWeight: 700, color: gpaColor(s.gpa) }}>{s.gpa > 0 ? s.gpa.toFixed(2) : "—"}</span></td>
                     <td>{s.completedCredits}</td>
                     <ProgramBalance student={s} />

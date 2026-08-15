@@ -24,7 +24,6 @@ function gpaColor(gpa: number): string {
   if (gpa > 0 && gpa < 2) return "var(--danger)";
   return "var(--fg1)";
 }
-
 function StudentBalance({ student }: { student: AdminStudent }) {
   const summary = resolveAccountSummary(student.summary, { balanceXof: student.balance });
   return (
@@ -195,7 +194,7 @@ export default function AdminStudentsPage() {
               <tr>
                 <SortTh label="Student" sortKey="name" sort={sort} onSort={changeSort} />
                 <SortTh label="Program" sortKey="program" sort={sort} onSort={changeSort} />
-                <SortTh label="Year" sortKey="year" sort={sort} onSort={changeSort} />
+                <SortTh label="Level" sortKey="level" sort={sort} onSort={changeSort} />
                 <SortTh label="GPA" sortKey="gpa" sort={sort} onSort={changeSort} />
                 <SortTh label="Balance" sortKey="balance" sort={sort} onSort={changeSort} align="right" />
                 <SortTh label="Status" sortKey="status" sort={sort} onSort={changeSort} />
@@ -219,7 +218,7 @@ export default function AdminStudentsPage() {
                     </div>
                   </td>
                   <td><Badge tone="neutral">{s.program}</Badge></td>
-                  <td>{s.yearLevel ? `Year ${s.yearLevel}` : "—"}</td>
+                  <td>{s.academicLevel ? <Badge tone="neutral">{s.academicLevel.code}</Badge> : "—"}</td>
                   <td><span style={{ fontWeight: 700, color: gpaColor(s.gpa) }}>{s.gpa > 0 ? s.gpa.toFixed(2) : "—"}</span></td>
                   <StudentBalance student={s} />
                   <td><Badge tone={STATUS_TONE[s.status] ?? "neutral"}>{STATUS_LABEL[s.status] ?? s.status}</Badge></td>
