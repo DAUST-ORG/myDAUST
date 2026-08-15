@@ -17,6 +17,8 @@ import { GuardiansService } from "./guardians.service.js";
 const CreateGuardianInput = z.object({
   fullName: z.string().min(1).max(120),
   email: z.string().email().max(160),
+  phone: z.string().trim().max(40).optional(),
+  address: z.string().trim().max(300).optional(),
   studentIds: z.array(z.string().min(1).max(64)).min(1).max(20),
   relation: z.string().max(40).optional(),
 });
@@ -28,6 +30,8 @@ const SetChildrenInput = z.object({
 const UpdateGuardianInput = z.object({
   fullName: z.string().min(1).max(120).optional(),
   email: z.string().email().max(160).optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  address: z.string().trim().max(300).nullable().optional(),
 });
 
 const RedeemInviteInput = z.object({
@@ -64,6 +68,18 @@ export class GuardiansController {
       user.personId,
       CreateGuardianInput.parse(body),
     );
+  }
+
+  /** Generate logins for guardians who do not have a password yet. */
+  @Post("provision-logins")
+  provisionLogins(@CurrentUser() user: AuthUser) {
+    return this.guardians.provisionAllMissing(user.personId);
+  }
+
+  /** Generate or reset one guardian login, returning its password once. */
+  @Post(":id/provision-login")
+  provisionLogin(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.guardians.provisionLogin(user.personId, id);
   }
 
   @Post(":id/resend-invite")

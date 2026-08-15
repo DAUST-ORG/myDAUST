@@ -1,14 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Mail, Pencil, Trash2, X } from "lucide-react";
+import {
+  Copy,
+  Download,
+  KeyRound,
+  Mail,
+  Pencil,
+  Trash2,
+  X,
+} from "lucide-react";
 import {
   type AdminStudentDirectoryRow,
+  type GuardianProvisionedLogin,
   type GuardianRow,
   createGuardian,
   deleteGuardian,
   getAdminStudentDirectory,
   getGuardians,
+  provisionAllGuardianLogins,
+  provisionGuardianLogin,
   resendGuardianInvite,
   setGuardianChildren,
   updateGuardian,
@@ -36,6 +47,8 @@ export default function ParentsPage() {
   const [form, setForm] = useState({
     fullName: "",
     email: "",
+    phone: "",
+    address: "",
     relation: "",
     studentIds: [] as string[],
   });
@@ -43,11 +56,17 @@ export default function ParentsPage() {
     id: string;
     fullName: string;
     email: string;
+    phone: string;
+    address: string;
     studentIds: string[];
   } | null>(null);
   const [removing, setRemoving] = useState<GuardianRow | null>(null);
   const [listQuery, setListQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [provisioning, setProvisioning] = useState<string | null>(null);
+  const [credentials, setCredentials] = useState<
+    GuardianProvisionedLogin[] | null
+  >(null);
 
   const load = useCallback(() => {
     getGuardians()
@@ -71,6 +90,7 @@ export default function ParentsPage() {
       (g) =>
         g.name.toLowerCase().includes(needle) ||
         g.email.toLowerCase().includes(needle) ||
+        (g.phone ?? "").toLowerCase().includes(needle) ||
         g.children.some(
           (c) =>
             c.name.toLowerCase().includes(needle) ||
@@ -90,6 +110,8 @@ export default function ParentsPage() {
       const created = await createGuardian({
         fullName: form.fullName.trim(),
         email: form.email.trim(),
+        phone: form.phone.trim() || undefined,
+        address: form.address.trim() || undefined,
         studentIds: form.studentIds,
         relation: form.relation.trim() || undefined,
       });
@@ -101,7 +123,14 @@ export default function ParentsPage() {
             : `Parent account created for ${form.fullName.trim()} · ID ${created.id}, but email delivery was not confirmed. Use Resend invite to try again and retrieve the setup link.`,
       );
       setAdding(false);
-      setForm({ fullName: "", email: "", relation: "", studentIds: [] });
+      setForm({
+        fullName: "",
+        email: "",
+        phone: "",
+        address: "",
+        relation: "",
+        studentIds: [],
+      });
       load();
     } catch (e) {
       setError(
@@ -120,6 +149,8 @@ export default function ParentsPage() {
       const updated = await updateGuardian(editing.id, {
         fullName: editing.fullName.trim(),
         email: editing.email.trim(),
+        phone: editing.phone.trim() || null,
+        address: editing.address.trim() || null,
       });
       await setGuardianChildren(editing.id, editing.studentIds);
       if (updated.inviteDelivery === "sent") {
@@ -177,6 +208,44 @@ export default function ParentsPage() {
     }
   }
 
+  async function provisionOne(id: string) {
+    setProvisioning(id);
+    setError(null);
+    try {
+      const credential = await provisionGuardianLogin(id);
+      setCredentials([credential]);
+      load();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Could not generate the parent login.",
+      );
+    } finally {
+      setProvisioning(null);
+    }
+  }
+
+  async function provisionAll() {
+    setProvisioning("all");
+    setError(null);
+    try {
+      const result = await provisionAllGuardianLogins();
+      if (result.credentials.length > 0) {
+        setCredentials(result.credentials);
+      } else {
+        setNote("Every parent already has a login.");
+      }
+      load();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Could not generate parent logins.",
+      );
+    } finally {
+      setProvisioning(null);
+    }
+  }
+
+  const missingLogins = (rows ?? []).filter((row) => !row.hasLogin).length;
+
   return (
     <>
       <PageHeader
@@ -191,6 +260,17 @@ export default function ParentsPage() {
               placeholder="Filter parents or students…"
               width={260}
             />
+            {missingLogins > 0 && (
+              <Button
+                icon={<KeyRound size={14} />}
+                onClick={provisionAll}
+                disabled={provisioning !== null}
+              >
+                {provisioning === "all"
+                  ? "Generating…"
+                  : `Generate ${missingLogins} login${missingLogins === 1 ? "" : "s"}`}
+              </Button>
+            )}
             <Button variant="primary" onClick={() => setAdding(true)}>
               New parent
             </Button>
@@ -239,7 +319,7 @@ export default function ParentsPage() {
             <thead>
               <tr>
                 <th>Parent</th>
-                <th>Email</th>
+                <th>Contact</th>
                 <th>Status</th>
                 <th>Assigned students</th>
                 <th>Actions</th>
@@ -273,18 +353,35 @@ export default function ParentsPage() {
                       </span>
                     </span>
                   </td>
-                  <td className="muted">{g.email}</td>
+                  <td>
+                    <div className="muted">{g.email}</div>
+                    {g.phone && (
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {g.phone}
+                      </div>
+                    )}
+                    {g.address && (
+                      <div className="muted" style={{ fontSize: 11.5 }}>
+                        {g.address}
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <Badge
                       tone={
                         g.status === "active"
                           ? "success"
-                          : g.status === "invited"
+                          : g.status === "invited" ||
+                              g.status === "not-provisioned"
                             ? "warning"
                             : "error"
                       }
                     >
-                      {g.status}
+                      {g.status === "not-provisioned"
+                        ? "Needs login"
+                        : g.status === "invite-expired"
+                          ? "Invite expired"
+                          : g.status}
                     </Badge>
                   </td>
                   <td>
@@ -311,6 +408,18 @@ export default function ParentsPage() {
                           Resend invite
                         </Button>
                       )}
+                      <Button
+                        size="sm"
+                        icon={<KeyRound size={12} />}
+                        onClick={() => provisionOne(g.id)}
+                        disabled={provisioning !== null}
+                      >
+                        {provisioning === g.id
+                          ? "Generating…"
+                          : g.hasLogin
+                            ? "Reset password"
+                            : "Generate login"}
+                      </Button>
                       <IconButton
                         label="Edit parent"
                         onClick={() =>
@@ -318,6 +427,8 @@ export default function ParentsPage() {
                             id: g.id,
                             fullName: g.name,
                             email: g.email,
+                            phone: g.phone ?? "",
+                            address: g.address ?? "",
                             studentIds: g.children.map((c) => c.studentId),
                           })
                         }
@@ -369,6 +480,18 @@ export default function ParentsPage() {
                 value={form.email}
                 onChange={(v) => setForm((f) => ({ ...f, email: v }))}
                 type="email"
+              />
+            </Field>
+            <Field label="Phone">
+              <Input
+                value={form.phone}
+                onChange={(v) => setForm((f) => ({ ...f, phone: v }))}
+              />
+            </Field>
+            <Field label="Address">
+              <Input
+                value={form.address}
+                onChange={(v) => setForm((f) => ({ ...f, address: v }))}
               />
             </Field>
             <Field
@@ -435,6 +558,22 @@ export default function ParentsPage() {
                 }
               />
             </Field>
+            <Field label="Phone">
+              <Input
+                value={editing.phone}
+                onChange={(v) =>
+                  setEditing((e) => (e ? { ...e, phone: v } : e))
+                }
+              />
+            </Field>
+            <Field label="Address">
+              <Input
+                value={editing.address}
+                onChange={(v) =>
+                  setEditing((e) => (e ? { ...e, address: v } : e))
+                }
+              />
+            </Field>
             <ChildChecklist
               students={students}
               selected={editing.studentIds}
@@ -472,7 +611,141 @@ export default function ParentsPage() {
           </p>
         </Modal>
       )}
+
+      {credentials && (
+        <GuardianCredentialsModal
+          credentials={credentials}
+          onClose={() => setCredentials(null)}
+        />
+      )}
     </>
+  );
+}
+
+function GuardianCredentialsModal({
+  credentials,
+  onClose,
+}: {
+  credentials: GuardianProvisionedLogin[];
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const bulk = credentials.length > 1;
+
+  function copy() {
+    const credential = credentials[0];
+    if (!credential) return;
+    navigator.clipboard
+      ?.writeText(`${credential.email}\n${credential.tempPassword}`)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      });
+  }
+
+  function downloadCsv() {
+    const body = credentials
+      .map((credential) =>
+        [credential.name, credential.email, credential.tempPassword]
+          .map((value) => `"${value.replace(/"/g, '""')}"`)
+          .join(","),
+      )
+      .join("\n");
+    const blob = new Blob([`name,email,tempPassword\n${body}\n`], {
+      type: "text/csv",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `daust-parent-logins-${credentials.length}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={
+        bulk ? `${credentials.length} logins generated` : "Login generated"
+      }
+      width={bulk ? 680 : 480}
+      footer={
+        <>
+          {bulk && (
+            <Button icon={<Download size={14} />} onClick={downloadCsv}>
+              Download CSV
+            </Button>
+          )}
+          <Button variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div
+          style={{
+            padding: "9px 12px",
+            borderRadius: "var(--radius-md)",
+            background: "var(--warning-50, #fff7e8)",
+            color: "var(--fg2)",
+            fontSize: 12.5,
+            lineHeight: 1.5,
+          }}
+        >
+          Copy these credentials now. Passwords are shown once, are never stored
+          in plain text or emailed, and must be changed on first login.
+        </div>
+        {bulk ? (
+          <div style={{ maxHeight: 340, overflow: "auto", fontSize: 12.5 }}>
+            {credentials.map((credential) => (
+              <div
+                key={credential.guardianId}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1.3fr 1fr",
+                  minWidth: 540,
+                  gap: 8,
+                  padding: "7px 0",
+                  borderBottom: "1px solid var(--border)",
+                  fontFamily: "ui-monospace, monospace",
+                }}
+              >
+                <span>{credential.name}</span>
+                <span>{credential.email}</span>
+                <strong>{credential.tempPassword}</strong>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <Field label="Name">
+              <div>{credentials[0]!.name}</div>
+            </Field>
+            <Field label="Email (login)">
+              <div style={{ fontFamily: "ui-monospace, monospace" }}>
+                {credentials[0]!.email}
+              </div>
+            </Field>
+            <Field label="Temporary password">
+              <div
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 700,
+                  fontSize: 16,
+                }}
+              >
+                {credentials[0]!.tempPassword}
+              </div>
+            </Field>
+            <Button icon={<Copy size={14} />} onClick={copy}>
+              {copied ? "Copied" : "Copy email + password"}
+            </Button>
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 

@@ -206,6 +206,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.864.0
+        version: 3.1102.0
       '@prisma/client':
         specifier: ^6.2.1
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)

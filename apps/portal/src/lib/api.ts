@@ -3590,7 +3590,11 @@ export interface GuardianRow {
   id: string;
   name: string;
   email: string;
-  status: string; // active | invited | invite-expired
+  phone: string | null;
+  address: string | null;
+  hasLogin: boolean;
+  mustChangePassword: boolean;
+  status: string; // active | not-provisioned | invited | invite-expired
   children: {
     studentId: string;
     studentNo: string;
@@ -3608,6 +3612,8 @@ export const getGuardians = () => request<GuardianRow[]>("/guardians");
 export const createGuardian = (input: {
   fullName: string;
   email: string;
+  phone?: string;
+  address?: string;
   studentIds: string[];
   relation?: string;
 }) =>
@@ -3634,7 +3640,12 @@ export const setGuardianChildren = (id: string, studentIds: string[]) =>
   });
 export const updateGuardian = (
   id: string,
-  input: { fullName?: string; email?: string },
+  input: {
+    fullName?: string;
+    email?: string;
+    phone?: string | null;
+    address?: string | null;
+  },
 ) =>
   request<{
     id: string;
@@ -3648,6 +3659,21 @@ export const updateGuardian = (
   });
 export const deleteGuardian = (id: string) =>
   request<{ ok: boolean }>(`/guardians/${id}`, { method: "DELETE" });
+export interface GuardianProvisionedLogin {
+  guardianId: string;
+  name: string;
+  email: string;
+  tempPassword: string;
+}
+export const provisionGuardianLogin = (id: string) =>
+  request<GuardianProvisionedLogin>(`/guardians/${id}/provision-login`, {
+    method: "POST",
+  });
+export const provisionAllGuardianLogins = () =>
+  request<{ count: number; credentials: GuardianProvisionedLogin[] }>(
+    "/guardians/provision-logins",
+    { method: "POST" },
+  );
 
 // --- Institution fee schedule (the DAUST payment-plan sheet) ---
 export interface FeePlanRow {
