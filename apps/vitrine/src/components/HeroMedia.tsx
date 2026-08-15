@@ -10,6 +10,74 @@ import { assetUrl } from "@/lib/api";
 
 const PAUSED_KEY = "daust-hero-video-paused";
 
+type YouTubePlayer = {
+  destroy: () => void;
+  mute: () => void;
+  playVideo: () => void;
+};
+
+type YouTubeApi = {
+  Player: new (
+    element: HTMLIFrameElement,
+    options: {
+      events: {
+        onError: () => void;
+        onReady: (event: { target: YouTubePlayer }) => void;
+        onStateChange: (event: { data: number }) => void;
+      };
+    },
+  ) => YouTubePlayer;
+  PlayerState: { PLAYING: number };
+};
+
+declare global {
+  interface Window {
+    YT?: YouTubeApi;
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+let youtubeApiPromise: Promise<YouTubeApi> | null = null;
+
+function loadYouTubeApi(): Promise<YouTubeApi> {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (youtubeApiPromise) return youtubeApiPromise;
+
+  youtubeApiPromise = new Promise<YouTubeApi>((resolve, reject) => {
+    const previousReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previousReady?.();
+      if (window.YT?.Player) resolve(window.YT);
+      else reject(new Error("YouTube player API did not initialize."));
+    };
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[src="https://www.youtube.com/iframe_api"]',
+    );
+    if (existing) {
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("YouTube player API failed to load.")),
+        {
+          once: true,
+        },
+      );
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://www.youtube.com/iframe_api";
+    script.async = true;
+    script.addEventListener(
+      "error",
+      () => reject(new Error("YouTube player API failed to load.")),
+      {
+        once: true,
+      },
+    );
+    document.head.appendChild(script);
+  });
+  return youtubeApiPromise;
+}
+
 export function HeroMedia({
   media,
   poster,
@@ -20,13 +88,18 @@ export function HeroMedia({
   label: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [eligible, setEligible] = useState(false);
   const [failed, setFailed] = useState(false);
   const [paused, setPaused] = useState(true);
+  const [providerPlaying, setProviderPlaying] = useState(false);
+  const [providerOrigin, setProviderOrigin] = useState<string>();
   const mediaKey = JSON.stringify(media);
 
   useEffect(() => {
     setFailed(false);
+    setProviderPlaying(false);
+    setProviderOrigin(window.location.origin);
     const connection = (
       navigator as Navigator & { connection?: { saveData?: boolean } }
     ).connection;
@@ -51,6 +124,37 @@ export function HeroMedia({
     void video.play().catch(() => setFailed(true));
   }, [eligible, failed, paused]);
 
+  useEffect(() => {
+    if (media.kind !== "youtube" || !eligible || failed || paused) return;
+
+    let active = true;
+    let player: YouTubePlayer | null = null;
+    void loadYouTubeApi()
+      .then((api) => {
+        if (!active || !iframeRef.current) return;
+        player = new api.Player(iframeRef.current, {
+          events: {
+            onReady: (event) => {
+              event.target.mute();
+              event.target.playVideo();
+            },
+            onStateChange: (event) => {
+              if (event.data === api.PlayerState.PLAYING) {
+                setProviderPlaying(true);
+              }
+            },
+            onError: () => setFailed(true),
+          },
+        });
+      })
+      .catch(() => setFailed(true));
+
+    return () => {
+      active = false;
+      player?.destroy();
+    };
+  }, [eligible, failed, media.kind, paused]);
+
   const toggle = () => {
     const next = !paused;
     setPaused(next);
@@ -61,7 +165,7 @@ export function HeroMedia({
     media.kind === "uploaded" || media.kind === "direct"
       ? assetUrl(media.url)
       : undefined;
-  const embed = heroMediaEmbedUrl(media);
+  const embed = heroMediaEmbedUrl(media, providerOrigin);
 
   return (
     <>
@@ -101,11 +205,18 @@ export function HeroMedia({
       )}
       {showVideo && embed && (
         <iframe
+          ref={iframeRef}
+          id={media.kind === "youtube" ? "daust-hero-youtube" : undefined}
           src={embed}
           title="DAUST campus background video"
           allow="autoplay; fullscreen"
           referrerPolicy="strict-origin-when-cross-origin"
           onError={() => setFailed(true)}
+          onLoad={() => {
+            if (media.kind !== "youtube") {
+              setProviderPlaying(true);
+            }
+          }}
           tabIndex={-1}
           aria-hidden="true"
           style={{
@@ -115,6 +226,8 @@ export function HeroMedia({
             height: "120%",
             border: 0,
             pointerEvents: "none",
+            opacity: media.kind === "youtube" && !providerPlaying ? 0 : 1,
+            transition: "opacity 180ms ease",
           }}
         />
       )}

@@ -679,7 +679,10 @@ export function normalizeHeroMediaUrl(value: string): HeroMedia | null {
 }
 
 /** Build a privacy-conscious provider URL that behaves like background media. */
-export function heroMediaEmbedUrl(media: HeroMedia): string | null {
+export function heroMediaEmbedUrl(
+  media: HeroMedia,
+  origin?: string,
+): string | null {
   if (media.kind === "youtube") {
     const params = [
       "autoplay=1",
@@ -692,6 +695,8 @@ export function heroMediaEmbedUrl(media: HeroMedia): string | null {
       "disablekb=1",
       "fs=0",
       "iv_load_policy=3",
+      "enablejsapi=1",
+      ...(origin ? [`origin=${encodeURIComponent(origin)}`] : []),
     ].join("&");
     return `https://www.youtube-nocookie.com/embed/${media.videoId}?${params}`;
   }
