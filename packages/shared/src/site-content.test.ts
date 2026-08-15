@@ -30,7 +30,7 @@ describe("hero media URLs", () => {
     );
     expect(media).toEqual({ kind: "youtube", videoId: "Mt9jSB0rP2o" });
 
-    const embed = heroMediaEmbedUrl(media!);
+    const embed = heroMediaEmbedUrl(media!, "https://daust.net");
     expect(embed).toContain(
       "https://www.youtube-nocookie.com/embed/Mt9jSB0rP2o?",
     );
@@ -41,6 +41,7 @@ describe("hero media URLs", () => {
     expect(embed).toContain("playlist=Mt9jSB0rP2o");
     expect(embed).toContain("disablekb=1");
     expect(embed).toContain("enablejsapi=1");
+    expect(embed).toContain("origin=https%3A%2F%2Fdaust.net");
   });
 
   it("rejects unsafe schemes and unsupported iframe providers", () => {
