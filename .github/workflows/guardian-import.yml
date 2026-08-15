@@ -37,6 +37,7 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
+  ECR: 961828155948.dkr.ecr.us-east-1.amazonaws.com
   ROLE_ARN: arn:aws:iam::961828155948:role/daust-github-deploy
 
 jobs:
@@ -48,7 +49,7 @@ jobs:
           role-to-assume: ${{ env.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Validate and upload the private source
+      - name: Validate and package the private source
         env:
           SOURCE_B64: ${{ secrets.GUARDIAN_IMPORT_CSV_B64 }}
           EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
@@ -62,11 +63,26 @@ jobs:
             echo "Source hash mismatch: expected $EXPECTED_SHA256, got $ACTUAL_SHA256"
             exit 1
           }
-          BUCKET="daust-$TARGET_ENV-transcript-imports-961828155948"
-          KEY="transcript-imports/guardian-imports/$ACTUAL_SHA256/all-parents.csv"
-          aws s3 cp guardian-source.csv "s3://$BUCKET/$KEY" --sse AES256 --only-show-errors
-          echo "SOURCE_BUCKET=$BUCKET" >> "$GITHUB_ENV"
-          echo "SOURCE_KEY=$KEY" >> "$GITHUB_ENV"
+          CLUSTER="daust-$TARGET_ENV"
+          SERVICE="daust-$TARGET_ENV-api"
+          TASK_DEF=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          CURRENT_IMAGE=$(aws ecs describe-task-definition --task-definition "$TASK_DEF" \
+            --query "taskDefinition.containerDefinitions[?name=='api'] | [0].image" --output text)
+          IMPORT_IMAGE="$ECR/daust-api:guardian-import-${ACTUAL_SHA256:0:16}-$TARGET_ENV"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR"
+          HAVE_IMAGE=$(aws ecr batch-get-image --repository-name daust-api \
+            --image-ids "imageTag=guardian-import-${ACTUAL_SHA256:0:16}-$TARGET_ENV" \
+            --query 'length(images)' --output text 2>/dev/null || echo 0)
+          if [ "$HAVE_IMAGE" = "0" ]; then
+            printf 'FROM %s\nCOPY guardian-source.csv /app/guardian-source.csv\n' "$CURRENT_IMAGE" \
+              | docker build -f - -t "$IMPORT_IMAGE" .
+            docker push "$IMPORT_IMAGE"
+          else
+            echo "Reusing the existing hash-addressed private import image."
+          fi
+          echo "IMPORT_IMAGE=$IMPORT_IMAGE" >> "$GITHUB_ENV"
           rm -f guardian-source.csv
 
       - name: Run dry run or confirmed import
@@ -90,14 +106,20 @@ jobs:
           LOG_PREFIX=$(jq -r '.["awslogs-stream-prefix"]' <<<"$LOG_OPTIONS")
           CONFIRM_VALUE=$([ "$SHOULD_CONFIRM" = "true" ] && echo 1 || echo 0)
           PARTIAL_VALUE=$([ "$ALLOW_PARTIAL" = "true" ] && echo 1 || echo 0)
+          aws ecs describe-task-definition --task-definition "$TASK_DEF" \
+            --query 'taskDefinition' --output json \
+            | jq --arg image "$IMPORT_IMAGE" \
+                'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+                 | .containerDefinitions[0].image = $image' > guardian-import-task.json
+          IMPORT_TASK_DEF=$(aws ecs register-task-definition \
+            --cli-input-json file://guardian-import-task.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
           OVERRIDES=$(jq -cn \
-            --arg bucket "$SOURCE_BUCKET" \
-            --arg key "$SOURCE_KEY" \
             --arg actor "$ACTOR_EMAIL" \
             --arg confirm "$CONFIRM_VALUE" \
             --arg partial "$PARTIAL_VALUE" \
-            '{containerOverrides:[{name:"api",command:["node","node_modules/tsx/dist/cli.mjs","node_modules/@mydaust/db/prisma/import-guardians.ts"],environment:[{name:"GUARDIANS_S3_BUCKET",value:$bucket},{name:"GUARDIANS_S3_KEY",value:$key},{name:"IMPORT_ACTOR_EMAIL",value:$actor},{name:"CONFIRM",value:$confirm},{name:"ALLOW_PARTIAL",value:$partial}]}]}')
-          RUN_RESULT=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_DEF" \
+            '{containerOverrides:[{name:"api",command:["node","node_modules/tsx/dist/cli.mjs","node_modules/@mydaust/db/prisma/import-guardians.ts"],environment:[{name:"GUARDIANS_CSV",value:"/app/guardian-source.csv"},{name:"IMPORT_ACTOR_EMAIL",value:$actor},{name:"CONFIRM",value:$confirm},{name:"ALLOW_PARTIAL",value:$partial}]}]}')
+          RUN_RESULT=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$IMPORT_TASK_DEF" \
             --launch-type FARGATE --network-configuration "$NET" \
             --overrides "$OVERRIDES")
           TASK=$(jq -r '.tasks[0].taskArn // empty' <<<"$RUN_RESULT")
