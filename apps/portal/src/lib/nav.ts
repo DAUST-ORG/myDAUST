@@ -186,7 +186,7 @@ export const REGISTRAR_NAV: PortalNav = {
       { href: "/admin/departments", label: "Departments", icon: Building },
       {
         href: "/admin/academic-years",
-        label: "Academic Years",
+        label: "Academic Catalog",
         icon: CalendarClock,
       },
       {
@@ -371,8 +371,8 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     crumb: "Department directory · Administration",
   },
   "/admin/academic-years": {
-    title: "Academic Years",
-    crumb: "Catalog year configuration · Administration",
+    title: "Academic Catalog",
+    crumb: "Years, programme requirements and progression · Administration",
   },
   "/admin/programs": {
     title: "Programs & Curriculum",

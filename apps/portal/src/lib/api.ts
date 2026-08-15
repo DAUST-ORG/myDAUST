@@ -2,6 +2,10 @@
 
 import type {
   AccountBalanceSummary,
+  AcademicCatalogDraft,
+  AcademicCatalogLevel,
+  AcademicCatalogProgram,
+  AcademicProgress,
   InstallmentDueState,
   InstallmentPaymentProgress,
   PaymentMethodsConfig,
@@ -12,6 +16,10 @@ import type {
 } from "@mydaust/shared";
 export type {
   AccountBalanceSummary,
+  AcademicCatalogDraft,
+  AcademicCatalogLevel,
+  AcademicCatalogProgram,
+  AcademicProgress,
   AccountStanding,
   InstallmentDueState,
   InstallmentPaymentProgress,
@@ -845,6 +853,7 @@ export interface MySummary {
   credits: number;
   gpa: number;
   completedCredits: number;
+  academicProgress: AcademicProgress;
 }
 export interface GradeRow {
   courseCode: string;
@@ -1147,6 +1156,7 @@ export interface AdminStudentDetail {
   gpa: number;
   completedCredits: number;
   currentTermCredits: number;
+  academicProgress: AcademicProgress;
   standing: string;
   status: string;
   balance: number;
@@ -2436,6 +2446,7 @@ export const getCollectionsTimeline = (academicYear?: string) =>
   );
 
 export type ApprovalRequestKind =
+  | "academic_catalog"
   | "global_fee_schedule"
   | "custom_charge"
   | "charge_removal"
@@ -3416,6 +3427,7 @@ export interface ChildSummary {
   summary?: AccountBalanceSummary;
   /** Credits the programme requires, summed from its requirement categories. */
   requiredCredits: number | null;
+  academicProgress: AcademicProgress;
   /** Percentage; a late counts as half a present. Null when nothing is recorded. */
   attendanceRate: number | null;
 }
@@ -3710,6 +3722,7 @@ export interface DegreeAudit {
   remaining: number;
   total: number;
   pctComplete: number;
+  academicProgress: AcademicProgress;
 }
 export const getDegreeAudit = () =>
   request<DegreeAudit>("/academics/my/degree");
@@ -3735,6 +3748,7 @@ export interface MyProfile {
   program: string | null;
   gpa: number;
   completedCredits: number;
+  academicProgress: AcademicProgress;
   standing: string;
   /** Saved PI-SPI payment alias, prefilled on the billing screen. */
   piSpiAlias: string | null;
@@ -3784,6 +3798,8 @@ export interface AcademicYearRow {
   id: string;
   label: string;
   status: "draft" | "active" | "archived";
+  startsOn: string | null;
+  endsOn: string | null;
   _count: { terms: number };
 }
 export const getAcademicYears = () =>
@@ -3797,6 +3813,64 @@ export const activateAcademicYear = (id: string) =>
   request<{ ok: boolean }>(`/registrar/academic-years/${id}/activate`, {
     method: "POST",
   });
+
+export interface AcademicCatalogRevisionView {
+  id: string;
+  academicYearId: string;
+  revision: number;
+  status:
+    "draft" | "pending" | "approved" | "rejected" | "cancelled" | "superseded";
+  yearLabel: string;
+  startsOn: string | null;
+  endsOn: string | null;
+  defaultLevels: AcademicCatalogLevel[];
+  programs: AcademicCatalogProgram[];
+  reason: string | null;
+  activateYear: boolean;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt: string | null;
+  approvalRequestId: string | null;
+}
+
+export interface AcademicCatalogWorkspace {
+  year: {
+    id: string;
+    label: string;
+    status: AcademicYearRow["status"];
+    startsOn: string | null;
+    endsOn: string | null;
+  };
+  effective: AcademicCatalogRevisionView;
+  editable: AcademicCatalogRevisionView | null;
+  levelBands: Array<AcademicCatalogLevel & { minimumCredits: number }>;
+  history: Array<
+    AcademicCatalogRevisionView & {
+      requester: { name: string; email: string } | null;
+      reviewer: { name: string; email: string } | null;
+    }
+  >;
+}
+
+export const getAcademicCatalog = (academicYearId: string) =>
+  request<AcademicCatalogWorkspace>(
+    `/registrar/academic-catalogs/${encodeURIComponent(academicYearId)}`,
+  );
+
+export const saveAcademicCatalogDraft = (
+  academicYearId: string,
+  input: AcademicCatalogDraft,
+) =>
+  request<AcademicCatalogRevisionView>(
+    `/registrar/academic-catalogs/${encodeURIComponent(academicYearId)}/draft`,
+    { method: "PUT", body: JSON.stringify(input) },
+  );
+
+export const submitAcademicCatalog = (academicYearId: string) =>
+  request<{ requestId: string; revision: number; status: "pending" }>(
+    `/registrar/academic-catalogs/${encodeURIComponent(academicYearId)}/submit`,
+    { method: "POST" },
+  );
 
 export interface GradingSchemeRow {
   id: string;

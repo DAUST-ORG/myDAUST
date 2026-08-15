@@ -53,6 +53,39 @@ function view(count = 42): TranscriptView {
       qualityPoints: (count - Math.ceil(count / 8)) * 24,
       gpa: 4,
     },
+    academicProgress: {
+      earnedCredits: (count - Math.ceil(count / 8)) * 6,
+      requiredCredits: 132,
+      inProgressCredits: 6,
+      level: {
+        code: "S5",
+        name: "Semester 5",
+        minimumCredits: 121,
+        creditCeiling: 150,
+      },
+      maximumLevel: {
+        code: "S5",
+        name: "Semester 5",
+        minimumCredits: 121,
+        creditCeiling: 150,
+      },
+      catalog: {
+        academicYearId: "year-1",
+        label: "2026–2027",
+        revision: 1,
+        fallback: false,
+      },
+    },
+    inProgressCourses: [
+      {
+        enrollmentId: "enrollment-current",
+        courseCode: "CS 4999",
+        title: "Capstone in progress",
+        credits: 6,
+        term: "Fall 2026",
+        sectionCode: "A",
+      },
+    ],
     semesters: [
       {
         termId: "term-1",

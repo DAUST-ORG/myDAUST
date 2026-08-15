@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
@@ -14,6 +15,7 @@ import type {
 } from "@mydaust/shared";
 import type { AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
 import { summarizeTranscriptRows } from "./transcript-calculation.js";
 import {
   renderTranscriptPdf,
@@ -83,18 +85,27 @@ export interface TranscriptPdfFile {
 
 @Injectable()
 export class TranscriptService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    private readonly catalogs: AcademicCatalogService = new AcademicCatalogService(
+      prisma,
+    ),
+  ) {}
 
   private async readView(
     client: Prisma.TransactionClient,
     studentId: string,
   ): Promise<TranscriptView> {
-    const [student, entries] = await Promise.all([
+    const [student, entries, activeEnrollments] = await Promise.all([
       client.student.findUnique({
         where: { id: studentId },
         select: {
           id: true,
           studentNo: true,
+          programId: true,
+          catalogYear: true,
+          catalogYearId: true,
           person: {
             select: {
               firstName: true,
@@ -127,6 +138,23 @@ export class TranscriptService {
           source: true,
         },
       }),
+      client.enrollment.findMany({
+        where: { studentId, status: "enrolled" },
+        orderBy: [
+          { section: { term: { startDate: "asc" } } },
+          { section: { course: { code: "asc" } } },
+        ],
+        select: {
+          id: true,
+          section: {
+            select: {
+              sectionCode: true,
+              course: { select: { code: true, title: true, credits: true } },
+              term: { select: { name: true } },
+            },
+          },
+        },
+      }),
     ]);
     if (!student) throw new NotFoundException("Student not found");
 
@@ -154,7 +182,34 @@ export class TranscriptService {
       requirementCategory: entry.requirementCategory,
       source: entry.source as TranscriptLedgerRow["source"],
     }));
-    return buildTranscriptView(identity, rows);
+    const inProgressCourses = activeEnrollments.map((enrollment) => ({
+      enrollmentId: enrollment.id,
+      courseCode: enrollment.section.course.code,
+      title: enrollment.section.course.title,
+      credits: enrollment.section.course.credits,
+      term: enrollment.section.term.name,
+      sectionCode: enrollment.section.sectionCode,
+    }));
+    const base = buildTranscriptView(identity, rows);
+    const inProgressCredits = inProgressCourses.reduce(
+      (sum, course) => sum + course.credits,
+      0,
+    );
+    const academicProgress = await this.catalogs.progress(
+      {
+        programId: student.programId,
+        catalogYearId: student.catalogYearId,
+        catalogYearLabel: student.catalogYear,
+        earnedCredits: base.totals.earnedCredits,
+        inProgressCredits,
+      },
+      client,
+    );
+    return {
+      ...base,
+      academicProgress,
+      inProgressCourses,
+    };
   }
 
   /** Consistent canonical transcript view used by every interactive surface. */

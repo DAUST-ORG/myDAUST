@@ -13,6 +13,7 @@ import {
 } from "../transcript/transcript-calculation.js";
 import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
+import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
 
 export const GRADE_POINTS: Record<string, number> = {
   "A+": 4.0,
@@ -272,9 +273,11 @@ export interface UpdateStudentFields {
 @Injectable()
 export class AcademicsService {
   private readonly transcript: TranscriptService;
+  private readonly catalogs: AcademicCatalogService;
 
   constructor(private readonly prisma: PrismaService) {
-    this.transcript = new TranscriptService(prisma);
+    this.catalogs = new AcademicCatalogService(prisma);
+    this.transcript = new TranscriptService(prisma, this.catalogs);
   }
 
   /** The active/upcoming term (the one registration targets). */
@@ -698,33 +701,41 @@ export class AcademicsService {
         remaining: 0,
         total: 0,
         pctComplete: 0,
+        academicProgress: {
+          earnedCredits: 0,
+          requiredCredits: null,
+          inProgressCredits: 0,
+          level: null,
+          maximumLevel: null,
+          catalog: null,
+        },
       };
     }
 
-    const [requirements, enrollments, transcriptEntries] = await Promise.all([
-      this.prisma.programRequirement.findMany({
-        where: {
+    const [effectiveCatalog, enrollments, transcriptEntries] =
+      await Promise.all([
+        this.catalogs.effectiveConfiguration({
           programId: student.programId,
-          ...(student.catalogYear ? { catalogYear: student.catalogYear } : {}),
-        },
-        orderBy: { position: "asc" },
-      }),
-      this.prisma.enrollment.findMany({
-        where: { studentId, status: "enrolled" },
-        include: {
-          section: { include: { course: { include: { department: true } } } },
-        },
-      }),
-      this.prisma.transcriptEntry.findMany({
-        where: {
-          studentId,
-          voidedAt: null,
-          countsTowardCredits: true,
-          earnedCredits: { gt: 0 },
-        },
-        include: { course: { include: { department: true } } },
-      }),
-    ]);
+          catalogYearId: student.catalogYearId,
+          catalogYearLabel: student.catalogYear,
+        }),
+        this.prisma.enrollment.findMany({
+          where: { studentId, status: "enrolled" },
+          include: {
+            section: { include: { course: { include: { department: true } } } },
+          },
+        }),
+        this.prisma.transcriptEntry.findMany({
+          where: {
+            studentId,
+            voidedAt: null,
+            countsTowardCredits: true,
+            earnedCredits: { gt: 0 },
+          },
+          include: { course: { include: { department: true } } },
+        }),
+      ]);
+    const requirements = effectiveCatalog?.program?.requirements ?? [];
 
     // A course declares which requirement it satisfies; the owning department is
     // only a fallback, because one department teaches courses counting toward
@@ -811,9 +822,21 @@ export class AcademicsService {
     const total = categories.reduce((s, c) => s + c.required, 0);
     const completedCredits = categories.reduce((s, c) => s + c.done, 0);
     const inProgress = categories.reduce((s, c) => s + c.inProgress, 0);
+    const transcriptSummary = summarizeTranscriptRows(transcriptEntries);
+    const academicProgress = await this.catalogs.progress({
+      programId: student.programId,
+      catalogYearId: student.catalogYearId,
+      catalogYearLabel: student.catalogYear,
+      earnedCredits: transcriptSummary.completedCredits,
+      inProgressCredits: enrollments.reduce(
+        (sum, enrollment) => sum + enrollment.section.course.credits,
+        0,
+      ),
+    });
     return {
       program: student.program?.name ?? null,
-      catalogYear: student.catalogYear,
+      catalogYear: effectiveCatalog?.label ?? student.catalogYear,
+      catalogFallback: effectiveCatalog?.fallback ?? false,
       categories,
       completed: completedCredits,
       inProgress,
@@ -821,6 +844,7 @@ export class AcademicsService {
       total,
       pctComplete:
         total === 0 ? 0 : Math.round((completedCredits / total) * 100),
+      academicProgress,
     };
   }
 
@@ -832,7 +856,9 @@ export class AcademicsService {
     });
     if (!s) throw new NotFoundException("Student not found");
 
-    const { gpa, completedCredits } = await this.transcript.summary(studentId);
+    const transcript = await this.transcript.view(studentId);
+    const gpa = transcript.totals.gpa ?? 0;
+    const completedCredits = transcript.totals.earnedCredits;
 
     return {
       name: `${s.person.firstName} ${s.person.lastName}`,
@@ -841,6 +867,7 @@ export class AcademicsService {
       program: s.program?.name ?? null,
       gpa,
       completedCredits,
+      academicProgress: transcript.academicProgress,
       standing: s.standing ?? standingLabel(gpa),
       // Saved instant-payment alias, so the billing screen can prefill it.
       piSpiAlias: s.piSpiAlias,
@@ -1678,14 +1705,15 @@ export class AcademicsService {
         where: { studentId, status: "enrolled" },
         include: { section: { include: { course: true } } },
       }),
-      this.transcript.summary(studentId),
+      this.transcript.view(studentId),
     ]);
     const credits = active.reduce((s, e) => s + e.section.course.credits, 0);
     return {
       enrolledCourses: active.length,
       credits,
-      gpa: transcript.gpa,
-      completedCredits: transcript.completedCredits,
+      gpa: transcript.totals.gpa ?? 0,
+      completedCredits: transcript.totals.earnedCredits,
+      academicProgress: transcript.academicProgress,
     };
   }
 
@@ -2613,26 +2641,29 @@ export class AcademicsService {
 
   /** Registrar/admin: one student's academic file (profile, enrollments, transcript, GPA, balance). */
   async adminStudentDetail(studentId: string) {
-    const student = await this.prisma.student.findUnique({
-      where: { id: studentId },
-      include: {
-        person: true,
-        program: { include: { department: true } },
-        holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
-        invoices: {
-          include: { plan: { include: { installments: true } } },
-        },
-        transcriptEntries: { where: { voidedAt: null } },
-        enrollments: {
-          include: {
-            section: {
-              include: { course: true, term: true, instructor: true },
-            },
+    const [student, transcriptView] = await Promise.all([
+      this.prisma.student.findUnique({
+        where: { id: studentId },
+        include: {
+          person: true,
+          program: { include: { department: true } },
+          holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
+          invoices: {
+            include: { plan: { include: { installments: true } } },
           },
-          orderBy: { enrolledAt: "desc" },
+          transcriptEntries: { where: { voidedAt: null } },
+          enrollments: {
+            include: {
+              section: {
+                include: { course: true, term: true, instructor: true },
+              },
+            },
+            orderBy: { enrolledAt: "desc" },
+          },
         },
-      },
-    });
+      }),
+      this.transcript.view(studentId),
+    ]);
     if (!student) throw new NotFoundException("Student not found");
     const { gpa, completedCredits } = summarizeTranscriptRows(
       student.transcriptEntries,
@@ -2657,6 +2688,7 @@ export class AcademicsService {
       gpa,
       completedCredits,
       currentTermCredits,
+      academicProgress: transcriptView.academicProgress,
       standing: standingLabel(gpa),
       status:
         student.recordStatus === "archived"
@@ -2815,6 +2847,17 @@ export class AcademicsService {
         programId = program.id;
       }
     }
+    const catalogYear =
+      input.catalogYear === undefined ||
+      input.catalogYear === null ||
+      input.catalogYear === ""
+        ? null
+        : await this.prisma.academicYear.findUnique({
+            where: { label: input.catalogYear },
+          });
+    if (input.catalogYear && !catalogYear) {
+      throw new BadRequestException("Unknown academic catalog year");
+    }
 
     const studentData = {
       ...(programId !== undefined ? { programId } : {}),
@@ -2876,7 +2919,10 @@ export class AcademicsService {
         ? { enrollmentStatus: input.enrollmentStatus }
         : {}),
       ...(input.catalogYear !== undefined
-        ? { catalogYear: input.catalogYear }
+        ? {
+            catalogYear: input.catalogYear,
+            catalogYearId: catalogYear?.id ?? null,
+          }
         : {}),
     };
 

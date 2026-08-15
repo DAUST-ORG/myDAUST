@@ -78,6 +78,78 @@ export default function ParentGrades() {
       )}
       {!data && !loadError && <p className="muted">Loading transcript…</p>}
 
+      {data && (
+        <div className="kpi-grid" style={{ marginBottom: 16 }}>
+          <div className="card" style={{ margin: 0 }}>
+            <div className="muted" style={{ fontSize: 11.5 }}>
+              Credits earned
+            </div>
+            <div style={{ font: "800 22px var(--font-display)", marginTop: 5 }}>
+              {data.totals.earnedCredits}
+              {data.academicProgress.requiredCredits
+                ? ` / ${data.academicProgress.requiredCredits}`
+                : ""}
+            </div>
+          </div>
+          <div className="card" style={{ margin: 0 }}>
+            <div className="muted" style={{ fontSize: 11.5 }}>
+              Academic level
+            </div>
+            <div style={{ font: "800 22px var(--font-display)", marginTop: 5 }}>
+              {data.academicProgress.level?.code ?? "—"}
+            </div>
+            <div className="muted" style={{ fontSize: 11.5 }}>
+              {data.academicProgress.level?.name ?? "Earned-credit level"}
+            </div>
+          </div>
+          <div className="card" style={{ margin: 0 }}>
+            <div className="muted" style={{ fontSize: 11.5 }}>
+              In progress
+            </div>
+            <div style={{ font: "800 22px var(--font-display)", marginTop: 5 }}>
+              {data.academicProgress.inProgressCredits}
+            </div>
+            <div className="muted" style={{ fontSize: 11.5 }}>
+              Not counted toward level
+            </div>
+          </div>
+        </div>
+      )}
+
+      {data && data.inProgressCourses.length > 0 && (
+        <Card
+          title="Courses in progress"
+          action={
+            <Badge tone="info">
+              {data.academicProgress.inProgressCredits} credits
+            </Badge>
+          }
+        >
+          <table>
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Course</th>
+                <th>Term</th>
+                <th style={{ textAlign: "right" }}>Credits</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.inProgressCourses.map((course) => (
+                <tr key={course.enrollmentId}>
+                  <td style={{ fontWeight: 650 }}>{course.courseCode}</td>
+                  <td>{course.title}</td>
+                  <td className="muted">{course.term}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <Badge tone="info">{course.credits} · In progress</Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
       {data && data.semesters.length === 0 && (
         <EmptyState
           title="No completed courses yet"

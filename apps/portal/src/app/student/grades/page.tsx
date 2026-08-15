@@ -9,7 +9,14 @@ import {
   getMyTranscriptView,
   getMySummary,
 } from "@/lib/api";
-import { Button, Card, EmptyState, PageHeader, Stat } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  PageHeader,
+  Stat,
+} from "@/components/ui";
 
 /** A-range green, B-range navy, C-range amber, everything else neutral. */
 function gradeTone(grade: string | null): { bg: string; fg: string } {
@@ -90,12 +97,29 @@ export default function GradesPage() {
         />
         <Stat
           label="Credits earned"
-          value={transcript?.totals.earnedCredits ?? "—"}
+          value={
+            transcript
+              ? `${transcript.totals.earnedCredits}${transcript.academicProgress.requiredCredits ? ` / ${transcript.academicProgress.requiredCredits}` : ""}`
+              : "—"
+          }
+          sub={
+            transcript?.academicProgress.requiredCredits
+              ? "earned / programme total"
+              : "programme requirements not configured"
+          }
         />
         <Stat
           label="Credits in progress"
           value={summary?.credits ?? "—"}
           tone="var(--daust-orange)"
+        />
+        <Stat
+          label="Academic level"
+          value={transcript?.academicProgress.level?.code ?? "—"}
+          sub={
+            transcript?.academicProgress.level?.name ?? "earned-credit level"
+          }
+          tone="var(--daust-navy)"
         />
       </div>
 
@@ -104,6 +128,46 @@ export default function GradesPage() {
           <div role="alert" style={{ color: "var(--error-500)" }}>
             {error}
           </div>
+        </Card>
+      )}
+
+      {transcript && transcript.inProgressCourses.length > 0 && (
+        <Card
+          title="Courses in progress"
+          action={
+            <Badge tone="info">
+              {transcript.academicProgress.inProgressCredits} credits
+            </Badge>
+          }
+        >
+          <div style={{ display: "grid", gap: 0 }}>
+            {transcript.inProgressCourses.map((course, index) => (
+              <div
+                key={course.enrollmentId}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "82px minmax(150px, 1fr) minmax(130px, auto) auto",
+                  gap: 12,
+                  alignItems: "center",
+                  padding: "10px 0",
+                  borderTop: index ? "1px solid var(--divider)" : undefined,
+                  fontSize: 12.5,
+                }}
+              >
+                <strong>{course.courseCode}</strong>
+                <span>{course.title}</span>
+                <span className="muted">
+                  {course.term} · {course.sectionCode}
+                </span>
+                <Badge tone="info">{course.credits} cr · In progress</Badge>
+              </div>
+            ))}
+          </div>
+          <p className="muted" style={{ fontSize: 11.5, margin: "10px 0 0" }}>
+            In-progress credits do not affect GPA or academic level until the
+            registrar approves the final grade.
+          </p>
         </Card>
       )}
 

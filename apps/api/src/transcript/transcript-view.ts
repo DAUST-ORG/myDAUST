@@ -1,4 +1,6 @@
 import type {
+  AcademicProgress,
+  InProgressCourse,
   TranscriptSemester,
   TranscriptStudentIdentity,
   TranscriptTotals,
@@ -70,6 +72,10 @@ function compareSemesters(a: TranscriptSemester, b: TranscriptSemester) {
 export function buildTranscriptView(
   student: TranscriptStudentIdentity,
   rows: TranscriptLedgerRow[],
+  extras?: {
+    academicProgress?: AcademicProgress;
+    inProgressCourses?: InProgressCourse[];
+  },
 ): TranscriptView {
   const entries = [...rows].sort(
     (a, b) =>
@@ -101,9 +107,19 @@ export function buildTranscriptView(
     })
     .sort(compareSemesters);
 
+  const totals = transcriptTotals(entries);
   return {
     student,
-    totals: transcriptTotals(entries),
+    totals,
+    academicProgress: extras?.academicProgress ?? {
+      earnedCredits: totals.earnedCredits,
+      requiredCredits: null,
+      inProgressCredits: 0,
+      level: null,
+      maximumLevel: null,
+      catalog: null,
+    },
+    inProgressCourses: extras?.inProgressCourses ?? [],
     semesters,
   };
 }

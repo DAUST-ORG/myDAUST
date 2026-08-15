@@ -109,9 +109,14 @@ export default function ParentDashboard() {
               style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}
             >
               {active.program}
-              {active.yearLevel ? ` · Year ${active.yearLevel}` : ""} · use the
-              sidebar to view grades, attendance and billing. Records are
-              read-only; contact the registrar for corrections.
+              {active.academicProgress.level
+                ? ` · Level ${active.academicProgress.level.code}`
+                : ""}
+              {active.academicProgress.inProgressCredits
+                ? ` · ${active.academicProgress.inProgressCredits} credits in progress`
+                : ""}{" "}
+              · use the sidebar to view grades, attendance and billing. Records
+              are read-only; contact the registrar for corrections.
             </p>
           </div>
         </>
