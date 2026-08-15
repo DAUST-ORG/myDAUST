@@ -1,0 +1,129 @@
+name: Guardian Import
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: Environment whose current API task runs the import
+        required: true
+        type: choice
+        options: [staging, prod]
+      actor_email:
+        description: Existing registrar or administrator recorded in the audit trail
+        required: true
+        type: string
+      expected_sha256:
+        description: SHA-256 of the reviewed CSV source
+        required: true
+        type: string
+      confirm:
+        description: Write safe matches (off means dry run)
+        required: true
+        default: false
+        type: boolean
+      allow_partial:
+        description: Permit safe matches while leaving reported blockers unresolved
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: guardian-import-${{ inputs.target_environment }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ROLE_ARN: arn:aws:iam::961828155948:role/daust-github-deploy
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate and upload the private source
+        env:
+          SOURCE_B64: ${{ secrets.GUARDIAN_IMPORT_CSV_B64 }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          TARGET_ENV: ${{ inputs.target_environment }}
+        run: |
+          set -euo pipefail
+          [ -n "$SOURCE_B64" ] || { echo "GUARDIAN_IMPORT_CSV_B64 is not configured"; exit 1; }
+          printf '%s' "$SOURCE_B64" | base64 --decode > guardian-source.csv
+          ACTUAL_SHA256=$(sha256sum guardian-source.csv | cut -d' ' -f1)
+          [ "$ACTUAL_SHA256" = "$EXPECTED_SHA256" ] || {
+            echo "Source hash mismatch: expected $EXPECTED_SHA256, got $ACTUAL_SHA256"
+            exit 1
+          }
+          BUCKET="daust-$TARGET_ENV-transcript-imports-961828155948"
+          KEY="transcript-imports/guardian-imports/$ACTUAL_SHA256/all-parents.csv"
+          aws s3 cp guardian-source.csv "s3://$BUCKET/$KEY" --sse AES256 --only-show-errors
+          echo "SOURCE_BUCKET=$BUCKET" >> "$GITHUB_ENV"
+          echo "SOURCE_KEY=$KEY" >> "$GITHUB_ENV"
+          rm -f guardian-source.csv
+
+      - name: Run dry run or confirmed import
+        env:
+          TARGET_ENV: ${{ inputs.target_environment }}
+          ACTOR_EMAIL: ${{ inputs.actor_email }}
+          SHOULD_CONFIRM: ${{ inputs.confirm }}
+          ALLOW_PARTIAL: ${{ inputs.allow_partial }}
+        run: |
+          set -euo pipefail
+          CLUSTER="daust-$TARGET_ENV"
+          SERVICE="daust-$TARGET_ENV-api"
+          TASK_DEF=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          NET=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].networkConfiguration' --output json)
+          LOG_OPTIONS=$(aws ecs describe-task-definition --task-definition "$TASK_DEF" \
+            --query "taskDefinition.containerDefinitions[?name=='api'] | [0].logConfiguration.options" \
+            --output json)
+          LOG_GROUP=$(jq -r '.["awslogs-group"]' <<<"$LOG_OPTIONS")
+          LOG_PREFIX=$(jq -r '.["awslogs-stream-prefix"]' <<<"$LOG_OPTIONS")
+          CONFIRM_VALUE=$([ "$SHOULD_CONFIRM" = "true" ] && echo 1 || echo 0)
+          PARTIAL_VALUE=$([ "$ALLOW_PARTIAL" = "true" ] && echo 1 || echo 0)
+          OVERRIDES=$(jq -cn \
+            --arg bucket "$SOURCE_BUCKET" \
+            --arg key "$SOURCE_KEY" \
+            --arg actor "$ACTOR_EMAIL" \
+            --arg confirm "$CONFIRM_VALUE" \
+            --arg partial "$PARTIAL_VALUE" \
+            '{containerOverrides:[{name:"api",command:["node","node_modules/tsx/dist/cli.mjs","node_modules/@mydaust/db/prisma/import-guardians.ts"],environment:[{name:"GUARDIANS_S3_BUCKET",value:$bucket},{name:"GUARDIANS_S3_KEY",value:$key},{name:"IMPORT_ACTOR_EMAIL",value:$actor},{name:"CONFIRM",value:$confirm},{name:"ALLOW_PARTIAL",value:$partial}]}]}')
+          RUN_RESULT=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_DEF" \
+            --launch-type FARGATE --network-configuration "$NET" \
+            --overrides "$OVERRIDES")
+          TASK=$(jq -r '.tasks[0].taskArn // empty' <<<"$RUN_RESULT")
+          [ -n "$TASK" ] || { jq -c '.failures' <<<"$RUN_RESULT"; exit 1; }
+          echo "guardian import task: $TASK"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
+          TASK_RESULT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK")
+          EXIT=$(jq -r '.tasks[0].containers[] | select(.name == "api") | .exitCode // empty' <<<"$TASK_RESULT")
+          TASK_ID="${TASK##*/}"
+          LOG_STREAM="$LOG_PREFIX/api/$TASK_ID"
+          printf '{"events":[]}' > guardian-import-logs.json
+          for attempt in $(seq 1 15); do
+            if aws logs get-log-events --log-group-name "$LOG_GROUP" \
+              --log-stream-name "$LOG_STREAM" --start-from-head \
+              --output json > guardian-import-logs.json 2>/dev/null \
+              && jq -e '[.events[].message | fromjson? | select(.event == "guardian-import-plan")] | length == 1' \
+                guardian-import-logs.json >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          jq -r '.events[].message | fromjson? | select(.event == "guardian-import-plan")' \
+            guardian-import-logs.json | tee guardian-import-plan.json
+          [ -s guardian-import-plan.json ] || { echo "Structured import plan missing"; exit 1; }
+          echo "### Guardian import $TARGET_ENV" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '"- Mode: \(.mode)\n- Source rows: \(.sourceRows)\n- Eligible guardians: \(.eligibleGuardians)\n- New guardians: \(.newGuardians)\n- Existing guardians: \(.existingGuardians)\n- Planned links: \(.plannedLinks)\n- New links: \(.newLinks)\n- Skipped guardians: \(.skippedGuardians)\n- Blockers: \(.blockerCount)\n- Warnings: \(.warningCount)\n- Issues: \(.issues)"' \
+            guardian-import-plan.json >> "$GITHUB_STEP_SUMMARY"
+          echo "task exit code: $EXIT"
+          [ "$EXIT" = "0" ]
