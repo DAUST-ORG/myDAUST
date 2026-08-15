@@ -40,6 +40,7 @@ describe("hero media URLs", () => {
     expect(embed).toContain("loop=1");
     expect(embed).toContain("playlist=Mt9jSB0rP2o");
     expect(embed).toContain("disablekb=1");
+    expect(embed).toContain("enablejsapi=1");
   });
 
   it("rejects unsafe schemes and unsupported iframe providers", () => {
