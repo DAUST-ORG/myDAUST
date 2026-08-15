@@ -35,6 +35,8 @@ function attendanceRate(records: { status: string }[]): number | null {
 export interface CreateGuardianInput {
   fullName: string;
   email: string;
+  phone?: string;
+  address?: string;
   studentIds: string[];
   relation?: string;
 }
@@ -65,6 +67,17 @@ export class GuardiansService {
     return { firstName, lastName: parts.join(" ") || firstName };
   }
 
+  /** Readable temporary password with ambiguous characters removed. */
+  private randomTempPassword(): string {
+    const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    const bytes = randomBytes(14);
+    let out = "";
+    for (let i = 0; i < 14; i += 1) {
+      out += alphabet[bytes[i]! % alphabet.length];
+    }
+    return out;
+  }
+
   // --- Registrar-facing ---------------------------------------------------
 
   async list() {
@@ -72,6 +85,7 @@ export class GuardiansService {
       where: { kind: "parent" },
       orderBy: { createdAt: "desc" },
       include: {
+        guardianProfile: true,
         guardianOf: { include: { student: { include: { person: true } } } },
         guardianInvites: { orderBy: { createdAt: "desc" }, take: 1 },
       },
@@ -82,12 +96,18 @@ export class GuardiansService {
         id: g.id,
         name: `${g.firstName} ${g.lastName}`,
         email: g.email,
-        // "invited" until they set a password; the invite itself may also have lapsed.
+        phone: g.guardianProfile?.phone ?? null,
+        address: g.guardianProfile?.address ?? null,
+        hasLogin: g.passwordHash !== null,
+        mustChangePassword: g.mustChangePassword,
+        // Imported guardians may have neither a password nor an invite yet.
         status: g.passwordHash
           ? "active"
-          : invite && invite.expiresAt.getTime() < Date.now()
-            ? "invite-expired"
-            : "invited",
+          : !invite
+            ? "not-provisioned"
+            : invite.expiresAt.getTime() < Date.now()
+              ? "invite-expired"
+              : "invited",
         children: g.guardianOf.map((link) => ({
           studentId: link.studentId,
           studentNo: link.student.studentNo,
@@ -139,6 +159,19 @@ export class GuardiansService {
             roles: ["parent"],
           },
         });
+
+    const phone = input.phone?.trim() || null;
+    const address = input.address?.trim() || null;
+    if (input.phone !== undefined || input.address !== undefined) {
+      await this.prisma.guardianProfile.upsert({
+        where: { guardianId: guardian.id },
+        create: { guardianId: guardian.id, phone, address },
+        update: {
+          ...(input.phone !== undefined ? { phone } : {}),
+          ...(input.address !== undefined ? { address } : {}),
+        },
+      });
+    }
 
     await this.prisma.guardianStudent.createMany({
       data: students.map((s) => ({
@@ -249,6 +282,61 @@ export class GuardiansService {
     };
   }
 
+  /** Generate or reset one guardian login, returning the temporary password once. */
+  async provisionLogin(actorId: string, guardianId: string) {
+    const guardian = await this.prisma.person.findFirst({
+      where: { id: guardianId, kind: "parent" },
+    });
+    if (!guardian) throw new NotFoundException("Guardian not found");
+
+    const tempPassword = this.randomTempPassword();
+    const provisionedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.person.update({
+        where: { id: guardian.id },
+        data: {
+          passwordHash: await bcrypt.hash(tempPassword, 10),
+          mustChangePassword: true,
+        },
+      });
+      // A previously issued setup link must not be able to replace the newly
+      // generated password after the registrar has disclosed it.
+      await tx.guardianInvite.updateMany({
+        where: { guardianId: guardian.id, usedAt: null },
+        data: { usedAt: provisionedAt },
+      });
+      await tx.auditLog.create({
+        data: {
+          entity: "Person",
+          entityId: guardian.id,
+          action: "guardian-login-provisioned",
+          actorId,
+        },
+      });
+    });
+
+    return {
+      guardianId: guardian.id,
+      name: `${guardian.firstName} ${guardian.lastName}`.trim(),
+      email: guardian.email,
+      tempPassword,
+    };
+  }
+
+  /** Bulk provision only guardians who do not already have a password. */
+  async provisionAllMissing(actorId: string) {
+    const guardians = await this.prisma.person.findMany({
+      where: { kind: "parent", passwordHash: null },
+      select: { id: true },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    });
+    const credentials = [];
+    for (const guardian of guardians) {
+      credentials.push(await this.provisionLogin(actorId, guardian.id));
+    }
+    return { count: credentials.length, credentials };
+  }
+
   /** Replace a guardian's linked students. */
   async setChildren(actorId: string, guardianId: string, studentIds: string[]) {
     const guardian = await this.prisma.person.findFirst({
@@ -295,7 +383,12 @@ export class GuardiansService {
   async update(
     actorId: string,
     guardianId: string,
-    input: { fullName?: string; email?: string },
+    input: {
+      fullName?: string;
+      email?: string;
+      phone?: string | null;
+      address?: string | null;
+    },
   ) {
     const guardian = await this.prisma.person.findFirst({
       where: { id: guardianId, kind: "parent" },
@@ -332,6 +425,24 @@ export class GuardiansService {
         await tx.guardianInvite.updateMany({
           where: { guardianId, usedAt: null },
           data: { usedAt: new Date() },
+        });
+      }
+      if (input.phone !== undefined || input.address !== undefined) {
+        await tx.guardianProfile.upsert({
+          where: { guardianId },
+          create: {
+            guardianId,
+            phone: input.phone?.trim() || null,
+            address: input.address?.trim() || null,
+          },
+          update: {
+            ...(input.phone !== undefined
+              ? { phone: input.phone?.trim() || null }
+              : {}),
+            ...(input.address !== undefined
+              ? { address: input.address?.trim() || null }
+              : {}),
+          },
         });
       }
       await tx.auditLog.create({
@@ -431,7 +542,7 @@ export class GuardiansService {
         if (claim.count !== 1) throw invalidInvite();
         await tx.person.update({
           where: { id: gInvite.guardianId },
-          data: { passwordHash },
+          data: { passwordHash, mustChangePassword: false },
         });
         // Any other outstanding invites for this guardian are now moot.
         await tx.guardianInvite.updateMany({

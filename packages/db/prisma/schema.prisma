@@ -392,6 +392,7 @@ model Person {
   projectMemberships         ProjectMember[]
   // --- SIS redesign ---
   guardianOf                 GuardianStudent[]         @relation("GuardianOf")
+  guardianProfile            GuardianProfile?
   guardianInvites            GuardianInvite[]          @relation("GuardianInvites")
   studentInvites             StudentInvite[]           @relation("StudentInvites")
   broadcasts                 Broadcast[]               @relation("BroadcastSender")
@@ -2066,6 +2067,18 @@ model GuardianStudent {
 
   @@unique([guardianId, studentId])
   @@index([studentId])
+}
+
+/// Contact details supplied by a registrar or an authoritative guardian import.
+/// Kept separate from Student contact fields because one guardian may be linked
+/// to several students and has one shared phone/address.
+model GuardianProfile {
+  guardianId String   @id
+  guardian   Person   @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+  phone      String?
+  address    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 /// Single-use password-setup token emailed when the registrar provisions a
