@@ -13,6 +13,7 @@ import {
   type EmailTemplatesInput,
   DEFAULT_EMAIL_TEMPLATES,
 } from "@mydaust/shared";
+import { Prisma } from "@mydaust/db";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 /** Seed rows derived from the former hardcoded constants. Created once; director edits win after that. */
@@ -68,22 +69,40 @@ const DEFAULT_FEES = [
 export class AppConfigService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Idempotent: creates missing defaults without touching director-edited rows. */
+  /**
+   * Idempotent across concurrent API processes: seed each empty configuration
+   * table once without touching director-edited or intentionally partial rows.
+   */
   private async ensureSeeded() {
-    const count = await this.prisma.feeItem.count();
-    if (count === 0)
-      await this.prisma.feeItem.createMany({ data: DEFAULT_FEES });
-    const tiers = await this.prisma.scholarshipTier.count();
-    if (tiers === 0) {
-      await this.prisma.scholarshipTier.createMany({
-        data: SCHOLARSHIP_TIERS.map((t) => ({
-          minScore: t.minScore,
-          pct: t.pct,
-          band: t.band,
-          note: t.note ?? null,
-        })),
-      });
-    }
+    await this.prisma.$transaction(async (tx) => {
+      // ScholarshipTier has no natural unique key, so ON CONFLICT cannot make
+      // its cold-start seed safe. A transaction-scoped advisory lock serializes
+      // only this tiny bootstrap section across every API process.
+      await tx.$queryRaw<Array<{ locked: number }>>(
+        Prisma.sql`
+          SELECT 1::int AS "locked"
+          FROM (
+            SELECT pg_advisory_xact_lock(hashtext('mydaust.app-config.defaults'))
+          ) AS config_seed_lock
+        `,
+      );
+      // Preserve the original seed-only-when-the-table-is-empty policy: a
+      // deliberate deletion/partial director configuration is never repaired
+      // implicitly by a read.
+      if ((await tx.feeItem.count()) === 0) {
+        await tx.feeItem.createMany({ data: DEFAULT_FEES });
+      }
+      if ((await tx.scholarshipTier.count()) === 0) {
+        await tx.scholarshipTier.createMany({
+          data: SCHOLARSHIP_TIERS.map((t) => ({
+            minScore: t.minScore,
+            pct: t.pct,
+            band: t.band,
+            note: t.note ?? null,
+          })),
+        });
+      }
+    });
   }
 
   async fees() {

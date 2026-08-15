@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { FinanceService } from "./finance.service.js";
 import { deriveApiAccountPosition } from "./account-position.js";
 
-function settlementFixture(options?: { retryOnce?: boolean }) {
+function settlementFixture(options?: {
+  retryOnce?: boolean;
+  onboardingStatus?: "payment_pending" | "enrolled";
+}) {
   const term = { id: "term", name: "Fall 2026" };
   const aAug = {
     id: "a-aug",
@@ -55,6 +58,16 @@ function settlementFixture(options?: { retryOnce?: boolean }) {
   const invoices: any[] = [invoiceA, invoiceB];
   const allocations: any[] = [];
   const audits: any[] = [];
+  const holds: any[] = [];
+  const onboarding = options?.onboardingStatus
+    ? {
+        id: "applicant-1",
+        onboardingStatus: options.onboardingStatus,
+        studentId: "student",
+        enrollmentInvoiceId: invoiceA.id,
+        activeOnboardingPaymentLinkId: "new-link",
+      }
+    : null;
   const payment: any = {
     id: "payment",
     invoiceId: invoiceA.id,
@@ -147,6 +160,9 @@ function settlementFixture(options?: { retryOnce?: boolean }) {
     [aAug, aDec, bSep].map((item) => [item.id, item] as const),
   );
   const tx: any = {
+    applicant: {
+      findUnique: vi.fn().mockImplementation(async () => onboarding),
+    },
     invoice,
     payment: paymentDelegate,
     installment: {
@@ -171,8 +187,33 @@ function settlementFixture(options?: { retryOnce?: boolean }) {
         return data;
       }),
     },
+    studentHold: {
+      findFirst: vi.fn(async () => holds[0] ?? null),
+      create: vi.fn(async ({ data }: any) => {
+        const created = {
+          id: `hold-${holds.length + 1}`,
+          active: true,
+          ...data,
+        };
+        holds.push(created);
+        return created;
+      }),
+    },
     piSpiRequest: { update: vi.fn() },
-    paymentLink: { update: vi.fn() },
+    paymentLink: {
+      findUnique: vi.fn(async ({ where }: any) =>
+        where.id === "old-link" && onboarding
+          ? {
+              id: "old-link",
+              status: "cancelled",
+              invoiceId: invoiceA.id,
+              studentId: "student",
+              onboardingApplicant: onboarding,
+            }
+          : null,
+      ),
+      update: vi.fn(),
+    },
     paymentSubmission: { update: vi.fn() },
   };
   let transactionCalls = 0;
@@ -197,7 +238,7 @@ function settlementFixture(options?: { retryOnce?: boolean }) {
   );
   const settle = (finance as any).settlePayment.bind(finance) as (
     paymentId: string,
-    options: { via: "ipn" },
+    options: Record<string, unknown>,
   ) => Promise<void>;
   return {
     finance,
@@ -212,6 +253,8 @@ function settlementFixture(options?: { retryOnce?: boolean }) {
     bSep,
     allocations,
     audits,
+    holds,
+    onboarding,
     injectRefundRace(invoicePaidXof: number) {
       refundRacePaidXof = invoicePaidXof;
     },
@@ -281,5 +324,74 @@ describe("settlement release safety", () => {
     expect(state.payment.status).toBe("refunded");
     expect(state.invoiceA.amountPaid).toBe(80);
     expect(state.aAug.amountPaid).toBe(80);
+  });
+
+  it("keeps an activated student enrolled and opens review after a refund", async () => {
+    const state = settlementFixture({ onboardingStatus: "enrolled" });
+    await state.settle("payment", { via: "ipn" });
+
+    await state.finance.refundPayment(
+      "payment",
+      "post-enrollment reversal",
+      "bursar",
+    );
+
+    expect(state.payment.status).toBe("refunded");
+    expect(state.onboarding?.onboardingStatus).toBe("enrolled");
+    expect(state.holds).toEqual([
+      expect.objectContaining({
+        studentId: "student",
+        type: "payment_reconciliation",
+      }),
+    ]);
+    expect(state.audits).toContainEqual(
+      expect.objectContaining({
+        entity: "Applicant",
+        entityId: "applicant-1",
+        action: "post-enrollment-refund-flagged",
+      }),
+    );
+  });
+
+  it("books a Finance-verified proof from a rotated onboarding link without reviving it", async () => {
+    const state = settlementFixture({ onboardingStatus: "payment_pending" });
+
+    await state.settle("payment", {
+      via: "manual",
+      actorId: "finance-reviewer",
+      method: "wave",
+      confirmedAmount: 100,
+      wireReview: {
+        id: "submitted-proof",
+        paymentLinkId: "old-link",
+        method: "wave",
+        bankReference: "WAVE-VERIFIED-100",
+        reviewedByName: "Finance Reviewer",
+        reviewedByEmail: "finance@test.local",
+      },
+    });
+
+    expect(state.payment.status).toBe("success");
+    expect(state.invoices).toContainEqual(
+      expect.objectContaining({
+        number: "CR-PAY-payment",
+        totalAmount: -50,
+        status: "paid",
+      }),
+    );
+    expect(state.prisma.paymentLink.update).not.toHaveBeenCalled();
+    expect(state.holds).toContainEqual(
+      expect.objectContaining({
+        studentId: "student",
+        type: "payment_reconciliation",
+      }),
+    );
+    expect(state.audits).toContainEqual(
+      expect.objectContaining({
+        entity: "PaymentSubmission",
+        entityId: "submitted-proof",
+        action: "stale-onboarding-proof-settlement-booked",
+      }),
+    );
   });
 });

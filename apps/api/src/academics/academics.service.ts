@@ -14,6 +14,7 @@ import {
 } from "../transcript/transcript-calculation.js";
 import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
+import { verifiedEnrollmentCashByInvoice } from "../finance/admission-payment-gate.js";
 import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
 import {
   AcademicStandingService,
@@ -485,6 +486,11 @@ export class AcademicsService {
         where: { id: studentId },
         include: { program: true },
       });
+      if (student.recordStatus !== "active") {
+        throw new ForbiddenException(
+          "Enrollment is available only after the first installment is verified",
+        );
+      }
 
       if (course.rule?.standingRequired) {
         const firstWord =
@@ -622,6 +628,10 @@ export class AcademicsService {
         }),
         this.prisma.student.findUnique({ where: { id: studentId } }),
       ]);
+    if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus !== "active") {
+      throw new ForbiddenException("Student enrollment is not active");
+    }
 
     const bestGrade = bestPointsByCourse(completed);
 
@@ -683,7 +693,7 @@ export class AcademicsService {
       maxCredits: MAX_CREDITS_PER_TERM,
       currentCredits,
       holds: holds.map((h) => ({ type: h.type, reason: h.reason })),
-      catalogYear: student?.catalogYear ?? null,
+      catalogYear: student.catalogYear ?? null,
       sections: rows,
     };
   }
@@ -699,6 +709,9 @@ export class AcademicsService {
       include: { program: true },
     });
     if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus !== "active") {
+      throw new ForbiddenException("Student enrollment is not active");
+    }
     if (!student.programId) {
       return {
         program: null,
@@ -879,6 +892,9 @@ export class AcademicsService {
       },
     });
     if (!s) throw new NotFoundException("Student not found");
+    if (s.recordStatus !== "active") {
+      throw new ForbiddenException("Student enrollment is not active");
+    }
 
     const transcript = await this.transcript.view(studentId);
     const gpa = transcript.totals.gpa ?? 0;
@@ -1715,7 +1731,11 @@ export class AcademicsService {
       throw new ForbiddenException("You do not teach this section");
     }
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { sectionId, status: "enrolled" },
+      where: {
+        sectionId,
+        status: "enrolled",
+        student: { recordStatus: "active" },
+      },
       include: { student: { include: { person: true } } },
     });
     return {
@@ -1847,6 +1867,7 @@ export class AcademicsService {
     const searchTokens =
       query.search?.trim().split(/\s+/).filter(Boolean) ?? [];
     return {
+      recordStatus: { not: "pending_payment" },
       ...(query.program ? { program: { is: { code: query.program } } } : {}),
       ...(searchTokens.length > 0
         ? {
@@ -1919,7 +1940,9 @@ export class AcademicsService {
       await Promise.all([
         recordsPromise,
         this.prisma.student.count({ where }),
-        this.prisma.student.count(),
+        this.prisma.student.count({
+          where: { recordStatus: { not: "pending_payment" } },
+        }),
         this.prisma.student.count({
           where: {
             recordStatus: "active",
@@ -2019,6 +2042,7 @@ export class AcademicsService {
   /** Minimal directory for search boxes and guardian/message selectors. */
   async adminStudentDirectory() {
     const students = await this.prisma.student.findMany({
+      where: { recordStatus: { not: "pending_payment" } },
       select: {
         id: true,
         studentNo: true,
@@ -2045,6 +2069,7 @@ export class AcademicsService {
    */
   async adminStudents() {
     const students = await this.prisma.student.findMany({
+      where: { recordStatus: { not: "pending_payment" } },
       select: ADMIN_STUDENT_ROSTER_SELECT,
       orderBy: { studentNo: "asc" },
     });
@@ -2725,6 +2750,23 @@ export class AcademicsService {
   async adminApplicants() {
     const apps = await this.prisma.applicant.findMany({
       orderBy: { score: "desc" },
+      include: {
+        student: { select: { id: true, studentNo: true } },
+        enrollmentInvoice: {
+          include: {
+            plan: {
+              include: {
+                installments: { orderBy: { sequence: "asc" }, take: 1 },
+              },
+            },
+            paymentSubmissions: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: { status: true },
+            },
+          },
+        },
+      },
     });
     const stages = [
       "submitted",
@@ -2734,24 +2776,55 @@ export class AcademicsService {
       "accepted",
       "rejected",
     ];
+    const verifiedCashByInvoice = await verifiedEnrollmentCashByInvoice(
+      this.prisma,
+      apps.flatMap((applicant) =>
+        applicant.enrollmentInvoiceId ? [applicant.enrollmentInvoiceId] : [],
+      ),
+    );
     return {
       funnel: stages.map((s) => ({
         stage: s,
         count: apps.filter((a) => a.stage === s).length,
       })),
-      applicants: apps.map((a) => ({
-        id: a.id,
-        name: `${a.firstName} ${a.lastName}`,
-        firstName: a.firstName,
-        lastName: a.lastName,
-        email: a.email,
-        program: a.programCode ?? "—",
-        stage: a.stage,
-        score: a.score,
-        country: a.country,
-        feePaid: a.feePaid,
-        submittedAt: a.createdAt.toISOString(),
-      })),
+      applicants: apps.map((a) => {
+        const first = a.enrollmentInvoice?.plan?.installments[0] ?? null;
+        const requiredCashXof =
+          a.requiredEnrollmentCashXof ?? first?.amountDue ?? 0;
+        const paidCashXof = a.enrollmentInvoiceId
+          ? (verifiedCashByInvoice.get(a.enrollmentInvoiceId) ?? 0)
+          : 0;
+        const proofStatus =
+          a.enrollmentInvoice?.paymentSubmissions[0]?.status ?? "none";
+        const onboarding =
+          a.stage === "accepted" || a.onboardingStatus !== "not_started"
+            ? {
+                status: a.onboardingStatus,
+                studentId: a.student?.id ?? null,
+                studentNo: a.student?.studentNo ?? null,
+                requiredCashXof,
+                paidCashXof,
+                remainingCashXof: Math.max(0, requiredCashXof - paidCashXof),
+                dueDate: first?.dueDate.toISOString() ?? null,
+                proofStatus,
+                enrolledAt: a.enrolledAt?.toISOString() ?? null,
+              }
+            : null;
+        return {
+          id: a.id,
+          name: `${a.firstName} ${a.lastName}`,
+          firstName: a.firstName,
+          lastName: a.lastName,
+          email: a.email,
+          program: a.programCode ?? "—",
+          stage: a.stage,
+          score: a.score,
+          country: a.country,
+          feePaid: a.feePaid,
+          submittedAt: a.createdAt.toISOString(),
+          onboarding,
+        };
+      }),
     };
   }
 
@@ -2812,6 +2885,9 @@ export class AcademicsService {
       this.standings.policyForStudent(studentId),
     ]);
     if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus === "pending_payment") {
+      throw new NotFoundException("Student not found");
+    }
     const { gpa, completedCredits } = summarizeTranscriptRows(
       student.transcriptEntries,
     );
@@ -2943,6 +3019,9 @@ export class AcademicsService {
       },
     });
     if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus === "pending_payment") {
+      throw new NotFoundException("Student not found");
+    }
     const events: {
       type: string;
       title: string;
@@ -2988,6 +3067,9 @@ export class AcademicsService {
       include: { person: true },
     });
     if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus === "pending_payment") {
+      throw new NotFoundException("Student not found");
+    }
 
     const personData: {
       firstName?: string;

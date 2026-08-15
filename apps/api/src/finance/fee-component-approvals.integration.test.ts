@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@mydaust/db";
 import type { AuthUser } from "../auth/current-user.js";
 import { FinanceApprovalsService } from "./finance-approvals.service.js";
+import { FinanceService } from "./finance.service.js";
 import { assignStandardPackageInTransaction } from "./standard-package.js";
 
 const SCHEMA = `fee_component_test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -245,6 +246,8 @@ describe.skipIf(!DB_URL)("fee component approvals", () => {
       env: { ...process.env, DATABASE_URL: DB_URL! },
       stdio: "pipe",
     });
+    process.env.DATABASE_URL = DB_URL!;
+    process.env.PORTAL_ORIGIN = "https://portal.test.daust.net";
     prisma = new PrismaClient({ datasources: { db: { url: DB_URL! } } });
     approvals = new FinanceApprovalsService(prisma as never);
     await prisma.costCenter.createMany({
@@ -646,6 +649,10 @@ describe.skipIf(!DB_URL)("fee component approvals", () => {
       optionalComponent: true,
       includeOptionalOverride: true,
     });
+    await prisma.student.update({
+      where: { id: fixture.student.id },
+      data: { recordStatus: "pending_payment" },
+    });
     const current = await prisma.feeSchedule.findUniqueOrThrow({
       where: { id: fixture.schedule.id },
       include: {
@@ -680,6 +687,305 @@ describe.skipIf(!DB_URL)("fee component approvals", () => {
         },
       }),
     ).resolves.toMatchObject({ included: true });
+  });
+
+  it("fails closed on in-flight cash evidence, then resynchronizes the gate", async () => {
+    const fixture = await createFixture("pending-global");
+    const year = await prisma.academicYear.findUniqueOrThrow({
+      where: { label: fixture.label },
+    });
+    await prisma.$transaction([
+      prisma.student.update({
+        where: { id: fixture.student.id },
+        data: { recordStatus: "pending_payment" },
+      }),
+      prisma.person.update({
+        where: { id: fixture.student.personId },
+        data: { roles: [] },
+      }),
+    ]);
+    const applicant = await prisma.applicant.create({
+      data: {
+        firstName: "Pending",
+        lastName: "Student",
+        email: `pending-${randomUUID()}@test.local`,
+        programCode: "BSCS",
+        stage: "accepted",
+        onboardingStatus: "payment_pending",
+        studentId: fixture.student.id,
+        admissionAcademicYearId: year.id,
+        enrollmentInvoiceId: fixture.invoice.id,
+        requiredEnrollmentCashXof: 1_071_250,
+        acceptedAt: new Date(),
+        paymentPendingAt: new Date(),
+      },
+    });
+    const oldLink = await prisma.paymentLink.create({
+      data: {
+        token: randomUUID().replaceAll("-", ""),
+        amountXof: 1_071_250,
+        purpose: "First enrollment installment",
+        payeeName: "Pending Student",
+        payeeMeta: fixture.student.studentNo,
+        studentId: fixture.student.id,
+        invoiceId: fixture.invoice.id,
+        costCenterCode: "9100",
+        onboardingApplicantId: applicant.id,
+      },
+    });
+    await prisma.applicant.update({
+      where: { id: applicant.id },
+      data: { activeOnboardingPaymentLinkId: oldLink.id },
+    });
+    const staleProof = await prisma.paymentSubmission.create({
+      data: {
+        source: "payment_link",
+        status: "submitted",
+        method: "wave",
+        studentId: fixture.student.id,
+        invoiceId: fixture.invoice.id,
+        paymentLinkId: oldLink.id,
+        submittedAmountXof: 1_071_250,
+        contactEmail: applicant.email,
+        bankSnapshot: {},
+      },
+    });
+    const stalePiSpi = await prisma.piSpiRequest.create({
+      data: {
+        txId: `pending-global-${randomUUID()}`,
+        status: "sent",
+        source: "payment_link",
+        payerAlias: randomUUID(),
+        amountXof: 1_071_250,
+        motif: "First enrollment installment",
+        studentId: fixture.student.id,
+        paymentLinkId: oldLink.id,
+      },
+    });
+
+    const current = await prisma.feeSchedule.findUniqueOrThrow({
+      where: { id: fixture.schedule.id },
+      include: {
+        rows: { orderBy: { sequence: "asc" } },
+        components: { orderBy: { sortOrder: "asc" } },
+      },
+    });
+    const after = schedulePayload(current);
+    after.components = after.components.map((component) =>
+      component.key === "tuition"
+        ? { ...component, annualAmountXof: 3_375_000 }
+        : component,
+    );
+
+    const revisionRequest = {
+      kind: "global_fee_schedule",
+      targetType: "FeeSchedule",
+      targetId: current.id,
+      academicYearLabel: fixture.label,
+      reason: "Revise the approved package for the pending cohort",
+      after,
+    } as const;
+
+    await expect(approvals.request(admin, revisionRequest)).rejects.toThrow(
+      "proof is under Finance review",
+    );
+    await expect(
+      prisma.paymentLink.findUniqueOrThrow({ where: { id: oldLink.id } }),
+    ).resolves.toMatchObject({ status: "active" });
+    await expect(
+      prisma.paymentSubmission.findUniqueOrThrow({
+        where: { id: staleProof.id },
+      }),
+    ).resolves.toMatchObject({ status: "submitted" });
+    await expect(
+      prisma.piSpiRequest.findUniqueOrThrow({ where: { id: stalePiSpi.id } }),
+    ).resolves.toMatchObject({ status: "sent" });
+
+    await prisma.paymentSubmission.update({
+      where: { id: staleProof.id },
+      data: { status: "rejected", activeKey: null },
+    });
+    await expect(approvals.request(admin, revisionRequest)).rejects.toThrow(
+      "PI-SPI payment request is active",
+    );
+    await expect(
+      prisma.paymentLink.findUniqueOrThrow({ where: { id: oldLink.id } }),
+    ).resolves.toMatchObject({ status: "active" });
+
+    await prisma.piSpiRequest.update({
+      where: { id: stalePiSpi.id },
+      data: { status: "cancelled", statusReason: "Payer cancelled request" },
+    });
+    await expect(
+      approvals.request(admin, revisionRequest),
+    ).resolves.toMatchObject({ applied: true });
+
+    const refreshed = await prisma.applicant.findUniqueOrThrow({
+      where: { id: applicant.id },
+      include: { activeOnboardingPaymentLink: true },
+    });
+    expect(refreshed).toMatchObject({
+      onboardingStatus: "payment_pending",
+      requiredEnrollmentCashXof: 1_171_250,
+      activeOnboardingPaymentLink: {
+        status: "active",
+        amountXof: 1_171_250,
+      },
+    });
+    expect(refreshed.activeOnboardingPaymentLinkId).not.toBe(oldLink.id);
+    await expect(
+      prisma.paymentLink.findUniqueOrThrow({ where: { id: oldLink.id } }),
+    ).resolves.toMatchObject({ status: "cancelled" });
+    await expect(
+      prisma.paymentSubmission.findUniqueOrThrow({
+        where: { id: staleProof.id },
+      }),
+    ).resolves.toMatchObject({ status: "rejected", activeKey: null });
+    await expect(
+      prisma.piSpiRequest.findUniqueOrThrow({ where: { id: stalePiSpi.id } }),
+    ).resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("activates after an approved component change lowers the cash threshold", async () => {
+    const fixture = await createFixture("pending-component-activation");
+    const year = await prisma.academicYear.findUniqueOrThrow({
+      where: { label: fixture.label },
+    });
+    await prisma.$transaction([
+      prisma.student.update({
+        where: { id: fixture.student.id },
+        data: { recordStatus: "pending_payment" },
+      }),
+      prisma.person.update({
+        where: { id: fixture.student.personId },
+        data: { roles: [] },
+      }),
+      prisma.invoice.update({
+        where: { id: fixture.invoice.id },
+        // Allocation is deliberately zero: an older account credit consumed the
+        // payable lines, but the successful Payment below is still verified cash
+        // explicitly initiated against this enrollment invoice.
+        data: { amountPaid: 0, status: "open" },
+      }),
+    ]);
+    await prisma.invoice.create({
+      data: {
+        studentId: fixture.student.id,
+        termId: fixture.invoice.termId,
+        totalAmount: -1_000_000,
+        status: "paid",
+        description: "Approved scholarship credit",
+        costCenterCode: "9100",
+        packageType: "credit",
+        academicYearLabel: fixture.label,
+      },
+    });
+    const payment = await prisma.payment.create({
+      data: {
+        invoiceId: fixture.invoice.id,
+        studentId: fixture.student.id,
+        amount: 1_000_000,
+        method: "wire",
+        status: "success",
+        provider: "manual-test",
+        providerRef: `component-threshold-${randomUUID()}`,
+        settledAt: new Date(),
+      },
+    });
+    await prisma.payment.create({
+      data: {
+        invoiceId: fixture.invoice.id,
+        studentId: fixture.student.id,
+        amount: 2_000_000,
+        method: "wire",
+        status: "refunded",
+        provider: "manual-test",
+        providerRef: `refunded-component-threshold-${randomUUID()}`,
+        settledAt: new Date(),
+        refundedAt: new Date(),
+      },
+    });
+    const applicant = await prisma.applicant.create({
+      data: {
+        firstName: "Threshold",
+        lastName: "Student",
+        email: `threshold-${randomUUID()}@test.local`,
+        stage: "accepted",
+        onboardingStatus: "payment_pending",
+        studentId: fixture.student.id,
+        admissionAcademicYearId: year.id,
+        enrollmentInvoiceId: fixture.invoice.id,
+        requiredEnrollmentCashXof: 1_071_250,
+        acceptedAt: new Date(),
+        paymentPendingAt: new Date(),
+      },
+    });
+    const link = await prisma.paymentLink.create({
+      data: {
+        token: randomUUID().replaceAll("-", ""),
+        amountXof: 71_250,
+        purpose: "Remaining enrollment installment",
+        payeeName: "Threshold Student",
+        payeeMeta: fixture.student.studentNo,
+        studentId: fixture.student.id,
+        invoiceId: fixture.invoice.id,
+        costCenterCode: "9100",
+        onboardingApplicantId: applicant.id,
+      },
+    });
+    await prisma.applicant.update({
+      where: { id: applicant.id },
+      data: { activeOnboardingPaymentLinkId: link.id },
+    });
+    const finance = new FinanceService(
+      prisma as never,
+      { send: async () => ({ sent: true }) } as never,
+      {} as never,
+      new Map() as never,
+    );
+    const approvalsWithDelivery = new FinanceApprovalsService(
+      prisma as never,
+      undefined,
+      finance,
+    );
+
+    const request = await approvalsWithDelivery.request(bursar, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: fixture.invoice.id,
+      reason: "The accepted student will not use cafeteria services",
+      after: { mode: "remove_component", componentKey: "cafeteria" },
+    });
+    await expect(
+      approvalsWithDelivery.approve(request.request.id, admin),
+    ).resolves.toMatchObject({ ok: true });
+
+    await expect(
+      prisma.applicant.findUniqueOrThrow({ where: { id: applicant.id } }),
+    ).resolves.toMatchObject({
+      onboardingStatus: "enrolled",
+      requiredEnrollmentCashXof: 913_750,
+      activatedByPaymentId: payment.id,
+      activeOnboardingPaymentLinkId: null,
+      studentInviteSentAt: expect.any(Date),
+    });
+    await expect(
+      prisma.student.findUniqueOrThrow({
+        where: { id: fixture.student.id },
+        include: { person: true },
+      }),
+    ).resolves.toMatchObject({
+      recordStatus: "active",
+      person: { roles: ["student"] },
+    });
+    await expect(
+      prisma.paymentLink.findUniqueOrThrow({ where: { id: link.id } }),
+    ).resolves.toMatchObject({ status: "cancelled" });
+    await expect(
+      prisma.studentInvite.count({
+        where: { studentPersonId: fixture.student.personId, usedAt: null },
+      }),
+    ).resolves.toBe(1);
   });
 
   it("fails closed for an unreconciled legacy package", async () => {

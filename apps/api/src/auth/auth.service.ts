@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { isAppRole } from "@mydaust/shared";
 import bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -14,7 +18,13 @@ export class AuthService {
       where: { email },
       include: { student: true },
     });
-    if (!person || !person.passwordHash) throw new UnauthorizedException("Invalid credentials");
+    if (
+      !person ||
+      !person.passwordHash ||
+      (person.student !== null && person.student.recordStatus !== "active")
+    ) {
+      throw new UnauthorizedException("Invalid credentials");
+    }
 
     const ok = await bcrypt.compare(password, person.passwordHash);
     if (!ok) throw new UnauthorizedException("Invalid credentials");
@@ -42,9 +52,16 @@ export class AuthService {
   }
 
   /** Self-service change: verify the current password, set the new hash, clear the force-change flag. */
-  async changePassword(personId: string, current: string, next: string): Promise<void> {
-    const person = await this.prisma.person.findUnique({ where: { id: personId } });
-    if (!person || !person.passwordHash) throw new UnauthorizedException("Invalid credentials");
+  async changePassword(
+    personId: string,
+    current: string,
+    next: string,
+  ): Promise<void> {
+    const person = await this.prisma.person.findUnique({
+      where: { id: personId },
+    });
+    if (!person || !person.passwordHash)
+      throw new UnauthorizedException("Invalid credentials");
     const ok = await bcrypt.compare(current, person.passwordHash);
     if (!ok) throw new BadRequestException("Current password is incorrect");
     const passwordHash = await bcrypt.hash(next, 10);
@@ -54,7 +71,12 @@ export class AuthService {
     });
     // Audit the action only — never the secret.
     await this.prisma.auditLog.create({
-      data: { entity: "Person", entityId: personId, action: "password-changed", actorId: personId },
+      data: {
+        entity: "Person",
+        entityId: personId,
+        action: "password-changed",
+        actorId: personId,
+      },
     });
   }
 }

@@ -86,7 +86,10 @@ export class GuardiansService {
       orderBy: { createdAt: "desc" },
       include: {
         guardianProfile: true,
-        guardianOf: { include: { student: { include: { person: true } } } },
+        guardianOf: {
+          where: { student: { recordStatus: "active" } },
+          include: { student: { include: { person: true } } },
+        },
         guardianInvites: { orderBy: { createdAt: "desc" }, take: 1 },
       },
     });
@@ -563,12 +566,20 @@ export class GuardiansService {
 
     const sInvite = await this.prisma.studentInvite.findUnique({
       where: { tokenHash },
-      include: { person: true },
+      include: { person: { include: { student: true } } },
     });
     if (sInvite) {
       const passwordHash = await bcrypt.hash(password, 10);
       const redeemedAt = new Date();
       await this.prisma.$transaction(async (tx) => {
+        const activeStudent = await tx.student.findFirst({
+          where: {
+            personId: sInvite.studentPersonId,
+            recordStatus: "active",
+          },
+          select: { id: true },
+        });
+        if (!activeStudent) throw invalidInvite();
         const claim = await tx.studentInvite.updateMany({
           where: {
             id: sInvite.id,
@@ -609,8 +620,12 @@ export class GuardiansService {
    * here, so authorisation lives in exactly one place.
    */
   async assertGuardianOf(guardianId: string, studentId: string) {
-    const link = await this.prisma.guardianStudent.findUnique({
-      where: { guardianId_studentId: { guardianId, studentId } },
+    const link = await this.prisma.guardianStudent.findFirst({
+      where: {
+        guardianId,
+        studentId,
+        student: { recordStatus: "active" },
+      },
     });
     if (!link)
       throw new ForbiddenException("You do not have access to that student");

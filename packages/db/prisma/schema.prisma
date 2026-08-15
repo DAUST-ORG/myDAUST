@@ -156,8 +156,16 @@ enum EnrollmentStatus {
 }
 
 enum StudentRecordStatus {
+  pending_payment
   active
   archived
+}
+
+enum ApplicantOnboardingStatus {
+  not_started
+  payment_pending
+  enrolled
+  cancelled
 }
 
 enum AttendanceStatus {
@@ -478,6 +486,7 @@ model Student {
   // Lifecycle of the SIS record itself. Archiving hides a student from active
   // rosters without deleting their academic or financial history.
   recordStatus         StudentRecordStatus       @default(active)
+  applicant            Applicant?                @relation("ApplicantStudent")
   holds                StudentHold[]
   alerts               StudentAlert[]
   watchers             StaffWatch[]
@@ -575,6 +584,7 @@ model Invoice {
   payments            Payment[]
   paymentSubmissions  PaymentSubmission[]
   piSpiRequests       PiSpiRequest[]
+  enrollmentForApplicant Applicant?                 @relation("ApplicantEnrollmentInvoice")
   createdAt           DateTime                   @default(now())
   updatedAt           DateTime                   @updatedAt
 
@@ -644,6 +654,7 @@ model Payment {
   componentAllocations PaymentComponentAllocation[]
   submission           PaymentSubmission?
   piSpiRequest         PiSpiRequest?
+  activatedApplicant   Applicant?                   @relation("ApplicantActivationPayment")
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
 
@@ -952,6 +963,32 @@ model Applicant {
   email              String
   programCode        String?
   stage              String              @default("submitted") // submitted|review|interview|offer|accepted|rejected
+  // Admissions acceptance and SIS activation are deliberately separate. Existing
+  // accepted rows remain not_started until an administrator runs the reviewed flow.
+  onboardingStatus ApplicantOnboardingStatus @default(not_started)
+  studentId String? @unique
+  student Student? @relation("ApplicantStudent", fields: [studentId], references: [id], onDelete: Restrict)
+  admissionAcademicYearId String?
+  admissionAcademicYear AcademicYear? @relation("ApplicantAdmissionAcademicYear", fields: [admissionAcademicYearId], references: [id], onDelete: SetNull)
+  enrollmentInvoiceId String? @unique
+  enrollmentInvoice Invoice? @relation("ApplicantEnrollmentInvoice", fields: [enrollmentInvoiceId], references: [id], onDelete: Restrict)
+  requiredEnrollmentCashXof Int?
+  activeOnboardingPaymentLinkId String? @unique
+  activeOnboardingPaymentLink PaymentLink? @relation("ApplicantActiveOnboardingPaymentLink", fields: [activeOnboardingPaymentLinkId], references: [id], onDelete: SetNull)
+  onboardingPaymentLinks PaymentLink[] @relation("ApplicantOnboardingPaymentLinks")
+  activatedByPaymentId String? @unique
+  activatedByPayment Payment? @relation("ApplicantActivationPayment", fields: [activatedByPaymentId], references: [id], onDelete: Restrict)
+  acceptedAt DateTime?
+  paymentPendingAt DateTime?
+  enrolledAt DateTime?
+  onboardingCancelledAt DateTime?
+  // Only hashes are persisted. While payment is pending the capability has no
+  // expiry; enrollment makes it read-only and sets an expiry 30 days later.
+  statusTokenHash String? @unique
+  statusTokenExpiresAt DateTime?
+  statusTokenRevokedAt DateTime?
+  acceptanceEmailSentAt DateTime?
+  studentInviteSentAt DateTime?
   score              Int? // BAC score (0–20)
   country            String?
   // Application fee settles after Finance verifies both payment proofs.
@@ -980,6 +1017,16 @@ model Applicant {
   createdAt          DateTime            @default(now())
 
   @@index([stage])
+  @@index([onboardingStatus])
+  @@index([admissionAcademicYearId])
+}
+
+/// Monotonic, database-backed yearly counter for permanent Student IDs. The
+/// value is advanced inside the acceptance transaction and is never decremented.
+model StudentNumberSequence {
+  academicYearStart Int      @id
+  nextValue         Int
+  updatedAt         DateTime @updatedAt
 }
 
 model Announcement {
@@ -1634,10 +1681,14 @@ model PaymentLink {
   paidAt             DateTime?
   createdById        String?
   createdAt          DateTime            @default(now())
+  onboardingApplicantId String?
+  onboardingApplicant Applicant? @relation("ApplicantOnboardingPaymentLinks", fields: [onboardingApplicantId], references: [id], onDelete: SetNull)
+  activeForApplicant Applicant? @relation("ApplicantActiveOnboardingPaymentLink")
   paymentSubmissions PaymentSubmission[]
   piSpiRequests      PiSpiRequest[]
 
   @@index([status])
+  @@index([onboardingApplicantId])
 }
 
 // ============================================================================
@@ -1684,6 +1735,7 @@ model AcademicYear {
   managementActualEntries ManagementActualEntry[]
   expenses                Expense[]
   students                Student[]                 @relation("StudentCatalogYear")
+  admittedApplicants      Applicant[]               @relation("ApplicantAdmissionAcademicYear")
   catalogRevisions        AcademicCatalogRevision[]
   createdAt               DateTime                  @default(now())
 

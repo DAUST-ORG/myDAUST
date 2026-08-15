@@ -5,6 +5,7 @@ describe("AcademicsService.myProfile guardian links", () => {
   it("returns only the signed-in student's linked guardian contact fields", async () => {
     const findUnique = vi.fn().mockResolvedValue({
       studentNo: "S2026001",
+      recordStatus: "active",
       person: {
         firstName: "Student",
         lastName: "Example",

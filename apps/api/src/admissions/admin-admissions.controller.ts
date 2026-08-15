@@ -10,7 +10,10 @@ const ApplicantFields = {
   country: z.string().max(80).nullish(),
   score: z.number().min(0).max(20).nullish(),
   phone: z.string().max(40).nullish(),
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullish(),
   gender: z.string().max(20).nullish(),
   nationality: z.string().max(80).nullish(),
   city: z.string().max(80).nullish(),
@@ -41,7 +44,15 @@ const UpdateApplicantInput = z.object({
 });
 
 const SetStageInput = z.object({
-  stage: z.enum(["submitted", "review", "interview", "offer", "accepted", "rejected"]),
+  stage: z.enum(["submitted", "review", "interview", "offer", "rejected"]),
+});
+
+const AcceptApplicantInput = z.object({
+  academicYearId: z.string().uuid().optional(),
+});
+
+const CancelOnboardingInput = z.object({
+  reason: z.string().trim().min(10).max(500),
 });
 
 @Controller("admissions")
@@ -61,13 +72,68 @@ export class AdminAdmissionsController {
   }
 
   @Patch("applicants/:id")
-  update(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
-    return this.admissions.adminUpdateApplicant(user.personId, id, UpdateApplicantInput.parse(body));
+  update(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.admissions.adminUpdateApplicant(
+      user.personId,
+      id,
+      UpdateApplicantInput.parse(body),
+    );
   }
 
   @Patch("applicants/:id/stage")
-  setStage(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  setStage(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const { stage } = SetStageInput.parse(body);
     return this.admissions.adminSetStage(user.personId, id, stage);
+  }
+
+  @Post("applicants/:id/accept")
+  @Roles("admin")
+  accept(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.admissions.adminAcceptApplicant(
+      user.personId,
+      id,
+      AcceptApplicantInput.parse(body ?? {}),
+    );
+  }
+
+  @Post("applicants/:id/acceptance-email/resend")
+  resendAcceptance(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.admissions.adminResendAcceptance(user.personId, id);
+  }
+
+  @Post("applicants/:id/onboarding-link/rotate")
+  rotateOnboardingLinks(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+  ) {
+    return this.admissions.adminRotateOnboardingLink(user.personId, id);
+  }
+
+  @Post("applicants/:id/onboarding/cancel")
+  @Roles("admin")
+  cancelOnboarding(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const { reason } = CancelOnboardingInput.parse(body);
+    return this.admissions.adminCancelOnboarding(user.personId, id, reason);
+  }
+
+  @Post("applicants/:id/student-invite/resend")
+  resendStudentInvite(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.admissions.adminResendStudentInvite(user.personId, id);
   }
 }

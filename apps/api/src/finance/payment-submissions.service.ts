@@ -14,6 +14,10 @@ import {
 } from "@mydaust/shared";
 import { MailService } from "../mail/mail.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import {
+  assertCurrentEnrollmentInvoicePaymentInTransaction,
+  assertCurrentOnboardingPaymentLinkInTransaction,
+} from "./admission-payment-gate.js";
 import { FinanceService } from "./finance.service.js";
 import { PaymentFileStorage } from "./payment-file.storage.js";
 
@@ -75,6 +79,11 @@ type CreateTarget = {
   applicantId?: string;
   diningOrderId?: string;
 };
+
+type PaymentTargetClient = Pick<
+  Prisma.TransactionClient,
+  "applicant" | "diningOrder" | "invoice" | "paymentLink"
+>;
 
 @Injectable()
 export class PaymentSubmissionsService {
@@ -304,85 +313,103 @@ export class PaymentSubmissionsService {
       );
     }
 
-    const target = await this.validateTarget(input, amount);
-    const active = await this.prisma.paymentSubmission.findUnique({
-      where: { activeKey: target.activeKey },
-      include: submissionInclude,
-    });
-    if (active) return this.present(active);
-
     const resumeToken = randomBytes(24).toString("hex");
-    try {
-      const created = await this.prisma.$transaction(async (tx) => {
-        const payment = target.invoice
-          ? await tx.payment.create({
-              data: {
-                invoiceId: target.invoice.id,
-                studentId: target.invoice.studentId,
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const created = await this.prisma.$transaction(
+          async (tx) => {
+            const target = await this.validateTarget(input, amount, tx);
+            if (input.invoiceId && input.source === "public_bill") {
+              await assertCurrentEnrollmentInvoicePaymentInTransaction(
+                tx,
+                input.invoiceId,
                 amount,
+              );
+            }
+            if (input.paymentLinkId) {
+              await assertCurrentOnboardingPaymentLinkInTransaction(
+                tx,
+                input.paymentLinkId,
+                amount,
+              );
+            }
+            const active = await tx.paymentSubmission.findUnique({
+              where: { activeKey: target.activeKey },
+              include: submissionInclude,
+            });
+            if (active) return active;
+
+            const payment = target.invoice
+              ? await tx.payment.create({
+                  data: {
+                    invoiceId: target.invoice.id,
+                    studentId: target.invoice.studentId,
+                    amount,
+                    method: input.method,
+                    status: "pending",
+                    provider: "manual",
+                    providerRef: `MANUAL-${randomUUID()}`,
+                    source: input.source,
+                    initiatedById: input.submittedById,
+                    initiatedByEmail:
+                      input.submittedByEmail ?? input.contactEmail,
+                  },
+                })
+              : null;
+            const submission = await tx.paymentSubmission.create({
+              data: {
+                resumeToken,
+                activeKey: target.activeKey,
+                status: "awaiting_proof",
                 method: input.method,
-                status: "pending",
-                provider: "manual",
-                providerRef: `MANUAL-${randomUUID()}`,
                 source: input.source,
-                initiatedById: input.submittedById,
-                initiatedByEmail: input.submittedByEmail ?? input.contactEmail,
+                studentId: target.studentId,
+                invoiceId: target.invoice?.id,
+                paymentId: payment?.id,
+                paymentLinkId: input.paymentLinkId,
+                applicantId: input.applicantId,
+                diningOrderId: input.diningOrderId,
+                submittedAmountXof: amount,
+                contactEmail: input.contactEmail,
+                submittedById: input.submittedById,
+                submittedByEmail: input.submittedByEmail,
+                bankSnapshot: details as never,
               },
-            })
-          : null;
-        const submission = await tx.paymentSubmission.create({
-          data: {
-            resumeToken,
-            activeKey: target.activeKey,
-            status: "awaiting_proof",
-            method: input.method,
-            source: input.source,
-            studentId: target.studentId,
-            invoiceId: target.invoice?.id,
-            paymentId: payment?.id,
-            paymentLinkId: input.paymentLinkId,
-            applicantId: input.applicantId,
-            diningOrderId: input.diningOrderId,
-            submittedAmountXof: amount,
-            contactEmail: input.contactEmail,
-            submittedById: input.submittedById,
-            submittedByEmail: input.submittedByEmail,
-            bankSnapshot: details as never,
+              include: submissionInclude,
+            });
+            await tx.auditLog.create({
+              data: {
+                entity: "PaymentSubmission",
+                entityId: submission.id,
+                action: "draft-created",
+                actorId: input.submittedById,
+                data: {
+                  method: input.method,
+                  amountXof: amount,
+                  source: input.source,
+                  target: target.activeKey,
+                },
+              },
+            });
+            return submission;
           },
-          include: submissionInclude,
-        });
-        await tx.auditLog.create({
-          data: {
-            entity: "PaymentSubmission",
-            entityId: submission.id,
-            action: "draft-created",
-            actorId: input.submittedById,
-            data: {
-              method: input.method,
-              amountXof: amount,
-              source: input.source,
-              target: target.activeKey,
-            },
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+            maxWait: 10_000,
+            timeout: 30_000,
           },
-        });
-        return submission;
-      });
-      return this.present(created);
-    } catch (error) {
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "P2002"
-      ) {
-        const existing = await this.prisma.paymentSubmission.findUnique({
-          where: { activeKey: target.activeKey },
-          include: submissionInclude,
-        });
-        if (existing) return this.present(existing);
+        );
+        return this.present(created);
+      } catch (error) {
+        const retryable =
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          (error.code === "P2002" || error.code === "P2034");
+        if (!retryable || attempt === 2) throw error;
       }
-      throw error;
     }
+    throw new Error("Payment-attempt transaction retry limit exhausted");
   }
 
   createForStudent(input: {
@@ -469,10 +496,14 @@ export class PaymentSubmissionsService {
     });
   }
 
-  private async validateTarget(input: CreateTarget, amount: number) {
+  private async validateTarget(
+    input: CreateTarget,
+    amount: number,
+    client: PaymentTargetClient = this.prisma,
+  ) {
     let invoice: { id: string; studentId: string } | null = null;
     if (input.invoiceId) {
-      const row = await this.prisma.invoice.findUnique({
+      const row = await client.invoice.findUnique({
         where: { id: input.invoiceId },
         select: {
           id: true,
@@ -496,7 +527,7 @@ export class PaymentSubmissionsService {
       invoice = row;
     }
     if (input.paymentLinkId) {
-      const link = await this.prisma.paymentLink.findUnique({
+      const link = await client.paymentLink.findUnique({
         where: { id: input.paymentLinkId },
       });
       if (!link || link.status !== "active") {
@@ -510,7 +541,7 @@ export class PaymentSubmissionsService {
       }
     }
     if (input.applicantId) {
-      const applicant = await this.prisma.applicant.findUnique({
+      const applicant = await client.applicant.findUnique({
         where: { id: input.applicantId },
       });
       if (!applicant) throw new NotFoundException("Application not found");
@@ -518,7 +549,7 @@ export class PaymentSubmissionsService {
         throw new BadRequestException("Application fee already paid");
     }
     if (input.diningOrderId) {
-      const order = await this.prisma.diningOrder.findUnique({
+      const order = await client.diningOrder.findUnique({
         where: { id: input.diningOrderId },
       });
       if (!order || (input.studentId && order.studentId !== input.studentId)) {
