@@ -9,6 +9,22 @@ import {
 import { assetUrl } from "@/lib/api";
 
 const PAUSED_KEY = "daust-hero-video-paused";
+const YOUTUBE_ORIGIN = "https://www.youtube-nocookie.com";
+
+function startYoutubePlayer(frame: HTMLIFrameElement | null) {
+  const player = frame?.contentWindow;
+  if (!player) return;
+  player.postMessage(
+    JSON.stringify({ event: "listening", id: "daust-hero-youtube" }),
+    YOUTUBE_ORIGIN,
+  );
+  for (const func of ["mute", "playVideo"]) {
+    player.postMessage(
+      JSON.stringify({ event: "command", func, args: [] }),
+      YOUTUBE_ORIGIN,
+    );
+  }
+}
 
 export function HeroMedia({
   media,
@@ -20,13 +36,16 @@ export function HeroMedia({
   label: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [eligible, setEligible] = useState(false);
   const [failed, setFailed] = useState(false);
   const [paused, setPaused] = useState(true);
+  const [providerPlaying, setProviderPlaying] = useState(false);
   const mediaKey = JSON.stringify(media);
 
   useEffect(() => {
     setFailed(false);
+    setProviderPlaying(false);
     const connection = (
       navigator as Navigator & { connection?: { saveData?: boolean } }
     ).connection;
@@ -50,6 +69,35 @@ export function HeroMedia({
     }
     void video.play().catch(() => setFailed(true));
   }, [eligible, failed, paused]);
+
+  useEffect(() => {
+    if (media.kind !== "youtube" || !eligible || failed || paused) return;
+
+    const onMessage = (event: MessageEvent) => {
+      if (
+        event.source !== iframeRef.current?.contentWindow ||
+        (event.origin !== YOUTUBE_ORIGIN &&
+          event.origin !== "https://www.youtube.com")
+      ) {
+        return;
+      }
+      let data: { event?: string; info?: number } | null = null;
+      try {
+        data =
+          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      } catch {
+        return;
+      }
+      if (data?.event === "onReady") startYoutubePlayer(iframeRef.current);
+      if (data?.event === "onStateChange" && data.info === 1) {
+        setProviderPlaying(true);
+      }
+    };
+
+    window.addEventListener("message", onMessage);
+    startYoutubePlayer(iframeRef.current);
+    return () => window.removeEventListener("message", onMessage);
+  }, [eligible, failed, media.kind, paused]);
 
   const toggle = () => {
     const next = !paused;
@@ -101,11 +149,20 @@ export function HeroMedia({
       )}
       {showVideo && embed && (
         <iframe
+          ref={iframeRef}
+          id={media.kind === "youtube" ? "daust-hero-youtube" : undefined}
           src={embed}
           title="DAUST campus background video"
           allow="autoplay; fullscreen"
           referrerPolicy="strict-origin-when-cross-origin"
           onError={() => setFailed(true)}
+          onLoad={() => {
+            if (media.kind !== "youtube") {
+              setProviderPlaying(true);
+              return;
+            }
+            startYoutubePlayer(iframeRef.current);
+          }}
           tabIndex={-1}
           aria-hidden="true"
           style={{
@@ -115,6 +172,8 @@ export function HeroMedia({
             height: "120%",
             border: 0,
             pointerEvents: "none",
+            opacity: media.kind === "youtube" && !providerPlaying ? 0 : 1,
+            transition: "opacity 180ms ease",
           }}
         />
       )}

@@ -692,6 +692,7 @@ export function heroMediaEmbedUrl(media: HeroMedia): string | null {
       "disablekb=1",
       "fs=0",
       "iv_load_policy=3",
+      "enablejsapi=1",
     ].join("&");
     return `https://www.youtube-nocookie.com/embed/${media.videoId}?${params}`;
   }
