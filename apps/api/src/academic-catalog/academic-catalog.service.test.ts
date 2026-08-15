@@ -102,6 +102,55 @@ describe("AcademicCatalogService.progress", () => {
     });
     expect(progress.level?.code).toBe("S1");
   });
+
+  it("resolves a roster batch with one catalog read", async () => {
+    const findMany = vi.fn(async () => [
+      {
+        academicYearId: "assigned-year",
+        yearLabel: "2026–2027",
+        revision: 2,
+        defaultLevels: [
+          ...levels,
+          { code: "S6", name: "Level six", creditCeiling: 180 },
+          { code: "S7", name: "Level seven", creditCeiling: 210 },
+          { code: "S8", name: "Level eight", creditCeiling: 240 },
+          { code: "S9", name: "Level nine", creditCeiling: 270 },
+          { code: "S10", name: "Level ten", creditCeiling: 300 },
+        ],
+        programConfigurations: [
+          {
+            ...program,
+            requirements: [{ category: "Degree", requiredCredits: 300 }],
+          },
+        ],
+        academicYear: { label: "2026–2027" },
+      },
+    ]);
+    const service = new AcademicCatalogService({
+      academicCatalogRevision: { findMany },
+    } as never);
+
+    const progress = await service.progressMany([
+      {
+        programId: PROGRAM_ID,
+        catalogYearId: "assigned-year",
+        catalogYearLabel: "2026–2027",
+        earnedCredits: 30,
+        inProgressCredits: 0,
+      },
+      {
+        programId: PROGRAM_ID,
+        catalogYearId: "assigned-year",
+        catalogYearLabel: "2026–2027",
+        earnedCredits: 31,
+        inProgressCredits: 6,
+      },
+    ]);
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(progress.map((row) => row.level?.code)).toEqual(["S1", "S2"]);
+    expect(progress[1]?.requiredCredits).toBe(300);
+  });
 });
 
 describe("AcademicCatalogService draft and approval submission", () => {

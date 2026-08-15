@@ -69,16 +69,59 @@ const SCHEMES: {
   },
 ];
 
-/** Per-category credits sum to the 132-credit degree, so completion can be
- *  derived from category fulfilment rather than tracked separately. */
-const REQUIREMENTS: [string, number][] = [
-  ["Core Engineering", 40],
-  ["Computer Science", 36],
-  ["Mathematics", 20],
-  ["Sciences", 16],
-  ["Humanities & English", 12],
-  ["Free Electives", 8],
-];
+/** Each approved engineering curriculum contains 300 credits: nine 30-credit
+ * taught semesters plus a 30-credit internship/thesis semester. The discipline
+ * split comes from the four source curriculum sheets. */
+const REQUIREMENTS_BY_DISCIPLINE: Record<
+  "computer" | "electrical" | "mechanical" | "chemical",
+  [string, number][]
+> = {
+  computer: [
+    ["Core Engineering", 102],
+    ["Computer Science", 132],
+    ["Mathematics", 36],
+    ["Sciences", 18],
+    ["Humanities & English", 12],
+  ],
+  electrical: [
+    ["Core Engineering", 90],
+    ["Electrical Engineering", 132],
+    ["Computer Science", 12],
+    ["Mathematics", 36],
+    ["Sciences", 18],
+    ["Humanities & English", 12],
+  ],
+  mechanical: [
+    ["Core Engineering", 90],
+    ["Mechanical Engineering", 120],
+    ["Electrical Engineering", 12],
+    ["Computer Science", 12],
+    ["Mathematics", 36],
+    ["Sciences", 18],
+    ["Humanities & English", 12],
+  ],
+  chemical: [
+    ["Core Engineering", 90],
+    ["Chemical Engineering", 102],
+    ["Chemistry", 36],
+    ["Computer Science", 12],
+    ["Mathematics", 36],
+    ["Sciences", 12],
+    ["Humanities & English", 12],
+  ],
+};
+
+function requirementsForProgram(program: { code: string; name: string }) {
+  const identity = `${program.code} ${program.name}`.toLowerCase();
+  if (identity.includes("chemical")) return REQUIREMENTS_BY_DISCIPLINE.chemical;
+  if (identity.includes("mechanical"))
+    return REQUIREMENTS_BY_DISCIPLINE.mechanical;
+  if (identity.includes("electrical"))
+    return REQUIREMENTS_BY_DISCIPLINE.electrical;
+  if (identity.includes("computer") || /\b(?:bscs|cs)\b/.test(identity))
+    return REQUIREMENTS_BY_DISCIPLINE.computer;
+  return null;
+}
 
 function defaultProgressionLevels(requiredCredits: number) {
   return Array.from(
@@ -98,12 +141,15 @@ function asJson(value: unknown): Prisma.InputJsonValue {
 /** A course's requirement area follows the institution's code prefixes; the
  *  owning department does not imply it (one department teaches several areas). */
 const CATEGORY_BY_PREFIX: [RegExp, string][] = [
-  [/^CSC/, "Computer Science"],
-  [/^MTH/, "Mathematics"],
-  [/^PHY|^CHM|^BIO/, "Sciences"],
-  [/^HUM|^ENG/, "Humanities & English"],
-  [/^CE|^MEC|^EEE/, "Core Engineering"],
-  [/^GEN/, "Free Electives"],
+  [/^(?:CSC|CS)\b/i, "Computer Science"],
+  [/^(?:MTH|MATH)\b/i, "Mathematics"],
+  [/^(?:PHY|PHYS|CHM|CHEM|BIO)\b/i, "Sciences"],
+  [/^(?:HUM|HSS|ENG)\b/i, "Humanities & English"],
+  [/^EE\b/i, "Electrical Engineering"],
+  [/^ME\b/i, "Mechanical Engineering"],
+  [/^CHE\b/i, "Chemical Engineering"],
+  [/^(?:ENGR|CE|MEC|EEE)\b/i, "Core Engineering"],
+  [/^GEN\b/i, "Free Electives"],
 ];
 
 /** The official DAUST payment plan: 4,285,000 full / 2,975,000 tuition-only a year. */
@@ -232,7 +278,16 @@ export async function seedSisReference(
   }
 
   for (const program of await prisma.program.findMany()) {
-    for (const [i, [category, requiredCredits]] of REQUIREMENTS.entries()) {
+    const requirements = requirementsForProgram(program);
+    if (!requirements) continue;
+    await prisma.programRequirement.deleteMany({
+      where: {
+        programId: program.id,
+        catalogYear: activeLabel,
+        category: { notIn: requirements.map(([category]) => category) },
+      },
+    });
+    for (const [i, [category, requiredCredits]] of requirements.entries()) {
       await prisma.programRequirement.upsert({
         where: {
           programId_catalogYear_category: {

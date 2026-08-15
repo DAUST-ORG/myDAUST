@@ -39,6 +39,27 @@ export interface AcademicCatalogRevisionView {
   approvalRequestId: string | null;
 }
 
+interface AcademicProgressInput {
+  programId: string | null;
+  catalogYearId: string | null;
+  catalogYearLabel: string | null;
+  earnedCredits: number;
+  inProgressCredits: number;
+}
+
+type ApprovedRevision = Prisma.AcademicCatalogRevisionGetPayload<{
+  include: { academicYear: true };
+}>;
+
+interface EffectiveCatalogConfiguration {
+  academicYearId: string;
+  label: string;
+  revision: number;
+  fallback: boolean;
+  defaultLevels: AcademicCatalogLevel[];
+  program: AcademicCatalogProgram | null;
+}
+
 function dateOnly(value: Date | null): string | null {
   return value?.toISOString().slice(0, 10) ?? null;
 }
@@ -377,24 +398,10 @@ export class AcademicCatalogService {
     );
   }
 
-  async progress(
-    input: {
-      programId: string | null;
-      catalogYearId: string | null;
-      catalogYearLabel: string | null;
-      earnedCredits: number;
-      inProgressCredits: number;
-    },
-    client: Prisma.TransactionClient | PrismaService = this.prisma,
-  ): Promise<AcademicProgress> {
-    const effective = await this.effectiveConfiguration(
-      {
-        programId: input.programId,
-        catalogYearId: input.catalogYearId,
-        catalogYearLabel: input.catalogYearLabel,
-      },
-      client,
-    );
+  private progressFromConfiguration(
+    input: AcademicProgressInput,
+    effective: EffectiveCatalogConfiguration | null,
+  ): AcademicProgress {
     if (!effective) {
       return {
         earnedCredits: input.earnedCredits,
@@ -434,27 +441,13 @@ export class AcademicCatalogService {
     };
   }
 
-  async effectiveConfiguration(
-    input: {
-      programId: string | null;
-      catalogYearId: string | null;
-      catalogYearLabel: string | null;
-    },
-    client: Prisma.TransactionClient | PrismaService = this.prisma,
-  ) {
-    const revisionDelegate = (
-      client as unknown as {
-        academicCatalogRevision?: {
-          findMany: typeof client.academicCatalogRevision.findMany;
-        };
-      }
-    ).academicCatalogRevision;
-    if (!revisionDelegate?.findMany) return null;
-    const approved = await revisionDelegate.findMany({
-      where: { status: "approved" },
-      orderBy: [{ approvedAt: "desc" }, { revision: "desc" }],
-      include: { academicYear: true },
-    });
+  private effectiveFromApproved(
+    input: Pick<
+      AcademicProgressInput,
+      "programId" | "catalogYearId" | "catalogYearLabel"
+    >,
+    approved: ApprovedRevision[],
+  ): EffectiveCatalogConfiguration | null {
     const assigned = input.catalogYearId
       ? approved.find((row) => row.academicYearId === input.catalogYearId)
       : input.catalogYearLabel
@@ -484,5 +477,73 @@ export class AcademicCatalogService {
       defaultLevels: levels(revision.defaultLevels),
       program: configuration ?? null,
     };
+  }
+
+  async progress(
+    input: AcademicProgressInput,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<AcademicProgress> {
+    const effective = await this.effectiveConfiguration(
+      {
+        programId: input.programId,
+        catalogYearId: input.catalogYearId,
+        catalogYearLabel: input.catalogYearLabel,
+      },
+      client,
+    );
+    return this.progressFromConfiguration(input, effective);
+  }
+
+  /** Resolve a roster page with one catalog query rather than one query per
+   * student. The result order always matches the input order. */
+  async progressMany(
+    inputs: AcademicProgressInput[],
+  ): Promise<AcademicProgress[]> {
+    if (inputs.length === 0) return [];
+    const delegate = (
+      this.prisma as unknown as {
+        academicCatalogRevision?: {
+          findMany: PrismaService["academicCatalogRevision"]["findMany"];
+        };
+      }
+    ).academicCatalogRevision;
+    if (!delegate?.findMany) {
+      return inputs.map((input) => this.progressFromConfiguration(input, null));
+    }
+    const approved = (await delegate.findMany({
+      where: { status: "approved" },
+      orderBy: [{ approvedAt: "desc" }, { revision: "desc" }],
+      include: { academicYear: true },
+    })) as ApprovedRevision[];
+    return inputs.map((input) =>
+      this.progressFromConfiguration(
+        input,
+        this.effectiveFromApproved(input, approved),
+      ),
+    );
+  }
+
+  async effectiveConfiguration(
+    input: {
+      programId: string | null;
+      catalogYearId: string | null;
+      catalogYearLabel: string | null;
+    },
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const revisionDelegate = (
+      client as unknown as {
+        academicCatalogRevision?: {
+          findMany: typeof client.academicCatalogRevision.findMany;
+        };
+      }
+    ).academicCatalogRevision;
+    if (!revisionDelegate?.findMany) return null;
+    const approved = await revisionDelegate.findMany({
+      where: { status: "approved" },
+      orderBy: [{ approvedAt: "desc" }, { revision: "desc" }],
+      include: { academicYear: true },
+    });
+    return this.effectiveFromApproved(input, approved as ApprovedRevision[]);
   }
 }
