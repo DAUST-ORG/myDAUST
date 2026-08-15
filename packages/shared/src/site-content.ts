@@ -677,6 +677,36 @@ export function normalizeHeroMediaUrl(value: string): HeroMedia | null {
   }
   return null;
 }
+
+/** Build a privacy-conscious provider URL that behaves like background media. */
+export function heroMediaEmbedUrl(media: HeroMedia): string | null {
+  if (media.kind === "youtube") {
+    const params = [
+      "autoplay=1",
+      "mute=1",
+      "controls=0",
+      "loop=1",
+      `playlist=${media.videoId}`,
+      "playsinline=1",
+      "rel=0",
+      "disablekb=1",
+      "fs=0",
+      "iv_load_policy=3",
+    ].join("&");
+    return `https://www.youtube-nocookie.com/embed/${media.videoId}?${params}`;
+  }
+  if (media.kind === "vimeo") {
+    const params = [
+      "background=1",
+      "autoplay=1",
+      "muted=1",
+      "loop=1",
+      "dnt=1",
+    ].join("&");
+    return `https://player.vimeo.com/video/${media.videoId}?${params}`;
+  }
+  return null;
+}
 const bi = (b: { en?: string; fr?: string } | undefined) => ({ en: (b?.en ?? "").slice(0, 4000), fr: (b?.fr ?? "").slice(0, 4000) });
 
 /**
