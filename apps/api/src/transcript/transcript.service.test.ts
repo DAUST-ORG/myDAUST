@@ -70,6 +70,9 @@ describe("TranscriptService.generatePdf", () => {
         findUnique: vi.fn(async () => ({
           id: "student-1",
           studentNo: "DAUST/001",
+          programId: "program-1",
+          catalogYear: "2026–2027",
+          catalogYearId: "year-1",
           person: {
             firstName: "Aissatou",
             lastName: "Diallo",
@@ -103,6 +106,8 @@ describe("TranscriptService.generatePdf", () => {
           },
         ]),
       },
+      enrollment: { findMany: vi.fn(async () => []) },
+      academicCatalogRevision: { findMany: vi.fn(async () => []) },
       auditLog: { create: auditCreate },
     };
     const prisma = {
@@ -171,6 +176,9 @@ describe("TranscriptService.view", () => {
         findUnique: vi.fn(async () => ({
           id: "student-1",
           studentNo: "DAUST-001",
+          programId: null,
+          catalogYear: null,
+          catalogYearId: null,
           person: {
             firstName: "Aissatou",
             lastName: "Diallo",
@@ -180,6 +188,8 @@ describe("TranscriptService.view", () => {
         })),
       },
       transcriptEntry: { findMany },
+      enrollment: { findMany: vi.fn(async () => []) },
+      academicCatalogRevision: { findMany: vi.fn(async () => []) },
     };
     const prisma = {
       $transaction: vi.fn(async (callback) => callback(tx)),

@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 /**
  * SIS reference data: grading scales, catalogue years, degree-audit requirement
@@ -79,6 +79,21 @@ const REQUIREMENTS: [string, number][] = [
   ["Humanities & English", 12],
   ["Free Electives", 8],
 ];
+
+function defaultProgressionLevels(requiredCredits: number) {
+  return Array.from(
+    { length: Math.max(1, Math.ceil(requiredCredits / 30)) },
+    (_, index) => ({
+      code: `S${index + 1}`,
+      name: `Semester ${index + 1}`,
+      creditCeiling: (index + 1) * 30,
+    }),
+  );
+}
+
+function asJson(value: unknown): Prisma.InputJsonValue {
+  return value as Prisma.InputJsonValue;
+}
 
 /** A course's requirement area follows the institution's code prefixes; the
  *  owning department does not imply it (one department teaches several areas). */
@@ -233,6 +248,82 @@ export async function seedSisReference(
           category,
           requiredCredits,
           position: i,
+        },
+      });
+    }
+  }
+
+  // The migration can run before the production reference loader has created
+  // programme requirements. Fill only that empty bootstrap snapshot; once a
+  // catalog contains programmes, it belongs to the director approval workflow
+  // and this idempotent loader must never rewrite it.
+  const activeYear = await prisma.academicYear.findUnique({
+    where: { label: activeLabel },
+  });
+  if (activeYear) {
+    const configuredPrograms = await prisma.program.findMany({
+      orderBy: { code: "asc" },
+      include: {
+        requirements: {
+          where: { catalogYear: activeLabel },
+          orderBy: [{ position: "asc" }, { category: "asc" }],
+        },
+      },
+    });
+    const programConfigurations = configuredPrograms.map((program) => ({
+      programId: program.id,
+      programCode: program.code,
+      programName: program.name,
+      progressionMode: "default",
+      customLevels: [],
+      requirements: program.requirements.map((requirement) => ({
+        category: requirement.category,
+        requiredCredits: requirement.requiredCredits,
+      })),
+    }));
+    const largestTotal = Math.max(
+      30,
+      ...programConfigurations.map((program) =>
+        program.requirements.reduce(
+          (total, requirement) => total + requirement.requiredCredits,
+          0,
+        ),
+      ),
+    );
+    const defaultLevels = defaultProgressionLevels(largestTotal);
+    const approvedCatalog = await prisma.academicCatalogRevision.findFirst({
+      where: { academicYearId: activeYear.id, status: "approved" },
+      orderBy: { revision: "desc" },
+    });
+    if (!approvedCatalog) {
+      const latest = await prisma.academicCatalogRevision.findFirst({
+        where: { academicYearId: activeYear.id },
+        orderBy: { revision: "desc" },
+        select: { revision: true },
+      });
+      await prisma.academicCatalogRevision.create({
+        data: {
+          academicYearId: activeYear.id,
+          revision: (latest?.revision ?? 0) + 1,
+          status: "approved",
+          yearLabel: activeYear.label,
+          startsOn: activeYear.startsOn,
+          endsOn: activeYear.endsOn,
+          defaultLevels: asJson(defaultLevels),
+          programConfigurations: asJson(programConfigurations),
+          reason: "Bootstrap fallback — replace through Director approval",
+          approvedAt: new Date(),
+        },
+      });
+    } else if (
+      Array.isArray(approvedCatalog.programConfigurations) &&
+      approvedCatalog.programConfigurations.length === 0
+    ) {
+      await prisma.academicCatalogRevision.update({
+        where: { id: approvedCatalog.id },
+        data: {
+          defaultLevels: asJson(defaultLevels),
+          programConfigurations: asJson(programConfigurations),
         },
       });
     }

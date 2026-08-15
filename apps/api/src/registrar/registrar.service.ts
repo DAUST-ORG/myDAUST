@@ -93,6 +93,15 @@ export class RegistrarService {
       if (!program) throw new BadRequestException("Unknown program");
       programId = program.id;
     }
+    const catalogYearLabel = input.catalogYear?.trim() || null;
+    const catalogYear = catalogYearLabel
+      ? await this.prisma.academicYear.findUnique({
+          where: { label: catalogYearLabel },
+        })
+      : null;
+    if (catalogYearLabel && !catalogYear) {
+      throw new BadRequestException("Unknown academic catalog year");
+    }
 
     const norm = (v: string | null | undefined) => {
       const t = typeof v === "string" ? v.trim() : v;
@@ -141,6 +150,7 @@ export class RegistrarService {
           expectedGrad: norm(input.expectedGrad),
           enrollmentStatus: norm(input.enrollmentStatus),
           catalogYear: norm(input.catalogYear),
+          catalogYearId: catalogYear?.id ?? null,
         },
       });
       await tx.auditLog.create({
@@ -477,31 +487,13 @@ export class RegistrarService {
     return year;
   }
 
-  /** Activating a year archives whichever year was active — only one at a time. */
-  async activateAcademicYear(actorId: string, id: string) {
+  /** Catalog publication is director-approved; direct activation is retired. */
+  async activateAcademicYear(_actorId: string, id: string) {
     const year = await this.prisma.academicYear.findUnique({ where: { id } });
     if (!year) throw new NotFoundException("Academic year not found");
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.academicYear.updateMany({
-        where: { status: "active", id: { not: id } },
-        data: { status: "archived" },
-      });
-      await tx.academicYear.update({
-        where: { id },
-        data: { status: "active" },
-      });
-      await tx.auditLog.create({
-        data: {
-          entity: "AcademicYear",
-          entityId: id,
-          action: "activated",
-          actorId,
-          data: { label: year.label },
-        },
-      });
-    });
-    return { ok: true };
+    throw new BadRequestException(
+      "Submit the academic catalog for director approval to activate this year",
+    );
   }
 
   // --- Grading schemes ----------------------------------------------------

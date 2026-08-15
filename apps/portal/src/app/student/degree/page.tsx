@@ -17,7 +17,10 @@ function statusTone(status: string): "success" | "info" | "warning" {
  */
 function rollUp(audit: DegreeAudit) {
   const total = audit.categories.reduce((s, c) => s + c.required, 0);
-  const completed = audit.categories.reduce((s, c) => s + Math.min(c.done, c.required), 0);
+  const completed = audit.categories.reduce(
+    (s, c) => s + Math.min(c.done, c.required),
+    0,
+  );
   const inProgress = audit.categories.reduce((s, c) => s + c.inProgress, 0);
   return {
     total,
@@ -33,16 +36,26 @@ export default function StudentDegree() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getDegreeAudit().then(setAudit).catch((e: Error) => setError(e.message));
+    getDegreeAudit()
+      .then(setAudit)
+      .catch((e: Error) => setError(e.message));
   }, []);
 
-  if (error) return <p className="card" style={{ color: "var(--danger)" }}>{error}</p>;
+  if (error)
+    return (
+      <p className="card" style={{ color: "var(--danger)" }}>
+        {error}
+      </p>
+    );
   if (!audit) return <p className="muted">Loading…</p>;
 
   if (audit.categories.length === 0) {
     return (
       <>
-        <PageHeader title="Degree Audit" subtitle={audit.program ?? undefined} />
+        <PageHeader
+          title="Degree Audit"
+          subtitle={audit.program ?? undefined}
+        />
         <EmptyState
           title="No requirement set for your programme yet"
           note="The registrar publishes requirements per catalogue year. Contact them if this looks wrong."
@@ -57,7 +70,10 @@ export default function StudentDegree() {
     <>
       <PageHeader
         title="Degree Audit"
-        subtitle={[audit.program, audit.catalogYear ? `Catalog ${audit.catalogYear}` : null]
+        subtitle={[
+          audit.program,
+          audit.catalogYear ? `Catalog ${audit.catalogYear}` : null,
+        ]
           .filter(Boolean)
           .join(" · ")}
       />
@@ -77,14 +93,30 @@ export default function StudentDegree() {
         }}
       >
         <div>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 44, fontWeight: 800, lineHeight: 1 }}>
+          <div
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 44,
+              fontWeight: 800,
+              lineHeight: 1,
+            }}
+          >
             {roll.pctComplete}%
           </div>
-          <div style={{ fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>toward degree</div>
+          <div style={{ fontSize: 12.5, opacity: 0.75, marginTop: 4 }}>
+            toward degree
+          </div>
         </div>
 
         <div style={{ minWidth: 0 }}>
-          <div style={{ height: 14, background: "rgba(255,255,255,.22)", borderRadius: "var(--radius-pill)", overflow: "hidden" }}>
+          <div
+            style={{
+              height: 14,
+              background: "rgba(255,255,255,.22)",
+              borderRadius: "var(--radius-pill)",
+              overflow: "hidden",
+            }}
+          >
             <div
               style={{
                 width: `${roll.pctComplete}%`,
@@ -95,26 +127,59 @@ export default function StudentDegree() {
               }}
             />
           </div>
-          <div style={{ display: "flex", gap: 30, marginTop: 18, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 30,
+              marginTop: 18,
+              flexWrap: "wrap",
+            }}
+          >
+            <HeroFig
+              label={audit.academicProgress.level?.name ?? "academic level"}
+              value={audit.academicProgress.level?.code ?? "—"}
+              tone="#ffc98a"
+            />
             <HeroFig label="credits earned" value={roll.completed} />
-            <HeroFig label="in progress" value={roll.inProgress} tone="#ffc98a" />
+            <HeroFig
+              label="in progress"
+              value={roll.inProgress}
+              tone="#ffc98a"
+            />
             <HeroFig label="remaining" value={roll.remaining} />
             <HeroFig label="total required" value={roll.total} />
           </div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 16,
+        }}
+      >
         {audit.categories.map((c) => (
           <Card key={c.category}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 12,
+              }}
+            >
               <strong style={{ flex: 1, fontSize: 14.5 }}>{c.category}</strong>
               <Badge tone={statusTone(c.status)}>{c.status}</Badge>
             </div>
             <Progress
               pct={c.pct}
               height={9}
-              tone={c.status === "Complete" ? "var(--success-500)" : "var(--daust-navy)"}
+              tone={
+                c.status === "Complete"
+                  ? "var(--success-500)"
+                  : "var(--daust-navy)"
+              }
             />
             <p className="muted" style={{ margin: "9px 0 0", fontSize: 12.5 }}>
               {c.done} of {c.required} credits · {c.remaining} to go
@@ -125,14 +190,22 @@ export default function StudentDegree() {
       </div>
 
       <p className="muted" style={{ fontSize: 12, marginTop: 16 }}>
-        Completion is summed from the credits applied to each requirement above, so this percentage
-        always agrees with the category breakdown.
+        Completion is summed from the credits applied to each requirement above,
+        so this percentage always agrees with the category breakdown.
       </p>
     </>
   );
 }
 
-function HeroFig({ label, value, tone }: { label: string; value: number; tone?: string }) {
+function HeroFig({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | string;
+  tone?: string;
+}) {
   return (
     <div>
       <div

@@ -15,6 +15,7 @@ import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js
 import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
 import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
+import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
 
 /** Password-setup invites are short-lived; the registrar can always re-issue one. */
 const INVITE_TTL_HOURS = 72;
@@ -42,6 +43,9 @@ export class GuardiansService {
     private readonly finance: FinanceService,
     private readonly paymentSubmissions: PaymentSubmissionsService,
     private readonly transcripts: TranscriptService = new TranscriptService(
+      prisma,
+    ),
+    private readonly catalogs: AcademicCatalogService = new AcademicCatalogService(
       prisma,
     ),
   ) {}
@@ -778,42 +782,46 @@ export class GuardiansService {
       },
     });
 
-    // Credits required for the degree come from the programme's requirement
-    // categories, the same source the student's own degree audit sums.
-    const requirements = await this.prisma.programRequirement.groupBy({
-      by: ["programId"],
-      _sum: { requiredCredits: true },
-    });
-    const requiredByProgram = new Map(
-      requirements.map((r) => [r.programId, r._sum.requiredCredits ?? 0]),
+    return Promise.all(
+      links.map(async ({ student, relation }) => {
+        const transcript = summarizeTranscriptRows(student.transcriptEntries);
+        const gpa = transcript.attemptedCredits === 0 ? null : transcript.gpa;
+        const summary = deriveApiAccountPosition(student.invoices).summary;
+        const inProgressCredits = student.enrollments
+          .filter((enrollment) => enrollment.status === "enrolled")
+          .reduce(
+            (total, enrollment) => total + enrollment.section.course.credits,
+            0,
+          );
+        const academicProgress = await this.catalogs.progress({
+          programId: student.programId,
+          catalogYearId: student.catalogYearId,
+          catalogYearLabel: student.catalogYear,
+          earnedCredits: transcript.completedCredits,
+          inProgressCredits,
+        });
+        return {
+          studentId: student.id,
+          studentNo: student.studentNo,
+          name: `${student.person.firstName} ${student.person.lastName}`,
+          program: student.program?.name ?? "—",
+          yearLevel: student.yearLevel,
+          photoUrl: student.photoUrl,
+          relation,
+          gpa,
+          completedCredits: transcript.completedCredits,
+          standing:
+            student.standing ??
+            (gpa === null ? "Not yet graded" : standingLabel(gpa)),
+          balance: summary.balanceXof,
+          summary,
+          requiredCredits: academicProgress.requiredCredits,
+          academicProgress,
+          attendanceRate: attendanceRate(
+            student.enrollments.flatMap((e) => e.attendance),
+          ),
+        };
+      }),
     );
-
-    return links.map(({ student, relation }) => {
-      const transcript = summarizeTranscriptRows(student.transcriptEntries);
-      const gpa = transcript.attemptedCredits === 0 ? null : transcript.gpa;
-      const summary = deriveApiAccountPosition(student.invoices).summary;
-      return {
-        studentId: student.id,
-        studentNo: student.studentNo,
-        name: `${student.person.firstName} ${student.person.lastName}`,
-        program: student.program?.name ?? "—",
-        yearLevel: student.yearLevel,
-        photoUrl: student.photoUrl,
-        relation,
-        gpa,
-        completedCredits: transcript.completedCredits,
-        standing:
-          student.standing ??
-          (gpa === null ? "Not yet graded" : standingLabel(gpa)),
-        balance: summary.balanceXof,
-        summary,
-        requiredCredits: student.programId
-          ? (requiredByProgram.get(student.programId) ?? null)
-          : null,
-        attendanceRate: attendanceRate(
-          student.enrollments.flatMap((e) => e.attendance),
-        ),
-      };
-    });
   }
 }

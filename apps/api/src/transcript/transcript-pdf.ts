@@ -1,4 +1,5 @@
 import type {
+  InProgressCourse,
   TranscriptPdfGeneration,
   TranscriptSemester,
   TranscriptView,
@@ -79,6 +80,8 @@ export interface TranscriptPdfFragment {
 export interface TranscriptPdfPagePlan {
   watermark: string;
   fragments: TranscriptPdfFragment[];
+  inProgress: InProgressCourse[];
+  inProgressContinued?: boolean;
 }
 
 export interface RenderedTranscriptPdf {
@@ -101,11 +104,13 @@ export function paginateTranscript(
   generation: TranscriptPdfGeneration,
 ): TranscriptPdfPagePlan[] {
   const watermark = transcriptWatermark(generation.generator.kind);
-  const pages: TranscriptPdfPagePlan[] = [{ watermark, fragments: [] }];
+  const pages: TranscriptPdfPagePlan[] = [
+    { watermark, fragments: [], inProgress: [] },
+  ];
   let remaining = FIRST_CONTENT_TOP - CONTENT_BOTTOM;
 
   const addPage = () => {
-    pages.push({ watermark, fragments: [] });
+    pages.push({ watermark, fragments: [], inProgress: [] });
     remaining = CONTINUATION_CONTENT_TOP - CONTENT_BOTTOM;
   };
 
@@ -126,6 +131,23 @@ export function paginateTranscript(
       continued = true;
       if (offset < semester.entries.length) addPage();
     }
+  }
+
+  let progressOffset = 0;
+  while (progressOffset < view.inProgressCourses.length) {
+    const fixed = TERM_HEADER_HEIGHT + TABLE_HEADER_HEIGHT + FRAGMENT_GAP;
+    if (remaining < fixed + ROW_HEIGHT) addPage();
+    const capacity = Math.max(1, Math.floor((remaining - fixed) / ROW_HEIGHT));
+    const entries = view.inProgressCourses.slice(
+      progressOffset,
+      progressOffset + capacity,
+    );
+    const page = pages.at(-1)!;
+    page.inProgress = entries;
+    page.inProgressContinued = progressOffset > 0;
+    remaining -= fixed + entries.length * ROW_HEIGHT;
+    progressOffset += entries.length;
+    if (progressOffset < view.inProgressCourses.length) addPage();
   }
 
   return pages;
@@ -269,9 +291,12 @@ function renderFirstPageIdentity(
     716,
     220,
   );
-  const program = view.student.program
+  const programName = view.student.program
     ? `${view.student.program.degree ? `${view.student.program.degree} - ` : ""}${view.student.program.code} - ${view.student.program.name}`
     : "Program not assigned";
+  const program = view.academicProgress.catalog
+    ? `${programName} | Catalog ${view.academicProgress.catalog.label} rev. ${view.academicProgress.catalog.revision}${view.academicProgress.catalog.fallback ? " (fallback)" : ""}`
+    : programName;
   labelValue(page, fonts, "Program", program, MARGIN, 677, 510);
   labelValue(
     page,
@@ -300,11 +325,15 @@ function renderFirstPageIdentity(
     height: 45,
     color: NAVY,
   });
+  const earned = view.academicProgress.requiredCredits
+    ? `${view.totals.earnedCredits} / ${view.academicProgress.requiredCredits}`
+    : String(view.totals.earnedCredits);
   const metrics = [
     ["Cumulative GPA", view.totals.gpa?.toFixed(2) ?? "N/A"],
     ["Attempted credits", String(view.totals.attemptedCredits)],
-    ["Earned credits", String(view.totals.earnedCredits)],
-    ["GPA credits", String(view.totals.gpaCredits)],
+    ["Earned / required", earned],
+    ["Academic level", view.academicProgress.level?.code ?? "N/A"],
+    ["In progress", String(view.academicProgress.inProgressCredits)],
   ] as const;
   const cellWidth = (PAGE_WIDTH - MARGIN * 2) / metrics.length;
   metrics.forEach(([label, value], index) => {
@@ -330,6 +359,94 @@ function renderFirstPageIdentity(
       color: WHITE,
     });
   });
+}
+
+function renderInProgressFragment(
+  page: PDFPage,
+  fonts: { regular: PDFFont; bold: PDFFont },
+  entries: InProgressCourse[],
+  continued: boolean,
+  y: number,
+): number {
+  page.drawRectangle({
+    x: MARGIN,
+    y: y - TERM_HEADER_HEIGHT,
+    width: PAGE_WIDTH - MARGIN * 2,
+    height: TERM_HEADER_HEIGHT,
+    color: NAVY_MID,
+  });
+  drawText(
+    page,
+    fonts.bold,
+    `COURSES IN PROGRESS${continued ? " (continued)" : ""}`,
+    { x: MARGIN + 11, y: y - 19, size: 10.5, color: WHITE },
+  );
+  y -= TERM_HEADER_HEIGHT;
+  page.drawRectangle({
+    x: MARGIN,
+    y: y - TABLE_HEADER_HEIGHT,
+    width: PAGE_WIDTH - MARGIN * 2,
+    height: TABLE_HEADER_HEIGHT,
+    color: PALE,
+  });
+  const headers = [
+    ["COURSE", MARGIN + 4],
+    ["TITLE", 111],
+    ["TERM / SECTION", 382],
+    ["CREDITS", 515],
+  ] as const;
+  for (const [label, x] of headers) {
+    drawText(page, fonts.bold, label, {
+      x,
+      y: y - 14,
+      size: 6.8,
+      color: MUTED,
+    });
+  }
+  y -= TABLE_HEADER_HEIGHT;
+  entries.forEach((entry, index) => {
+    const rowBottom = y - ROW_HEIGHT;
+    if (index % 2 === 1) {
+      page.drawRectangle({
+        x: MARGIN,
+        y: rowBottom,
+        width: PAGE_WIDTH - MARGIN * 2,
+        height: ROW_HEIGHT,
+        color: rgb(0.982, 0.985, 0.989),
+      });
+    }
+    drawText(page, fonts.bold, fitText(fonts.bold, entry.courseCode, 7.7, 62), {
+      x: MARGIN + 4,
+      y: rowBottom + 8,
+      size: 7.7,
+      color: NAVY,
+    });
+    drawText(
+      page,
+      fonts.regular,
+      fitText(fonts.regular, entry.title, 8.1, 260),
+      {
+        x: 111,
+        y: rowBottom + 8,
+        size: 8.1,
+        color: INK,
+      },
+    );
+    drawText(
+      page,
+      fonts.regular,
+      fitText(fonts.regular, `${entry.term} / ${entry.sectionCode}`, 7.5, 122),
+      { x: 382, y: rowBottom + 8, size: 7.5, color: MUTED },
+    );
+    drawText(page, fonts.bold, String(entry.credits), {
+      x: 532,
+      y: rowBottom + 8,
+      size: 8.1,
+      color: ORANGE,
+    });
+    y = rowBottom;
+  });
+  return y - FRAGMENT_GAP;
 }
 
 function renderContinuationIdentity(
@@ -552,7 +669,11 @@ export async function renderTranscriptPdf(
     else renderContinuationIdentity(page, fonts, view);
 
     let y = index === 0 ? FIRST_CONTENT_TOP : CONTINUATION_CONTENT_TOP;
-    if (pagePlan.fragments.length === 0 && index === 0) {
+    if (
+      pagePlan.fragments.length === 0 &&
+      pagePlan.inProgress.length === 0 &&
+      index === 0
+    ) {
       drawText(page, fonts.bold, "No transcript entries", {
         x: MARGIN,
         y: y - 30,
@@ -568,6 +689,15 @@ export async function renderTranscriptPdf(
     }
     for (const fragment of pagePlan.fragments) {
       y = renderSemesterFragment(page, fonts, fragment, y);
+    }
+    if (pagePlan.inProgress.length > 0) {
+      y = renderInProgressFragment(
+        page,
+        fonts,
+        pagePlan.inProgress,
+        pagePlan.inProgressContinued ?? false,
+        y,
+      );
     }
     renderFooter(page, fonts, generation, index + 1, pages.length);
   });

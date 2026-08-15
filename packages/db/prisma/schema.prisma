@@ -112,6 +112,7 @@ enum ApprovalRequestStatus {
 }
 
 enum ApprovalRequestKind {
+  academic_catalog
   global_fee_schedule
   custom_charge
   charge_removal
@@ -407,6 +408,8 @@ model Person {
   paymentsInitiated          Payment[]                 @relation("PaymentInitiator")
   feeSchedulesCreated        FeeSchedule[]             @relation("FeeScheduleCreator")
   feeSchedulesApproved       FeeSchedule[]             @relation("FeeScheduleApprover")
+  academicCatalogsCreated    AcademicCatalogRevision[] @relation("AcademicCatalogCreator")
+  academicCatalogsApproved   AcademicCatalogRevision[] @relation("AcademicCatalogApprover")
   approvalRequestsCreated    ApprovalRequest[]         @relation("ApprovalRequester")
   approvalRequestsReviewed   ApprovalRequest[]         @relation("ApprovalReviewer")
   approvalEvents             ApprovalEvent[]           @relation("ApprovalEventActor")
@@ -465,6 +468,8 @@ model Student {
   expectedGrad         String?
   enrollmentStatus     String? // full-time | part-time | leave
   catalogYear          String? // requirement set the student is audited against
+  catalogYearId        String?
+  catalogAcademicYear  AcademicYear?         @relation("StudentCatalogYear", fields: [catalogYearId], references: [id], onDelete: SetNull)
   standing             String? // Good Standing | Probation | ...
   // Lifecycle of the SIS record itself. Archiving hides a student from active
   // rosters without deleting their academic or financial history.
@@ -489,6 +494,7 @@ model Student {
   createdAt            DateTime              @default(now())
 
   @@index([recordStatus])
+  @@index([catalogYearId])
 }
 
 /// A faculty member's public-website profile. Only people whose roles include
@@ -1648,12 +1654,21 @@ enum AcademicYearStatus {
   archived
 }
 
+enum AcademicCatalogStatus {
+  draft
+  pending
+  approved
+  rejected
+  cancelled
+  superseded
+}
+
 /// Catalog year (e.g. "2026-2027"). Exactly one is `active` at a time; activating
 /// another archives the previous one.
 model AcademicYear {
-  id                      String                  @id @default(uuid())
-  label                   String                  @unique
-  status                  AcademicYearStatus      @default(draft)
+  id                      String                    @id @default(uuid())
+  label                   String                    @unique
+  status                  AcademicYearStatus        @default(draft)
   startsOn                DateTime?
   endsOn                  DateTime?
   terms                   Term[]
@@ -1663,9 +1678,41 @@ model AcademicYear {
   operatingBudgets        OperatingBudget[]
   managementActualEntries ManagementActualEntry[]
   expenses                Expense[]
-  createdAt               DateTime                @default(now())
+  students                Student[]                 @relation("StudentCatalogYear")
+  catalogRevisions        AcademicCatalogRevision[]
+  createdAt               DateTime                  @default(now())
 
   @@index([status])
+}
+
+/// Immutable, director-approved academic progression and programme-requirement
+/// snapshot. JSON preserves the whole reviewed catalog as one atomic revision.
+model AcademicCatalogRevision {
+  id                    String                @id @default(uuid())
+  academicYearId        String
+  academicYear          AcademicYear          @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  revision              Int
+  status                AcademicCatalogStatus @default(draft)
+  yearLabel             String
+  startsOn              DateTime?
+  endsOn                DateTime?
+  defaultLevels         Json
+  programConfigurations Json
+  reason                String?
+  activateYear          Boolean               @default(false)
+  createdById           String?
+  createdBy             Person?               @relation("AcademicCatalogCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  approvedById          String?
+  approvedBy            Person?               @relation("AcademicCatalogApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvalRequestId     String?               @unique
+  approvedAt            DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@unique([academicYearId, revision])
+  @@index([academicYearId, status, revision])
+  @@index([createdById])
+  @@index([approvedById])
 }
 
 model CalendarEvent {

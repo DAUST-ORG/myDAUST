@@ -228,7 +228,9 @@ export default function AdminStudentDetailPage() {
             </HeroPill>
             {s.program && <HeroPill icon={GraduationCap}>{s.program}</HeroPill>}
             <HeroPill icon={CalendarDays}>
-              {s.yearLevel ? `Year ${s.yearLevel}` : "Year —"}
+              {s.academicProgress.level
+                ? `Level ${s.academicProgress.level.code}`
+                : "Level —"}
               {s.cohort ? ` · ${s.cohort}` : ""}
             </HeroPill>
           </div>
@@ -262,7 +264,16 @@ export default function AdminStudentDetailPage() {
           label="Credits earned"
           icon={Layers}
           value={String(s.completedCredits)}
-          unit="/ 132"
+          unit={
+            s.academicProgress.requiredCredits
+              ? `/ ${s.academicProgress.requiredCredits}`
+              : undefined
+          }
+          sub={
+            s.academicProgress.requiredCredits
+              ? `${s.currentTermCredits} in progress`
+              : "Programme requirements not configured"
+          }
         />
         <ProfileStat
           label="Standing"
@@ -380,8 +391,23 @@ export default function AdminStudentDetailPage() {
               v={<b>{s.gpa > 0 ? `${s.gpa.toFixed(2)} / 4.0` : "—"}</b>}
             />
             <KV k="Academic standing" v={s.standing} />
-            <KV k="Credits earned" v={`${s.completedCredits} / 132`} />
-            <KV k="Credits this term" v={String(s.currentTermCredits)} />
+            <KV
+              k="Credits earned"
+              v={
+                s.academicProgress.requiredCredits
+                  ? `${s.completedCredits} / ${s.academicProgress.requiredCredits}`
+                  : `${s.completedCredits} · requirements not configured`
+              }
+            />
+            <KV
+              k="Academic level"
+              v={
+                s.academicProgress.level
+                  ? `${s.academicProgress.level.code} — ${s.academicProgress.level.name}`
+                  : "—"
+              }
+            />
+            <KV k="Credits in progress" v={String(s.currentTermCredits)} />
             <KV k="Major" v={s.major ?? "—"} />
             <KV k="Minor" v={s.minor ?? "—"} />
             <KV k="Catalog year" v={s.catalogYear ?? "—"} />
