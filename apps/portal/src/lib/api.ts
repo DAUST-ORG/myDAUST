@@ -3193,6 +3193,31 @@ export interface Applicant {
   country: string | null;
   feePaid: boolean;
   submittedAt: string;
+  onboarding: ApplicantOnboardingSummary | null;
+}
+export type ApplicantOnboardingStatus =
+  "not_started" | "payment_pending" | "enrolled" | "cancelled";
+export type ApplicantProofStatus =
+  | "none"
+  | "awaiting_proof"
+  | "submitted"
+  | "approved"
+  | "rejected"
+  | "cancelled";
+export type ApplicantInstallmentStatus =
+  "pending" | "partial" | "paid" | "overdue";
+export interface ApplicantOnboardingSummary {
+  status: ApplicantOnboardingStatus;
+  /** Internal Student primary key, used only for staff record links. */
+  studentId: string | null;
+  /** Permanent, payer-facing Student ID such as S202631AD. */
+  studentNo: string | null;
+  requiredCashXof: number;
+  paidCashXof: number;
+  remainingCashXof: number;
+  dueDate: string | null;
+  proofStatus: ApplicantProofStatus;
+  enrolledAt: string | null;
 }
 export interface Admissions {
   funnel: { stage: string; count: number }[];
@@ -3245,6 +3270,59 @@ export const setApplicantStage = (id: string, stage: string) =>
     method: "PATCH",
     body: JSON.stringify({ stage }),
   });
+export interface ApplicantFirstInstallment {
+  amountDue: number;
+  amountPaid: number;
+  remainingAmount: number;
+  dueDate: string;
+  status: ApplicantInstallmentStatus;
+}
+export interface ApplicantOnboardingView {
+  status: ApplicantOnboardingStatus;
+  /** Internal Student primary key. */
+  studentId: string | null;
+  /** Permanent Student ID displayed to applicants and entered on payment.daust.net. */
+  studentNo: string | null;
+  academicYear: { id: string; label: string } | null;
+  acceptedAt: string | null;
+  paymentPendingAt: string | null;
+  enrolledAt: string | null;
+  cancelledAt: string | null;
+  requiredCashXof: number | null;
+  invoiceId: string | null;
+  firstInstallment: ApplicantFirstInstallment | null;
+  proofStatus: ApplicantProofStatus;
+  paymentLink: {
+    id: string;
+    status: "active" | "paid" | "cancelled" | "expired";
+    url: string;
+  } | null;
+  acceptanceEmailSentAt: string | null;
+  statusUrl?: string;
+  paymentUrl?: string;
+  emailDelivery?: "sent" | "not_sent" | "not_requested";
+}
+export type ApplicantOnboardingActionResult = {
+  onboarding: ApplicantOnboardingView;
+};
+export const acceptApplicant = (id: string, academicYearId?: string) =>
+  request<ApplicantOnboardingActionResult>(
+    `/admissions/applicants/${id}/accept`,
+    {
+      method: "POST",
+      body: JSON.stringify({ academicYearId }),
+    },
+  );
+export const rotateApplicantOnboardingLink = (id: string) =>
+  request<ApplicantOnboardingActionResult>(
+    `/admissions/applicants/${id}/onboarding-link/rotate`,
+    { method: "POST", body: "{}" },
+  );
+export const resendApplicantAcceptanceEmail = (id: string) =>
+  request<ApplicantOnboardingActionResult>(
+    `/admissions/applicants/${id}/acceptance-email/resend`,
+    { method: "POST", body: "{}" },
+  );
 export interface ApplicantDetail {
   id: string;
   firstName: string;
@@ -3275,9 +3353,51 @@ export interface ApplicantDetail {
   essay: string | null;
   term: string | null;
   scholarship: { pct: number; band: string | null };
+  onboarding: ApplicantOnboardingView | null;
 }
 export const getApplicant = (id: string) =>
   request<ApplicantDetail>(`/admissions/applicants/${id}`);
+export const cancelApplicantOnboarding = (id: string, reason: string) =>
+  request<ApplicantDetail>(`/admissions/applicants/${id}/onboarding/cancel`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+export type ApplicantStudentInviteResult = ApplicantDetail & {
+  studentInvite: {
+    inviteUrl: string;
+    expiresAt: string;
+    delivery: "sent" | "not_sent";
+  };
+};
+export const resendApplicantStudentInvite = (id: string) =>
+  request<ApplicantStudentInviteResult>(
+    `/admissions/applicants/${id}/student-invite/resend`,
+    { method: "POST", body: "{}" },
+  );
+
+export interface PublicApplicationStatus {
+  onboardingStatus: ApplicantOnboardingStatus;
+  readOnly: boolean;
+  applicant: {
+    name: string;
+    programCode: string | null;
+    program: string | null;
+    academicYear: { id: string; label: string } | null;
+  };
+  studentNo: string | null;
+  firstInstallment: ApplicantFirstInstallment;
+  proofStatus: ApplicantProofStatus;
+  payment: {
+    canPay: boolean;
+    paymentUrl: string | null;
+    publicBillUrl: string | null;
+  };
+}
+export const getPublicApplicationStatus = (token: string) =>
+  request<PublicApplicationStatus>(
+    `/applications/status/${encodeURIComponent(token)}`,
+    { cache: "no-store" },
+  );
 
 export interface StaffMember {
   id: string;
@@ -3454,13 +3574,21 @@ export interface BillLookup {
   balanceXof: number;
   /** Canonical account amount remaining after credits. */
   outstandingXof?: number;
-  /** Maximum that can currently post to the oldest invoice without leapfrogging. */
+  /** Normal payable target, or the refund-net enrollment cash remainder while pending. */
   payableXof?: number;
   summary?: AccountBalanceSummary;
   creditXof: number;
   dueDate: string | null;
   charges: BillCharge[];
   pendingWires: WireTransferSummary[];
+  enrollmentGate: {
+    status: "payment_pending" | "enrolled";
+    requiredCashXof: number;
+    paidCashXof: number;
+    remainingCashXof: number;
+    dueDate: string | null;
+    pendingProof: boolean;
+  } | null;
 }
 export const lookupBill = (studentNo: string, dob: string) =>
   request<BillLookup>("/finance/public/bill/lookup", {

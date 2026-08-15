@@ -3,8 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { FilePlus2 } from "lucide-react";
-import { type Admissions, getAdmissions, getAdminPrograms, setApplicantStage } from "@/lib/api";
+import { acceptApplicant, type Admissions, getAdmissions, getAdminPrograms, setApplicantStage } from "@/lib/api";
+import { formatXof } from "@/lib/format";
 import { Avatar, Badge, type BadgeTone, Button, PageHeader, SearchInput, Select, SortTh, Stat, useSort } from "@/components/ui";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useAuth } from "@/lib/use-auth";
 import { ApplicationModal, type ProgramOption } from "./ApplicationModal";
 
 const STAGES = ["submitted", "review", "interview", "offer", "accepted", "rejected"];
@@ -24,6 +27,18 @@ const STAGE_LABEL: Record<string, string> = {
   accepted: "Accepted",
   rejected: "Rejected",
 };
+const ONBOARDING_LABEL: Record<string, string> = {
+  not_started: "Accepted",
+  payment_pending: "Payment pending",
+  enrolled: "Enrolled",
+  cancelled: "Onboarding cancelled",
+};
+const ONBOARDING_TONE: Record<string, BadgeTone> = {
+  not_started: "success",
+  payment_pending: "warning",
+  enrolled: "success",
+  cancelled: "error",
+};
 
 interface StageAction {
   label: string;
@@ -35,18 +50,23 @@ const STAGE_ACTION: Record<string, StageAction> = {
   submitted: { label: "Submit for review", next: "review", variant: "primary" },
   review: { label: "Admit", next: "offer", variant: "secondary" },
   interview: { label: "Admit", next: "offer", variant: "secondary" },
-  offer: { label: "Confirm", next: "accepted", variant: "navy" },
+  offer: { label: "Accept", next: "accepted", variant: "navy" },
 };
 
 export default function AdmissionsPage() {
   const router = useRouter();
+  const { me } = useAuth();
+  const isAdmin = me?.roles.includes("admin") ?? false;
   const [d, setD] = useState<Admissions | null>(null);
   const [programOptions, setProgramOptions] = useState<ProgramOption[]>([]);
   const [q, setQ] = useState("");
   const [stageF, setStageF] = useState("all");
+  const [queueF, setQueueF] = useState<"active" | "history" | "all">("active");
   const [adding, setAdding] = useState(false);
+  const [pendingAcceptance, setPendingAcceptance] = useState<{ id: string; name: string } | null>(null);
   const [advancing, setAdvancing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const { sort, toggle, apply } = useSort({ key: "score", dir: "desc" });
 
   function load() {
@@ -60,13 +80,36 @@ export default function AdmissionsPage() {
   }, []);
 
   async function advance(id: string, next: string) {
+    if (next === "accepted" && !isAdmin) return;
     setAdvancing(id);
     setErr(null);
     try {
-      await setApplicantStage(id, next);
+      if (next === "accepted") await acceptApplicant(id);
+      else await setApplicantStage(id, next);
       load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not update the applicant stage.");
+    } finally {
+      setAdvancing(null);
+    }
+  }
+
+  async function confirmAcceptance() {
+    if (!pendingAcceptance || !isAdmin) return;
+    setAdvancing(pendingAcceptance.id);
+    setErr(null);
+    setNotice(null);
+    try {
+      const { onboarding } = await acceptApplicant(pendingAcceptance.id);
+      setNotice(onboarding.emailDelivery === "not_sent"
+        ? `${pendingAcceptance.name} was accepted, but the email failed. Open the record to copy or resend the private link.`
+        : `${pendingAcceptance.name} was accepted and moved to payment pending.`);
+      setPendingAcceptance(null);
+      load();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Could not accept this applicant.";
+      setErr(message);
+      throw cause;
     } finally {
       setAdvancing(null);
     }
@@ -76,27 +119,34 @@ export default function AdmissionsPage() {
 
   const stats = useMemo(() => {
     const cnt = (st: string) => d?.funnel.find((f) => f.stage === st)?.count ?? 0;
-    const total = (d?.funnel ?? []).reduce((s, f) => s + f.count, 0);
+    const total = (d?.funnel ?? []).reduce((sum, item) => sum + item.count, 0);
+    const awaitingPayment = d?.applicants.filter((a) => a.onboarding?.status === "payment_pending").length ?? 0;
+    const enrolled = d?.applicants.filter((a) => a.onboarding?.status === "enrolled").length ?? 0;
     return {
       total,
       underReview: cnt("review") + cnt("interview"),
-      admitted: cnt("offer"),
-      confirmed: cnt("accepted"),
-      // Funnel bars: cumulative narrowing of the pipeline.
+      awaitingPayment,
+      enrolled,
       funApplied: total,
       funReviewed: total - cnt("submitted"),
       funAdmitted: cnt("offer") + cnt("accepted"),
-      funConfirmed: cnt("accepted"),
+      funPaymentPending: awaitingPayment,
+      funEnrolled: enrolled,
     };
   }, [d]);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const base = (d?.applicants ?? []).filter(
-      (a) =>
-        (stageF === "all" || a.stage === stageF) &&
-        (!needle || a.name.toLowerCase().includes(needle) || a.email.toLowerCase().includes(needle)),
-    );
+    const base = (d?.applicants ?? []).filter((a) => {
+      const completed = a.stage === "rejected" || ["enrolled", "cancelled"].includes(a.onboarding?.status ?? "");
+      const inQueue = queueF === "all" || (queueF === "history" ? completed : !completed);
+      const stageMatches =
+        stageF === "all" ||
+        (["payment_pending", "enrolled", "cancelled"].includes(stageF)
+          ? a.onboarding?.status === stageF
+          : a.stage === stageF);
+      return inQueue && stageMatches && (!needle || a.name.toLowerCase().includes(needle) || a.email.toLowerCase().includes(needle) || a.onboarding?.studentNo?.toLowerCase().includes(needle));
+    });
     return apply(base, {
       name: (a) => a.name,
       program: (a) => a.program,
@@ -105,7 +155,7 @@ export default function AdmissionsPage() {
       stage: (a) => STAGES.indexOf(a.stage),
       submitted: (a) => a.submittedAt,
     });
-  }, [d, q, stageF, apply]);
+  }, [d, q, queueF, stageF, apply]);
 
   if (!d) return <p className="muted">Loading…</p>;
 
@@ -125,8 +175,8 @@ export default function AdmissionsPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginBottom: 20 }}>
         <Stat label="Applications" value={stats.total} sub="FALL 2026" />
         <Stat label="Under review" value={stats.underReview} sub="awaiting decision" tone="var(--daust-orange)" />
-        <Stat label="Admitted" value={stats.admitted} sub="offers sent" tone="var(--daust-navy)" />
-        <Stat label="Confirmed" value={stats.confirmed} sub="deposits paid" tone="var(--success)" />
+        <Stat label="Payment pending" value={stats.awaitingPayment} sub="accepted applicants" tone="var(--daust-orange)" />
+        <Stat label="Enrolled" value={stats.enrolled} sub="first payment verified" tone="var(--success)" />
       </div>
 
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -137,7 +187,8 @@ export default function AdmissionsPage() {
             <FunnelBar label="Applied" count={stats.funApplied} max={stats.funApplied} />
             <FunnelBar label="Reviewed" count={stats.funReviewed} max={stats.funApplied} />
             <FunnelBar label="Admitted" count={stats.funAdmitted} max={stats.funApplied} />
-            <FunnelBar label="Confirmed" count={stats.funConfirmed} max={stats.funApplied} />
+            <FunnelBar label="Payment pending" count={stats.funPaymentPending} max={stats.funApplied} />
+            <FunnelBar label="Enrolled" count={stats.funEnrolled} max={stats.funApplied} />
           </div>
         </div>
 
@@ -145,10 +196,12 @@ export default function AdmissionsPage() {
         <div style={{ flex: "3 1 480px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <SearchInput value={q} onChange={setQ} placeholder="Filter applicants…" width={280} />
-            <Select value={stageF} onChange={setStageF} options={[{ value: "all", label: "All stages" }, ...STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s]! }))]} />
+            <Select ariaLabel="Queue" value={queueF} onChange={(value) => setQueueF(value as typeof queueF)} options={[{ value: "active", label: "Active queue" }, { value: "history", label: "History" }, { value: "all", label: "All applications" }]} />
+            <Select value={stageF} onChange={setStageF} options={[{ value: "all", label: "All stages" }, ...STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s]! })), { value: "payment_pending", label: "Payment pending" }, { value: "enrolled", label: "Enrolled" }, { value: "cancelled", label: "Onboarding cancelled" }]} />
           </div>
 
           {err && <p className="card" style={{ margin: 0, color: "var(--danger)" }}>{err}</p>}
+          {notice && <p className="card" role="status" style={{ margin: 0, color: "var(--success)" }}>{notice}</p>}
 
           <div className="card" style={{ margin: 0, padding: 0, overflow: "hidden" }}>
             <div style={{ overflowX: "auto" }}>
@@ -158,6 +211,7 @@ export default function AdmissionsPage() {
                     <SortTh label="Applicant" sortKey="name" sort={sort} onSort={toggle} />
                     <SortTh label="Score" sortKey="score" sort={sort} onSort={toggle} />
                     <SortTh label="Stage" sortKey="stage" sort={sort} onSort={toggle} />
+                    <th>First payment</th>
                     <th style={{ textAlign: "right" }}>Actions</th>
                   </tr>
                 </thead>
@@ -174,14 +228,31 @@ export default function AdmissionsPage() {
                         </div>
                       </td>
                       <td style={{ fontWeight: 700 }}>{a.score ?? "—"}</td>
-                      <td><Badge tone={STAGE_TONE[a.stage] ?? "neutral"}>{STAGE_LABEL[a.stage] ?? a.stage}</Badge></td>
+                      <td>
+                        <Badge tone={a.stage === "accepted" && a.onboarding ? ONBOARDING_TONE[a.onboarding.status] ?? "neutral" : STAGE_TONE[a.stage] ?? "neutral"}>
+                          {a.stage === "accepted" && a.onboarding ? ONBOARDING_LABEL[a.onboarding.status] ?? a.onboarding.status : STAGE_LABEL[a.stage] ?? a.stage}
+                        </Badge>
+                        {a.stage === "accepted" && a.onboarding?.studentNo && <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>{a.onboarding.studentNo}</div>}
+                      </td>
+                      <td>
+                        {a.onboarding?.status === "payment_pending" ? (
+                          <div style={{ minWidth: 145 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 10.5 }}>
+                              <span>{formatXof(a.onboarding.paidCashXof)}</span>
+                              <span className="muted">of {formatXof(a.onboarding.requiredCashXof)}</span>
+                            </div>
+                            <div className="bar" style={{ marginTop: 5 }}><span style={{ width: `${a.onboarding.requiredCashXof > 0 ? Math.min(100, Math.round((a.onboarding.paidCashXof / a.onboarding.requiredCashXof) * 100)) : 0}%`, background: "var(--daust-orange)" }} /></div>
+                            {a.onboarding.proofStatus === "submitted" && <div style={{ color: "var(--warning)", fontSize: 10, marginTop: 4 }}>Proof under review</div>}
+                          </div>
+                        ) : a.onboarding?.status === "enrolled" ? <span style={{ color: "var(--success)", fontSize: 11.5, fontWeight: 600 }}>Verified</span> : <span className="muted">—</span>}
+                      </td>
                       <td onClick={(e) => e.stopPropagation()} style={{ cursor: "default", textAlign: "right" }}>
-                        {STAGE_ACTION[a.stage] && (
+                        {STAGE_ACTION[a.stage] && (STAGE_ACTION[a.stage]!.next !== "accepted" || isAdmin) && (
                           <Button
                             size="sm"
                             variant={STAGE_ACTION[a.stage]!.variant}
                             disabled={advancing === a.id}
-                            onClick={() => advance(a.id, STAGE_ACTION[a.stage]!.next)}
+                            onClick={() => STAGE_ACTION[a.stage]!.next === "accepted" ? setPendingAcceptance({ id: a.id, name: a.name }) : advance(a.id, STAGE_ACTION[a.stage]!.next)}
                           >
                             {advancing === a.id ? "Saving…" : STAGE_ACTION[a.stage]!.label}
                           </Button>
@@ -190,7 +261,7 @@ export default function AdmissionsPage() {
                     </tr>
                   ))}
                   {rows.length === 0 && (
-                    <tr><td colSpan={4} className="muted" style={{ textAlign: "center", padding: 32 }}>No applicants match.</td></tr>
+                    <tr><td colSpan={5} className="muted" style={{ textAlign: "center", padding: 32 }}>No applicants match this queue.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -205,6 +276,16 @@ export default function AdmissionsPage() {
           programs={programOptions}
           onClose={() => setAdding(false)}
           onSaved={(id) => router.push(`/admin/admissions/${id}`)}
+        />
+      )}
+      {pendingAcceptance && isAdmin && (
+        <ConfirmDialog
+          title="Accept applicant and prepare payment?"
+          message={<><strong>{pendingAcceptance.name}</strong> will receive a permanent Student ID and first-installment invoice. They will remain payment pending, without student access, until Finance verifies the full installment.</>}
+          confirmLabel="Accept and prepare payment"
+          danger={false}
+          onClose={() => setPendingAcceptance(null)}
+          onConfirm={confirmAcceptance}
         />
       )}
     </>

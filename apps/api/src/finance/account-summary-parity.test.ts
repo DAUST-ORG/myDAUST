@@ -102,8 +102,27 @@ const student = {
   invoices,
 };
 
-function service() {
+function service(
+  onboarding: {
+    onboardingStatus: "payment_pending" | "enrolled";
+    enrollmentInvoiceId: string;
+    requiredEnrollmentCashXof: number;
+  } | null = null,
+) {
   const prisma = {
+    applicant: {
+      findUnique: vi.fn(async ({ include }: any) =>
+        onboarding && include
+          ? {
+              ...onboarding,
+              enrollmentInvoice:
+                invoices.find(
+                  (invoice) => invoice.id === onboarding.enrollmentInvoiceId,
+                ) ?? null,
+            }
+          : onboarding,
+      ),
+    },
     invoice: {
       findMany: vi.fn().mockResolvedValue(invoices),
       groupBy: vi.fn().mockResolvedValue([{ status: "open", _count: 3 }]),
@@ -111,6 +130,9 @@ function service() {
     payment: {
       aggregate: vi.fn().mockResolvedValue({ _sum: { amount: 200 } }),
       groupBy: vi.fn().mockResolvedValue([]),
+      findMany: vi
+        .fn()
+        .mockResolvedValue([{ invoiceId: "tuition", amount: 200 }]),
     },
     student: {
       findUnique: vi.fn().mockResolvedValue(student),
@@ -230,5 +252,72 @@ describe("finance API account-summary parity", () => {
     );
     expect(aging.accountCounts.overdue).toBe(1);
     expect(aging.activeHoldAccountCount).toBe(1);
+  });
+
+  it("defaults a pending applicant's public payment to the first-installment remainder", async () => {
+    const { finance } = service({
+      onboardingStatus: "payment_pending",
+      enrollmentInvoiceId: "tuition",
+      requiredEnrollmentCashXof: 500,
+    });
+
+    const publicBill = await finance.lookupBill("DAUST-001", "2005-01-02");
+
+    expect(publicBill.enrollmentGate).toMatchObject({
+      status: "payment_pending",
+      requiredCashXof: 500,
+      paidCashXof: 200,
+      remainingCashXof: 300,
+      pendingProof: false,
+    });
+    expect(publicBill.payableXof).toBe(300);
+    expect(publicBill.dueDate).toEqual(new Date("2026-08-01T00:00:00Z"));
+    expect(publicBill.summary).toBeUndefined();
+    expect(publicBill.charges).toEqual([]);
+    expect(publicBill.pendingWires).toEqual([]);
+    expect(publicBill.balanceXof).toBe(300);
+    expect(publicBill.outstandingXof).toBe(300);
+    expect(publicBill.creditXof).toBe(0);
+  });
+
+  it("permits partial public payments but rejects amounts above the enrollment remainder", async () => {
+    const { finance } = service({
+      onboardingStatus: "payment_pending",
+      enrollmentInvoiceId: "tuition",
+      requiredEnrollmentCashXof: 500,
+    });
+
+    await expect(
+      finance.publicBillPaymentTarget("DAUST-001", "2005-01-02", 150),
+    ).resolves.toMatchObject({
+      studentId: "student",
+      invoiceId: "tuition",
+      amountXof: 150,
+    });
+    await expect(
+      finance.publicBillPaymentTarget("DAUST-001", "2005-01-02", 301),
+    ).rejects.toThrow("remaining first-installment cash requirement");
+  });
+
+  it("keeps enrollment cash payable even when account credits consumed normal payable lines", async () => {
+    const { finance } = service({
+      onboardingStatus: "payment_pending",
+      enrollmentInvoiceId: "tuition",
+      requiredEnrollmentCashXof: 500,
+    });
+    const accountRead = vi
+      .spyOn(finance as any, "loadPayableAccount")
+      .mockRejectedValue(
+        new Error("normal payable position is intentionally unavailable"),
+      );
+
+    await expect(
+      finance.publicBillPaymentTarget("DAUST-001", "2005-01-02", 300),
+    ).resolves.toMatchObject({
+      studentId: "student",
+      invoiceId: "tuition",
+      amountXof: 300,
+    });
+    expect(accountRead).not.toHaveBeenCalled();
   });
 });

@@ -194,6 +194,7 @@ describe("registrar student roster", () => {
       recordStatus: "active",
     });
     expect(prisma.student.findMany).toHaveBeenCalledWith({
+      where: { recordStatus: { not: "pending_payment" } },
       select: {
         id: true,
         studentNo: true,

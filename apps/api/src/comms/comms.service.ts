@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import type { AuthUser } from "../auth/current-user.js";
 
@@ -11,7 +16,8 @@ export class CommsService {
     const audiences = new Set<string>(["all"]);
     if (user.roles.includes("student")) audiences.add("student");
     if (user.roles.includes("faculty")) audiences.add("faculty");
-    if (user.roles.some((r) => r !== "student" && r !== "faculty")) audiences.add("staff");
+    if (user.roles.some((r) => r !== "student" && r !== "faculty"))
+      audiences.add("staff");
 
     return this.prisma.announcement.findMany({
       where: { audience: { in: [...audiences] } },
@@ -25,7 +31,13 @@ export class CommsService {
     author: string,
   ) {
     return this.prisma.announcement.create({
-      data: { title: input.title, body: input.body, category: input.category, audience: input.audience, author },
+      data: {
+        title: input.title,
+        body: input.body,
+        category: input.category,
+        audience: input.audience,
+        author,
+      },
     });
   }
 
@@ -45,7 +57,9 @@ export class CommsService {
     return Promise.all(
       threads.map(async (t) => {
         const me = t.participants.find((p) => p.personId === personId);
-        const other = t.participants.find((p) => p.personId !== personId)?.person;
+        const other = t.participants.find(
+          (p) => p.personId !== personId,
+        )?.person;
         const last = t.messages[0];
         const unread = await this.prisma.message.count({
           where: {
@@ -59,7 +73,9 @@ export class CommsService {
           subject: t.subject,
           who: other ? `${other.firstName} ${other.lastName}` : "Conversation",
           role: other?.roles[0] ?? "",
-          initials: other ? `${other.firstName[0] ?? ""}${other.lastName[0] ?? ""}` : "?",
+          initials: other
+            ? `${other.firstName[0] ?? ""}${other.lastName[0] ?? ""}`
+            : "?",
           preview: last?.body ?? "",
           time: (last?.createdAt ?? t.updatedAt).toISOString(),
           unread,
@@ -91,13 +107,17 @@ export class CommsService {
       data: { lastReadAt: new Date() },
     });
 
-    const other = thread.participants.find((p) => p.personId !== personId)?.person;
+    const other = thread.participants.find(
+      (p) => p.personId !== personId,
+    )?.person;
     return {
       id: thread.id,
       subject: thread.subject,
       who: other ? `${other.firstName} ${other.lastName}` : "Conversation",
       role: other?.roles[0] ?? "",
-      initials: other ? `${other.firstName[0] ?? ""}${other.lastName[0] ?? ""}` : "?",
+      initials: other
+        ? `${other.firstName[0] ?? ""}${other.lastName[0] ?? ""}`
+        : "?",
       messages: thread.messages.map((m) => ({
         id: m.id,
         body: m.body,
@@ -111,8 +131,13 @@ export class CommsService {
   async sendMessage(threadId: string, personId: string, body: string) {
     await this.assertParticipant(threadId, personId);
     const [message] = await this.prisma.$transaction([
-      this.prisma.message.create({ data: { threadId, senderId: personId, body } }),
-      this.prisma.thread.update({ where: { id: threadId }, data: { updatedAt: new Date() } }),
+      this.prisma.message.create({
+        data: { threadId, senderId: personId, body },
+      }),
+      this.prisma.thread.update({
+        where: { id: threadId },
+        data: { updatedAt: new Date() },
+      }),
       this.prisma.threadParticipant.update({
         where: { threadId_personId: { threadId, personId } },
         data: { lastReadAt: new Date() },
@@ -122,7 +147,12 @@ export class CommsService {
   }
 
   /** Start (or reuse) a 1:1 thread with an allowed contact, so conversations don't fragment. */
-  async startThread(personId: string, recipientId: string, subject: string | undefined, body: string) {
+  async startThread(
+    personId: string,
+    recipientId: string,
+    subject: string | undefined,
+    body: string,
+  ) {
     const allowed = await this.contacts(personId);
     if (!allowed.some((c) => c.id === recipientId)) {
       throw new ForbiddenException("You cannot message this person");
@@ -141,7 +171,10 @@ export class CommsService {
     const thread =
       existing ??
       (await this.prisma.thread.create({
-        data: { subject, participants: { create: [{ personId }, { personId: recipientId }] } },
+        data: {
+          subject,
+          participants: { create: [{ personId }, { personId: recipientId }] },
+        },
       }));
 
     await this.sendMessage(thread.id, personId, body);
@@ -155,13 +188,21 @@ export class CommsService {
    * student's reply reaches only the instructor. Ownership is checked here: an
    * instructor may only broadcast to a section they teach.
    */
-  async broadcastToSection(personId: string, sectionId: string, subject: string | undefined, body: string) {
+  async broadcastToSection(
+    personId: string,
+    sectionId: string,
+    subject: string | undefined,
+    body: string,
+  ) {
     const section = await this.prisma.section.findUnique({
       where: { id: sectionId },
       include: {
         course: true,
         enrollments: {
-          where: { status: "enrolled" },
+          where: {
+            status: "enrolled",
+            student: { recordStatus: "active" },
+          },
           include: { student: { select: { personId: true } } },
         },
       },
@@ -187,10 +228,19 @@ export class CommsService {
    */
   async broadcastToAudience(
     personId: string,
-    input: { audienceType: "individual" | "year" | "program" | "all"; audienceValue?: string; subject: string; body: string },
+    input: {
+      audienceType: "individual" | "year" | "program" | "all";
+      audienceValue?: string;
+      subject: string;
+      body: string;
+    },
   ) {
-    const recipientIds = await this.resolveAudience(input.audienceType, input.audienceValue);
-    if (recipientIds.length === 0) throw new BadRequestException("That audience has no students");
+    const recipientIds = await this.resolveAudience(
+      input.audienceType,
+      input.audienceValue,
+    );
+    if (recipientIds.length === 0)
+      throw new BadRequestException("That audience has no students");
 
     for (const recipientId of recipientIds) {
       const existing = await this.prisma.thread.findFirst({
@@ -204,7 +254,10 @@ export class CommsService {
       const thread =
         existing ??
         (await this.prisma.thread.create({
-          data: { subject: input.subject, participants: { create: [{ personId }, { personId: recipientId }] } },
+          data: {
+            subject: input.subject,
+            participants: { create: [{ personId }, { personId: recipientId }] },
+          },
         }));
       await this.sendMessage(thread.id, personId, input.body);
     }
@@ -225,7 +278,11 @@ export class CommsService {
         entityId: broadcast.id,
         action: "broadcast-sent",
         actorId: personId,
-        data: { audienceType: input.audienceType, audienceValue: input.audienceValue ?? null, recipients: recipientIds.length },
+        data: {
+          audienceType: input.audienceType,
+          audienceValue: input.audienceValue ?? null,
+          recipients: recipientIds.length,
+        },
       },
     });
     return { id: broadcast.id, sent: recipientIds.length };
@@ -238,7 +295,10 @@ export class CommsService {
     if (audienceType === "individual") {
       if (!audienceValue) throw new BadRequestException("Select a student");
       const student = await this.prisma.student.findFirst({
-        where: { recordStatus: "active", OR: [{ id: audienceValue }, { studentNo: audienceValue }] },
+        where: {
+          recordStatus: "active",
+          OR: [{ id: audienceValue }, { studentNo: audienceValue }],
+        },
         select: { personId: true },
       });
       if (!student) throw new NotFoundException("Student not found");
@@ -248,14 +308,23 @@ export class CommsService {
       audienceType === "year"
         ? { recordStatus: "active" as const, yearLevel: Number(audienceValue) }
         : audienceType === "program"
-          ? { recordStatus: "active" as const, program: { code: audienceValue } }
+          ? {
+              recordStatus: "active" as const,
+              program: { code: audienceValue },
+            }
           : { recordStatus: "active" as const };
-    const students = await this.prisma.student.findMany({ where, select: { personId: true } });
+    const students = await this.prisma.student.findMany({
+      where,
+      select: { personId: true },
+    });
     return students.map((s) => s.personId);
   }
 
   /** Pre-send recipient count for the compose chip; never throws (0 on empty/invalid). */
-  async previewAudience(audienceType: "individual" | "year" | "program" | "all", audienceValue?: string) {
+  async previewAudience(
+    audienceType: "individual" | "year" | "program" | "all",
+    audienceValue?: string,
+  ) {
     try {
       const ids = await this.resolveAudience(audienceType, audienceValue);
       return { count: ids.length };
@@ -293,15 +362,23 @@ export class CommsService {
 
     if (me.roles.includes("student") && me.student) {
       const enrollments = await this.prisma.enrollment.findMany({
-        where: { studentId: me.student.id, status: { in: ["enrolled", "completed"] } },
+        where: {
+          studentId: me.student.id,
+          status: { in: ["enrolled", "completed"] },
+        },
         include: { section: { select: { instructorId: true } } },
       });
-      for (const e of enrollments) if (e.section.instructorId) ids.add(e.section.instructorId);
+      for (const e of enrollments)
+        if (e.section.instructorId) ids.add(e.section.instructorId);
     }
 
     if (me.roles.includes("faculty")) {
       const enrollments = await this.prisma.enrollment.findMany({
-        where: { section: { instructorId: personId }, status: { in: ["enrolled", "completed"] } },
+        where: {
+          section: { instructorId: personId },
+          status: { in: ["enrolled", "completed"] },
+          student: { recordStatus: "active" },
+        },
         include: { student: { select: { personId: true } } },
       });
       for (const e of enrollments) ids.add(e.student.personId);
@@ -316,7 +393,10 @@ export class CommsService {
 
     // Staff/admin requesters can reach anyone with a role.
     if (me.roles.some((r) => !["student", "faculty"].includes(r))) {
-      const all = await this.prisma.person.findMany({ where: { roles: { isEmpty: false } }, select: { id: true } });
+      const all = await this.prisma.person.findMany({
+        where: { roles: { isEmpty: false } },
+        select: { id: true },
+      });
       for (const p of all) ids.add(p.id);
     }
 

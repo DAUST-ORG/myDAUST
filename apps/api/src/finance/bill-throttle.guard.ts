@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   type CanActivate,
   type ExecutionContext,
@@ -18,10 +19,13 @@ const STUDENT_WINDOW_MS = 5 * 60_000;
 const STUDENT_MAX = 6; // lookups + checkout for one ID in 5 min (a real payer needs ~2)
 const GLOBAL_WINDOW_MS = 60_000;
 const GLOBAL_MAX = 300;
+const STATUS_TOKEN_WINDOW_MS = 5 * 60_000;
+const STATUS_TOKEN_MAX = 30;
 
 @Injectable()
 export class BillThrottleGuard implements CanActivate {
   private readonly byStudent = new Map<string, number[]>();
+  private readonly byStatusToken = new Map<string, number[]>();
   private readonly global: number[] = [];
 
   canActivate(context: ExecutionContext): boolean {
@@ -32,6 +36,11 @@ export class BillThrottleGuard implements CanActivate {
       typeof body?.studentNo === "string"
         ? body.studentNo.trim().toLowerCase()
         : "__none__";
+    const rawToken = req.params?.token;
+    const statusTokenKey =
+      typeof rawToken === "string" && rawToken.length > 0
+        ? createHash("sha256").update(rawToken).digest("hex")
+        : null;
 
     this.hitList(this.global, now, GLOBAL_MAX, GLOBAL_WINDOW_MS);
     // Multipart proof uploads are parsed by Multer after guards run, so their body is not
@@ -45,6 +54,18 @@ export class BillThrottleGuard implements CanActivate {
         STUDENT_MAX,
         STUDENT_WINDOW_MS,
       );
+    // Accepted-applicant status URLs are bearer capabilities. Keep a distinct,
+    // hashed target bucket so repeated reads are explicitly bounded without
+    // retaining the capability itself in memory.
+    if (statusTokenKey) {
+      this.hitMap(
+        this.byStatusToken,
+        statusTokenKey,
+        now,
+        STATUS_TOKEN_MAX,
+        STATUS_TOKEN_WINDOW_MS,
+      );
+    }
     return true;
   }
 

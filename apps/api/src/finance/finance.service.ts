@@ -49,6 +49,13 @@ import {
   invoicePlanType,
 } from "./account-customization.js";
 import { displayFeeComponentLabel } from "./fee-components.js";
+import {
+  assertCurrentEnrollmentInvoicePaymentInTransaction,
+  assertCurrentOnboardingPaymentLinkInTransaction,
+  syncEnrollmentGateInTransaction,
+  type EnrollmentActivation,
+  verifiedEnrollmentCashXof,
+} from "./admission-payment-gate.js";
 
 // Shared fee constants are bootstrap fallbacks only. Standard billing always reads
 // the current administrator-approved FeeSchedule revision from the database.
@@ -65,6 +72,20 @@ const DEFAULT_WIRE_CONFIG: WirePaymentConfig = {
   instructions: "",
   notificationRecipients: ["finance@daust.edu.sn"],
 };
+
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character]!,
+  );
+}
 
 /** Payment-plan dates are Dakar calendar dates, never arbitrary timestamps. */
 export function parseFinanceDateOnly(value: string, label = "Due date"): Date {
@@ -1044,8 +1065,14 @@ export class FinanceService {
       method?: string | null;
       actorId?: string;
       confirmedAmount?: number;
+      /** A signed provider event is real cash even if its onboarding link was rotated locally. */
+      providerConfirmedStaleOnboarding?: boolean;
       /** Set when a request-to-pay settled, so the rail row and link flip with the money. */
-      piSpiReview?: { id: string; paymentLinkId?: string | null };
+      piSpiReview?: {
+        id: string;
+        paymentLinkId?: string | null;
+        end2endId?: string | null;
+      };
       wireReview?: {
         id: string;
         paymentLinkId?: string | null;
@@ -1070,8 +1097,18 @@ export class FinanceService {
             where: { id: paymentId },
           });
           if (!payment) throw new NotFoundException("Payment not found");
-          if (payment.status === "success") return false;
-          if (payment.status !== "pending") {
+          if (payment.status === "success") {
+            return { didSettle: false, activation: null };
+          }
+          if (
+            (payment.status === "cancelled" || payment.status === "failed") &&
+            opts.providerConfirmedStaleOnboarding
+          ) {
+            await tx.payment.update({
+              where: { id: payment.id },
+              data: { status: "pending" },
+            });
+          } else if (payment.status !== "pending") {
             throw new BadRequestException(`Payment is ${payment.status}`);
           }
           const amount = opts.confirmedAmount ?? payment.amount;
@@ -1079,6 +1116,62 @@ export class FinanceService {
             throw new BadRequestException(
               "Settled amount must be a positive whole number of XOF",
             );
+          }
+          const reviewedPaymentLinkId =
+            opts.wireReview?.paymentLinkId ??
+            opts.piSpiReview?.paymentLinkId ??
+            null;
+          let staleVerifiedOnboardingProof: {
+            applicantId: string;
+            studentId: string;
+            paymentLinkId: string;
+          } | null = null;
+          if (reviewedPaymentLinkId && !opts.providerConfirmedStaleOnboarding) {
+            const reviewedLink = opts.wireReview
+              ? await tx.paymentLink.findUnique({
+                  where: { id: reviewedPaymentLinkId },
+                  include: { onboardingApplicant: true },
+                })
+              : null;
+            const onboarding = reviewedLink?.onboardingApplicant;
+            if (reviewedLink && onboarding) {
+              if (
+                reviewedLink.invoiceId !== payment.invoiceId ||
+                reviewedLink.studentId !== payment.studentId ||
+                onboarding.enrollmentInvoiceId !== payment.invoiceId ||
+                onboarding.studentId !== payment.studentId
+              ) {
+                throw new BadRequestException(
+                  "Enrollment payment proof does not match its accounting target",
+                );
+              }
+              const isCurrent =
+                reviewedLink.status === "active" &&
+                onboarding.onboardingStatus === "payment_pending" &&
+                onboarding.activeOnboardingPaymentLinkId === reviewedLink.id;
+              if (isCurrent) {
+                await assertCurrentOnboardingPaymentLinkInTransaction(
+                  tx,
+                  reviewedPaymentLinkId,
+                  amount,
+                );
+              } else {
+                // Finance has independently verified evidence for an obsolete
+                // enrollment link. Book the real cash, keep the obsolete link
+                // closed, and flag the account for reconciliation below.
+                staleVerifiedOnboardingProof = {
+                  applicantId: onboarding.id,
+                  studentId: payment.studentId,
+                  paymentLinkId: reviewedLink.id,
+                };
+              }
+            } else {
+              await assertCurrentOnboardingPaymentLinkInTransaction(
+                tx,
+                reviewedPaymentLinkId,
+                amount,
+              );
+            }
           }
 
           // Re-read the whole account inside the serializable transaction. Two different
@@ -1107,7 +1200,9 @@ export class FinanceService {
               ...(opts.payload ? { ipnPayload: opts.payload } : {}),
             },
           });
-          if (claimed.count === 0) return false;
+          if (claimed.count === 0) {
+            return { didSettle: false, activation: null };
+          }
 
           const payableBeforeXof = account.position.summary.outstandingXof;
           const directlyPayableLines = [] as typeof account.lines;
@@ -1290,6 +1385,9 @@ export class FinanceService {
                 status: "settled",
                 settledAmountXof: amount,
                 settledAt: new Date(),
+                ...(opts.piSpiReview.end2endId
+                  ? { end2endId: opts.piSpiReview.end2endId }
+                  : {}),
               },
             });
             if (opts.piSpiReview.paymentLinkId) {
@@ -1327,7 +1425,10 @@ export class FinanceService {
                   : {}),
               },
             });
-            if (opts.wireReview.paymentLinkId) {
+            if (
+              opts.wireReview.paymentLinkId &&
+              !staleVerifiedOnboardingProof
+            ) {
               await tx.paymentLink.update({
                 where: { id: opts.wireReview.paymentLinkId },
                 data: {
@@ -1350,7 +1451,47 @@ export class FinanceService {
               },
             });
           }
-          return true;
+          const gate = await syncEnrollmentGateInTransaction(tx, {
+            invoiceId: originalInvoice.id,
+            paymentId: payment.id,
+            actorId: opts.actorId,
+            inFlightRotationPolicy: "preserve",
+          });
+          if (staleVerifiedOnboardingProof) {
+            await tx.auditLog.create({
+              data: {
+                entity: "PaymentSubmission",
+                entityId: opts.wireReview!.id,
+                action: "stale-onboarding-proof-settlement-booked",
+                actorId: opts.actorId,
+                data: {
+                  applicantId: staleVerifiedOnboardingProof.applicantId,
+                  studentId: staleVerifiedOnboardingProof.studentId,
+                  paymentLinkId: staleVerifiedOnboardingProof.paymentLinkId,
+                  paymentId: payment.id,
+                  amountXof: amount,
+                },
+              },
+            });
+            const existingHold = await tx.studentHold.findFirst({
+              where: {
+                studentId: staleVerifiedOnboardingProof.studentId,
+                active: true,
+                type: "payment_reconciliation",
+              },
+            });
+            if (!existingHold) {
+              await tx.studentHold.create({
+                data: {
+                  studentId: staleVerifiedOnboardingProof.studentId,
+                  type: "payment_reconciliation",
+                  reason:
+                    "A payment proof from an obsolete enrollment link was verified; Finance review is required",
+                },
+              });
+            }
+          }
+          return { didSettle: true, activation: gate?.activation ?? null };
         },
         {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -1359,10 +1500,13 @@ export class FinanceService {
         },
       );
 
-    let didSettle = false;
+    let result: {
+      didSettle: boolean;
+      activation: EnrollmentActivation | null;
+    } = { didSettle: false, activation: null };
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        didSettle = await runSettlement();
+        result = await runSettlement();
         break;
       } catch (error) {
         const retryable =
@@ -1374,7 +1518,16 @@ export class FinanceService {
       }
     }
 
-    if (didSettle) await this.emailReceipt(paymentId);
+    if (result.didSettle) {
+      // Money is already committed. Email/provider failures are deliberately
+      // best-effort and must never make a successful settlement look rolled back.
+      await Promise.allSettled([
+        this.emailReceipt(paymentId),
+        ...(result.activation
+          ? [this.deliverStudentActivationInvite(result.activation)]
+          : []),
+      ]);
+    }
   }
 
   /** Settle an invoice-backed proof submission and its ledger rows in one transaction. */
@@ -1689,10 +1842,10 @@ export class FinanceService {
     }
 
     // Only one payable request per target at a time, matching the DB partial unique index.
-    const target = input.invoiceId
-      ? { invoiceId: input.invoiceId }
-      : input.paymentLinkId
-        ? { paymentLinkId: input.paymentLinkId }
+    const target = input.paymentLinkId
+      ? { paymentLinkId: input.paymentLinkId }
+      : input.invoiceId
+        ? { invoiceId: input.invoiceId }
         : { applicantId: input.applicantId! };
     const active = await this.prisma.piSpiRequest.findFirst({
       where: { ...target, status: { in: ["initiated", "sent"] } },
@@ -1710,53 +1863,109 @@ export class FinanceService {
       Date.now() + loadEnv().PI_SPI_REQUEST_TTL_HOURS * 3600_000,
     );
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      // Applicant fees have no Invoice, so they carry no Payment row — the fee is marked
-      // paid on the Applicant itself when the rail settles.
-      const payment =
-        input.invoiceId && input.studentId
-          ? await tx.payment.create({
-              data: {
-                invoiceId: input.invoiceId,
-                studentId: input.studentId,
+    const createLocalRequest = () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          if (input.invoiceId) {
+            const invoice = await tx.invoice.findUnique({
+              where: { id: input.invoiceId },
+              select: { id: true, studentId: true, status: true },
+            });
+            if (
+              !invoice ||
+              invoice.status === "void" ||
+              (input.studentId && invoice.studentId !== input.studentId)
+            ) {
+              throw new BadRequestException(
+                "This payment target is no longer available",
+              );
+            }
+            if (input.source === "public_bill") {
+              await assertCurrentEnrollmentInvoicePaymentInTransaction(
+                tx,
+                input.invoiceId,
                 amount,
-                method: "pi_spi",
-                status: "pending",
-                provider: "pi_spi",
-                providerRef: txId,
-                source: input.source,
-                initiatedById: input.actorId,
-                initiatedByEmail: input.initiatedByEmail,
-              },
-            })
-          : null;
-      const request = await tx.piSpiRequest.create({
-        data: {
-          txId,
-          source: input.source,
-          status: "initiated",
-          payerAlias: input.alias,
-          amountXof: amount,
-          motif: input.motif.slice(0, 140),
-          studentId: input.studentId,
-          invoiceId: input.invoiceId,
-          paymentId: payment?.id,
-          paymentLinkId: input.paymentLinkId,
-          applicantId: input.applicantId,
-          expiresAt,
+              );
+            }
+          }
+          if (input.paymentLinkId) {
+            await assertCurrentOnboardingPaymentLinkInTransaction(
+              tx,
+              input.paymentLinkId,
+              amount,
+            );
+          }
+          // Applicant fees have no Invoice, so they carry no Payment row — the fee is marked
+          // paid on the Applicant itself when the rail settles.
+          const payment =
+            input.invoiceId && input.studentId
+              ? await tx.payment.create({
+                  data: {
+                    invoiceId: input.invoiceId,
+                    studentId: input.studentId,
+                    amount,
+                    method: "pi_spi",
+                    status: "pending",
+                    provider: "pi_spi",
+                    providerRef: txId,
+                    source: input.source,
+                    initiatedById: input.actorId,
+                    initiatedByEmail: input.initiatedByEmail,
+                  },
+                })
+              : null;
+          const request = await tx.piSpiRequest.create({
+            data: {
+              txId,
+              source: input.source,
+              status: "initiated",
+              payerAlias: input.alias,
+              amountXof: amount,
+              motif: input.motif.slice(0, 140),
+              studentId: input.studentId,
+              // Payment-link requests name the link as their single polymorphic target;
+              // their Payment row above still carries the accounting invoice.
+              invoiceId: input.paymentLinkId ? undefined : input.invoiceId,
+              paymentId: payment?.id,
+              paymentLinkId: input.paymentLinkId,
+              applicantId: input.applicantId,
+              expiresAt,
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              entity: "PiSpiRequest",
+              entityId: request.id,
+              action: "initiated",
+              actorId: input.actorId,
+              data: { source: input.source, amountXof: amount, txId },
+            },
+          });
+          return request;
         },
-      });
-      await tx.auditLog.create({
-        data: {
-          entity: "PiSpiRequest",
-          entityId: request.id,
-          action: "initiated",
-          actorId: input.actorId,
-          data: { source: input.source, amountXof: amount, txId },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 10_000,
+          timeout: 30_000,
         },
-      });
-      return request;
-    });
+      );
+    let created: Awaited<ReturnType<typeof createLocalRequest>> | undefined;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        created = await createLocalRequest();
+        break;
+      } catch (error) {
+        const retryable =
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "P2034";
+        if (!retryable || attempt === 2) throw error;
+      }
+    }
+    if (!created) {
+      throw new Error("PI-SPI initiation transaction retry limit exhausted");
+    }
 
     try {
       const result = await rail.requestPayment({
@@ -1860,26 +2069,32 @@ export class FinanceService {
     alias: string;
     amountXof: number;
   }) {
-    const student = await this.findStudentForBill(input.studentNo, input.dob);
-    const account = await this.loadPayableAccount(student.id);
-    const { amount, invoice } = this.requirePayableTarget(
-      account,
+    const target = await this.publicBillPaymentTarget(
+      input.studentNo,
+      input.dob,
       input.amountXof,
     );
+    const invoice = await this.prisma.invoice.findUniqueOrThrow({
+      where: { id: target.invoiceId },
+      select: { id: true, number: true, description: true },
+    });
     return this.createPiSpiRequest({
       source: "public_bill",
       alias: input.alias,
-      amountXof: amount,
+      amountXof: target.amountXof,
       motif: `DAUST ${invoice.description ?? "tuition"}`,
       documentRef: invoice.number ?? undefined,
-      studentId: student.id,
+      studentId: target.studentId,
       invoiceId: invoice.id,
     });
   }
 
   /** Bursar-generated one-off payment link. */
   async submitPaymentLinkPiSpi(token: string, alias: string) {
-    const link = await this.prisma.paymentLink.findUnique({ where: { token } });
+    const link = await this.prisma.paymentLink.findUnique({
+      where: { token },
+      include: { onboardingApplicant: { select: { id: true } } },
+    });
     if (!link || link.status === "cancelled")
       throw new NotFoundException("Payment link not found");
     if (link.status === "paid")
@@ -1890,9 +2105,20 @@ export class FinanceService {
     if (link.invoiceId) {
       const linkedInvoice = await this.prisma.invoice.findUniqueOrThrow({
         where: { id: link.invoiceId },
-        select: { studentId: true },
+        select: { id: true, studentId: true },
       });
       const studentId = link.studentId ?? linkedInvoice.studentId;
+      if (link.onboardingApplicant) {
+        return this.createPiSpiRequest({
+          source: "payment_link",
+          alias,
+          amountXof: link.amountXof,
+          motif: link.purpose || "DAUST enrollment payment",
+          studentId,
+          invoiceId: linkedInvoice.id,
+          paymentLinkId: link.id,
+        });
+      }
       const account = await this.loadPayableAccount(studentId);
       const { amount, invoice } = this.requirePayableTarget(
         account,
@@ -2039,6 +2265,99 @@ export class FinanceService {
     if (request.status === "settled") return; // terminal
 
     if (event.status === "settled") {
+      const bookLateOnboardingSettlement = async (
+        onboarding: { id: string; studentId: string | null },
+        reference: {
+          paymentLinkId?: string | null;
+          invoiceId?: string | null;
+        },
+      ) => {
+        const amount = Math.min(
+          event.amount ?? request.amountXof,
+          request.amountXof,
+        );
+        if (request.paymentId) {
+          await this.settlePayment(request.paymentId, {
+            via: "pi_spi",
+            method: "pi_spi",
+            confirmedAmount: amount,
+            payload: event as unknown as object,
+            providerConfirmedStaleOnboarding: true,
+            // Do not revive an obsolete link or void invoice; only the provider
+            // request and canonical cash ledger become settled.
+            piSpiReview: {
+              id: request.id,
+              end2endId: event.end2endId,
+            },
+          });
+        }
+        await this.prisma.$transaction(async (tx) => {
+          await tx.auditLog.create({
+            data: {
+              entity: "PiSpiRequest",
+              entityId: request.id,
+              action: "late-onboarding-settlement-booked",
+              data: {
+                applicantId: onboarding.id,
+                paymentLinkId: reference.paymentLinkId ?? null,
+                invoiceId: reference.invoiceId ?? null,
+                providerStatus: event.status,
+                providerAmountXof: amount,
+              },
+            },
+          });
+          if (onboarding.studentId) {
+            const existingHold = await tx.studentHold.findFirst({
+              where: {
+                studentId: onboarding.studentId,
+                active: true,
+                type: "payment_reconciliation",
+              },
+            });
+            if (!existingHold) {
+              await tx.studentHold.create({
+                data: {
+                  studentId: onboarding.studentId,
+                  type: "payment_reconciliation",
+                  reason:
+                    "A cancelled enrollment payment request later reported a settlement; Finance review is required",
+                },
+              });
+            }
+          }
+        });
+      };
+
+      if (request.paymentLinkId) {
+        const paymentLink = await this.prisma.paymentLink.findUnique({
+          where: { id: request.paymentLinkId },
+          include: { onboardingApplicant: true },
+        });
+        const onboarding = paymentLink?.onboardingApplicant;
+        if (
+          onboarding &&
+          (paymentLink?.status !== "active" ||
+            onboarding.onboardingStatus !== "payment_pending" ||
+            onboarding.activeOnboardingPaymentLinkId !== paymentLink.id)
+        ) {
+          await bookLateOnboardingSettlement(onboarding, {
+            paymentLinkId: paymentLink.id,
+          });
+          return;
+        }
+      }
+      if (request.invoiceId && !request.paymentLinkId) {
+        const onboarding = await this.prisma.applicant.findUnique({
+          where: { enrollmentInvoiceId: request.invoiceId },
+          select: { id: true, studentId: true, onboardingStatus: true },
+        });
+        if (onboarding?.onboardingStatus === "cancelled") {
+          await bookLateOnboardingSettlement(onboarding, {
+            invoiceId: request.invoiceId,
+          });
+          return;
+        }
+      }
       // Trust our own recorded amount over the notification's, and never credit more
       // than was requested.
       const amount = Math.min(
@@ -2221,6 +2540,52 @@ export class FinanceService {
         decision === "approved"
           ? `<h2>Wire transfer approved</h2><p>DAUST Finance confirmed <strong>${amount} XOF</strong>. The payment has been applied to the account.</p>`
           : `<h2>Wire transfer not approved</h2><p>${wire.rejectionReason ?? "Finance could not verify the deposit."}</p><p>You may submit a new proof after correcting the issue.</p>`,
+    });
+  }
+
+  /** Deliver the account setup secret created atomically by the enrollment gate. */
+  async deliverStudentActivationInvite(activation: EnrollmentActivation) {
+    let sent = false;
+    try {
+      const setupUrl = `${loadEnv().PORTAL_ORIGIN}/set-password?token=${encodeURIComponent(activation.inviteToken)}`;
+      sent = (
+        await this.mail.send({
+          to: activation.email,
+          subject: "Your myDAUST student account is ready",
+          html: `
+            <h2>Enrollment confirmed</h2>
+            <p>Hello ${escapeHtml(activation.name)},</p>
+            <p>DAUST has verified your first installment and activated your student record.</p>
+            <table cellpadding="6">
+              <tr><td><strong>Student ID</strong></td><td>${escapeHtml(activation.studentNo)}</td></tr>
+              <tr><td><strong>Setup link expires</strong></td><td>${activation.inviteExpiresAt.toISOString()}</td></tr>
+            </table>
+            <p><a href="${setupUrl}">Set up your myDAUST password</a>.</p>
+            <p>If the link expires, Admissions can send you a new one.</p>
+          `,
+        })
+      ).sent;
+    } catch {
+      sent = false;
+    }
+    if (sent) {
+      await this.prisma.applicant.updateMany({
+        where: {
+          id: activation.applicantId,
+          onboardingStatus: "enrolled",
+          studentInviteSentAt: null,
+        },
+        data: { studentInviteSentAt: new Date() },
+      });
+      return;
+    }
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Applicant",
+        entityId: activation.applicantId,
+        action: "student-invite-delivery-pending",
+        data: { studentId: activation.studentId },
+      },
     });
   }
 
@@ -2828,10 +3193,13 @@ export class FinanceService {
   /** Bursar/admin direct action: assign the exact already-approved package only. */
   async assignStandardPackage(studentId: string, actorId: string) {
     const student = await this.prisma.student.findFirst({
-      where: { id: studentId, recordStatus: "active" },
+      where: {
+        id: studentId,
+        recordStatus: { in: ["active", "pending_payment"] },
+      },
       select: { id: true },
     });
-    if (!student) throw new NotFoundException("Active student not found");
+    if (!student) throw new NotFoundException("Billable student not found");
     return this.billStandardTuition(student.id, actorId);
   }
 
@@ -3628,7 +3996,7 @@ export class FinanceService {
       this.prisma.applicant.count(),
       this.prisma.approvalRequest.count({ where: { status: "pending" } }),
       this.prisma.studentHold.findMany({
-        where: { active: true },
+        where: { active: true, student: { recordStatus: "active" } },
         distinct: ["studentId"],
         select: { studentId: true },
       }),
@@ -3941,6 +4309,50 @@ export class FinanceService {
               },
             },
           });
+          const onboarding = await tx.applicant.findUnique({
+            where: { enrollmentInvoiceId: current.invoice.id },
+          });
+          if (onboarding?.onboardingStatus === "payment_pending") {
+            await syncEnrollmentGateInTransaction(tx, {
+              invoiceId: current.invoice.id,
+              actorId,
+              inFlightRotationPolicy: "preserve",
+            });
+          } else if (
+            onboarding?.onboardingStatus === "enrolled" &&
+            onboarding.studentId
+          ) {
+            const existingHold = await tx.studentHold.findFirst({
+              where: {
+                studentId: onboarding.studentId,
+                active: true,
+                type: "payment_reconciliation",
+              },
+            });
+            if (!existingHold) {
+              await tx.studentHold.create({
+                data: {
+                  studentId: onboarding.studentId,
+                  type: "payment_reconciliation",
+                  reason:
+                    "An enrollment payment was refunded after activation; Finance and Registrar review is required",
+                },
+              });
+            }
+            await tx.auditLog.create({
+              data: {
+                entity: "Applicant",
+                entityId: onboarding.id,
+                action: "post-enrollment-refund-flagged",
+                actorId,
+                data: {
+                  studentId: onboarding.studentId,
+                  paymentId: current.id,
+                  refundedAmountXof: current.amount,
+                },
+              },
+            });
+          }
           return true;
         },
         {
@@ -4279,7 +4691,7 @@ export class FinanceService {
         },
       },
     });
-    return { ...link, url: `${loadEnv().PORTAL_ORIGIN}/pay/${link.token}` };
+    return { ...link, url: `${loadEnv().PAYMENT_ORIGIN}/pay/${link.token}` };
   }
 
   async listPaymentLinks() {
@@ -4289,7 +4701,7 @@ export class FinanceService {
     const now = Date.now();
     return links.map((l) => ({
       ...l,
-      url: `${loadEnv().PORTAL_ORIGIN}/pay/${l.token}`,
+      url: `${loadEnv().PAYMENT_ORIGIN}/pay/${l.token}`,
       expired:
         l.status === "active" &&
         l.expiresAt !== null &&
@@ -4405,18 +4817,30 @@ export class FinanceService {
   /** Public: outstanding balance + charges for a student matched by ID + date of birth. */
   async lookupBill(studentNo: string, dob: string) {
     const student = await this.findStudentForBill(studentNo, dob);
-    const invoices = await this.prisma.invoice.findMany({
-      where: { studentId: student.id },
-      orderBy: { createdAt: "asc" },
-      include: {
-        term: true,
-        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
-        paymentSubmissions: {
-          where: { status: "submitted" },
-          orderBy: { createdAt: "desc" },
+    const [invoices, onboarding] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where: { studentId: student.id },
+        orderBy: { createdAt: "asc" },
+        include: {
+          term: true,
+          plan: {
+            include: { installments: { orderBy: { sequence: "asc" } } },
+          },
+          paymentSubmissions: {
+            where: { status: "submitted" },
+            orderBy: { createdAt: "desc" },
+          },
         },
-      },
-    });
+      }),
+      this.prisma.applicant.findUnique({
+        where: { studentId: student.id },
+        select: {
+          onboardingStatus: true,
+          enrollmentInvoiceId: true,
+          requiredEnrollmentCashXof: true,
+        },
+      }),
+    ]);
     const position = deriveApiAccountPosition(invoices);
     const payableTarget = selectOldestPayableTarget(invoices, position);
     const grossCreditXof = invoices
@@ -4425,6 +4849,38 @@ export class FinanceService {
     const invoicesById = new Map(
       invoices.map((invoice) => [invoice.id, invoice] as const),
     );
+    const enrollmentInvoice = onboarding?.enrollmentInvoiceId
+      ? invoicesById.get(onboarding.enrollmentInvoiceId)
+      : null;
+    const firstEnrollmentInstallment =
+      enrollmentInvoice?.plan?.installments[0] ?? null;
+    const enrollmentRequiredCashXof =
+      firstEnrollmentInstallment?.amountDue ??
+      onboarding?.requiredEnrollmentCashXof ??
+      0;
+    const enrollmentPaidCashXof = enrollmentInvoice
+      ? await verifiedEnrollmentCashXof(this.prisma, enrollmentInvoice.id)
+      : 0;
+    const enrollmentRemainingCashXof = Math.max(
+      0,
+      enrollmentRequiredCashXof - enrollmentPaidCashXof,
+    );
+    const enrollmentGate =
+      onboarding &&
+      (onboarding.onboardingStatus === "payment_pending" ||
+        onboarding.onboardingStatus === "enrolled")
+        ? {
+            status: onboarding.onboardingStatus,
+            requiredCashXof: enrollmentRequiredCashXof,
+            paidCashXof: enrollmentPaidCashXof,
+            remainingCashXof: enrollmentRemainingCashXof,
+            dueDate: firstEnrollmentInstallment?.dueDate ?? null,
+            pendingProof:
+              enrollmentInvoice?.paymentSubmissions.some(
+                (submission) => submission.status === "submitted",
+              ) ?? false,
+          }
+        : null;
     const charges = position.installments.map((line) => {
       const invoice = invoicesById.get(line.invoiceId)!;
       return {
@@ -4445,6 +4901,13 @@ export class FinanceService {
         daysPastDue: line.daysPastDue,
       };
     });
+    const hideAnnualAccount = enrollmentGate?.status === "payment_pending";
+    const payerFacingBalanceXof = hideAnnualAccount
+      ? enrollmentRemainingCashXof
+      : position.summary.balanceXof;
+    const payerFacingOutstandingXof = hideAnnualAccount
+      ? enrollmentRemainingCashXof
+      : position.summary.outstandingXof;
     return {
       studentName: `${student.person.firstName} ${student.person.lastName}`
         .replace(/\s+/g, " ")
@@ -4452,17 +4915,28 @@ export class FinanceService {
       studentNo: student.studentNo,
       program: student.program?.name ?? null,
       term: invoices[0]?.term.name ?? null,
-      balanceXof: position.summary.balanceXof,
-      outstandingXof: position.summary.outstandingXof,
-      payableXof: payableTarget?.invoicePayableXof ?? 0,
-      creditXof: grossCreditXof,
+      balanceXof: payerFacingBalanceXof,
+      outstandingXof: payerFacingOutstandingXof,
+      payableXof:
+        enrollmentGate?.status === "payment_pending"
+          ? enrollmentGate.remainingCashXof
+          : (payableTarget?.invoicePayableXof ?? 0),
+      creditXof: hideAnnualAccount ? 0 : grossCreditXof,
       dueDate:
-        position.summary.oldestOverdueDate ?? position.summary.nextDueDate,
-      summary: position.summary,
-      charges,
-      pendingWires: invoices.flatMap((invoice) =>
-        invoice.paymentSubmissions.map((wire) => this.publicWireSummary(wire)),
-      ),
+        enrollmentGate?.status === "payment_pending"
+          ? enrollmentGate.dueDate
+          : (position.summary.oldestOverdueDate ??
+            position.summary.nextDueDate),
+      ...(hideAnnualAccount ? {} : { summary: position.summary }),
+      enrollmentGate,
+      charges: hideAnnualAccount ? [] : charges,
+      pendingWires: hideAnnualAccount
+        ? []
+        : invoices.flatMap((invoice) =>
+            invoice.paymentSubmissions.map((wire) =>
+              this.publicWireSummary(wire),
+            ),
+          ),
     };
   }
 
@@ -4473,6 +4947,59 @@ export class FinanceService {
     amountXof: number,
   ) {
     const student = await this.findStudentForBill(studentNo, dob);
+    const onboarding = await this.prisma.applicant.findUnique({
+      where: { studentId: student.id },
+      include: {
+        enrollmentInvoice: {
+          include: {
+            plan: {
+              include: {
+                installments: { orderBy: { sequence: "asc" }, take: 1 },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (
+      onboarding?.onboardingStatus === "payment_pending" &&
+      onboarding.enrollmentInvoice
+    ) {
+      const first = onboarding.enrollmentInvoice.plan?.installments[0];
+      const requiredCashXof =
+        first?.amountDue ?? onboarding.requiredEnrollmentCashXof ?? 0;
+      const paidCashXof = await verifiedEnrollmentCashXof(
+        this.prisma,
+        onboarding.enrollmentInvoice.id,
+      );
+      const remainingCashXof = Math.max(0, requiredCashXof - paidCashXof);
+      if (remainingCashXof <= 0) {
+        throw new BadRequestException(
+          "The enrollment payment is already complete",
+        );
+      }
+      if (amountXof > remainingCashXof) {
+        throw new BadRequestException(
+          "Amount exceeds the remaining first-installment cash requirement",
+        );
+      }
+      if (!Number.isSafeInteger(amountXof) || amountXof <= 0) {
+        throw new BadRequestException(
+          "Amount must be a positive whole number of XOF",
+        );
+      }
+      if (onboarding.enrollmentInvoice.status === "void") {
+        throw new BadRequestException(
+          "The enrollment charge is no longer payable",
+        );
+      }
+      return {
+        studentId: student.id,
+        invoiceId: onboarding.enrollmentInvoice.id,
+        amountXof,
+        contactEmail: student.person.email,
+      };
+    }
     const account = await this.loadPayableAccount(student.id);
     const { amount, invoice } = this.requirePayableTarget(account, amountXof);
     return {

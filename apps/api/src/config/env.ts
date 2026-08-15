@@ -8,8 +8,8 @@ const schema = z
       .default("development"),
     PORT: z.coerce.number().default(4000),
     DATABASE_URL: z.string().url(),
-    PORTAL_ORIGIN: z.string().url().default("http://localhost:3001"),
-    VITRINE_ORIGIN: z.string().url().default("http://localhost:3000"),
+    PORTAL_ORIGIN: z.string().url().default("http://localhost:3000"),
+    VITRINE_ORIGIN: z.string().url().default("http://localhost:3001"),
     // Public bill-payment portal (payment.daust.net).
     PAYMENT_ORIGIN: z.string().url().default("http://localhost:3000"),
     WIRE_PROOFS_BUCKET: z.string().min(3).optional(),

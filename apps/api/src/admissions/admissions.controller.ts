@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Param,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
 import { ApplicationInput, ProofPaymentMethod } from "@mydaust/shared";
 import { z } from "zod";
 import { Public } from "../auth/decorators.js";
@@ -22,6 +30,19 @@ export class AdmissionsController {
   apply(@Body() body: unknown) {
     const input = ApplicationInput.parse(body);
     return this.admissions.apply(input);
+  }
+
+  /** Public capability page for an accepted applicant; never accepts a raw id. */
+  @Public()
+  @Get("status/:token")
+  @UseGuards(BillThrottleGuard)
+  @Header("Cache-Control", "no-store, max-age=0")
+  @Header("Pragma", "no-cache")
+  @Header("Expires", "0")
+  @Header("Referrer-Policy", "no-referrer")
+  @Header("X-Robots-Tag", "noindex, nofollow")
+  onboardingStatus(@Param("token") token: string) {
+    return this.admissions.publicOnboardingStatus(token);
   }
 
   /** Public: start/resume proof-based application-fee payment. */
