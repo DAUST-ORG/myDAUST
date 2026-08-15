@@ -12,9 +12,11 @@ import {
 } from "lucide-react";
 import {
   type DirectorPortalOverview,
+  type DirectorStandingOverride,
   type DirectorWidgetKey,
   type DirectorWidgetPreferences,
   getDirectorPortalOverview,
+  getDirectorStandingOverrides,
   getDirectorUnauditedPaymentCount,
   getDirectorWidgets,
   updateDirectorWidgets,
@@ -38,19 +40,25 @@ export default function DirectorOverviewPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unauditedPayments, setUnauditedPayments] = useState(0);
+  const [standingOverrides, setStandingOverrides] = useState<
+    DirectorStandingOverride[]
+  >([]);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [nextOverview, nextPreferences, paymentCount] = await Promise.all([
-        getDirectorPortalOverview(),
-        getDirectorWidgets(),
-        getDirectorUnauditedPaymentCount(),
-      ]);
+      const [nextOverview, nextPreferences, paymentCount, overrides] =
+        await Promise.all([
+          getDirectorPortalOverview(),
+          getDirectorWidgets(),
+          getDirectorUnauditedPaymentCount(),
+          getDirectorStandingOverrides(),
+        ]);
       setOverview(nextOverview);
       setPreferences(nextPreferences);
       setDraft(nextPreferences.selected);
       setUnauditedPayments(paymentCount.count);
+      setStandingOverrides(overrides);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -163,6 +171,47 @@ export default function DirectorOverviewPage() {
           <span className="sr-only"> unaudited payments</span>
         </strong>
       </Link>
+
+      {standingOverrides.length > 0 && (
+        <Card
+          title={`Active standing exceptions · ${standingOverrides.length}`}
+        >
+          <div style={{ display: "grid", gap: 10 }}>
+            {standingOverrides.slice(0, 5).map((override) => (
+              <div
+                key={override.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(160px,.8fr) minmax(220px,1.2fr)",
+                  gap: 14,
+                  paddingBottom: 10,
+                  borderBottom: "1px solid var(--divider)",
+                }}
+              >
+                <span>
+                  <strong>{override.studentName}</strong>
+                  <span
+                    className="muted"
+                    style={{ display: "block", fontSize: 12 }}
+                  >
+                    {override.studentNo} ·{" "}
+                    {override.program?.code ?? "No programme"}
+                  </span>
+                </span>
+                <span style={{ fontSize: 13 }}>
+                  <strong>{override.standingCode.replaceAll("_", " ")}</strong>
+                  <span
+                    className="muted"
+                    style={{ display: "block", marginTop: 3 }}
+                  >
+                    {override.reason}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {error && !customizing && (
         <div

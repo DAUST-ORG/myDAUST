@@ -1,4 +1,8 @@
-import type { AcademicProgress, InProgressCourse } from "./academic-catalog.js";
+import type {
+  AcademicProgress,
+  AcademicStanding,
+  InProgressCourse,
+} from "./academic-catalog.js";
 
 /** A student identity snapshot used by every transcript surface. */
 export interface TranscriptStudentIdentity {
@@ -57,6 +61,7 @@ export interface TranscriptView {
   student: TranscriptStudentIdentity;
   totals: TranscriptTotals;
   academicProgress: AcademicProgress;
+  academicStanding: AcademicStanding;
   inProgressCourses: InProgressCourse[];
   /** Ordered from the earliest semester to the most recent. */
   semesters: TranscriptSemester[];

@@ -15,6 +15,8 @@ import type {
   AcademicCatalogDraft,
   AcademicCatalogLevel,
   AcademicCatalogProgram,
+  AcademicNotYetGradedStanding,
+  AcademicStandingRule,
 } from "@mydaust/shared";
 import {
   type AcademicCatalogWorkspace,
@@ -38,7 +40,12 @@ function copyPrograms(programs: AcademicCatalogProgram[]) {
     requirements: program.requirements.map((requirement) => ({
       ...requirement,
     })),
+    customStandingRules: copyStandingRules(program.customStandingRules),
   }));
+}
+
+function copyStandingRules(rules: AcademicStandingRule[]) {
+  return rules.map((rule) => ({ ...rule }));
 }
 
 function initialDraft(
@@ -50,6 +57,8 @@ function initialDraft(
     startsOn: source.startsOn,
     endsOn: source.endsOn,
     defaultLevels: copyLevels(source.defaultLevels),
+    defaultStandingRules: copyStandingRules(source.defaultStandingRules),
+    notYetGradedStanding: { ...source.notYetGradedStanding },
     programs: copyPrograms(source.programs),
     reason: source.status === "draft" ? (source.reason ?? "") : "",
     activateYear:
@@ -407,6 +416,33 @@ export default function AcademicCatalogPage() {
                     <div className="section-heading">
                       <div>
                         <span>03</span>
+                        <h3>Academic standing</h3>
+                      </div>
+                      <p>
+                        The highest cumulative-GPA threshold determines the
+                        student&apos;s standing. Programmes may retain a custom
+                        policy.
+                      </p>
+                    </div>
+                    <StandingEditor
+                      rules={draft.defaultStandingRules}
+                      notYet={draft.notYetGradedStanding}
+                      onNotYetChange={(notYetGradedStanding) =>
+                        setDraft({
+                          ...draft,
+                          notYetGradedStanding,
+                        })
+                      }
+                      onChange={(rules) =>
+                        setDraft({ ...draft, defaultStandingRules: rules })
+                      }
+                    />
+                  </section>
+
+                  <section className="catalog-section">
+                    <div className="section-heading">
+                      <div>
+                        <span>04</span>
                         <h3>Programme requirements</h3>
                       </div>
                       <p>
@@ -420,6 +456,7 @@ export default function AcademicCatalogPage() {
                           key={program.programId}
                           program={program}
                           defaultLevels={draft.defaultLevels}
+                          defaultStandingRules={draft.defaultStandingRules}
                           onChange={(next) => {
                             const programs = copyPrograms(draft.programs);
                             programs[programIndex] = next;
@@ -700,6 +737,15 @@ export default function AcademicCatalogPage() {
         .level-row input {
           width: 100%;
         }
+        .standing-row {
+          grid-template-columns: 28px 110px minmax(
+              150px,
+              1fr
+            ) 105px 72px 120px 34px;
+        }
+        .standing-row select {
+          width: 100%;
+        }
         .icon-button {
           width: 32px;
           height: 32px;
@@ -925,6 +971,14 @@ export default function AcademicCatalogPage() {
           .level-row {
             grid-template-columns: 24px 74px minmax(110px, 1fr) 92px 30px;
           }
+          .standing-row {
+            grid-template-columns: 24px minmax(95px, 1fr) minmax(110px, 1fr);
+          }
+          .standing-row > :nth-child(4),
+          .standing-row > :nth-child(5),
+          .standing-row > :nth-child(6) {
+            grid-column: auto;
+          }
           .programme-editor summary {
             grid-template-columns: minmax(0, 1fr) auto;
           }
@@ -1004,6 +1058,7 @@ function LevelEditor({
 function ProgrammeEditor({
   program,
   defaultLevels,
+  defaultStandingRules,
   onChange,
   onLevelChange,
   onAddLevel,
@@ -1011,12 +1066,14 @@ function ProgrammeEditor({
 }: {
   program: AcademicCatalogProgram;
   defaultLevels: AcademicCatalogLevel[];
+  defaultStandingRules: AcademicStandingRule[];
   onChange: (program: AcademicCatalogProgram) => void;
   onLevelChange: (index: number, patch: Partial<AcademicCatalogLevel>) => void;
   onAddLevel: () => void;
   onRemoveLevel: (index: number) => void;
 }) {
   const custom = program.progressionMode === "custom";
+  const customStanding = program.standingMode === "custom";
   return (
     <details className="programme-editor">
       <summary>
@@ -1147,7 +1204,203 @@ function ProgrammeEditor({
             />
           </div>
         )}
+
+        <div className="programme-mode">
+          <div>
+            <strong>
+              {customStanding
+                ? "Custom standing policy retained"
+                : "Uses institutional standing policy"}
+            </strong>
+            <p>
+              {customStanding
+                ? "Institutional threshold changes will not alter this programme unless you conform it."
+                : "This programme follows the approved institutional cumulative-GPA thresholds."}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={
+              customStanding ? (
+                <CopyCheck size={14} />
+              ) : (
+                <SlidersHorizontal size={14} />
+              )
+            }
+            onClick={() =>
+              onChange({
+                ...program,
+                standingMode: customStanding ? "default" : "custom",
+                customStandingRules: customStanding
+                  ? []
+                  : copyStandingRules(defaultStandingRules),
+              })
+            }
+          >
+            {customStanding ? "Conform to default" : "Create custom policy"}
+          </Button>
+        </div>
+
+        {customStanding && (
+          <StandingEditor
+            rules={program.customStandingRules}
+            onChange={(customStandingRules) =>
+              onChange({ ...program, customStandingRules })
+            }
+          />
+        )}
       </div>
     </details>
+  );
+}
+
+function StandingEditor({
+  rules,
+  notYet,
+  onNotYetChange,
+  onChange,
+}: {
+  rules: AcademicStandingRule[];
+  notYet?: AcademicNotYetGradedStanding;
+  onNotYetChange?: (value: AcademicNotYetGradedStanding) => void;
+  onChange: (rules: AcademicStandingRule[]) => void;
+}) {
+  const update = (index: number, patch: Partial<AcademicStandingRule>) =>
+    onChange(
+      rules.map((rule, position) =>
+        position === index ? { ...rule, ...patch } : rule,
+      ),
+    );
+  return (
+    <div className="level-table">
+      {notYet && onNotYetChange && (
+        <div className="level-row">
+          <span className="level-number">—</span>
+          <input
+            value="not_yet_graded"
+            disabled
+            aria-label="Not yet graded code"
+          />
+          <input
+            value={notYet.label}
+            aria-label="Not yet graded label"
+            onChange={(event) =>
+              onNotYetChange({ ...notYet, label: event.target.value })
+            }
+          />
+          <input
+            value="No GPA credits"
+            disabled
+            aria-label="Not yet graded condition"
+          />
+          <select
+            value={notYet.tone}
+            aria-label="Not yet graded tone"
+            onChange={(event) =>
+              onNotYetChange({
+                ...notYet,
+                tone: event.target.value as AcademicStandingRule["tone"],
+              })
+            }
+          >
+            <option value="neutral">Neutral</option>
+            <option value="success">Success</option>
+            <option value="honor">Honor</option>
+            <option value="warning">Warning</option>
+          </select>
+        </div>
+      )}
+      {rules.map((rule, index) => (
+        <div className="level-row standing-row" key={`${rule.code}-${index}`}>
+          <span className="level-number">
+            {String(index + 1).padStart(2, "0")}
+          </span>
+          <input
+            aria-label={`Standing ${index + 1} code`}
+            value={rule.code}
+            onChange={(event) => update(index, { code: event.target.value })}
+          />
+          <input
+            aria-label={`Standing ${index + 1} label`}
+            value={rule.label}
+            onChange={(event) => update(index, { label: event.target.value })}
+          />
+          <input
+            aria-label={`${rule.label} minimum GPA`}
+            type="number"
+            min={0}
+            max={4}
+            step={0.01}
+            value={rule.minimumGpa}
+            onChange={(event) =>
+              update(index, { minimumGpa: Number(event.target.value) })
+            }
+          />
+          <select
+            aria-label={`${rule.label} order`}
+            value={rule.order}
+            onChange={(event) =>
+              update(index, { order: Number(event.target.value) })
+            }
+          >
+            {Array.from(
+              { length: Math.max(10, rules.length + 2) },
+              (_, order) => (
+                <option key={order} value={order}>
+                  Order {order}
+                </option>
+              ),
+            )}
+          </select>
+          <select
+            aria-label={`${rule.label} tone`}
+            value={rule.tone}
+            onChange={(event) =>
+              update(index, {
+                tone: event.target.value as AcademicStandingRule["tone"],
+              })
+            }
+          >
+            <option value="neutral">Neutral</option>
+            <option value="success">Success</option>
+            <option value="honor">Honor</option>
+            <option value="warning">Warning</option>
+          </select>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={`Remove ${rule.label}`}
+            disabled={rules.length === 1}
+            onClick={() =>
+              onChange(rules.filter((_, position) => position !== index))
+            }
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="level-add"
+        onClick={() =>
+          onChange([
+            ...rules,
+            {
+              code: `standing_${rules.length + 1}`,
+              label: "New standing",
+              minimumGpa:
+                Array.from({ length: 401 }, (_, value) => value / 100).find(
+                  (value) => !rules.some((rule) => rule.minimumGpa === value),
+                ) ?? 4,
+              order: Math.max(-1, ...rules.map((rule) => rule.order)) + 1,
+              tone: "neutral",
+            },
+          ])
+        }
+      >
+        <Plus size={14} /> Add standing threshold
+      </button>
+    </div>
   );
 }

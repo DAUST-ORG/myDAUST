@@ -113,12 +113,16 @@ const REQUIREMENTS_BY_DISCIPLINE: Record<
 
 function requirementsForProgram(program: { code: string; name: string }) {
   const identity = `${program.code} ${program.name}`.toLowerCase();
-  if (identity.includes("chemical")) return REQUIREMENTS_BY_DISCIPLINE.chemical;
-  if (identity.includes("mechanical"))
+  if (
+    identity.includes("chemical") ||
+    /\b(?:bschem|bsche|che)\b/.test(identity)
+  )
+    return REQUIREMENTS_BY_DISCIPLINE.chemical;
+  if (identity.includes("mechanical") || /\b(?:bsme|me)\b/.test(identity))
     return REQUIREMENTS_BY_DISCIPLINE.mechanical;
-  if (identity.includes("electrical"))
+  if (identity.includes("electrical") || /\b(?:bsee|ee)\b/.test(identity))
     return REQUIREMENTS_BY_DISCIPLINE.electrical;
-  if (identity.includes("computer") || /\b(?:bscs|cs)\b/.test(identity))
+  if (identity.includes("computer") || /\b(?:bsce|bscs|cs)\b/.test(identity))
     return REQUIREMENTS_BY_DISCIPLINE.computer;
   return null;
 }
@@ -381,6 +385,48 @@ export async function seedSisReference(
           programConfigurations: asJson(programConfigurations),
         },
       });
+    }
+  }
+
+  // Deployment preflight: every latest approved catalog must expose the full
+  // 300-credit requirement for every recognized engineering programme. A
+  // mismatch is safer to fail than to publish another incorrect denominator.
+  const programmes = new Map(
+    (await prisma.program.findMany()).map((program) => [program.id, program]),
+  );
+  const approvedRevisions = await prisma.academicCatalogRevision.findMany({
+    where: { status: "approved" },
+    orderBy: [{ academicYearId: "asc" }, { revision: "desc" }],
+  });
+  const checkedYears = new Set<string>();
+  for (const revision of approvedRevisions) {
+    if (checkedYears.has(revision.academicYearId)) continue;
+    checkedYears.add(revision.academicYearId);
+    const configurations = Array.isArray(revision.programConfigurations)
+      ? revision.programConfigurations
+      : [];
+    for (const raw of configurations) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const configuration = raw as {
+        programId?: unknown;
+        requirements?: unknown;
+      };
+      if (typeof configuration.programId !== "string") continue;
+      const programme = programmes.get(configuration.programId);
+      if (!programme || !requirementsForProgram(programme)) continue;
+      const total = Array.isArray(configuration.requirements)
+        ? configuration.requirements.reduce((sum, requirement) => {
+            if (!requirement || typeof requirement !== "object") return sum;
+            const credits = (requirement as { requiredCredits?: unknown })
+              .requiredCredits;
+            return sum + (typeof credits === "number" ? credits : 0);
+          }, 0)
+        : 0;
+      if (total !== 300) {
+        throw new Error(
+          `Academic catalog preflight failed: ${programme.code} totals ${total} credits in ${revision.yearLabel}; expected 300`,
+        );
+      }
     }
   }
 

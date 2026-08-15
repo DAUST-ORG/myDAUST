@@ -93,6 +93,7 @@ export default function GradesPage() {
         <Stat
           label="Cumulative GPA"
           value={transcript?.totals.gpa?.toFixed(2) ?? "—"}
+          sub={transcript?.academicStanding.label ?? "Academic standing"}
           tone="var(--daust-navy)"
         />
         <Stat

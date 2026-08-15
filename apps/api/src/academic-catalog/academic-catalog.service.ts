@@ -6,12 +6,18 @@ import {
 import { Prisma } from "@mydaust/db";
 import {
   AcademicCatalogDraftInput,
+  AcademicNotYetGradedStandingInput,
+  AcademicStandingRuleInput,
+  DEFAULT_ACADEMIC_STANDING_RULES,
+  DEFAULT_NOT_YET_GRADED_STANDING,
   academicLevelBands,
   deriveAcademicLevel,
   type AcademicCatalogDraft,
   type AcademicCatalogLevel,
   type AcademicCatalogProgram,
+  type AcademicNotYetGradedStanding,
   type AcademicProgress,
+  type AcademicStandingRule,
 } from "@mydaust/shared";
 import type { AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -30,6 +36,8 @@ export interface AcademicCatalogRevisionView {
   startsOn: string | null;
   endsOn: string | null;
   defaultLevels: AcademicCatalogLevel[];
+  defaultStandingRules: AcademicStandingRule[];
+  notYetGradedStanding: AcademicNotYetGradedStanding;
   programs: AcademicCatalogProgram[];
   reason: string | null;
   activateYear: boolean;
@@ -57,6 +65,8 @@ interface EffectiveCatalogConfiguration {
   revision: number;
   fallback: boolean;
   defaultLevels: AcademicCatalogLevel[];
+  defaultStandingRules: AcademicStandingRule[];
+  notYetGradedStanding: AcademicNotYetGradedStanding;
   program: AcademicCatalogProgram | null;
 }
 
@@ -73,7 +83,32 @@ function levels(value: unknown): AcademicCatalogLevel[] {
 }
 
 function programs(value: unknown): AcademicCatalogProgram[] {
-  return Array.isArray(value) ? (value as AcademicCatalogProgram[]) : [];
+  if (!Array.isArray(value)) return [];
+  return value.map((raw) => {
+    const program = raw as AcademicCatalogProgram;
+    return {
+      ...program,
+      standingMode: program.standingMode ?? "default",
+      customStandingRules: program.customStandingRules ?? [],
+    };
+  });
+}
+
+function standingRules(value: unknown): AcademicStandingRule[] {
+  const parsed = Array.isArray(value)
+    ? value
+        .map((rule) => AcademicStandingRuleInput.safeParse(rule))
+        .filter((result) => result.success)
+        .map((result) => result.data)
+    : [];
+  return parsed.length > 0
+    ? parsed
+    : DEFAULT_ACADEMIC_STANDING_RULES.map((rule) => ({ ...rule }));
+}
+
+function notYetGraded(value: unknown): AcademicNotYetGradedStanding {
+  const parsed = AcademicNotYetGradedStandingInput.safeParse(value);
+  return parsed.success ? parsed.data : { ...DEFAULT_NOT_YET_GRADED_STANDING };
 }
 
 @Injectable()
@@ -90,6 +125,8 @@ export class AcademicCatalogService {
       startsOn: dateOnly(row.startsOn),
       endsOn: dateOnly(row.endsOn),
       defaultLevels: levels(row.defaultLevels),
+      defaultStandingRules: standingRules(row.defaultStandingRules),
+      notYetGradedStanding: notYetGraded(row.notYetGradedStanding),
       programs: programs(row.programConfigurations),
       reason: row.reason,
       activateYear: row.activateYear,
@@ -116,6 +153,8 @@ export class AcademicCatalogService {
       programName: program.name,
       progressionMode: "default",
       customLevels: [],
+      standingMode: "default",
+      customStandingRules: [],
       requirements: program.requirements.map((requirement) => ({
         category: requirement.category,
         requiredCredits: requirement.requiredCredits,
@@ -187,6 +226,8 @@ export class AcademicCatalogService {
           programName: program.name,
           progressionMode: "default",
           customLevels: [],
+          standingMode: "default",
+          customStandingRules: [],
           requirements: [],
         },
     );
@@ -201,6 +242,10 @@ export class AcademicCatalogService {
           startsOn: dateOnly(year.startsOn),
           endsOn: dateOnly(year.endsOn),
           defaultLevels: this.defaultLevelsFor(completePrograms),
+          defaultStandingRules: DEFAULT_ACADEMIC_STANDING_RULES.map((rule) => ({
+            ...rule,
+          })),
+          notYetGradedStanding: { ...DEFAULT_NOT_YET_GRADED_STANDING },
           programs: completePrograms,
           reason: "Legacy programme requirements",
           activateYear: year.status === "active",
@@ -294,6 +339,8 @@ export class AcademicCatalogService {
         : null,
       endsOn: input.endsOn ? new Date(`${input.endsOn}T00:00:00.000Z`) : null,
       defaultLevels: json(input.defaultLevels),
+      defaultStandingRules: json(input.defaultStandingRules),
+      notYetGradedStanding: json(input.notYetGradedStanding),
       programConfigurations: json(input.programs),
       reason: input.reason,
       activateYear: input.activateYear,
@@ -337,6 +384,8 @@ export class AcademicCatalogService {
           startsOn: dateOnly(draft.startsOn),
           endsOn: dateOnly(draft.endsOn),
           defaultLevels: draft.defaultLevels,
+          defaultStandingRules: draft.defaultStandingRules,
+          notYetGradedStanding: draft.notYetGradedStanding,
           programs: draft.programConfigurations,
           reason: draft.reason,
           activateYear: draft.activateYear,
@@ -475,6 +524,8 @@ export class AcademicCatalogService {
       revision: revision.revision,
       fallback: assigned === null,
       defaultLevels: levels(revision.defaultLevels),
+      defaultStandingRules: standingRules(revision.defaultStandingRules),
+      notYetGradedStanding: notYetGraded(revision.notYetGradedStanding),
       program: configuration ?? null,
     };
   }
@@ -492,6 +543,71 @@ export class AcademicCatalogService {
       client,
     );
     return this.progressFromConfiguration(input, effective);
+  }
+
+  async standingPolicy(
+    input: Pick<
+      AcademicProgressInput,
+      "programId" | "catalogYearId" | "catalogYearLabel"
+    >,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const effective = await this.effectiveConfiguration(input, client);
+    return this.standingPolicyFromConfiguration(effective);
+  }
+
+  private standingPolicyFromConfiguration(
+    effective: EffectiveCatalogConfiguration | null,
+  ) {
+    if (!effective) {
+      return {
+        rules: DEFAULT_ACADEMIC_STANDING_RULES.map((rule) => ({ ...rule })),
+        notYetGraded: { ...DEFAULT_NOT_YET_GRADED_STANDING },
+        catalog: null,
+      };
+    }
+    return {
+      rules:
+        effective.program?.standingMode === "custom"
+          ? effective.program.customStandingRules
+          : effective.defaultStandingRules,
+      notYetGraded: effective.notYetGradedStanding,
+      catalog: {
+        academicYearId: effective.academicYearId,
+        label: effective.label,
+        revision: effective.revision,
+        fallback: effective.fallback,
+      },
+    };
+  }
+
+  async standingPoliciesMany(
+    inputs: Pick<
+      AcademicProgressInput,
+      "programId" | "catalogYearId" | "catalogYearLabel"
+    >[],
+  ) {
+    if (inputs.length === 0) return [];
+    const delegate = (
+      this.prisma as unknown as {
+        academicCatalogRevision?: {
+          findMany: PrismaService["academicCatalogRevision"]["findMany"];
+        };
+      }
+    ).academicCatalogRevision;
+    if (!delegate?.findMany) {
+      return inputs.map(() => this.standingPolicyFromConfiguration(null));
+    }
+    const approved = (await delegate.findMany({
+      where: { status: "approved" },
+      orderBy: [{ approvedAt: "desc" }, { revision: "desc" }],
+      include: { academicYear: true },
+    })) as ApprovedRevision[];
+    return inputs.map((input) =>
+      this.standingPolicyFromConfiguration(
+        this.effectiveFromApproved(input, approved),
+      ),
+    );
   }
 
   /** Resolve a roster page with one catalog query rather than one query per
@@ -521,6 +637,37 @@ export class AcademicCatalogService {
         this.effectiveFromApproved(input, approved),
       ),
     );
+  }
+
+  /** Resolve progression and standing policy together for roster surfaces so
+   * both student-facing values come from one approved-catalog snapshot/read. */
+  async progressAndStandingPoliciesMany(inputs: AcademicProgressInput[]) {
+    if (inputs.length === 0) return [];
+    const delegate = (
+      this.prisma as unknown as {
+        academicCatalogRevision?: {
+          findMany: PrismaService["academicCatalogRevision"]["findMany"];
+        };
+      }
+    ).academicCatalogRevision;
+    if (!delegate?.findMany) {
+      return inputs.map((input) => ({
+        progress: this.progressFromConfiguration(input, null),
+        standingPolicy: this.standingPolicyFromConfiguration(null),
+      }));
+    }
+    const approved = (await delegate.findMany({
+      where: { status: "approved" },
+      orderBy: [{ approvedAt: "desc" }, { revision: "desc" }],
+      include: { academicYear: true },
+    })) as ApprovedRevision[];
+    return inputs.map((input) => {
+      const effective = this.effectiveFromApproved(input, approved);
+      return {
+        progress: this.progressFromConfiguration(input, effective),
+        standingPolicy: this.standingPolicyFromConfiguration(effective),
+      };
+    });
   }
 
   async effectiveConfiguration(

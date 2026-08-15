@@ -16,6 +16,7 @@ import type {
 import type { AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
+import { AcademicStandingService } from "../academic-catalog/academic-standing.service.js";
 import { summarizeTranscriptRows } from "./transcript-calculation.js";
 import {
   renderTranscriptPdf,
@@ -90,6 +91,11 @@ export class TranscriptService {
     @Optional()
     private readonly catalogs: AcademicCatalogService = new AcademicCatalogService(
       prisma,
+    ),
+    @Optional()
+    private readonly standings: AcademicStandingService = new AcademicStandingService(
+      prisma,
+      catalogs,
     ),
   ) {}
 
@@ -205,9 +211,21 @@ export class TranscriptService {
       },
       client,
     );
+    const academicStanding = await this.standings.resolve(
+      {
+        studentId: student.id,
+        programId: student.programId,
+        catalogYearId: student.catalogYearId,
+        catalogYearLabel: student.catalogYear,
+        cumulativeGpa: base.totals.gpa,
+        hasGpaBearingCoursework: base.totals.gpaCredits > 0,
+      },
+      client,
+    );
     return {
       ...base,
       academicProgress,
+      academicStanding,
       inProgressCourses,
     };
   }
