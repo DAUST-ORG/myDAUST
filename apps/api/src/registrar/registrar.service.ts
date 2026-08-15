@@ -282,6 +282,11 @@ export class RegistrarService {
       include: { person: true },
     });
     if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus !== "active") {
+      throw new BadRequestException(
+        "A student login can be provisioned only after enrollment is active",
+      );
+    }
     const person = student.person;
     let email = person.email;
 
@@ -338,7 +343,7 @@ export class RegistrarService {
 
   async listDocuments(studentId: string) {
     return this.prisma.studentDocument.findMany({
-      where: { studentId },
+      where: { studentId, student: { recordStatus: "active" } },
       orderBy: { uploadedAt: "desc" },
     });
   }
@@ -352,6 +357,9 @@ export class RegistrarService {
       where: { id: studentId },
     });
     if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus !== "active") {
+      throw new NotFoundException("Student not found");
+    }
     // The six typed slots hold one document each; "other" is an open list.
     if (input.slot !== "other") {
       await this.prisma.studentDocument.deleteMany({
@@ -1013,6 +1021,11 @@ export class RegistrarService {
     reason: string,
     level = "warning",
   ) {
+    const student = await this.prisma.student.findFirst({
+      where: { id: studentId, recordStatus: "active" },
+      select: { id: true },
+    });
+    if (!student) throw new NotFoundException("Student not found");
     const alert = await this.prisma.studentAlert.create({
       data: { studentId, reason, level, warnedAt: new Date() },
     });
@@ -1027,7 +1040,7 @@ export class RegistrarService {
   /** The caller's early-alert watchlist — a personal follow list, not a shared flag. */
   async listWatching(personId: string) {
     const rows = await this.prisma.staffWatch.findMany({
-      where: { personId },
+      where: { personId, student: { recordStatus: "active" } },
       include: { student: { include: { person: true, program: true } } },
       orderBy: { createdAt: "desc" },
     });
@@ -1043,7 +1056,9 @@ export class RegistrarService {
     const student = await this.prisma.student.findUnique({
       where: { id: studentId },
     });
-    if (!student) throw new NotFoundException("Student not found");
+    if (!student || student.recordStatus !== "active") {
+      throw new NotFoundException("Student not found");
+    }
     await this.prisma.staffWatch.upsert({
       where: { personId_studentId: { personId, studentId } },
       update: {},
@@ -1060,7 +1075,10 @@ export class RegistrarService {
   /** Recent warnings across all students, for the "Warnings sent" panel. */
   async listWarnings(limit = 25) {
     const alerts = await this.prisma.studentAlert.findMany({
-      where: { warnedAt: { not: null } },
+      where: {
+        warnedAt: { not: null },
+        student: { recordStatus: "active" },
+      },
       orderBy: { warnedAt: "desc" },
       take: limit,
       include: { student: { include: { person: true } } },

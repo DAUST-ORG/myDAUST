@@ -270,13 +270,22 @@ function PayBillInner() {
   const accountMeta = accountSummary
     ? accountPresentation(accountSummary)
     : null;
+  const enrollmentGate =
+    bill?.enrollmentGate?.status === "payment_pending"
+      ? bill.enrollmentGate
+      : null;
   const payableXof = bill
-    ? Math.min(
-        accountSummary?.outstandingXof ?? Math.max(0, bill.balanceXof),
-        bill.payableXof ??
-          accountSummary?.outstandingXof ??
-          Math.max(0, bill.balanceXof),
-      )
+    ? enrollmentGate
+      ? Math.min(
+          enrollmentGate.remainingCashXof,
+          bill.payableXof ?? enrollmentGate.remainingCashXof,
+        )
+      : Math.min(
+          accountSummary?.outstandingXof ?? Math.max(0, bill.balanceXof),
+          bill.payableXof ??
+            accountSummary?.outstandingXof ??
+            Math.max(0, bill.balanceXof),
+        )
     : 0;
 
   return (
@@ -551,12 +560,32 @@ function PayBillInner() {
               </div>
               <div style={{ marginTop: 22, position: "relative" }}>
                 <div style={{ fontSize: 12, color: "rgba(255,255,255,.72)" }}>
-                  Account position
+                  {enrollmentGate
+                    ? "First installment remaining"
+                    : "Account position"}
                 </div>
-                {accountSummary && (
-                  <div style={{ position: "absolute", top: -4, right: 0 }}>
-                    <AccountStandingBadge summary={accountSummary} />
+                {enrollmentGate ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: -4,
+                      right: 0,
+                      borderRadius: 999,
+                      padding: "4px 9px",
+                      background: "rgba(237,132,37,.18)",
+                      color: "#ffd0a5",
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                    }}
+                  >
+                    Enrollment pending
                   </div>
+                ) : (
+                  accountSummary && (
+                    <div style={{ position: "absolute", top: -4, right: 0 }}>
+                      <AccountStandingBadge summary={accountSummary} />
+                    </div>
+                  )
                 )}
                 <div
                   style={{
@@ -566,20 +595,24 @@ function PayBillInner() {
                     lineHeight: 1,
                     marginTop: 5,
                     color:
-                      accountSummary?.standing === "overdue"
-                        ? "#ffb4aa"
-                        : accountSummary?.standing === "credit" ||
-                            accountSummary?.standing === "cleared"
-                          ? "#b7efd0"
-                          : accountSummary?.standing === "unscheduled"
-                            ? "#ffd59c"
-                            : "#fff",
+                      enrollmentGate
+                        ? "#fff"
+                        : accountSummary?.standing === "overdue"
+                          ? "#ffb4aa"
+                          : accountSummary?.standing === "credit" ||
+                              accountSummary?.standing === "cleared"
+                            ? "#b7efd0"
+                            : accountSummary?.standing === "unscheduled"
+                              ? "#ffd59c"
+                              : "#fff",
                   }}
                 >
                   {fcfa(
-                    accountSummary?.standing === "credit"
-                      ? accountSummary.creditXof
-                      : (accountSummary?.outstandingXof ??
+                    enrollmentGate
+                      ? enrollmentGate.remainingCashXof
+                      : accountSummary?.standing === "credit"
+                        ? accountSummary.creditXof
+                        : (accountSummary?.outstandingXof ??
                           Math.abs(bill.balanceXof)),
                   )}{" "}
                   <span
@@ -589,10 +622,13 @@ function PayBillInner() {
                       color: "rgba(255,255,255,.72)",
                     }}
                   >
-                    FCFA{accountSummary?.standing === "credit" ? " credit" : ""}
+                    FCFA
+                    {!enrollmentGate && accountSummary?.standing === "credit"
+                      ? " credit"
+                      : ""}
                   </span>
                 </div>
-                {accountMeta && (
+                {enrollmentGate ? (
                   <div
                     style={{
                       fontSize: 12,
@@ -600,10 +636,24 @@ function PayBillInner() {
                       marginTop: 8,
                     }}
                   >
-                    {accountMeta.description}
+                    Full verified cash payment activates student access. Partial
+                    payments remain on the account until the installment is
+                    complete.
                   </div>
+                ) : (
+                  accountMeta && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "rgba(255,255,255,.78)",
+                        marginTop: 8,
+                      }}
+                    >
+                      {accountMeta.description}
+                    </div>
+                  )
                 )}
-                {accountSummary?.nextDueDate && (
+                {(enrollmentGate?.dueDate ?? accountSummary?.nextDueDate) && (
                   <span
                     style={{
                       display: "inline-flex",
@@ -618,13 +668,88 @@ function PayBillInner() {
                     }}
                   >
                     <CalendarDays size={13} /> Next due{" "}
-                    {formatDate(accountSummary.nextDueDate)}
+                    {formatDate(
+                      enrollmentGate?.dueDate ?? accountSummary!.nextDueDate!,
+                    )}
                   </span>
                 )}
               </div>
             </div>
 
-            {bill.charges.length > 0 && (
+            {enrollmentGate && (
+              <div
+                role="status"
+                style={{
+                  margin: "18px 30px 4px",
+                  padding: "14px 15px",
+                  borderRadius: 10,
+                  border: "1px solid #f0cfaa",
+                  background: "#fff8ee",
+                  color: "#70451c",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <strong style={{ fontSize: 12.5 }}>
+                    First-installment enrollment payment
+                  </strong>
+                  {enrollmentGate.pendingProof && (
+                    <span
+                      style={{
+                        borderRadius: 999,
+                        padding: "3px 8px",
+                        background: "#f7e2c7",
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Proof under Finance review
+                    </span>
+                  )}
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit, minmax(min(100px, 100%), 1fr))",
+                    gap: 12,
+                    marginTop: 11,
+                  }}
+                >
+                  {[
+                    ["Required", enrollmentGate.requiredCashXof],
+                    ["Verified", enrollmentGate.paidCashXof],
+                    ["Remaining", enrollmentGate.remainingCashXof],
+                  ].map(([label, value]) => (
+                    <span key={label as string} style={{ minWidth: 0 }}>
+                      <small style={{ display: "block", fontSize: 10 }}>
+                        {label}
+                      </small>
+                      <strong
+                        style={{
+                          display: "block",
+                          marginTop: 2,
+                          fontSize: 12,
+                          fontVariantNumeric: "tabular-nums",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        {fcfa(value as number)} FCFA
+                      </strong>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!enrollmentGate && bill.charges.length > 0 && (
               <div style={{ padding: "18px 30px 4px" }}>
                 <div
                   style={{
@@ -721,7 +846,7 @@ function PayBillInner() {
               </div>
             )}
 
-            {(accountSummary?.outstandingXof ?? bill.balanceXof) > 0 ? (
+            {payableXof > 0 ? (
               <div style={{ padding: "16px 30px 30px" }}>
                 <div
                   style={{
@@ -733,7 +858,9 @@ function PayBillInner() {
                     margin: "6px 0 10px",
                   }}
                 >
-                  Make a payment
+                  {enrollmentGate
+                    ? "Pay toward first installment"
+                    : "Make a payment"}
                 </div>
                 <label
                   style={{ fontSize: 12.5, fontWeight: 600, color: "#4d5965" }}
@@ -781,10 +908,12 @@ function PayBillInner() {
                 <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
                   {[
                     [
-                      payableXof <
-                      (accountSummary?.outstandingXof ?? bill.balanceXof)
-                        ? "Current charge"
-                        : "Full balance",
+                      enrollmentGate
+                        ? "First installment"
+                        : payableXof <
+                            (accountSummary?.outstandingXof ?? bill.balanceXof)
+                          ? "Current charge"
+                          : "Full balance",
                       payableXof,
                     ],
                     ["Half", Math.round(payableXof / 2)],

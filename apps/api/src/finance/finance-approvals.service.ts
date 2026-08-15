@@ -25,6 +25,11 @@ import {
   type FeeComponentDefinition,
 } from "./fee-components.js";
 import { OperatingBudgetService } from "./operating-budget.service.js";
+import {
+  syncEnrollmentGateInTransaction,
+  type EnrollmentActivation,
+} from "./admission-payment-gate.js";
+import { FinanceService } from "./finance.service.js";
 
 export const DIRECTOR_WIDGET_KEYS = [
   "people",
@@ -98,6 +103,7 @@ export class FinanceApprovalsService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() operatingBudget?: OperatingBudgetService,
+    @Optional() private readonly finance?: FinanceService,
   ) {
     // Unit/integration tests historically instantiate this service directly.
     // Keep that seam while Nest injects the shared provider in the application.
@@ -514,11 +520,14 @@ export class FinanceApprovalsService {
     if (!actor.roles.includes("admin")) {
       throw new ForbiddenException("Only an administrator can approve changes");
     }
-    return this.transaction(async (tx) => {
+    const outcome = await this.transaction(async (tx) => {
       const request = await tx.approvalRequest.findUnique({ where: { id } });
       if (!request) throw new NotFoundException("Approval request not found");
       if (request.status === "approved") {
-        return { ok: true, id: request.id, status: request.status };
+        return {
+          response: { ok: true, id: request.id, status: request.status },
+          activations: [] as EnrollmentActivation[],
+        };
       }
       if (request.status !== "pending") {
         throw new BadRequestException(`Request is already ${request.status}`);
@@ -554,10 +563,43 @@ export class FinanceApprovalsService {
             data: this.asJson({ reason: staleReason }),
           },
         });
-        return { ok: false, id, status: stale.status, reason: staleReason };
+        return {
+          response: {
+            ok: false,
+            id,
+            status: stale.status,
+            reason: staleReason,
+          },
+          activations: [] as EnrollmentActivation[],
+        };
       }
 
       const result = await this.apply(tx, request, actor.personId);
+      const activations: EnrollmentActivation[] = [];
+      const gateInvoiceIds = new Set<string>();
+      if (request.kind === "payment_plan" && request.targetId) {
+        gateInvoiceIds.add(request.targetId);
+      } else if (request.kind === "global_fee_schedule") {
+        const pending = await tx.applicant.findMany({
+          where: {
+            onboardingStatus: "payment_pending",
+            enrollmentInvoiceId: { not: null },
+          },
+          select: { enrollmentInvoiceId: true },
+        });
+        for (const applicant of pending) {
+          if (applicant.enrollmentInvoiceId) {
+            gateInvoiceIds.add(applicant.enrollmentInvoiceId);
+          }
+        }
+      }
+      for (const invoiceId of gateInvoiceIds) {
+        const gate = await syncEnrollmentGateInTransaction(tx, {
+          invoiceId,
+          actorId: actor.personId,
+        });
+        if (gate?.activation) activations.push(gate.activation);
+      }
       const updated = await tx.approvalRequest.update({
         where: { id },
         data: {
@@ -585,8 +627,19 @@ export class FinanceApprovalsService {
           data: this.asJson({ kind: request.kind, result }),
         },
       });
-      return { ok: true, id, status: updated.status, result };
+      return {
+        response: { ok: true, id, status: updated.status, result },
+        activations,
+      };
     });
+    if (this.finance && outcome.activations.length > 0) {
+      await Promise.allSettled(
+        outcome.activations.map((activation) =>
+          this.finance!.deliverStudentActivationInvite(activation),
+        ),
+      );
+    }
+    return outcome.response;
   }
 
   async reject(id: string, actor: AuthUser, note: string) {
@@ -1169,7 +1222,7 @@ export class FinanceApprovalsService {
         feeScheduleId: current.id,
         packageType: "standard_full",
         status: { not: "void" },
-        student: { recordStatus: "active" },
+        student: { recordStatus: { in: ["active", "pending_payment"] } },
       },
       include: {
         plan: { include: { installments: true } },
@@ -1414,7 +1467,9 @@ export class FinanceApprovalsService {
             academicYearLabel: current.academicYearLabel,
             packageType: "standard_full",
             status: { not: "void" },
-            student: { recordStatus: "active" },
+            student: {
+              recordStatus: { in: ["active", "pending_payment"] },
+            },
           },
         },
       });
@@ -2382,12 +2437,15 @@ export class FinanceApprovalsService {
     const costCenterCode = String(after.costCenterCode ?? COST_CENTER_TUITION);
     const [student, center, term] = await Promise.all([
       tx.student.findFirst({
-        where: { id: studentId, recordStatus: "active" },
+        where: {
+          id: studentId,
+          recordStatus: { in: ["active", "pending_payment"] },
+        },
       }),
       tx.costCenter.findUnique({ where: { code: costCenterCode } }),
       this.activeTerm(tx),
     ]);
-    if (!student) throw new NotFoundException("Active student not found");
+    if (!student) throw new NotFoundException("Billable student not found");
     if (!center) throw new BadRequestException("Unknown cost center");
     if (!label || !Number.isSafeInteger(amountXof) || amountXof <= 0) {
       throw new BadRequestException("Invalid account credit");

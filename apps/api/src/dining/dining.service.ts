@@ -29,6 +29,16 @@ export class DiningService {
     );
   }
 
+  private async requireActiveStudent(studentId: string) {
+    const student = await this.prisma.student.findFirst({
+      where: { id: studentId, recordStatus: "active" },
+      select: { id: true },
+    });
+    if (!student) {
+      throw new ForbiddenException("Student enrollment is not active");
+    }
+  }
+
   // --- Student ---
 
   async myPass(studentId: string) {
@@ -36,6 +46,9 @@ export class DiningService {
       where: { id: studentId },
       include: { person: true, mealPlan: true },
     });
+    if (student.recordStatus !== "active") {
+      throw new ForbiddenException("Student enrollment is not active");
+    }
     return {
       token: signPass(studentId, this.secret()),
       studentNo: student.studentNo,
@@ -46,6 +59,7 @@ export class DiningService {
   }
 
   async choosePlan(studentId: string, type: "none" | "half" | "full") {
+    await this.requireActiveStudent(studentId);
     return this.prisma.mealPlan.upsert({
       where: { studentId },
       update: { type, active: type !== "none" },
@@ -62,6 +76,7 @@ export class DiningService {
 
   /** Which meal periods the student has already been served today (for the home hub). */
   async myToday(studentId: string) {
+    await this.requireActiveStudent(studentId);
     const scans = await this.prisma.diningScan.findMany({
       where: { studentId, date: this.dayOnly(), result: "served" },
       select: { period: true },
@@ -70,6 +85,7 @@ export class DiningService {
   }
 
   async myOrders(studentId: string) {
+    await this.requireActiveStudent(studentId);
     const orders = await this.prisma.diningOrder.findMany({
       where: { studentId },
       orderBy: { createdAt: "desc" },
@@ -92,6 +108,7 @@ export class DiningService {
     studentId: string,
     items: { menuItemId: string; qty: number }[],
   ) {
+    await this.requireActiveStudent(studentId);
     if (items.length === 0) throw new BadRequestException("Order is empty");
     const menuItems = await this.prisma.menuItem.findMany({
       where: { id: { in: items.map((i) => i.menuItemId) } },
@@ -125,6 +142,7 @@ export class DiningService {
     method: ProofPaymentMethod,
     actor: { personId: string; email: string },
   ) {
+    await this.requireActiveStudent(studentId);
     const order = await this.prisma.diningOrder.findUnique({
       where: { id: orderId },
     });
@@ -158,7 +176,7 @@ export class DiningService {
       where: { id: studentId },
       include: { person: true, mealPlan: true },
     });
-    if (!student)
+    if (!student || student.recordStatus !== "active")
       return {
         result: "turned_away" as const,
         reason: "Unknown student",
@@ -220,10 +238,10 @@ export class DiningService {
       where: { studentNo },
       include: { person: true },
     });
-    if (!student) {
+    if (!student || student.recordStatus !== "active") {
       return {
         result: "turned_away" as const,
-        reason: "Unknown student number",
+        reason: "Unknown or inactive student number",
         name: null,
         studentNo: null,
       };
@@ -309,11 +327,14 @@ export class DiningService {
       }),
       this.prisma.mealPlan.groupBy({
         by: ["type"],
-        where: { active: true },
+        where: { active: true, student: { recordStatus: "active" } },
         _count: true,
       }),
       this.prisma.diningOrder.findMany({
-        where: { status: { in: ["paid", "preparing", "ready"] } },
+        where: {
+          status: { in: ["paid", "preparing", "ready"] },
+          student: { recordStatus: "active" },
+        },
       }),
     ]);
     const periods = PERIODS.map((p) => ({
@@ -338,7 +359,10 @@ export class DiningService {
 
   async adminOrders() {
     const orders = await this.prisma.diningOrder.findMany({
-      where: { status: { not: "cart" } },
+      where: {
+        status: { not: "cart" },
+        student: { recordStatus: "active" },
+      },
       orderBy: { createdAt: "desc" },
       include: {
         student: { include: { person: true } },
@@ -381,6 +405,7 @@ export class DiningService {
     const date = this.dayOnly();
     const [plans, scans] = await Promise.all([
       this.prisma.mealPlan.findMany({
+        where: { student: { recordStatus: "active" } },
         include: { student: { include: { person: true } } },
         orderBy: { createdAt: "asc" },
       }),

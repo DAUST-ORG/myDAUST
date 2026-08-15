@@ -109,6 +109,7 @@ export class TranscriptService {
         select: {
           id: true,
           studentNo: true,
+          recordStatus: true,
           programId: true,
           catalogYear: true,
           catalogYearId: true,
@@ -163,6 +164,9 @@ export class TranscriptService {
       }),
     ]);
     if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus === "pending_payment") {
+      throw new NotFoundException("Student not found");
+    }
 
     const identity: TranscriptStudentIdentity = {
       id: student.id,
@@ -375,9 +379,12 @@ export class TranscriptService {
   ) {
     const student = await this.prisma.student.findUnique({
       where: { id: studentId },
-      select: { id: true },
+      select: { id: true, recordStatus: true },
     });
     if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus === "pending_payment") {
+      throw new NotFoundException("Student not found");
+    }
     const entries = await this.prisma.transcriptEntry.findMany({
       where: { studentId, ...(includeVoided ? {} : { voidedAt: null }) },
       orderBy: [
@@ -434,6 +441,9 @@ export class TranscriptService {
       where: { id: studentId },
     });
     if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus === "pending_payment") {
+      throw new NotFoundException("Student not found");
+    }
     const [course, term, policy] = await Promise.all([
       input.courseId
         ? this.prisma.course.findUnique({ where: { id: input.courseId } })

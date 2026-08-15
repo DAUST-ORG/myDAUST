@@ -6,11 +6,25 @@ import { type NextRequest, NextResponse } from "next/server";
 const PAYMENT_HOSTS = new Set(["payment.daust.net", "payment.daust.azt.dev"]);
 
 export function middleware(req: NextRequest) {
-  const host = (req.headers.get("host") ?? "").split(":")[0]?.toLowerCase() ?? "";
+  const host =
+    (req.headers.get("host") ?? "").split(":")[0]?.toLowerCase() ?? "";
   if (PAYMENT_HOSTS.has(host)) {
-    if (req.nextUrl.pathname === "/") return NextResponse.rewrite(new URL("/pay-bill", req.url));
+    if (req.nextUrl.pathname === "/")
+      return NextResponse.rewrite(new URL("/pay-bill", req.url));
     // Staff bill-tracking console lives at payment.daust.net/admin.
-    if (req.nextUrl.pathname === "/admin") return NextResponse.rewrite(new URL("/billing-admin", req.url));
+    if (req.nextUrl.pathname === "/admin")
+      return NextResponse.rewrite(new URL("/billing-admin", req.url));
+  }
+
+  // Application-status URLs are bearer capabilities. Keep the token out of browser/
+  // intermediary caches, search indexes and Referer headers sent to payment providers.
+  if (req.nextUrl.pathname.startsWith("/application-status/")) {
+    const response = NextResponse.next();
+    response.headers.set("Cache-Control", "no-store, private, max-age=0");
+    response.headers.set("Pragma", "no-cache");
+    response.headers.set("Referrer-Policy", "no-referrer");
+    response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+    return response;
   }
   return NextResponse.next();
 }

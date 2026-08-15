@@ -24,16 +24,24 @@ export async function assignStandardPackageInTransaction(
   tx: Prisma.TransactionClient,
   studentId: string,
   actorId: string,
+  academicYearId?: string,
 ): Promise<StandardPackageAssignment> {
   const student = await tx.student.findFirst({
-    where: { id: studentId, recordStatus: "active" },
+    where: {
+      id: studentId,
+      recordStatus: { in: ["pending_payment", "active"] },
+    },
     select: { id: true },
   });
-  if (!student) throw new NotFoundException("Active student not found");
+  if (!student) {
+    throw new NotFoundException("Billable student not found");
+  }
 
   const schedule = await tx.feeSchedule.findFirst({
     where: {
-      academicYear: { status: "active" },
+      academicYear: academicYearId
+        ? { id: academicYearId }
+        : { status: "active" },
       status: "approved",
       approvedById: { not: null },
       approvedAt: { not: null },

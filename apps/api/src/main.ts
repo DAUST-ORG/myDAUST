@@ -23,17 +23,22 @@ async function bootstrap() {
   app.useGlobalFilters(new ZodExceptionFilter(app.getHttpAdapter()));
   // Keep legacy `/uploads/<file>` URLs stable while the controller streams the
   // object from persistent storage at `/api/uploads/<file>`.
-  app.use(UPLOADS_ROUTE, (request: Request, response: Response, next: NextFunction) => {
-    if (!["GET", "HEAD"].includes(request.method)) return next();
-    const filename = request.path.replace(/^\/+/, "");
-    if (!filename || filename.includes("/")) return next();
-    return response.redirect(
-      307,
-      `/api/uploads/${encodeURIComponent(filename)}`,
-    );
-  });
+  app.use(
+    UPLOADS_ROUTE,
+    (request: Request, response: Response, next: NextFunction) => {
+      if (!["GET", "HEAD"].includes(request.method)) return next();
+      const filename = request.path.replace(/^\/+/, "");
+      if (!filename || filename.includes("/")) return next();
+      return response.redirect(
+        307,
+        `/api/uploads/${encodeURIComponent(filename)}`,
+      );
+    },
+  );
   app.enableCors({
-    origin: [env.PORTAL_ORIGIN, env.VITRINE_ORIGIN],
+    origin: [
+      ...new Set([env.PORTAL_ORIGIN, env.VITRINE_ORIGIN, env.PAYMENT_ORIGIN]),
+    ],
     credentials: true, // session cookie flows cross-origin (same-site localhost)
     allowedHeaders: [
       "Content-Type",
