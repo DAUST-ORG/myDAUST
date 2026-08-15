@@ -195,35 +195,33 @@ async function main() {
     conflictingEmails.length;
 
   console.log(
-    JSON.stringify(
-      {
-        mode: commit ? "commit" : "dry-run",
-        sourceSha256,
-        sourceRows: plan.sourceRows,
-        distinctGuardianEmails: plan.distinctEmails,
-        eligibleGuardians: eligible.length,
-        newGuardians,
-        existingGuardians,
-        plannedLinks: eligibleLinks,
-        newLinks,
-        skippedGuardians: plan.skippedGuardians + conflictingEmails.length,
-        blockerCount,
-        warningCount: plan.issues.filter(
-          (issue) => issue.severity === "warning",
-        ).length,
-        issues: [
-          ...plan.issues,
-          ...conflictingEmails.map((person) => ({
-            code: "email_owned_by_non_guardian",
-            severity: "blocker",
-            email: person.email,
-            message: `${person.email} already belongs to a ${person.kind} account`,
-          })),
-        ],
-      },
-      null,
-      2,
-    ),
+    JSON.stringify({
+      event: "guardian-import-plan",
+      mode: commit ? "commit" : "dry-run",
+      sourceSha256,
+      sourceRows: plan.sourceRows,
+      distinctGuardianEmails: plan.distinctEmails,
+      eligibleGuardians: eligible.length,
+      newGuardians,
+      existingGuardians,
+      plannedLinks: eligibleLinks,
+      newLinks,
+      skippedGuardians: plan.skippedGuardians + conflictingEmails.length,
+      blockerCount,
+      warningCount: plan.issues.filter((issue) => issue.severity === "warning")
+        .length,
+      issues: [
+        ...plan.issues.map(({ code, severity, rowNumbers }) => ({
+          code,
+          severity,
+          rowNumbers,
+        })),
+        ...conflictingEmails.map(() => ({
+          code: "email_owned_by_non_guardian",
+          severity: "blocker",
+        })),
+      ],
+    }),
   );
 
   if (!commit) {
