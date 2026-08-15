@@ -81,7 +81,7 @@ export interface AdminStudentRosterQuery {
   pageSize: number;
   search?: string;
   program?: string;
-  sort: "name" | "program" | "year" | "gpa" | "balance" | "status";
+  sort: "name" | "program" | "level" | "gpa" | "balance" | "status";
   direction: "asc" | "desc";
 }
 
@@ -94,6 +94,9 @@ const ADMIN_STUDENT_ROSTER_SELECT = {
   studentNo: true,
   photoUrl: true,
   yearLevel: true,
+  programId: true,
+  catalogYearId: true,
+  catalogYear: true,
   cohort: true,
   recordStatus: true,
   person: {
@@ -1765,7 +1768,10 @@ export class AcademicsService {
     };
   }
 
-  private mapAdminStudentRoster(s: AdminStudentRosterRecord) {
+  private mapAdminStudentRoster(
+    s: AdminStudentRosterRecord,
+    academicProgress?: Awaited<ReturnType<AcademicCatalogService["progress"]>>,
+  ) {
     const { gpa, completedCredits } = summarizeTranscriptRows(
       s.transcriptEntries,
     );
@@ -1784,6 +1790,7 @@ export class AcademicsService {
       program: s.program?.code ?? "—",
       programName: s.program?.name ?? null,
       yearLevel: s.yearLevel,
+      academicLevel: academicProgress?.level ?? null,
       cohort: s.cohort,
       gpa,
       completedCredits,
@@ -1851,17 +1858,19 @@ export class AcademicsService {
     if (query.sort === "program") {
       return [{ program: { code: direction } }, { studentNo: "asc" }];
     }
-    return [{ yearLevel: direction }, { studentNo: "asc" }];
+    return [{ studentNo: "asc" }];
   }
 
   /**
-   * Admin: paginated roster for the full Students page. Default name/program/year
-   * sorts are applied in PostgreSQL before pagination. Derived-column sorts remain
-   * exact by sorting the filtered result before taking the requested page.
+   * Admin: paginated roster for the full Students page. Name/program sorts are
+   * applied in PostgreSQL before pagination. Computed level and other derived
+   * columns remain exact by sorting the filtered result before taking the page.
    */
   async adminStudentRoster(query: AdminStudentRosterQuery) {
     const where = this.adminStudentRosterWhere(query);
-    const derivedSort = ["gpa", "balance", "status"].includes(query.sort);
+    const derivedSort = ["level", "gpa", "balance", "status"].includes(
+      query.sort,
+    );
     const recordsPromise = derivedSort
       ? this.prisma.student.findMany({
           where,
@@ -1892,22 +1901,44 @@ export class AcademicsService {
         }),
       ]);
 
-    let items = records.map((student) => this.mapAdminStudentRoster(student));
+    const academicProgress = await this.catalogs.progressMany(
+      records.map((student) => {
+        const summary = summarizeTranscriptRows(student.transcriptEntries);
+        return {
+          programId: student.programId,
+          catalogYearId: student.catalogYearId,
+          catalogYearLabel: student.catalogYear,
+          earnedCredits: summary.completedCredits,
+          inProgressCredits: 0,
+        };
+      }),
+    );
+    let items = records.map((student, index) =>
+      this.mapAdminStudentRoster(student, academicProgress[index]),
+    );
     if (derivedSort) {
       const direction = query.direction === "asc" ? 1 : -1;
       items.sort((left, right) => {
+        if (query.sort === "level") {
+          if (!left.academicLevel && right.academicLevel) return 1;
+          if (left.academicLevel && !right.academicLevel) return -1;
+        }
         const leftValue =
-          query.sort === "gpa"
-            ? left.gpa
-            : query.sort === "balance"
-              ? left.balance
-              : left.status;
+          query.sort === "level"
+            ? (left.academicLevel?.creditCeiling ?? 0)
+            : query.sort === "gpa"
+              ? left.gpa
+              : query.sort === "balance"
+                ? left.balance
+                : left.status;
         const rightValue =
-          query.sort === "gpa"
-            ? right.gpa
-            : query.sort === "balance"
-              ? right.balance
-              : right.status;
+          query.sort === "level"
+            ? (right.academicLevel?.creditCeiling ?? 0)
+            : query.sort === "gpa"
+              ? right.gpa
+              : query.sort === "balance"
+                ? right.balance
+                : right.status;
         const compared =
           typeof leftValue === "number" && typeof rightValue === "number"
             ? leftValue - rightValue
@@ -1966,7 +1997,21 @@ export class AcademicsService {
       select: ADMIN_STUDENT_ROSTER_SELECT,
       orderBy: { studentNo: "asc" },
     });
-    return students.map((student) => this.mapAdminStudentRoster(student));
+    const academicProgress = await this.catalogs.progressMany(
+      students.map((student) => {
+        const summary = summarizeTranscriptRows(student.transcriptEntries);
+        return {
+          programId: student.programId,
+          catalogYearId: student.catalogYearId,
+          catalogYearLabel: student.catalogYear,
+          earnedCredits: summary.completedCredits,
+          inProgressCredits: 0,
+        };
+      }),
+    );
+    return students.map((student, index) =>
+      this.mapAdminStudentRoster(student, academicProgress[index]),
+    );
   }
 
   /** Admin: programs, course catalog + department list (for create forms). */
@@ -2042,7 +2087,19 @@ export class AcademicsService {
       where: { departmentId: program.departmentId },
       orderBy: { code: "asc" },
     });
-    const students = program.students.map((s) => {
+    const programmeProgress = await this.catalogs.progressMany(
+      program.students.map((student) => {
+        const summary = summarizeTranscriptRows(student.transcriptEntries);
+        return {
+          programId: student.programId,
+          catalogYearId: student.catalogYearId,
+          catalogYearLabel: student.catalogYear,
+          earnedCredits: summary.completedCredits,
+          inProgressCredits: 0,
+        };
+      }),
+    );
+    const students = program.students.map((s, index) => {
       const { gpa, completedCredits } = summarizeTranscriptRows(
         s.transcriptEntries,
       );
@@ -2053,6 +2110,7 @@ export class AcademicsService {
         name: `${s.person.firstName} ${s.person.lastName}`,
         photoUrl: s.photoUrl,
         yearLevel: s.yearLevel,
+        academicLevel: programmeProgress[index]?.level ?? null,
         gpa,
         completedCredits,
         balance: summary.balanceXof,

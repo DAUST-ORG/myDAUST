@@ -139,7 +139,7 @@ const AdminStudentRosterQueryInput = z.object({
   }).default(50),
   search: z.string().trim().max(100).optional(),
   program: z.string().trim().max(20).optional(),
-  sort: z.enum(["name", "program", "year", "gpa", "balance", "status"]).default("name"),
+  sort: z.enum(["name", "program", "level", "gpa", "balance", "status"]).default("name"),
   direction: z.enum(["asc", "desc"]).default("asc"),
 });
 

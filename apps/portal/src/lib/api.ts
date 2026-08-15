@@ -884,6 +884,12 @@ export interface AdminStudent {
   program: string;
   programName: string | null;
   yearLevel: number | null;
+  academicLevel: {
+    code: string;
+    name: string;
+    minimumCredits: number;
+    creditCeiling: number;
+  } | null;
   cohort: string | null;
   gpa: number;
   completedCredits: number;
@@ -902,7 +908,7 @@ export interface AdminStudentDirectoryRow {
   recordStatus: "active" | "archived";
 }
 export type AdminStudentRosterSort =
-  "name" | "program" | "year" | "gpa" | "balance" | "status";
+  "name" | "program" | "level" | "gpa" | "balance" | "status";
 export interface AdminStudentRosterPage {
   items: AdminStudent[];
   page: number;
@@ -1006,6 +1012,12 @@ export interface ProgramDetail {
     name: string;
     photoUrl: string | null;
     yearLevel: number | null;
+    academicLevel: {
+      code: string;
+      name: string;
+      minimumCredits: number;
+      creditCeiling: number;
+    } | null;
     gpa: number;
     completedCredits: number;
     balance: number;
