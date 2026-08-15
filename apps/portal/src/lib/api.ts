@@ -3843,6 +3843,12 @@ export interface MyProfile {
   academicProgress: AcademicProgress;
   academicStanding: AcademicStanding;
   standing: string;
+  guardians: {
+    name: string;
+    relation: string | null;
+    email: string;
+    phone: string | null;
+  }[];
   /** Saved PI-SPI payment alias, prefilled on the billing screen. */
   piSpiAlias: string | null;
   personal: Record<string, string | null>;

@@ -1,9 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GraduationCap, HeartPulse, MapPin, User } from "lucide-react";
+import {
+  GraduationCap,
+  HeartPulse,
+  Mail,
+  MapPin,
+  Phone,
+  User,
+  UsersRound,
+} from "lucide-react";
 import { type MyProfile, getMyProfile } from "@/lib/api";
-import { Avatar, Card, PageHeader, Tabs } from "@/components/ui";
+import { Avatar, Badge, Card, PageHeader, Tabs } from "@/components/ui";
 
 type FieldMap = Record<string, string | number | null>;
 
@@ -17,6 +25,7 @@ const TABS = [
   { value: "overview", label: "Overview" },
   { value: "personal", label: "Personal" },
   { value: "academic", label: "Academic" },
+  { value: "guardians", label: "Parents & guardians" },
   { value: "emergency", label: "Emergency & Health" },
 ];
 
@@ -190,6 +199,7 @@ export default function StudentProfile() {
       {tab === "academic" && (
         <DetailCard title="Academic Information" fields={p.academic} />
       )}
+      {tab === "guardians" && <GuardiansCard guardians={p.guardians} />}
       {tab === "emergency" && (
         <DetailCard title="Emergency & Health" fields={p.emergency} />
       )}
@@ -199,6 +209,146 @@ export default function StudentProfile() {
         correction.
       </p>
     </>
+  );
+}
+
+function GuardiansCard({ guardians }: { guardians: MyProfile["guardians"] }) {
+  return (
+    <Card
+      title={
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <UsersRound size={16} color="var(--daust-navy)" />
+          <h3
+            style={{
+              margin: 0,
+              fontFamily: "var(--font-display)",
+              fontSize: 16,
+              fontWeight: 700,
+            }}
+          >
+            Parents & guardians
+          </h3>
+        </div>
+      }
+    >
+      <p className="muted" style={{ margin: "0 0 18px", fontSize: 13.5 }}>
+        These contacts are maintained by the registrar and linked to your
+        student record.
+      </p>
+
+      {guardians.length === 0 ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+            padding: "18px 0 6px",
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              display: "grid",
+              placeItems: "center",
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              background: "var(--surface-2)",
+              color: "var(--fg3)",
+              flexShrink: 0,
+            }}
+          >
+            <UsersRound size={17} />
+          </span>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>
+              No parent or guardian is linked
+            </div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 3 }}>
+              Contact the registrar if someone should be added to your record.
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div>
+          {guardians.map((guardian, index) => (
+            <article
+              key={`${guardian.email}-${index}`}
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 20,
+                alignItems: "center",
+                padding: "16px 0",
+                borderTop: index === 0 ? "none" : "1px solid var(--border)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  minWidth: 0,
+                  flex: "1 1 220px",
+                }}
+              >
+                <Avatar name={guardian.name} size={42} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 750, fontSize: 14.5 }}>
+                    {guardian.name}
+                  </div>
+                  <div style={{ marginTop: 4 }}>
+                    <Badge tone="neutral">
+                      {guardian.relation?.trim() || "Parent or guardian"}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "9px 22px",
+                  fontSize: 13.5,
+                  flex: "1 1 280px",
+                }}
+              >
+                <a
+                  href={`mailto:${guardian.email}`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 7,
+                    color: "var(--fg1)",
+                    textDecoration: "none",
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  <Mail size={14} color="var(--daust-steel)" />
+                  {guardian.email}
+                </a>
+                {guardian.phone && (
+                  <a
+                    href={`tel:${guardian.phone}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 7,
+                      color: "var(--fg1)",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <Phone size={14} color="var(--daust-steel)" />
+                    {guardian.phone}
+                  </a>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 

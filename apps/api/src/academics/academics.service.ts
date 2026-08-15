@@ -859,7 +859,24 @@ export class AcademicsService {
   async myProfile(studentId: string) {
     const s = await this.prisma.student.findUnique({
       where: { id: studentId },
-      include: { person: true, program: true },
+      include: {
+        person: true,
+        program: true,
+        guardians: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            relation: true,
+            guardian: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+                guardianProfile: { select: { phone: true } },
+              },
+            },
+          },
+        },
+      },
     });
     if (!s) throw new NotFoundException("Student not found");
 
@@ -877,6 +894,12 @@ export class AcademicsService {
       academicProgress: transcript.academicProgress,
       standing: transcript.academicStanding.label,
       academicStanding: transcript.academicStanding,
+      guardians: s.guardians.map((link) => ({
+        name: `${link.guardian.firstName} ${link.guardian.lastName}`.trim(),
+        relation: link.relation,
+        email: link.guardian.email,
+        phone: link.guardian.guardianProfile?.phone ?? null,
+      })),
       // Saved instant-payment alias, so the billing screen can prefill it.
       piSpiAlias: s.piSpiAlias,
       personal: {
