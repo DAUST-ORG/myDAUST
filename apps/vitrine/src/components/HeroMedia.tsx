@@ -9,21 +9,73 @@ import {
 import { assetUrl } from "@/lib/api";
 
 const PAUSED_KEY = "daust-hero-video-paused";
-const YOUTUBE_ORIGIN = "https://www.youtube-nocookie.com";
 
-function startYoutubePlayer(frame: HTMLIFrameElement | null) {
-  const player = frame?.contentWindow;
-  if (!player) return;
-  player.postMessage(
-    JSON.stringify({ event: "listening", id: "daust-hero-youtube" }),
-    YOUTUBE_ORIGIN,
-  );
-  for (const func of ["mute", "playVideo"]) {
-    player.postMessage(
-      JSON.stringify({ event: "command", func, args: [] }),
-      YOUTUBE_ORIGIN,
-    );
+type YouTubePlayer = {
+  destroy: () => void;
+  mute: () => void;
+  playVideo: () => void;
+};
+
+type YouTubeApi = {
+  Player: new (
+    element: HTMLIFrameElement,
+    options: {
+      events: {
+        onError: () => void;
+        onReady: (event: { target: YouTubePlayer }) => void;
+        onStateChange: (event: { data: number }) => void;
+      };
+    },
+  ) => YouTubePlayer;
+  PlayerState: { PLAYING: number };
+};
+
+declare global {
+  interface Window {
+    YT?: YouTubeApi;
+    onYouTubeIframeAPIReady?: () => void;
   }
+}
+
+let youtubeApiPromise: Promise<YouTubeApi> | null = null;
+
+function loadYouTubeApi(): Promise<YouTubeApi> {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (youtubeApiPromise) return youtubeApiPromise;
+
+  youtubeApiPromise = new Promise<YouTubeApi>((resolve, reject) => {
+    const previousReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previousReady?.();
+      if (window.YT?.Player) resolve(window.YT);
+      else reject(new Error("YouTube player API did not initialize."));
+    };
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[src="https://www.youtube.com/iframe_api"]',
+    );
+    if (existing) {
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("YouTube player API failed to load.")),
+        {
+          once: true,
+        },
+      );
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://www.youtube.com/iframe_api";
+    script.async = true;
+    script.addEventListener(
+      "error",
+      () => reject(new Error("YouTube player API failed to load.")),
+      {
+        once: true,
+      },
+    );
+    document.head.appendChild(script);
+  });
+  return youtubeApiPromise;
 }
 
 export function HeroMedia({
@@ -41,11 +93,13 @@ export function HeroMedia({
   const [failed, setFailed] = useState(false);
   const [paused, setPaused] = useState(true);
   const [providerPlaying, setProviderPlaying] = useState(false);
+  const [providerOrigin, setProviderOrigin] = useState<string>();
   const mediaKey = JSON.stringify(media);
 
   useEffect(() => {
     setFailed(false);
     setProviderPlaying(false);
+    setProviderOrigin(window.location.origin);
     const connection = (
       navigator as Navigator & { connection?: { saveData?: boolean } }
     ).connection;
@@ -73,30 +127,32 @@ export function HeroMedia({
   useEffect(() => {
     if (media.kind !== "youtube" || !eligible || failed || paused) return;
 
-    const onMessage = (event: MessageEvent) => {
-      if (
-        event.source !== iframeRef.current?.contentWindow ||
-        (event.origin !== YOUTUBE_ORIGIN &&
-          event.origin !== "https://www.youtube.com")
-      ) {
-        return;
-      }
-      let data: { event?: string; info?: number } | null = null;
-      try {
-        data =
-          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-      } catch {
-        return;
-      }
-      if (data?.event === "onReady") startYoutubePlayer(iframeRef.current);
-      if (data?.event === "onStateChange" && data.info === 1) {
-        setProviderPlaying(true);
-      }
-    };
+    let active = true;
+    let player: YouTubePlayer | null = null;
+    void loadYouTubeApi()
+      .then((api) => {
+        if (!active || !iframeRef.current) return;
+        player = new api.Player(iframeRef.current, {
+          events: {
+            onReady: (event) => {
+              event.target.mute();
+              event.target.playVideo();
+            },
+            onStateChange: (event) => {
+              if (event.data === api.PlayerState.PLAYING) {
+                setProviderPlaying(true);
+              }
+            },
+            onError: () => setFailed(true),
+          },
+        });
+      })
+      .catch(() => setFailed(true));
 
-    window.addEventListener("message", onMessage);
-    startYoutubePlayer(iframeRef.current);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      active = false;
+      player?.destroy();
+    };
   }, [eligible, failed, media.kind, paused]);
 
   const toggle = () => {
@@ -109,7 +165,7 @@ export function HeroMedia({
     media.kind === "uploaded" || media.kind === "direct"
       ? assetUrl(media.url)
       : undefined;
-  const embed = heroMediaEmbedUrl(media);
+  const embed = heroMediaEmbedUrl(media, providerOrigin);
 
   return (
     <>
@@ -159,9 +215,7 @@ export function HeroMedia({
           onLoad={() => {
             if (media.kind !== "youtube") {
               setProviderPlaying(true);
-              return;
             }
-            startYoutubePlayer(iframeRef.current);
           }}
           tabIndex={-1}
           aria-hidden="true"
