@@ -1,4 +1,5 @@
 import type {
+  AcademicStanding,
   AcademicProgress,
   InProgressCourse,
   TranscriptSemester,
@@ -74,6 +75,7 @@ export function buildTranscriptView(
   rows: TranscriptLedgerRow[],
   extras?: {
     academicProgress?: AcademicProgress;
+    academicStanding?: AcademicStanding;
     inProgressCourses?: InProgressCourse[];
   },
 ): TranscriptView {
@@ -118,6 +120,14 @@ export function buildTranscriptView(
       level: null,
       maximumLevel: null,
       catalog: null,
+    },
+    academicStanding: extras?.academicStanding ?? {
+      code: "not_yet_graded",
+      label: "Not yet graded",
+      tone: "neutral",
+      source: "computed",
+      catalog: null,
+      override: null,
     },
     inProgressCourses: extras?.inProgressCourses ?? [],
     semesters,

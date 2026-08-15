@@ -222,6 +222,15 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
           detail={view?.academicProgress.level?.name ?? "Earned-credit level"}
         />
         <SummaryMetric
+          label="Academic standing"
+          value={view?.academicStanding.label ?? "—"}
+          detail={
+            view?.academicStanding.source === "override"
+              ? "Manually assigned"
+              : "Approved GPA policy"
+          }
+        />
+        <SummaryMetric
           label="In progress"
           value={view ? String(view.academicProgress.inProgressCredits) : "—"}
           detail="Not counted toward level"
@@ -407,7 +416,7 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
         }
         .transcript-summary {
           display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
           background: var(--transcript-navy);
           color: #f7f9fc;
         }
@@ -444,10 +453,9 @@ export function TranscriptManager({ studentId }: { studentId: string }) {
         }
         .transcript-progress-table > div {
           display: grid;
-          grid-template-columns: 82px minmax(150px, 1fr) minmax(
-              150px,
-              auto
-            ) auto;
+          grid-template-columns:
+            82px minmax(150px, 1fr) minmax(150px, auto)
+            auto;
           align-items: center;
           gap: 12px;
           padding: 10px 14px;

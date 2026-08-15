@@ -410,6 +410,9 @@ model Person {
   feeSchedulesApproved       FeeSchedule[]             @relation("FeeScheduleApprover")
   academicCatalogsCreated    AcademicCatalogRevision[] @relation("AcademicCatalogCreator")
   academicCatalogsApproved   AcademicCatalogRevision[] @relation("AcademicCatalogApprover")
+  standingOverridesCreated   StudentStandingOverride[] @relation("StandingOverrideCreator")
+  standingOverridesUpdated   StudentStandingOverride[] @relation("StandingOverrideUpdater")
+  standingOverridesCleared   StudentStandingOverride[] @relation("StandingOverrideClearer")
   approvalRequestsCreated    ApprovalRequest[]         @relation("ApprovalRequester")
   approvalRequestsReviewed   ApprovalRequest[]         @relation("ApprovalReviewer")
   approvalEvents             ApprovalEvent[]           @relation("ApprovalEventActor")
@@ -424,12 +427,12 @@ model Person {
 }
 
 model Student {
-  id                   String                @id @default(uuid())
-  personId             String                @unique
-  person               Person                @relation(fields: [personId], references: [id])
-  studentNo            String                @unique
+  id                   String                    @id @default(uuid())
+  personId             String                    @unique
+  person               Person                    @relation(fields: [personId], references: [id])
+  studentNo            String                    @unique
   programId            String?
-  program              Program?              @relation(fields: [programId], references: [id])
+  program              Program?                  @relation(fields: [programId], references: [id])
   // Date of birth (date only). Second factor for the public bill-payment lookup.
   dateOfBirth          DateTime?
   // Roster photo, resolved to an absolute URL (served from the vitrine bucket).
@@ -469,11 +472,11 @@ model Student {
   enrollmentStatus     String? // full-time | part-time | leave
   catalogYear          String? // requirement set the student is audited against
   catalogYearId        String?
-  catalogAcademicYear  AcademicYear?         @relation("StudentCatalogYear", fields: [catalogYearId], references: [id], onDelete: SetNull)
+  catalogAcademicYear  AcademicYear?             @relation("StudentCatalogYear", fields: [catalogYearId], references: [id], onDelete: SetNull)
   standing             String? // Good Standing | Probation | ...
   // Lifecycle of the SIS record itself. Archiving hides a student from active
   // rosters without deleting their academic or financial history.
-  recordStatus         StudentRecordStatus   @default(active)
+  recordStatus         StudentRecordStatus       @default(active)
   holds                StudentHold[]
   alerts               StudentAlert[]
   watchers             StaffWatch[]
@@ -484,6 +487,7 @@ model Student {
   piSpiRequests        PiSpiRequest[]
   enrollments          Enrollment[]
   transcriptEntries    TranscriptEntry[]
+  standingOverrides    StudentStandingOverride[]
   gradeSubmissionItems GradeSubmissionItem[]
   mealPlan             MealPlan?
   diningOrders         DiningOrder[]
@@ -491,7 +495,7 @@ model Student {
   housing              HousingAssignment?
   roommateProfile      RoommateProfile?
   documents            StudentDocument[]
-  createdAt            DateTime              @default(now())
+  createdAt            DateTime                  @default(now())
 
   @@index([recordStatus])
   @@index([catalogYearId])
@@ -1697,6 +1701,8 @@ model AcademicCatalogRevision {
   startsOn              DateTime?
   endsOn                DateTime?
   defaultLevels         Json
+  defaultStandingRules  Json                  @default("[{\"code\":\"academic_probation\",\"label\":\"Academic Probation\",\"minimumGpa\":0,\"order\":0,\"tone\":\"warning\"},{\"code\":\"good_standing\",\"label\":\"Good Standing\",\"minimumGpa\":2,\"order\":1,\"tone\":\"success\"},{\"code\":\"deans_list\",\"label\":\"Dean's List\",\"minimumGpa\":3.7,\"order\":2,\"tone\":\"honor\"}]")
+  notYetGradedStanding  Json                  @default("{\"code\":\"not_yet_graded\",\"label\":\"Not yet graded\",\"tone\":\"neutral\"}")
   programConfigurations Json
   reason                String?
   activateYear          Boolean               @default(false)
@@ -1713,6 +1719,31 @@ model AcademicCatalogRevision {
   @@index([academicYearId, status, revision])
   @@index([createdById])
   @@index([approvedById])
+}
+
+/// A reasoned exception to the approved catalog standing policy. Computed
+/// standing remains the default and resumes after clearing or expiry.
+model StudentStandingOverride {
+  id           String    @id @default(uuid())
+  studentId    String
+  student      Student   @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  standingCode String
+  reason       String
+  expiresAt    DateTime?
+  createdById  String?
+  createdBy    Person?   @relation("StandingOverrideCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById  String?
+  updatedBy    Person?   @relation("StandingOverrideUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  clearedById  String?
+  clearedBy    Person?   @relation("StandingOverrideClearer", fields: [clearedById], references: [id], onDelete: SetNull)
+  clearedAt    DateTime?
+  clearReason  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([studentId, clearedAt, expiresAt])
+  @@index([createdById])
+  @@index([clearedById])
 }
 
 model CalendarEvent {

@@ -184,7 +184,7 @@ export default function StudentDashboard() {
             value={summary ? summary.gpa.toFixed(2) : "—"}
             sub={
               summary
-                ? `${summary.completedCredits}${summary.academicProgress.requiredCredits ? ` / ${summary.academicProgress.requiredCredits}` : ""} credits earned · ${summary.academicProgress.level ? `Level ${summary.academicProgress.level.code}` : "level pending"}`
+                ? `${summary.academicStanding.label} · ${summary.completedCredits}${summary.academicProgress.requiredCredits ? ` / ${summary.academicProgress.requiredCredits}` : ""} credits earned · ${summary.academicProgress.level ? `Level ${summary.academicProgress.level.code}` : "level pending"}`
                 : "—"
             }
             tone="var(--daust-navy)"

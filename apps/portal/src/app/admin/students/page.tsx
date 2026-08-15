@@ -197,7 +197,7 @@ export default function AdminStudentsPage() {
                 <SortTh label="Level" sortKey="level" sort={sort} onSort={changeSort} />
                 <SortTh label="GPA" sortKey="gpa" sort={sort} onSort={changeSort} />
                 <SortTh label="Balance" sortKey="balance" sort={sort} onSort={changeSort} align="right" />
-                <SortTh label="Status" sortKey="status" sort={sort} onSort={changeSort} />
+                <SortTh label="Standing" sortKey="status" sort={sort} onSort={changeSort} />
                 <th style={{ textAlign: "left" }}>Login</th>
                 <th />
               </tr>
@@ -221,7 +221,28 @@ export default function AdminStudentsPage() {
                   <td>{s.academicLevel ? <Badge tone="neutral">{s.academicLevel.code}</Badge> : "—"}</td>
                   <td><span style={{ fontWeight: 700, color: gpaColor(s.gpa) }}>{s.gpa > 0 ? s.gpa.toFixed(2) : "—"}</span></td>
                   <StudentBalance student={s} />
-                  <td><Badge tone={STATUS_TONE[s.status] ?? "neutral"}>{STATUS_LABEL[s.status] ?? s.status}</Badge></td>
+                  <td>
+                    {s.status === "archived" ? (
+                      <Badge tone="neutral">Archived</Badge>
+                    ) : s.academicStanding ? (
+                      <Badge
+                        tone={
+                          s.academicStanding.tone === "warning"
+                            ? "warning"
+                            : s.academicStanding.tone === "success"
+                              ? "success"
+                              : s.academicStanding.tone === "honor"
+                                ? "navy"
+                                : "neutral"
+                        }
+                      >
+                        {s.academicStanding.label}
+                        {s.academicStanding.source === "override" ? " · manual" : ""}
+                      </Badge>
+                    ) : (
+                      <Badge tone={STATUS_TONE[s.status] ?? "neutral"}>{STATUS_LABEL[s.status] ?? s.status}</Badge>
+                    )}
+                  </td>
                   <td onClick={(e) => e.stopPropagation()}>
                     {!s.hasLogin ? (
                       <button className="link-btn" onClick={() => provisionOne(s.id)} disabled={provisioning !== null} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--daust-navy)", background: "none", border: "none", cursor: "pointer" }}>

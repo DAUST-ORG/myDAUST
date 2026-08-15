@@ -5,7 +5,10 @@ import type {
   AcademicCatalogDraft,
   AcademicCatalogLevel,
   AcademicCatalogProgram,
+  AcademicNotYetGradedStanding,
   AcademicProgress,
+  AcademicStanding,
+  AcademicStandingRule,
   InstallmentDueState,
   InstallmentPaymentProgress,
   PaymentMethodsConfig,
@@ -19,7 +22,10 @@ export type {
   AcademicCatalogDraft,
   AcademicCatalogLevel,
   AcademicCatalogProgram,
+  AcademicNotYetGradedStanding,
   AcademicProgress,
+  AcademicStanding,
+  AcademicStandingRule,
   AccountStanding,
   InstallmentDueState,
   InstallmentPaymentProgress,
@@ -116,6 +122,17 @@ export async function uploadFile(file: File): Promise<UploadResult> {
   const form = new FormData();
   form.append("file", file);
   const res = await fetch(`${API_URL}/api/uploads`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!res.ok) throw await toApiError(res);
+  return res.json() as Promise<UploadResult>;
+}
+export async function uploadSiteVideo(file: File): Promise<UploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}/api/uploads/site-video`, {
     method: "POST",
     credentials: "include",
     body: form,
@@ -854,6 +871,7 @@ export interface MySummary {
   gpa: number;
   completedCredits: number;
   academicProgress: AcademicProgress;
+  academicStanding: AcademicStanding;
 }
 export interface GradeRow {
   courseCode: string;
@@ -890,6 +908,7 @@ export interface AdminStudent {
     minimumCredits: number;
     creditCeiling: number;
   } | null;
+  academicStanding: AcademicStanding | null;
   cohort: string | null;
   gpa: number;
   completedCredits: number;
@@ -1018,6 +1037,7 @@ export interface ProgramDetail {
       minimumCredits: number;
       creditCeiling: number;
     } | null;
+    academicStanding: AcademicStanding | null;
     gpa: number;
     completedCredits: number;
     balance: number;
@@ -1169,6 +1189,12 @@ export interface AdminStudentDetail {
   completedCredits: number;
   currentTermCredits: number;
   academicProgress: AcademicProgress;
+  academicStanding: AcademicStanding;
+  standingPolicy: {
+    rules: AcademicStandingRule[];
+    notYetGraded: AcademicNotYetGradedStanding;
+    catalog: AcademicProgress["catalog"];
+  };
   standing: string;
   status: string;
   balance: number;
@@ -1368,6 +1394,19 @@ export const updateStudent = (id: string, input: UpdateStudentInput) =>
   request<AdminStudentDetail>(`/academics/admin/students/${id}`, {
     method: "PATCH",
     body: JSON.stringify(input),
+  });
+export const setStudentStandingOverride = (
+  id: string,
+  input: { standingCode: string; reason: string; expiresAt?: string | null },
+) =>
+  request(`/academics/admin/students/${id}/standing-override`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+export const clearStudentStandingOverride = (id: string, reason: string) =>
+  request(`/academics/admin/students/${id}/standing-override`, {
+    method: "DELETE",
+    body: JSON.stringify({ reason }),
   });
 export const adminDropEnrollment = (enrollmentId: string) =>
   request(`/academics/admin/enrollments/${enrollmentId}/drop`, {
@@ -2599,6 +2638,21 @@ export const listDirectorPaymentVerifications = () =>
   request<DirectorPaymentVerification[]>("/director/payment-verifications");
 export const getDirectorUnauditedPaymentCount = () =>
   request<{ count: number }>("/director/payment-verifications/unaudited-count");
+export interface DirectorStandingOverride {
+  id: string;
+  studentId: string;
+  studentNo: string;
+  studentName: string;
+  program: { code: string; name: string } | null;
+  standingCode: string;
+  reason: string;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: { firstName: string; lastName: string; email: string } | null;
+}
+export const getDirectorStandingOverrides = () =>
+  request<DirectorStandingOverride[]>("/academics/director/standing-overrides");
 export const auditDirectorPayment = (
   id: string,
   outcome: "reviewed" | "flagged",
@@ -3761,6 +3815,7 @@ export interface MyProfile {
   gpa: number;
   completedCredits: number;
   academicProgress: AcademicProgress;
+  academicStanding: AcademicStanding;
   standing: string;
   /** Saved PI-SPI payment alias, prefilled on the billing screen. */
   piSpiAlias: string | null;
@@ -3836,6 +3891,8 @@ export interface AcademicCatalogRevisionView {
   startsOn: string | null;
   endsOn: string | null;
   defaultLevels: AcademicCatalogLevel[];
+  defaultStandingRules: AcademicStandingRule[];
+  notYetGradedStanding: AcademicNotYetGradedStanding;
   programs: AcademicCatalogProgram[];
   reason: string | null;
   activateYear: boolean;

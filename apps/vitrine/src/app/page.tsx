@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Icon } from "@/components/icons";
 import { Hover } from "@/components/Hover";
 import { ImageSlot } from "@/components/ImageSlot";
+import { HeroMedia } from "@/components/HeroMedia";
 import { AiPanel } from "@/components/AiPanel";
 import { ApplyModal } from "@/components/ApplyModal";
 import { CookieBanner } from "@/components/CookieBanner";
@@ -288,7 +289,13 @@ export default function Site() {
     <>
       {/* hero */}
       <section style={{ position: "relative", background: "var(--daust-navy-deep)", overflow: "hidden", minHeight: "84vh", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
-        <div style={{ position: "absolute", inset: 0 }}><ImageSlot label={fr ? "Campus / étudiants" : "Campus / students hero"} src={IMG.hero} /></div>
+        <div style={{ position: "absolute", inset: 0 }}>
+          <HeroMedia
+            label={fr ? "Campus / étudiants" : "Campus / students hero"}
+            poster={IMG.hero}
+            media={overrides?.heroMedia ?? { kind: "image" }}
+          />
+        </div>
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg,rgba(10,26,48,.35) 0%,rgba(10,26,48,.15) 40%,rgba(10,26,48,.85) 100%)", pointerEvents: "none" }} />
         <div style={{ position: "relative", ...WRAP, width: "100%", padding: "0 40px 72px" }}>
           <div style={{ maxWidth: 1000 }}>

@@ -10,12 +10,16 @@ import type { AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { FinanceService } from "../finance/finance.service.js";
-import { standingLabel } from "../academics/academics.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
 import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
 import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
 import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
+import {
+  DEFAULT_ACADEMIC_STANDING_RULES,
+  DEFAULT_NOT_YET_GRADED_STANDING,
+  deriveAcademicStanding,
+} from "@mydaust/shared";
 
 /** Password-setup invites are short-lived; the registrar can always re-issue one. */
 const INVITE_TTL_HOURS = 72;
@@ -784,8 +788,16 @@ export class GuardiansService {
 
     return Promise.all(
       links.map(async ({ student, relation }) => {
+        const hasTransaction =
+          typeof (this.prisma as unknown as { $transaction?: unknown })
+            .$transaction === "function";
+        const transcriptView = hasTransaction
+          ? await this.transcripts.view(student.id)
+          : null;
         const transcript = summarizeTranscriptRows(student.transcriptEntries);
-        const gpa = transcript.attemptedCredits === 0 ? null : transcript.gpa;
+        const gpa =
+          transcriptView?.totals.gpa ??
+          (transcript.attemptedCredits === 0 ? null : transcript.gpa);
         const summary = deriveApiAccountPosition(student.invoices).summary;
         const inProgressCredits = student.enrollments
           .filter((enrollment) => enrollment.status === "enrolled")
@@ -793,13 +805,26 @@ export class GuardiansService {
             (total, enrollment) => total + enrollment.section.course.credits,
             0,
           );
-        const academicProgress = await this.catalogs.progress({
-          programId: student.programId,
-          catalogYearId: student.catalogYearId,
-          catalogYearLabel: student.catalogYear,
-          earnedCredits: transcript.completedCredits,
-          inProgressCredits,
-        });
+        const academicProgress =
+          transcriptView?.academicProgress ??
+          (await this.catalogs.progress({
+            programId: student.programId,
+            catalogYearId: student.catalogYearId,
+            catalogYearLabel: student.catalogYear,
+            earnedCredits: transcript.completedCredits,
+            inProgressCredits,
+          }));
+        const academicStanding = transcriptView?.academicStanding ?? {
+          ...deriveAcademicStanding(
+            [...DEFAULT_ACADEMIC_STANDING_RULES],
+            DEFAULT_NOT_YET_GRADED_STANDING,
+            gpa,
+            transcript.attemptedCredits > 0,
+          ),
+          source: "computed" as const,
+          catalog: academicProgress.catalog,
+          override: null,
+        };
         return {
           studentId: student.id,
           studentNo: student.studentNo,
@@ -810,9 +835,8 @@ export class GuardiansService {
           relation,
           gpa,
           completedCredits: transcript.completedCredits,
-          standing:
-            student.standing ??
-            (gpa === null ? "Not yet graded" : standingLabel(gpa)),
+          standing: academicStanding.label,
+          academicStanding,
           balance: summary.balanceXof,
           summary,
           requiredCredits: academicProgress.requiredCredits,

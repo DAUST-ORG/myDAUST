@@ -11,6 +11,61 @@ export const AcademicCatalogRequirementInput = z.object({
   requiredCredits: z.number().int().min(1).max(1000),
 });
 
+export const AcademicStandingToneInput = z.enum([
+  "neutral",
+  "success",
+  "honor",
+  "warning",
+]);
+
+export const AcademicStandingRuleInput = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^[a-z][a-z0-9_]*$/)
+    .max(40),
+  label: z.string().trim().min(1).max(80),
+  minimumGpa: z.number().min(0).max(4),
+  order: z.number().int().min(0).max(100),
+  tone: AcademicStandingToneInput,
+});
+
+export const DEFAULT_ACADEMIC_STANDING_RULES = [
+  {
+    code: "academic_probation",
+    label: "Academic Probation",
+    minimumGpa: 0,
+    order: 0,
+    tone: "warning",
+  },
+  {
+    code: "good_standing",
+    label: "Good Standing",
+    minimumGpa: 2,
+    order: 1,
+    tone: "success",
+  },
+  {
+    code: "deans_list",
+    label: "Dean's List",
+    minimumGpa: 3.7,
+    order: 2,
+    tone: "honor",
+  },
+] as const;
+
+export const DEFAULT_NOT_YET_GRADED_STANDING = {
+  code: "not_yet_graded",
+  label: "Not yet graded",
+  tone: "neutral",
+} as const;
+
+export const AcademicNotYetGradedStandingInput = z.object({
+  code: z.literal("not_yet_graded").default("not_yet_graded"),
+  label: z.string().trim().min(1).max(80),
+  tone: AcademicStandingToneInput,
+});
+
 export const AcademicCatalogProgramInput = z.object({
   programId: z.string().uuid(),
   programCode: z.string().trim().min(1).max(40),
@@ -18,6 +73,8 @@ export const AcademicCatalogProgramInput = z.object({
   progressionMode: z.enum(["default", "custom"]),
   customLevels: z.array(AcademicCatalogLevelInput).max(40),
   requirements: z.array(AcademicCatalogRequirementInput).max(80),
+  standingMode: z.enum(["default", "custom"]).default("default"),
+  customStandingRules: z.array(AcademicStandingRuleInput).max(20).default([]),
 });
 
 function validateLevels(
@@ -48,12 +105,71 @@ function validateLevels(
   });
 }
 
+function validateStandingRules(
+  rules: AcademicStandingRule[],
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+) {
+  if (rules.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "At least one academic-standing rule is required",
+      path,
+    });
+    return;
+  }
+  const codes = new Set<string>();
+  const orders = new Set<number>();
+  const thresholds = new Set<number>();
+  for (const [index, rule] of rules.entries()) {
+    if (codes.has(rule.code)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Standing codes must be unique",
+        path: [...path, index, "code"],
+      });
+    }
+    if (orders.has(rule.order)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Standing order values must be unique",
+        path: [...path, index, "order"],
+      });
+    }
+    if (thresholds.has(rule.minimumGpa)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Standing GPA thresholds must be unique",
+        path: [...path, index, "minimumGpa"],
+      });
+    }
+    codes.add(rule.code);
+    orders.add(rule.order);
+    thresholds.add(rule.minimumGpa);
+  }
+  if (!rules.some((rule) => rule.minimumGpa === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Standing rules must cover GPA 0.00",
+      path,
+    });
+  }
+}
+
 export const AcademicCatalogDraftInput = z
   .object({
     yearLabel: z.string().trim().min(4).max(40),
     startsOn: z.string().date().nullable(),
     endsOn: z.string().date().nullable(),
     defaultLevels: z.array(AcademicCatalogLevelInput).min(1).max(40),
+    defaultStandingRules: z
+      .array(AcademicStandingRuleInput)
+      .min(1)
+      .max(20)
+      .default([...DEFAULT_ACADEMIC_STANDING_RULES]),
+    notYetGradedStanding: AcademicNotYetGradedStandingInput.default(
+      DEFAULT_NOT_YET_GRADED_STANDING,
+    ),
     programs: z.array(AcademicCatalogProgramInput).max(500),
     reason: z.string().trim().min(1).max(1000),
     activateYear: z.boolean().default(false),
@@ -67,6 +183,9 @@ export const AcademicCatalogDraftInput = z
       });
     }
     validateLevels(value.defaultLevels, ctx, ["defaultLevels"]);
+    validateStandingRules(value.defaultStandingRules, ctx, [
+      "defaultStandingRules",
+    ]);
     const programIds = new Set<string>();
     value.programs.forEach((program, index) => {
       if (programIds.has(program.programId)) {
@@ -109,6 +228,13 @@ export const AcademicCatalogDraftInput = z
           "customLevels",
         ]);
       }
+      if (program.standingMode === "custom") {
+        validateStandingRules(program.customStandingRules, ctx, [
+          "programs",
+          index,
+          "customStandingRules",
+        ]);
+      }
       const total = program.requirements.reduce(
         (sum, requirement) => sum + requirement.requiredCredits,
         0,
@@ -135,6 +261,43 @@ export type AcademicCatalogProgram = z.infer<
   typeof AcademicCatalogProgramInput
 >;
 export type AcademicCatalogDraft = z.infer<typeof AcademicCatalogDraftInput>;
+export type AcademicStandingTone = z.infer<typeof AcademicStandingToneInput>;
+export type AcademicStandingRule = z.infer<typeof AcademicStandingRuleInput>;
+export type AcademicNotYetGradedStanding = z.infer<
+  typeof AcademicNotYetGradedStandingInput
+>;
+
+export interface AcademicStanding {
+  code: string;
+  label: string;
+  tone: AcademicStandingTone;
+  source: "computed" | "override";
+  catalog: AcademicProgress["catalog"];
+  override: {
+    id: string;
+    reason: string;
+    expiresAt: string | null;
+    createdAt: string;
+    createdBy: { name: string; email: string } | null;
+  } | null;
+}
+
+export function deriveAcademicStanding(
+  rules: AcademicStandingRule[],
+  notYetGraded: AcademicNotYetGradedStanding,
+  gpa: number | null,
+  hasGpaCredits: boolean,
+): Pick<AcademicStanding, "code" | "label" | "tone"> {
+  if (!hasGpaCredits || gpa === null) return notYetGraded;
+  const sorted = [...rules].sort(
+    (a, b) => a.minimumGpa - b.minimumGpa || a.order - b.order,
+  );
+  return (
+    [...sorted].reverse().find((rule) => gpa >= rule.minimumGpa) ??
+    sorted[0] ??
+    DEFAULT_NOT_YET_GRADED_STANDING
+  );
+}
 
 export interface AcademicLevelBand extends AcademicCatalogLevel {
   minimumCredits: number;

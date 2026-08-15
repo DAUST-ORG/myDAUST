@@ -31,9 +31,11 @@ import {
   getAdminStudentDetail,
   getMe,
   getStudentAccount,
+  setStudentStandingOverride,
+  clearStudentStandingOverride,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
-import { Avatar, Tabs } from "@/components/ui";
+import { Avatar, Field, Modal, Tabs } from "@/components/ui";
 import {
   AccountStandingBadge,
   AccountStatusLine,
@@ -70,6 +72,12 @@ export default function AdminStudentDetailPage() {
   const [editing, setEditing] = useState<EditSection | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [canManageTranscript, setCanManageTranscript] = useState(false);
+  const [standingOpen, setStandingOpen] = useState(false);
+  const [standingCode, setStandingCode] = useState("");
+  const [standingReason, setStandingReason] = useState("");
+  const [standingExpiry, setStandingExpiry] = useState("");
+  const [standingBusy, setStandingBusy] = useState(false);
+  const [standingError, setStandingError] = useState<string | null>(null);
   const pencil = (section: EditSection) => (
     <button
       onClick={() => setEditing(section)}
@@ -102,6 +110,54 @@ export default function AdminStudentDetailPage() {
       .then(setActivity)
       .catch(() => {});
   }, [id]);
+
+  const saveStandingOverride = async () => {
+    if (!standingCode || !standingReason.trim()) return;
+    setStandingBusy(true);
+    setStandingError(null);
+    try {
+      await setStudentStandingOverride(id, {
+        standingCode,
+        reason: standingReason,
+        expiresAt: standingExpiry
+          ? new Date(`${standingExpiry}T23:59:59.000Z`).toISOString()
+          : null,
+      });
+      setStandingOpen(false);
+      setStandingReason("");
+      setStandingExpiry("");
+      load();
+    } catch (error) {
+      setStandingError(
+        error instanceof Error
+          ? error.message
+          : "Could not save the exception.",
+      );
+    } finally {
+      setStandingBusy(false);
+    }
+  };
+
+  const clearStanding = async () => {
+    if (!standingReason.trim()) return;
+    setStandingBusy(true);
+    setStandingError(null);
+    try {
+      await clearStudentStandingOverride(id, standingReason);
+      setStandingOpen(false);
+      setStandingReason("");
+      setStandingExpiry("");
+      load();
+    } catch (error) {
+      setStandingError(
+        error instanceof Error
+          ? error.message
+          : "Could not clear the exception.",
+      );
+    } finally {
+      setStandingBusy(false);
+    }
+  };
   useEffect(() => load(), [load]);
   useEffect(() => {
     getMe()
@@ -278,12 +334,11 @@ export default function AdminStudentDetailPage() {
         <ProfileStat
           label="Standing"
           icon={CheckCircle2}
-          value={
-            s.standing === "Academic Probation"
-              ? "Probation"
-              : s.standing === "Dean's List"
-                ? "Dean's List"
-                : "Good"
+          value={s.academicStanding.label}
+          sub={
+            s.academicStanding.source === "override"
+              ? "Manually assigned"
+              : "Computed from approved policy"
           }
         />
       </div>
@@ -384,13 +439,36 @@ export default function AdminStudentDetailPage() {
           <ProfileCard
             title="Standing"
             icon={Award}
-            action={pencil("enrollment")}
+            action={
+              <button
+                onClick={() => {
+                  setStandingCode(s.academicStanding.code);
+                  setStandingReason("");
+                  setStandingExpiry("");
+                  setStandingError(null);
+                  setStandingOpen(true);
+                }}
+                className="btn secondary small"
+              >
+                {s.academicStanding.source === "override"
+                  ? "Manage exception"
+                  : "Assign exception"}
+              </button>
+            }
           >
             <KV
               k="Cumulative GPA"
               v={<b>{s.gpa > 0 ? `${s.gpa.toFixed(2)} / 4.0` : "—"}</b>}
             />
             <KV k="Academic standing" v={s.standing} />
+            {s.academicStanding.source === "override" && (
+              <KV
+                k="Manual exception"
+                v={
+                  s.academicStanding.override?.reason ?? "Assigned by registrar"
+                }
+              />
+            )}
             <KV
               k="Credits earned"
               v={
@@ -841,6 +919,79 @@ export default function AdminStudentDetailPage() {
           }}
         />
       )}
+      <Modal
+        open={standingOpen}
+        onClose={() => !standingBusy && setStandingOpen(false)}
+        title="Academic standing exception"
+        footer={
+          <>
+            {s.academicStanding.source === "override" && (
+              <button
+                className="btn secondary"
+                disabled={standingBusy || !standingReason.trim()}
+                onClick={clearStanding}
+              >
+                Clear exception
+              </button>
+            )}
+            <button
+              className="btn primary"
+              disabled={standingBusy || !standingCode || !standingReason.trim()}
+              onClick={saveStandingOverride}
+            >
+              {standingBusy ? "Saving…" : "Save exception"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "grid", gap: 16 }}>
+          {standingError && (
+            <div role="alert" style={{ color: "var(--danger)", fontSize: 13 }}>
+              {standingError}
+            </div>
+          )}
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            The approved catalog normally computes standing from cumulative GPA.
+            Use an exception only when the registrar has an academic reason;
+            every change is audited.
+          </p>
+          <Field label="Assigned standing">
+            <select
+              value={standingCode}
+              onChange={(event) => setStandingCode(event.target.value)}
+            >
+              <option value={s.standingPolicy.notYetGraded.code}>
+                {s.standingPolicy.notYetGraded.label}
+              </option>
+              {s.standingPolicy.rules.map((rule) => (
+                <option key={rule.code} value={rule.code}>
+                  {rule.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Required reason">
+            <textarea
+              value={standingReason}
+              onChange={(event) => setStandingReason(event.target.value)}
+              rows={4}
+              maxLength={1000}
+              placeholder="Explain the academic basis for this exception"
+            />
+          </Field>
+          <Field
+            label="Expiry date (optional)"
+            hint="After this date, the approved GPA policy applies automatically."
+          >
+            <input
+              type="date"
+              min={new Date().toISOString().slice(0, 10)}
+              value={standingExpiry}
+              onChange={(event) => setStandingExpiry(event.target.value)}
+            />
+          </Field>
+        </div>
+      </Modal>
     </>
   );
 }

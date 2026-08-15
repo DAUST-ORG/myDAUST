@@ -9,12 +9,13 @@ import {
   type DirectorItem,
   EMPTY_SITE_OVERRIDES,
   flattenSiteText,
+  normalizeHeroMediaUrl,
   SITE_IMAGE_SLOTS,
   SITE_SECTION_LABELS,
   type SiteOverrides,
   type VentureItem,
 } from "@mydaust/shared";
-import { getSiteDraft, publishSite, previewSite, saveSiteDraft, uploadFile, fileUrl } from "@/lib/api";
+import { getSiteDraft, publishSite, previewSite, saveSiteDraft, uploadFile, uploadSiteVideo, fileUrl } from "@/lib/api";
 import { Button, Card, Input, SearchInput, Toggle } from "@/components/ui";
 
 // Default (localized) copy, flattened to { path: value } — the CMS shows these and stores only diffs.
@@ -28,6 +29,7 @@ function normalize(o: Partial<SiteOverrides> | null | undefined): SiteOverrides 
     images: { ...(o?.images ?? {}) },
     hidden: [...(o?.hidden ?? [])],
     collections: { ...(o?.collections ?? {}) },
+    heroMedia: o?.heroMedia ?? { kind: "image" },
   };
 }
 
@@ -267,6 +269,7 @@ export function MediaEditor({ draft }: { draft: Draft }) {
   const { ov, setOv, loaded } = draft;
   const [uploading, setUploading] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [heroUrl, setHeroUrl] = useState("");
 
   const setImage = (key: string, url: string) =>
     setOv((prev) => {
@@ -290,11 +293,75 @@ export function MediaEditor({ draft }: { draft: Draft }) {
     }
   }
 
+  async function onHeroVideo(file: File | undefined) {
+    if (!file) return;
+    setUploading("hero-video");
+    setErr(null);
+    try {
+      const { url } = await uploadSiteVideo(file);
+      setOv((prev) => ({ ...normalize(prev), heroMedia: { kind: "uploaded", url } }));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Video upload failed.");
+    } finally {
+      setUploading(null);
+    }
+  }
+
+  function applyHeroUrl() {
+    const media = normalizeHeroMediaUrl(heroUrl);
+    if (!media || media.kind === "image" || media.kind === "uploaded") {
+      setErr("Use an HTTPS MP4/WebM, YouTube, or Vimeo URL.");
+      return;
+    }
+    setErr(null);
+    setOv((prev) => ({ ...normalize(prev), heroMedia: media }));
+  }
+
   if (!loaded) return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
 
+  const heroPoster = ov.images.hero ?? DEFAULT_IMAGES.hero!;
+  const heroMedia = ov.heroMedia ?? { kind: "image" as const };
+  const heroPreview = heroMedia.kind === "uploaded" || heroMedia.kind === "direct"
+    ? previewSrc(heroMedia.url)
+    : heroMedia.kind === "youtube"
+      ? `https://www.youtube-nocookie.com/embed/${heroMedia.videoId}?mute=1&controls=1&rel=0`
+      : heroMedia.kind === "vimeo"
+        ? `https://player.vimeo.com/video/${heroMedia.videoId}?muted=1&dnt=1`
+        : null;
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 }}>
-      {err && <div style={{ gridColumn: "1/-1", color: "var(--error-500)", fontSize: 13 }}>{err}</div>}
+    <div style={{ display: "grid", gap: 16 }}>
+      {err && <div role="alert" style={{ color: "var(--error-500)", fontSize: 13 }}>{err}</div>}
+      <Card pad>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--daust-navy)", marginBottom: 6 }}>Homepage hero media</div>
+        <p style={{ margin: "0 0 14px", color: "var(--fg3)", fontSize: 12.5, lineHeight: 1.5 }}>
+          The current hero image remains the poster and permanent fallback. Video is skipped on phones, reduced-motion, or data-saving devices.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,300px),1fr))", gap: 16 }}>
+          <div style={{ position: "relative", height: 190, overflow: "hidden", borderRadius: "var(--radius-md)", background: "var(--surface-2)", border: "1px solid var(--border)" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={previewSrc(heroPoster)} alt="Homepage hero poster" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            {heroPreview && (heroMedia.kind === "uploaded" || heroMedia.kind === "direct") && <video src={heroPreview} poster={previewSrc(heroPoster)} muted loop playsInline controls preload="metadata" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+            {heroPreview && (heroMedia.kind === "youtube" || heroMedia.kind === "vimeo") && <iframe src={heroPreview} title="Hero video preview" allow="autoplay; fullscreen" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }} />}
+          </div>
+          <div style={{ display: "grid", alignContent: "start", gap: 10 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button variant={heroMedia.kind === "image" ? "primary" : "secondary"} onClick={() => setOv((prev) => ({ ...normalize(prev), heroMedia: { kind: "image" } }))}>Image only</Button>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", fontSize: 12.5, fontWeight: 600, color: "var(--daust-navy)", cursor: "pointer" }}>
+                <Upload size={14} /> {uploading === "hero-video" ? "Uploading…" : "Upload video"}
+                <input type="file" accept="video/mp4,video/webm" style={{ display: "none" }} onChange={(e) => onHeroVideo(e.target.files?.[0])} disabled={uploading !== null} />
+              </label>
+            </div>
+            <label style={{ fontSize: 12.5, fontWeight: 600, color: "var(--fg2)" }}>External URL</label>
+            <Input value={heroUrl} onChange={setHeroUrl} placeholder="https://… .mp4, YouTube, or Vimeo" />
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="secondary" onClick={applyHeroUrl}>Use URL</Button>
+              {heroMedia.kind !== "image" && <Button variant="ghost" onClick={() => setOv((prev) => ({ ...normalize(prev), heroMedia: { kind: "image" } }))}>Reset</Button>}
+            </div>
+          </div>
+        </div>
+      </Card>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 }}>
       {SITE_IMAGE_SLOTS.map(({ key, label }) => {
         const current = ov.images[key] ?? DEFAULT_IMAGES[key]!;
         const overridden = ov.images[key] !== undefined;
@@ -320,6 +387,7 @@ export function MediaEditor({ draft }: { draft: Draft }) {
           </Card>
         );
       })}
+      </div>
     </div>
   );
 }

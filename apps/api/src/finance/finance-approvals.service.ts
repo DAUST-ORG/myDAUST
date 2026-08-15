@@ -771,6 +771,8 @@ export class FinanceApprovalsService {
       startsOn: revision.startsOn?.toISOString().slice(0, 10) ?? null,
       endsOn: revision.endsOn?.toISOString().slice(0, 10) ?? null,
       defaultLevels: revision.defaultLevels,
+      defaultStandingRules: revision.defaultStandingRules,
+      notYetGradedStanding: revision.notYetGradedStanding,
       programs: revision.programConfigurations,
       reason: revision.reason,
       activateYear: revision.activateYear,

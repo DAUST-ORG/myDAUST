@@ -333,6 +333,7 @@ function renderFirstPageIdentity(
     ["Attempted credits", String(view.totals.attemptedCredits)],
     ["Earned / required", earned],
     ["Academic level", view.academicProgress.level?.code ?? "N/A"],
+    ["Standing", view.academicStanding.label],
     ["In progress", String(view.academicProgress.inProgressCredits)],
   ] as const;
   const cellWidth = (PAGE_WIDTH - MARGIN * 2) / metrics.length;

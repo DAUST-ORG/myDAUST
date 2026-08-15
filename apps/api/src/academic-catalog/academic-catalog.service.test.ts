@@ -151,6 +151,53 @@ describe("AcademicCatalogService.progress", () => {
     expect(progress.map((row) => row.level?.code)).toEqual(["S1", "S2"]);
     expect(progress[1]?.requiredCredits).toBe(300);
   });
+
+  it("resolves inherited and custom standing policies from one approved snapshot", async () => {
+    const findMany = vi.fn(async () => [
+      {
+        academicYearId: "assigned-year",
+        yearLabel: "2026–2027",
+        revision: 7,
+        defaultLevels: levels,
+        defaultStandingRules: [
+          { code: "probation", label: "Probation", minimumGpa: 0, order: 0, tone: "warning" },
+          { code: "clear", label: "Clear", minimumGpa: 2, order: 1, tone: "success" },
+        ],
+        notYetGradedStanding: {
+          code: "not_yet_graded",
+          label: "Awaiting first grade",
+          tone: "neutral",
+        },
+        programConfigurations: [
+          {
+            ...program,
+            standingMode: "custom",
+            customStandingRules: [
+              { code: "review", label: "Review", minimumGpa: 0, order: 0, tone: "warning" },
+              { code: "clear", label: "Clear", minimumGpa: 2.25, order: 1, tone: "success" },
+            ],
+          },
+        ],
+        academicYear: { label: "2026–2027" },
+      },
+    ]);
+    const service = new AcademicCatalogService({
+      academicCatalogRevision: { findMany },
+    } as never);
+
+    const [policy] = await service.standingPoliciesMany([
+      {
+        programId: PROGRAM_ID,
+        catalogYearId: "assigned-year",
+        catalogYearLabel: "2026–2027",
+      },
+    ]);
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(policy?.rules.map((rule) => rule.minimumGpa)).toEqual([0, 2.25]);
+    expect(policy?.notYetGraded.label).toBe("Awaiting first grade");
+    expect(policy?.catalog?.revision).toBe(7);
+  });
 });
 
 describe("AcademicCatalogService draft and approval submission", () => {

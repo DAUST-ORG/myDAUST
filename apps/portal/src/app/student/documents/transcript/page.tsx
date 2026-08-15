@@ -98,6 +98,14 @@ export default function TranscriptPage() {
             <div className="muted" style={{ fontSize: 13 }}>
               {transcript?.student.email}
             </div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              {transcript?.student.program
+                ? `${transcript.student.program.code} — ${transcript.student.program.name}`
+                : "Programme not assigned"}
+              {transcript?.academicProgress.catalog
+                ? ` · Catalog ${transcript.academicProgress.catalog.label} rev. ${transcript.academicProgress.catalog.revision}${transcript.academicProgress.catalog.fallback ? " (fallback)" : ""}`
+                : ""}
+            </div>
           </div>
           <div>
             <div
@@ -118,6 +126,24 @@ export default function TranscriptPage() {
               }}
             >
               {transcript?.totals.gpa?.toFixed(2) ?? "—"}
+            </div>
+          </div>
+          <div>
+            <div
+              className="muted"
+              style={{
+                fontSize: 11,
+                textTransform: "uppercase",
+                letterSpacing: ".06em",
+              }}
+            >
+              Academic standing
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>
+              {transcript?.academicStanding.label ?? "—"}
+              {transcript?.academicStanding.source === "override"
+                ? " (manual)"
+                : ""}
             </div>
           </div>
           <div>

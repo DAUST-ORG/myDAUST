@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import {
   CreateAssignmentInput,
   DropInput,
@@ -143,6 +143,16 @@ const AdminStudentRosterQueryInput = z.object({
   direction: z.enum(["asc", "desc"]).default("asc"),
 });
 
+const StandingOverrideInput = z.object({
+  standingCode: z.string().trim().min(1).max(40),
+  reason: z.string().trim().min(1).max(1000),
+  expiresAt: z.string().datetime().nullable().optional(),
+});
+
+const ClearStandingOverrideInput = z.object({
+  reason: z.string().trim().min(1).max(1000),
+});
+
 @Controller("academics")
 export class AcademicsController {
   constructor(private readonly academics: AcademicsService) {}
@@ -257,6 +267,40 @@ export class AcademicsController {
   updateStudent(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
     const input = UpdateStudentInput.parse(body);
     return this.academics.updateStudent(user.personId, id, input);
+  }
+
+  @Put("admin/students/:id/standing-override")
+  @Roles("admin", "registrar")
+  setStandingOverride(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.academics.setStudentStandingOverride(
+      user.personId,
+      id,
+      StandingOverrideInput.parse(body),
+    );
+  }
+
+  @Delete("admin/students/:id/standing-override")
+  @Roles("admin", "registrar")
+  clearStandingOverride(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.academics.clearStudentStandingOverride(
+      user.personId,
+      id,
+      ClearStandingOverrideInput.parse(body).reason,
+    );
+  }
+
+  @Get("director/standing-overrides")
+  @Roles("admin")
+  currentStandingOverrides() {
+    return this.academics.currentStandingOverrides();
   }
 
   @Post("admin/enrollments/:id/drop")
