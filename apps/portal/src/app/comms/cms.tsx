@@ -9,6 +9,7 @@ import {
   type DirectorItem,
   EMPTY_SITE_OVERRIDES,
   flattenSiteText,
+  heroMediaEmbedUrl,
   normalizeHeroMediaUrl,
   SITE_IMAGE_SLOTS,
   SITE_SECTION_LABELS,
@@ -323,11 +324,7 @@ export function MediaEditor({ draft }: { draft: Draft }) {
   const heroMedia = ov.heroMedia ?? { kind: "image" as const };
   const heroPreview = heroMedia.kind === "uploaded" || heroMedia.kind === "direct"
     ? previewSrc(heroMedia.url)
-    : heroMedia.kind === "youtube"
-      ? `https://www.youtube-nocookie.com/embed/${heroMedia.videoId}?mute=1&controls=1&rel=0`
-      : heroMedia.kind === "vimeo"
-        ? `https://player.vimeo.com/video/${heroMedia.videoId}?muted=1&dnt=1`
-        : null;
+    : heroMediaEmbedUrl(heroMedia);
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -342,7 +339,7 @@ export function MediaEditor({ draft }: { draft: Draft }) {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={previewSrc(heroPoster)} alt="Homepage hero poster" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             {heroPreview && (heroMedia.kind === "uploaded" || heroMedia.kind === "direct") && <video src={heroPreview} poster={previewSrc(heroPoster)} muted loop playsInline controls preload="metadata" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
-            {heroPreview && (heroMedia.kind === "youtube" || heroMedia.kind === "vimeo") && <iframe src={heroPreview} title="Hero video preview" allow="autoplay; fullscreen" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }} />}
+            {heroPreview && (heroMedia.kind === "youtube" || heroMedia.kind === "vimeo") && <iframe src={heroPreview} title="Hero video preview" allow="autoplay" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", inset: "-10%", width: "120%", height: "120%", border: 0, pointerEvents: "none" }} />}
           </div>
           <div style={{ display: "grid", alignContent: "start", gap: 10 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

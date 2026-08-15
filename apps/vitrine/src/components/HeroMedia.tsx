@@ -2,7 +2,10 @@
 
 import { Pause, Play } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { HeroMedia as HeroMediaValue } from "@mydaust/shared";
+import {
+  heroMediaEmbedUrl,
+  type HeroMedia as HeroMediaValue,
+} from "@mydaust/shared";
 import { assetUrl } from "@/lib/api";
 
 const PAUSED_KEY = "daust-hero-video-paused";
@@ -58,12 +61,7 @@ export function HeroMedia({
     media.kind === "uploaded" || media.kind === "direct"
       ? assetUrl(media.url)
       : undefined;
-  const embed =
-    media.kind === "youtube"
-      ? `https://www.youtube-nocookie.com/embed/${media.videoId}?autoplay=1&mute=1&controls=0&loop=1&playlist=${media.videoId}&playsinline=1&rel=0`
-      : media.kind === "vimeo"
-        ? `https://player.vimeo.com/video/${media.videoId}?background=1&autoplay=1&muted=1&loop=1&dnt=1`
-        : null;
+  const embed = heroMediaEmbedUrl(media);
 
   return (
     <>
