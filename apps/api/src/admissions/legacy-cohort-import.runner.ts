@@ -16,6 +16,7 @@ import {
   verifyLegacyCohortManifestExtraction,
 } from "./legacy-cohort-import.extraction.js";
 import { applyHistoricalCashSettlementInTransaction } from "../finance/historical-cash-settlement.js";
+import { cancelOnboardingPaymentAttemptsInTransaction } from "../finance/admission-payment-gate.js";
 import { normalizeExternalReference } from "../finance/historical-payment-import.manifest.js";
 import {
   externalReferenceFingerprintSha256,
@@ -584,8 +585,8 @@ export async function planLegacyCohortImport(
           installmentCount: feeSchedule.rows.length,
         })
       : 0;
-  let projectedActivations = 0;
-  let pendingAfterImport = 0;
+  let paymentGateActivations = 0;
+  let paymentGatePending = 0;
   for (const person of manifest.people) {
     const total = person.payments.reduce(
       (sum, payment) => sum + payment.amountXof,
@@ -599,9 +600,9 @@ export async function planLegacyCohortImport(
       });
     }
     if (total >= firstInstallmentXof && firstInstallmentXof > 0) {
-      projectedActivations += 1;
+      paymentGateActivations += 1;
     } else {
-      pendingAfterImport += 1;
+      paymentGatePending += 1;
     }
     for (const payment of person.payments) {
       const settledOn = paymentDate(payment);
@@ -622,6 +623,19 @@ export async function planLegacyCohortImport(
       }
     }
   }
+  const activateAllLegacyStudents =
+    manifest.onboardingPolicy.disposition === "activate_all_legacy_students";
+  const projectedActivations = activateAllLegacyStudents
+    ? manifest.people.length
+    : paymentGateActivations;
+  const pendingAfterImport = activateAllLegacyStudents ? 0 : paymentGatePending;
+  if (activateAllLegacyStudents) {
+    warnings.push({
+      code: "reviewed_legacy_activation_override",
+      message:
+        "Every included legacy record will be activated after canonical historical-cash processing, including records below the enrollment payment gate",
+    });
+  }
 
   const paymentAmountXof = manifest.people.reduce(
     (sum, person) =>
@@ -634,6 +648,7 @@ export async function planLegacyCohortImport(
   );
   const anchor = {
     manifestSha256,
+    onboardingPolicy: manifest.onboardingPolicy,
     academicYear: academicYear
       ? {
           id: academicYear.id,
@@ -743,6 +758,110 @@ async function suppressLegacyCohortActivationInviteInTransaction(
       data: {
         batchId,
         studentId: activation.studentId,
+        notificationPolicy: "suppress_all",
+      },
+    },
+  });
+}
+
+async function activateLegacyCohortStudentByReviewedOverrideInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    applicantId: string;
+    studentId: string;
+    personId: string;
+    invoiceId: string;
+    cohortBatchId: string;
+    manifestSha256: string;
+    actorId: string;
+    reason: string;
+  },
+): Promise<void> {
+  const [person, activeInvite] = await Promise.all([
+    tx.person.findUnique({
+      where: { id: input.personId },
+      select: { roles: true },
+    }),
+    tx.studentInvite.findFirst({
+      where: { studentPersonId: input.personId },
+      select: { id: true },
+    }),
+  ]);
+  if (!person) throw new Error("Legacy cohort Student Person is missing");
+  if (activeInvite) {
+    throw new Error(
+      "Reviewed legacy activation override cannot consume or replace an account invite",
+    );
+  }
+
+  const now = new Date();
+  const claimed = await tx.applicant.updateMany({
+    where: {
+      id: input.applicantId,
+      studentId: input.studentId,
+      enrollmentInvoiceId: input.invoiceId,
+      onboardingStatus: "payment_pending",
+      activatedByPaymentId: null,
+    },
+    data: {
+      onboardingStatus: "enrolled",
+      enrolledAt: now,
+      activeOnboardingPaymentLinkId: null,
+      statusTokenHash: null,
+      statusTokenExpiresAt: now,
+      statusTokenRevokedAt: now,
+    },
+  });
+  if (claimed.count !== 1) {
+    throw new Error(
+      "Reviewed legacy activation override could not claim the pending applicant",
+    );
+  }
+
+  await tx.student.update({
+    where: { id: input.studentId },
+    data: { recordStatus: "active", enrolledAt: now },
+  });
+  await tx.person.update({
+    where: { id: input.personId },
+    data: {
+      roles: person.roles.includes("student")
+        ? person.roles
+        : [...person.roles, "student"],
+    },
+  });
+  const onboardingLinks = await tx.paymentLink.findMany({
+    where: { onboardingApplicantId: input.applicantId },
+    select: { id: true },
+  });
+  await tx.paymentLink.updateMany({
+    where: {
+      onboardingApplicantId: input.applicantId,
+      status: "active",
+    },
+    data: { status: "cancelled" },
+  });
+  await cancelOnboardingPaymentAttemptsInTransaction(
+    tx,
+    onboardingLinks.map((link) => link.id),
+    "Legacy cohort enrollment was activated by reviewed migration policy",
+    "preserve",
+  );
+  await tx.auditLog.create({
+    data: {
+      entity: "Applicant",
+      entityId: input.applicantId,
+      action: "legacy-cohort-onboarding-override-activated",
+      actorId: input.actorId,
+      data: {
+        cohortBatchId: input.cohortBatchId,
+        manifestSha256: input.manifestSha256,
+        studentId: input.studentId,
+        invoiceId: input.invoiceId,
+        activatedByPaymentId: null,
+        onboardingPolicy: "activate_all_legacy_students",
+        reviewed: true,
+        reason: input.reason,
         notificationPolicy: "suppress_all",
       },
     },
@@ -1011,6 +1130,11 @@ export async function executeLegacyCohortImport(
               academicYearId: manifest.academicYear.id,
               studentNo: person.legacyStudentNo,
               studentNoSource: "legacy_explicit",
+              statusCapabilityPolicy:
+                manifest.onboardingPolicy.disposition ===
+                "activate_all_legacy_students"
+                  ? "suppress"
+                  : "create",
             });
             const personRecord = await tx.legacyCohortImportPerson.create({
               data: {
@@ -1132,6 +1256,27 @@ export async function executeLegacyCohortImport(
                 activated = true;
               }
             }
+            if (
+              !activated &&
+              manifest.onboardingPolicy.disposition ===
+                "activate_all_legacy_students"
+            ) {
+              await activateLegacyCohortStudentByReviewedOverrideInTransaction(
+                tx,
+                {
+                  applicantId: applicant.id,
+                  studentId: gate.studentId,
+                  personId: gate.personId,
+                  invoiceId: gate.invoiceId,
+                  cohortBatchId: cohortBatch.id,
+                  manifestSha256: plan.manifestSha256,
+                  actorId: plan.actorId,
+                  reason: manifest.onboardingPolicy.reason,
+                },
+              );
+              activatedStudents += 1;
+              activated = true;
+            }
             if (activated) {
               await tx.legacyCohortImportPerson.update({
                 where: { id: personRecord.id },
@@ -1244,6 +1389,7 @@ export async function executeLegacyCohortImport(
                 importedXof: plan.paymentAmountXof,
                 activatedStudents,
                 notificationPolicy: manifest.notificationPolicy,
+                onboardingPolicy: manifest.onboardingPolicy,
               },
             },
           });

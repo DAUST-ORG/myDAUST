@@ -47,6 +47,14 @@ function buildReviewedCohort(input?: {
   secondGuardianEmail?: string | null;
   programCode?: string | null;
   documentedReference?: string;
+  paymentAmountXof?: number;
+  onboardingPolicy?:
+    | { disposition: "respect_payment_gate" }
+    | {
+        disposition: "activate_all_legacy_students";
+        reviewed: true;
+        reason: string;
+      };
 }) {
   const suffix = randomUUID().slice(0, 8);
   const workbookSha = input?.workbookSha ?? "a".repeat(64);
@@ -65,6 +73,7 @@ function buildReviewedCohort(input?: {
     input?.secondGuardianEmail === undefined ? null : input.secondGuardianEmail;
   const programCode =
     input?.programCode === undefined ? null : input.programCode;
+  const paymentAmountXof = input?.paymentAmountXof ?? 1_000_000;
   const guardianEmailDecision = (email: string | null) =>
     email
       ? {
@@ -83,7 +92,7 @@ function buildReviewedCohort(input?: {
     extractor: { name: "legacy-cohort-extractor", version: "1" },
     sourceWorkbookSha256: workbookSha,
     sourceRowCount: 3,
-    sourcePaidTotalXof: 1_000_000,
+    sourcePaidTotalXof: paymentAmountXof,
     rows: [
       {
         sourceSheet: "PAID",
@@ -91,7 +100,7 @@ function buildReviewedCohort(input?: {
         rowFingerprintSha256: firstFingerprint,
         sourceLabel: "paid",
         sourceLegacyStudentNo: firstStudentNo,
-        paymentAmountXof: 1_000_000,
+        paymentAmountXof,
       },
       {
         sourceSheet: "UNPAID",
@@ -120,10 +129,13 @@ function buildReviewedCohort(input?: {
     },
     sourceExtractionSha256: trustedLegacyCohortExtractionDigest(extraction),
     sourceRowCount: 3,
-    sourcePaidTotalXof: 1_000_000,
+    sourcePaidTotalXof: paymentAmountXof,
     academicYear: { id: academicYearId, label: "2026-2027" },
     currency: "XOF",
     notificationPolicy: "suppress_all",
+    onboardingPolicy: input?.onboardingPolicy ?? {
+      disposition: "respect_payment_gate",
+    },
     guardians: [
       {
         guardianKey: "guardian-paid",
@@ -184,7 +196,7 @@ function buildReviewedCohort(input?: {
           {
             paymentKey: "payment-paid",
             sourceCoordinates: [{ sourceSheet: "PAID", sourceRowNumber: 2 }],
-            amountXof: 1_000_000,
+            amountXof: paymentAmountXof,
             evidence: input?.documentedReference
               ? {
                   status: "documented",
@@ -344,6 +356,60 @@ function buildNoCashCohort(input: {
     reviewNote: REVIEW_REASON,
   });
   return { manifest, extraction };
+}
+
+function buildReviewedCohortWithExcludedSource() {
+  const workbookSha = "4".repeat(64);
+  const base = buildReviewedCohort({
+    workbookSha,
+    firstStudentNo: "F202600501",
+    secondStudentNo: "F202600502",
+  });
+  const excludedAmountXof = 250_000;
+  const extraction = TrustedLegacyCohortExtractionSchema.parse({
+    ...base.extraction,
+    sourceRowCount: 4,
+    sourcePaidTotalXof: base.extraction.sourcePaidTotalXof + excludedAmountXof,
+    rows: [
+      ...base.extraction.rows,
+      {
+        sourceSheet: "HELD",
+        sourceRowNumber: 9,
+        rowFingerprintSha256: "e".repeat(64),
+        sourceLabel: "paid",
+        sourceLegacyStudentNo: "F202600599",
+        paymentAmountXof: excludedAmountXof,
+      },
+    ],
+  });
+  const manifest = LegacyCohortManifestSchema.parse({
+    ...base.manifest,
+    sourceExtractionSha256: trustedLegacyCohortExtractionDigest(extraction),
+    sourceRowCount: 4,
+    sourcePaidTotalXof: base.manifest.sourcePaidTotalXof + excludedAmountXof,
+    excludedSources: [
+      {
+        sourceSheet: "HELD",
+        sourceRowNumber: 9,
+        rowFingerprintSha256: "e".repeat(64),
+        holdCodes: ["production_partial_student_candidate"],
+        reason:
+          "The production read-only reconciliation found a partial Student candidate that requires staff review.",
+        reviewed: true,
+      },
+    ],
+    exclusionReview: {
+      reviewWorkbook: {
+        fileName: "review-v3.xlsx",
+        sha256: "6".repeat(64),
+      },
+      holdNotes: {
+        fileName: "hold-notes.json",
+        sha256: "7".repeat(64),
+      },
+    },
+  });
+  return { manifest, extraction, excludedAmountXof };
 }
 
 describe.skipIf(!DB_URL)("legacy cohort importer", () => {
@@ -591,6 +657,9 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
       provider: "historical_import",
       source: "legacy_cohort_import",
     });
+    expect(paid.applicant.activatedByPaymentId).toBe(
+      paid.invoice.payments[0]?.id,
+    );
     expect(paid.rows).toHaveLength(1);
     expect(paid.student.guardians).toHaveLength(1);
     expect(unpaid.legacyStudentNo).toBe("F202600002");
@@ -653,6 +722,214 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
       excludedXof: 0n,
       reviewedAdjustmentXof: 0n,
     });
+  }, 120_000);
+
+  it("activates every explicitly reviewed legacy Student after canonical cash processing", async () => {
+    const { manifest, extraction } = buildReviewedCohort({
+      workbookSha: "3".repeat(64),
+      firstStudentNo: "F202600401",
+      secondStudentNo: "F202600402",
+      paymentAmountXof: 500_000,
+      onboardingPolicy: {
+        disposition: "activate_all_legacy_students",
+        reviewed: true,
+        reason:
+          "The reviewed legacy migration requires every included historical Student to appear in the active registrar directory.",
+      },
+    });
+    const invocation = { actorEmail };
+    const dryRun = await planLegacyCohortImport(prisma, manifest, invocation);
+    expect(dryRun).toMatchObject({
+      blockers: [],
+      people: 2,
+      payments: 1,
+      paymentAmountXof: 500_000,
+      projectedActivations: 2,
+      pendingAfterImport: 0,
+    });
+    expect(dryRun.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "reviewed_legacy_activation_override",
+        }),
+      ]),
+    );
+
+    const result = await executeLegacyCohortImport(
+      prisma,
+      manifest,
+      extraction,
+      invocation,
+      dryRun.planSha256,
+    );
+    expect(result).toMatchObject({
+      alreadyImported: false,
+      peopleCreated: 2,
+      paymentsImported: 1,
+      importedXof: 500_000,
+      activatedStudents: 2,
+    });
+
+    const records = await prisma.legacyCohortImportPerson.findMany({
+      where: { batchId: result.batchId },
+      include: {
+        applicant: true,
+        student: { include: { person: true } },
+        invoice: { include: { payments: true } },
+      },
+      orderBy: { legacyStudentNo: "asc" },
+    });
+    expect(records).toHaveLength(2);
+    for (const record of records) {
+      expect(record.onboardingStatusAtImport).toBe("enrolled");
+      expect(record.applicant.onboardingStatus).toBe("enrolled");
+      expect(record.applicant.activatedByPaymentId).toBeNull();
+      expect(record.applicant.activeOnboardingPaymentLinkId).toBeNull();
+      expect(record.applicant.statusTokenHash).toBeNull();
+      expect(record.applicant.statusTokenRevokedAt).not.toBeNull();
+      expect(record.applicant.acceptanceEmailSentAt).toBeNull();
+      expect(record.applicant.studentInviteSentAt).toBeNull();
+      expect(record.student.recordStatus).toBe("active");
+      expect(record.student.enrolledAt).not.toBeNull();
+      expect(record.student.person.roles).toContain("student");
+      expect(record.student.person.passwordHash).toBeNull();
+      expect(record.student.person.mustChangePassword).toBe(false);
+    }
+    expect(records[0]?.invoice.amountPaid).toBe(500_000);
+    expect(records[0]?.invoice.payments).toHaveLength(1);
+    expect(records[1]?.invoice.amountPaid).toBe(0);
+    expect(
+      await prisma.studentInvite.count({
+        where: {
+          studentPersonId: {
+            in: records.map((record) => record.student.personId),
+          },
+        },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.paymentLink.count({
+        where: {
+          onboardingApplicantId: {
+            in: records.map((record) => record.applicantId),
+          },
+          status: "active",
+        },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.auditLog.count({
+        where: {
+          entity: "Applicant",
+          entityId: { in: records.map((record) => record.applicantId) },
+          action: "legacy-cohort-onboarding-override-activated",
+        },
+      }),
+    ).toBe(2);
+  }, 120_000);
+
+  it("persists explicit exclusion controls and exact reruns remain no-ops", async () => {
+    const { manifest, extraction, excludedAmountXof } =
+      buildReviewedCohortWithExcludedSource();
+    const invocation = { actorEmail };
+    const before = {
+      applicants: await prisma.applicant.count(),
+      students: await prisma.student.count(),
+      payments: await prisma.payment.count(),
+      rows: await prisma.legacyCohortImportRow.count(),
+    };
+    const dryRun = await planLegacyCohortImport(prisma, manifest, invocation);
+    expect(dryRun).toMatchObject({
+      blockers: [],
+      sourceRows: 4,
+      includedSourceRows: 3,
+      excludedSourceRows: 1,
+      people: 2,
+      payments: 1,
+    });
+
+    const imported = await executeLegacyCohortImport(
+      prisma,
+      manifest,
+      extraction,
+      invocation,
+      dryRun.planSha256,
+    );
+    expect(imported).toMatchObject({
+      alreadyImported: false,
+      peopleCreated: 2,
+      paymentsImported: 1,
+    });
+    expect(await prisma.applicant.count()).toBe(before.applicants + 2);
+    expect(await prisma.student.count()).toBe(before.students + 2);
+    expect(await prisma.payment.count()).toBe(before.payments + 1);
+    expect(await prisma.legacyCohortImportRow.count()).toBe(before.rows + 3);
+    expect(
+      await prisma.student.findFirst({
+        where: {
+          studentNo: { equals: "F202600599", mode: "insensitive" },
+        },
+      }),
+    ).toBeNull();
+    expect(
+      await prisma.paymentImportBatch.findUniqueOrThrow({
+        where: { sourceSha256: manifest.sourceWorkbook.sha256 },
+      }),
+    ).toMatchObject({
+      totalRows: 4,
+      importedRows: 1,
+      skippedRows: 3,
+      excludedSourceGroups: 2,
+      sourceTotalXof: 1_250_000n,
+      importedXof: 1_000_000n,
+      excludedXof: BigInt(excludedAmountXof),
+      reviewedAdjustmentXof: 0n,
+      errorSummary: expect.objectContaining({
+        explicitlyExcludedSourceRows: 1,
+        excludedHoldCodeCounts: {
+          production_partial_student_candidate: 1,
+        },
+      }),
+    });
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        entity: "LegacyCohortImportBatch",
+        entityId: imported.batchId,
+        action: "legacy-cohort-imported",
+      },
+    });
+    expect(audit.data).toEqual(
+      expect.objectContaining({
+        includedSourceRows: 3,
+        excludedSourceRows: 1,
+        excludedHoldCodeCounts: {
+          production_partial_student_candidate: 1,
+        },
+      }),
+    );
+
+    const rerunPlan = await planLegacyCohortImport(
+      prisma,
+      manifest,
+      invocation,
+    );
+    const rerun = await executeLegacyCohortImport(
+      prisma,
+      manifest,
+      extraction,
+      invocation,
+      rerunPlan.planSha256,
+    );
+    expect(rerun).toMatchObject({
+      batchId: imported.batchId,
+      alreadyImported: true,
+      peopleCreated: 0,
+      paymentsImported: 0,
+    });
+    expect(await prisma.applicant.count()).toBe(before.applicants + 2);
+    expect(await prisma.student.count()).toBe(before.students + 2);
+    expect(await prisma.payment.count()).toBe(before.payments + 1);
+    expect(await prisma.legacyCohortImportRow.count()).toBe(before.rows + 3);
   }, 120_000);
 
   it("enforces contact-only parent email and credential constraints", async () => {

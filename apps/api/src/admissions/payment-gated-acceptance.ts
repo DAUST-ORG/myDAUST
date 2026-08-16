@@ -23,7 +23,7 @@ export type PaymentGateCreationResult = {
   invoiceId: string;
   paymentLinkId: string;
   requiredEnrollmentCashXof: number;
-  statusToken: string;
+  statusToken: string | null;
 };
 
 /**
@@ -41,10 +41,20 @@ export async function createPaymentGatedAcceptanceInTransaction(
     academicYearId: string;
     studentNo: string;
     studentNoSource: "generated" | "legacy_explicit";
+    statusCapabilityPolicy?: "create" | "suppress";
   },
 ): Promise<PaymentGateCreationResult> {
   const reviewedStudentNo = input.studentNo.normalize("NFKC").trim();
   const studentNo = normalizeStudentNumber(input.studentNo);
+  const statusCapabilityPolicy = input.statusCapabilityPolicy ?? "create";
+  if (
+    statusCapabilityPolicy === "suppress" &&
+    input.studentNoSource !== "legacy_explicit"
+  ) {
+    throw new BadRequestException(
+      "Applicant status capabilities can only be suppressed for a reviewed legacy acceptance",
+    );
+  }
   const applicant = await tx.applicant.findUnique({
     where: { id: input.applicantId },
   });
@@ -187,7 +197,8 @@ export async function createPaymentGatedAcceptanceInTransaction(
       onboardingApplicantId: applicant.id,
     },
   });
-  const statusToken = newApplicantStatusCapability();
+  const statusToken =
+    statusCapabilityPolicy === "create" ? newApplicantStatusCapability() : null;
   await tx.applicant.update({
     where: { id: applicant.id },
     data: {
@@ -198,9 +209,11 @@ export async function createPaymentGatedAcceptanceInTransaction(
       enrollmentInvoiceId: invoice.id,
       requiredEnrollmentCashXof: firstInstallment.amountDue,
       activeOnboardingPaymentLinkId: paymentLink.id,
-      statusTokenHash: hashApplicantStatusCapability(statusToken),
-      statusTokenExpiresAt: null,
-      statusTokenRevokedAt: null,
+      statusTokenHash: statusToken
+        ? hashApplicantStatusCapability(statusToken)
+        : null,
+      statusTokenExpiresAt: statusToken ? null : now,
+      statusTokenRevokedAt: statusToken ? null : now,
       acceptedAt: applicant.acceptedAt ?? now,
       paymentPendingAt: now,
       onboardingCancelledAt: null,
@@ -221,6 +234,7 @@ export async function createPaymentGatedAcceptanceInTransaction(
           invoiceId: invoice.id,
           requiredEnrollmentCashXof: firstInstallment.amountDue,
           paymentLinkId: paymentLink.id,
+          statusCapabilityPolicy,
         },
       },
       {

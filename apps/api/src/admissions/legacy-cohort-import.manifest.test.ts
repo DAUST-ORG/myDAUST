@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   LegacyCohortStudentNumberSchema,
   LegacyCohortManifestSchema,
   legacyCohortManifestDigest,
+  verifyLegacyCohortExclusionReviewArtifacts,
 } from "./legacy-cohort-import.manifest.js";
 
 const SHA_A = "a".repeat(64);
@@ -125,6 +127,49 @@ describe("LegacyCohortManifestSchema", () => {
     expect(manifest.people[0]?.legacyStudentNo).toBe("F202600001");
     expect(manifest.guardians[0]?.address).toBeNull();
     expect(manifest.notificationPolicy).toBe("suppress_all");
+    expect(manifest.onboardingPolicy).toEqual({
+      disposition: "respect_payment_gate",
+    });
+  });
+
+  it("requires an explicit reviewed reason for the legacy activation override", () => {
+    const manifest = LegacyCohortManifestSchema.parse(
+      rawManifest({
+        onboardingPolicy: {
+          disposition: "activate_all_legacy_students",
+          reviewed: true,
+          reason: REVIEW_REASON,
+        },
+      }),
+    );
+
+    expect(manifest.onboardingPolicy).toEqual({
+      disposition: "activate_all_legacy_students",
+      reviewed: true,
+      reason: REVIEW_REASON,
+    });
+    expect(() =>
+      LegacyCohortManifestSchema.parse(
+        rawManifest({
+          onboardingPolicy: {
+            disposition: "activate_all_legacy_students",
+            reviewed: false,
+            reason: REVIEW_REASON,
+          },
+        }),
+      ),
+    ).toThrow();
+    expect(() =>
+      LegacyCohortManifestSchema.parse(
+        rawManifest({
+          onboardingPolicy: {
+            disposition: "activate_all_legacy_students",
+            reviewed: true,
+            reason: "Legacy override",
+          },
+        }),
+      ),
+    ).toThrow();
   });
 
   it("retains full source controls with immutable reviewed exclusions", () => {
@@ -176,6 +221,49 @@ describe("LegacyCohortManifestSchema", () => {
         }),
       ),
     ).toThrow(/expected 3/);
+  });
+
+  it("requires the exact bound review workbook and hold notes at runtime", () => {
+    const reviewBytes = Buffer.from("review workbook");
+    const holdBytes = Buffer.from("hold notes");
+    const manifest = LegacyCohortManifestSchema.parse(
+      rawManifest({
+        sourceRowCount: 2,
+        excludedSources: [excludedSource()],
+        exclusionReview: {
+          reviewWorkbook: {
+            fileName: "review-v3.xlsx",
+            sha256: createHash("sha256").update(reviewBytes).digest("hex"),
+          },
+          holdNotes: {
+            fileName: "holds.json",
+            sha256: createHash("sha256").update(holdBytes).digest("hex"),
+          },
+        },
+      }),
+    );
+
+    expect(() => verifyLegacyCohortExclusionReviewArtifacts(manifest)).toThrow(
+      /require the bound review workbook/,
+    );
+    expect(() =>
+      verifyLegacyCohortExclusionReviewArtifacts(manifest, {
+        reviewWorkbook: {
+          fileName: "review-v3.xlsx",
+          bytes: reviewBytes,
+        },
+        holdNotes: { fileName: "holds.json", bytes: holdBytes },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      verifyLegacyCohortExclusionReviewArtifacts(manifest, {
+        reviewWorkbook: {
+          fileName: "review-v3.xlsx",
+          bytes: Buffer.from("tampered"),
+        },
+        holdNotes: { fileName: "holds.json", bytes: holdBytes },
+      }),
+    ).toThrow(/reviewWorkbook SHA-256/);
   });
 
   it("accepts real source F-IDs and rejects lowercase or malformed variants", () => {
@@ -537,6 +625,7 @@ describe("LegacyCohortManifestSchema", () => {
       people: manifest.people,
       guardians: manifest.guardians,
       notificationPolicy: manifest.notificationPolicy,
+      onboardingPolicy: manifest.onboardingPolicy,
       currency: manifest.currency,
       academicYear: manifest.academicYear,
       sourcePaidTotalXof: manifest.sourcePaidTotalXof,

@@ -1088,7 +1088,7 @@ export class AdmissionsService {
         subject: "Set up your myDAUST student account",
         html: `
           <p>Hello ${esc(recipient.name)},</p>
-          <p>Your enrollment payment is confirmed and your myDAUST student account is ready.</p>
+          <p>Your enrollment is active and your myDAUST student account is ready.</p>
           <p><a href="${inviteUrl}">Set your password</a> (this link is valid for 72 hours).</p>
           <p>If you were not expecting this, you can ignore this email.</p>
         `,
