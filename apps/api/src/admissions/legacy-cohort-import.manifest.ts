@@ -75,6 +75,25 @@ const EmailDecisionSchema = z
     }
   });
 
+const UnavailableGuardianEmailDecisionSchema = z
+  .object({
+    sourceEmail: z
+      .string()
+      .trim()
+      .email()
+      .transform((value) => value.toLowerCase())
+      .nullable(),
+    finalEmail: z.null(),
+    disposition: z.literal("unavailable"),
+    reason: ReviewedReasonSchema,
+  })
+  .strict();
+
+const GuardianEmailDecisionSchema = z.union([
+  EmailDecisionSchema,
+  UnavailableGuardianEmailDecisionSchema,
+]);
+
 const SourceDispositionSchema = z.discriminatedUnion("kind", [
   z
     .object({
@@ -101,6 +120,45 @@ const ManifestSourceRowSchema = SourceCoordinateSchema.extend({
   rowFingerprintSha256: Sha256Schema,
   disposition: SourceDispositionSchema,
 }).strict();
+
+const ExcludedSourceSchema = SourceCoordinateSchema.extend({
+  rowFingerprintSha256: Sha256Schema,
+  holdCodes: z
+    .array(
+      z
+        .string()
+        .trim()
+        .regex(/^[a-z][a-z0-9_]{2,79}$/, "Expected a stable hold code"),
+    )
+    .min(1)
+    .max(20),
+  reason: ReviewedReasonSchema,
+  reviewed: z.literal(true),
+})
+  .strict()
+  .superRefine((source, ctx) => {
+    if (new Set(source.holdCodes).size !== source.holdCodes.length) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["holdCodes"],
+        message: "Excluded-source hold codes must be unique",
+      });
+    }
+  });
+
+const ReviewedArtifactSchema = z
+  .object({
+    fileName: z.string().trim().min(1).max(255),
+    sha256: Sha256Schema,
+  })
+  .strict();
+
+const ExclusionReviewSchema = z
+  .object({
+    reviewWorkbook: ReviewedArtifactSchema,
+    holdNotes: ReviewedArtifactSchema,
+  })
+  .strict();
 
 const KnownPaymentMethodSchema = z.enum([
   "wave",
@@ -222,14 +280,27 @@ const LegacyIdDecisionSchema = z.discriminatedUnion("disposition", [
     .strict(),
 ]);
 
+// Source F-IDs use the academic year followed by an unpadded sequence/day and
+// normalized name initials (for example F2026001AML or F20254ABN). The longer
+// digits-only branch is retained for explicitly reserved legacy identifiers.
+const LEGACY_COHORT_STUDENT_NUMBER = /^F20\d{2}(?:\d{5,}|\d+[A-Z]+)$/;
+
+export const LegacyCohortStudentNumberSchema = z
+  .string()
+  .trim()
+  .regex(
+    LEGACY_COHORT_STUDENT_NUMBER,
+    "Expected an uppercase permanent legacy F-ID",
+  );
+
+export function isLegacyCohortStudentNumber(value: string): boolean {
+  return LEGACY_COHORT_STUDENT_NUMBER.test(value);
+}
+
 const PersonGroupSchema = z
   .object({
     personKey: z.string().trim().min(1).max(120),
-    legacyStudentNo: z
-      .string()
-      .trim()
-      .toUpperCase()
-      .regex(/^F\d{5,}$/, "Expected an explicit legacy F-ID"),
+    legacyStudentNo: LegacyCohortStudentNumberSchema,
     legacyIdDecision: LegacyIdDecisionSchema,
     groupingReview: z
       .object({ reviewed: z.literal(true), reason: ReviewedReasonSchema })
@@ -239,7 +310,7 @@ const PersonGroupSchema = z
         firstName: z.string().trim().min(1).max(120),
         lastName: z.string().trim().min(1).max(120),
         dateOfBirth: LegacyCohortDateOnlySchema,
-        programCode: z.string().trim().min(1).max(40),
+        programCode: z.string().trim().min(1).max(40).nullable(),
         phone: z.string().trim().max(40).nullable().optional(),
         gender: z.string().trim().max(40).nullable().optional(),
         nationality: z.string().trim().max(80).nullable().optional(),
@@ -261,7 +332,7 @@ const GuardianSchema = z
     lastName: z.string().trim().min(1).max(120),
     phone: z.string().trim().min(3).max(40),
     address: z.string().trim().min(3).max(500).nullable(),
-    email: EmailDecisionSchema,
+    email: GuardianEmailDecisionSchema,
     identityDecision: z.discriminatedUnion("disposition", [
       z
         .object({
@@ -309,6 +380,8 @@ export const LegacyCohortManifestSchema = z
     notificationPolicy: z.literal("suppress_all"),
     guardians: z.array(GuardianSchema).min(1).max(MAX_ROWS),
     people: z.array(PersonGroupSchema).min(1).max(MAX_ROWS),
+    excludedSources: z.array(ExcludedSourceSchema).max(MAX_ROWS).default([]),
+    exclusionReview: ExclusionReviewSchema.optional(),
     reviewNote: ReviewedReasonSchema,
   })
   .strict()
@@ -324,6 +397,8 @@ export const LegacyCohortManifestSchema = z
       string,
       z.infer<typeof ManifestSourceRowSchema>
     >();
+    const excludedCoordinates = new Set<string>();
+    const excludedFingerprints = new Set<string>();
     const guardianKeys = new Set<string>();
     const referencedGuardianKeys = new Set<string>();
     const finalEmails = new Map<string, string>();
@@ -338,18 +413,21 @@ export const LegacyCohortManifestSchema = z
         });
       }
       guardianKeys.add(guardian.guardianKey);
-      const owner = finalEmails.get(guardian.email.finalEmail);
-      if (owner) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["guardians", index, "email", "finalEmail"],
-          message: "Final email is already assigned to another reviewed record",
-        });
+      if (guardian.email.finalEmail) {
+        const owner = finalEmails.get(guardian.email.finalEmail);
+        if (owner) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["guardians", index, "email", "finalEmail"],
+            message:
+              "Final email is already assigned to another reviewed record",
+          });
+        }
+        finalEmails.set(
+          guardian.email.finalEmail,
+          `guardian ${guardian.guardianKey}`,
+        );
       }
-      finalEmails.set(
-        guardian.email.finalEmail,
-        `guardian ${guardian.guardianKey}`,
-      );
     }
 
     for (const [personIndex, person] of manifest.people.entries()) {
@@ -604,11 +682,49 @@ export const LegacyCohortManifestSchema = z
       }
     }
 
-    if (sourceOwners.size !== manifest.sourceRowCount) {
+    for (const [excludedIndex, source] of manifest.excludedSources.entries()) {
+      const coordinate = legacyCohortCoordinate(source);
+      if (sourceOwners.has(coordinate) || excludedCoordinates.has(coordinate)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["excludedSources", excludedIndex],
+          message:
+            "An excluded source coordinate cannot overlap an included or excluded row",
+        });
+      }
+      excludedCoordinates.add(coordinate);
+      if (excludedFingerprints.has(source.rowFingerprintSha256)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["excludedSources", excludedIndex, "rowFingerprintSha256"],
+          message: "Excluded-source fingerprints must be unique",
+        });
+      }
+      excludedFingerprints.add(source.rowFingerprintSha256);
+    }
+
+    if (manifest.excludedSources.length > 0 && !manifest.exclusionReview) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["exclusionReview"],
+        message:
+          "Reviewed exclusions require immutable review-workbook and hold-notes provenance",
+      });
+    }
+    if (manifest.excludedSources.length === 0 && manifest.exclusionReview) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["exclusionReview"],
+        message: "Exclusion provenance is stale when no source rows are held",
+      });
+    }
+
+    const representedSourceRows = sourceOwners.size + excludedCoordinates.size;
+    if (representedSourceRows !== manifest.sourceRowCount) {
       ctx.addIssue({
         code: "custom",
         path: ["sourceRowCount"],
-        message: `Manifest represents ${sourceOwners.size} unique rows, expected ${manifest.sourceRowCount}`,
+        message: `Manifest represents ${representedSourceRows} unique included/excluded rows, expected ${manifest.sourceRowCount}`,
       });
     }
 

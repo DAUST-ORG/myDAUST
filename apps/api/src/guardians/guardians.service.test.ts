@@ -1,5 +1,9 @@
 import bcrypt from "bcryptjs";
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { GuardiansService } from "./guardians.service.js";
 
@@ -47,6 +51,35 @@ describe("GuardiansService login management", () => {
         status: "not-provisioned",
       }),
     ]);
+  });
+
+  it("reports a null-email parent as contact-only", async () => {
+    const prisma = {
+      person: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "parent-contact",
+            firstName: "Awa",
+            lastName: "Ndiaye",
+            email: null,
+            passwordHash: null,
+            mustChangePassword: false,
+            guardianProfile: { phone: "+221770000000", address: null },
+            guardianInvites: [],
+            guardianOf: [],
+          },
+        ]),
+      },
+    };
+
+    const rows = await serviceWith(prisma).list();
+
+    expect(rows[0]).toMatchObject({
+      id: "parent-contact",
+      email: null,
+      hasLogin: false,
+      status: "contact-only",
+    });
   });
 
   it("generates or resets a login and invalidates outstanding setup links", async () => {
@@ -139,7 +172,11 @@ describe("GuardiansService login management", () => {
 
     expect(prisma.person.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { kind: "parent", passwordHash: null },
+        where: {
+          kind: "parent",
+          email: { not: null },
+          passwordHash: null,
+        },
       }),
     );
     expect(result.count).toBe(2);
@@ -157,6 +194,41 @@ describe("GuardiansService login management", () => {
     await expect(
       serviceWith(prisma).provisionLogin("registrar-1", "staff-1"),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("refuses to provision a login without a real email", async () => {
+    const prisma = {
+      person: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "parent-contact",
+          kind: "parent",
+          email: null,
+        }),
+      },
+    };
+
+    await expect(
+      serviceWith(prisma).provisionLogin("registrar-1", "parent-contact"),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("refuses to resend an invitation without a real email", async () => {
+    const prisma = {
+      person: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "parent-contact",
+          kind: "parent",
+          email: null,
+          passwordHash: null,
+        }),
+      },
+      guardianInvite: { create: vi.fn() },
+    };
+
+    await expect(
+      serviceWith(prisma).resendInvite("registrar-1", "parent-contact"),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.guardianInvite.create).not.toHaveBeenCalled();
   });
 });
 
@@ -303,6 +375,81 @@ describe("GuardiansService student relationships", () => {
     expect(result.inviteDelivery).toBe("not_requested");
   });
 
+  it("creates and links a contact-only parent when email is unavailable", async () => {
+    const guardian = {
+      id: "parent-contact",
+      firstName: "Awa",
+      lastName: "Ndiaye",
+      email: null,
+    };
+    const tx = {
+      student: { findFirst: vi.fn().mockResolvedValue({ id: "student-1" }) },
+      person: {
+        findFirst: vi.fn(),
+        create: vi.fn().mockResolvedValue(guardian),
+      },
+      guardianProfile: { create: vi.fn().mockResolvedValue({}) },
+      guardianStudent: { create: vi.fn().mockResolvedValue({}) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const mail = { send: vi.fn().mockResolvedValue({ sent: true }) };
+    const prisma = {
+      $transaction: vi.fn(
+        async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+      ),
+      guardianInvite: { create: vi.fn().mockResolvedValue({}) },
+    };
+
+    const result = await serviceWith(prisma, mail).createForStudent(
+      "registrar-1",
+      "student-1",
+      { fullName: "Awa Ndiaye", sendInvite: false },
+    );
+
+    expect(tx.person.findFirst).not.toHaveBeenCalled();
+    expect(tx.person.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          email: null,
+          passwordHash: null,
+          mustChangePassword: false,
+        }),
+      }),
+    );
+    expect(tx.guardianStudent.create).toHaveBeenCalledOnce();
+    expect(prisma.guardianInvite.create).not.toHaveBeenCalled();
+    expect(mail.send).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      email: null,
+      inviteDelivery: "not_requested",
+    });
+  });
+
+  it("refuses an invitation request when the new parent has no email", async () => {
+    const prisma = { $transaction: vi.fn() };
+
+    await expect(
+      serviceWith(prisma).createForStudent("registrar-1", "student-1", {
+        fullName: "Awa Ndiaye",
+        sendInvite: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a provided blank email instead of converting it to null", async () => {
+    const prisma = { $transaction: vi.fn() };
+
+    await expect(
+      serviceWith(prisma).createForStudent("registrar-1", "student-1", {
+        fullName: "Awa Ndiaye",
+        email: "   ",
+        sendInvite: false,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("sends a setup invitation only when staff explicitly requests it", async () => {
     const guardian = {
       id: "parent-1",
@@ -368,6 +515,59 @@ describe("GuardiansService student relationships", () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(tx.person.create).not.toHaveBeenCalled();
+  });
+
+  it("adds a real email to a contact-only parent without auto-sending an invite", async () => {
+    const guardian = {
+      id: "parent-contact",
+      firstName: "Awa",
+      lastName: "Ndiaye",
+      email: null,
+      passwordHash: null,
+      guardianInvites: [],
+    };
+    const updated = { ...guardian, email: "awa@example.com" };
+    const tx = {
+      person: { update: vi.fn().mockResolvedValue(updated) },
+      guardianInvite: { updateMany: vi.fn() },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const mail = { send: vi.fn().mockResolvedValue({ sent: true }) };
+    const prisma = {
+      person: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValueOnce(guardian)
+          .mockResolvedValueOnce(null),
+      },
+      guardianInvite: { create: vi.fn() },
+      $transaction: vi.fn(
+        async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+      ),
+    };
+
+    const result = await serviceWith(prisma, mail).update(
+      "registrar-1",
+      guardian.id,
+      { email: "AWA@EXAMPLE.COM" },
+    );
+
+    expect(tx.person.update).toHaveBeenCalledWith({
+      where: { id: guardian.id },
+      data: { email: "awa@example.com" },
+    });
+    expect(prisma.person.findFirst).toHaveBeenNthCalledWith(2, {
+      where: {
+        email: { equals: "awa@example.com", mode: "insensitive" },
+      },
+    });
+    expect(tx.guardianInvite.updateMany).not.toHaveBeenCalled();
+    expect(prisma.guardianInvite.create).not.toHaveBeenCalled();
+    expect(mail.send).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      email: "awa@example.com",
+      inviteDelivery: null,
+    });
   });
 
   it("unlinks only the relationship and records the revocation", async () => {

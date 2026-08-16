@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
 import { normalizeStudentNumber, toDakarDateKey } from "@mydaust/shared";
 import { assignStandardPackageInTransaction } from "../finance/standard-package.js";
+import { isLegacyCohortStudentNumber } from "./legacy-cohort-import.manifest.js";
 
 const STATUS_TOKEN_BYTES = 32;
 
@@ -42,6 +43,7 @@ export async function createPaymentGatedAcceptanceInTransaction(
     studentNoSource: "generated" | "legacy_explicit";
   },
 ): Promise<PaymentGateCreationResult> {
+  const reviewedStudentNo = input.studentNo.normalize("NFKC").trim();
   const studentNo = normalizeStudentNumber(input.studentNo);
   const applicant = await tx.applicant.findUnique({
     where: { id: input.applicantId },
@@ -67,12 +69,13 @@ export async function createPaymentGatedAcceptanceInTransaction(
       "A valid date of birth is required before acceptance",
     );
   }
-  if (!applicant.programCode) {
+  const isReviewedLegacy = input.studentNoSource === "legacy_explicit";
+  if (!applicant.programCode && !isReviewedLegacy) {
     throw new BadRequestException("A program is required before acceptance");
   }
   if (
-    input.studentNoSource === "legacy_explicit" &&
-    !/^F\d{5,}$/.test(studentNo)
+    isReviewedLegacy &&
+    (reviewedStudentNo !== studentNo || !isLegacyCohortStudentNumber(studentNo))
   ) {
     throw new BadRequestException(
       "A reviewed legacy acceptance requires an explicit permanent F-ID",
@@ -80,7 +83,9 @@ export async function createPaymentGatedAcceptanceInTransaction(
   }
 
   const [program, academicYear, existingStudentNo] = await Promise.all([
-    tx.program.findUnique({ where: { code: applicant.programCode } }),
+    applicant.programCode
+      ? tx.program.findUnique({ where: { code: applicant.programCode } })
+      : Promise.resolve(null),
     tx.academicYear.findUnique({ where: { id: input.academicYearId } }),
     tx.student.findFirst({
       where: {
@@ -89,7 +94,9 @@ export async function createPaymentGatedAcceptanceInTransaction(
       select: { id: true },
     }),
   ]);
-  if (!program) throw new BadRequestException("Unknown applicant program");
+  if (applicant.programCode && !program) {
+    throw new BadRequestException("Unknown applicant program");
+  }
   if (!academicYear) throw new BadRequestException("Unknown academic year");
   if (existingStudentNo) {
     throw new BadRequestException(
@@ -124,7 +131,7 @@ export async function createPaymentGatedAcceptanceInTransaction(
     data: {
       personId: person.id,
       studentNo,
-      programId: program.id,
+      programId: program?.id ?? null,
       dateOfBirth: new Date(
         `${applicant.dateOfBirth.toISOString().slice(0, 10)}T00:00:00Z`,
       ),
@@ -171,7 +178,7 @@ export async function createPaymentGatedAcceptanceInTransaction(
       amountXof: firstInstallment.amountDue,
       purpose: "First enrollment installment",
       payeeName: `${applicant.firstName} ${applicant.lastName}`.trim(),
-      payeeMeta: `${studentNo} · ${program.code}`,
+      payeeMeta: program ? `${studentNo} · ${program.code}` : studentNo,
       studentId: student.id,
       invoiceId: invoice.id,
       costCenterCode: invoice.costCenterCode,

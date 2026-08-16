@@ -13,6 +13,7 @@ import {
   toDakarDateKey,
 } from "@mydaust/shared";
 import type { AuthUser } from "../auth/current-user.js";
+import { requirePersonEmail } from "../auth/person-email.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { projectedInstallmentStatus } from "./account-position.js";
 import {
@@ -493,8 +494,12 @@ export class FinanceApprovalsService {
     updatedAt: Date;
     reviewedAt: Date | null;
     appliedAt: Date | null;
-    requestedBy?: { firstName: string; lastName: string; email: string };
-    reviewedBy?: { firstName: string; lastName: string; email: string } | null;
+    requestedBy?: { firstName: string; lastName: string; email: string | null };
+    reviewedBy?: {
+      firstName: string;
+      lastName: string;
+      email: string | null;
+    } | null;
     events?: unknown[];
   }) {
     return {
@@ -502,13 +507,19 @@ export class FinanceApprovalsService {
       requester: row.requestedBy
         ? {
             name: `${row.requestedBy.firstName} ${row.requestedBy.lastName}`.trim(),
-            email: row.requestedBy.email,
+            email: requirePersonEmail(
+              row.requestedBy.email,
+              "Approval requester",
+            ),
           }
         : null,
       reviewer: row.reviewedBy
         ? {
             name: `${row.reviewedBy.firstName} ${row.reviewedBy.lastName}`.trim(),
-            email: row.reviewedBy.email,
+            email: requirePersonEmail(
+              row.reviewedBy.email,
+              "Approval reviewer",
+            ),
           }
         : null,
       requestedBy: undefined,

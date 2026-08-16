@@ -46,6 +46,8 @@ export type LegacyCohortImportPlan = {
   sourceSha256: string;
   planSha256: string;
   sourceRows: number;
+  includedSourceRows: number;
+  excludedSourceRows: number;
   people: number;
   guardians: number;
   payments: number;
@@ -54,7 +56,12 @@ export type LegacyCohortImportPlan = {
   projectedActivations: number;
   feeSchedule: { id: string; revision: number; totalXof: number } | null;
   blockers: LegacyCohortImportBlocker[];
-  warnings: { code: string; message: string; personKey?: string }[];
+  warnings: {
+    code: string;
+    message: string;
+    personKey?: string;
+    guardianKey?: string;
+  }[];
 };
 
 export type LegacyCohortImportResult = {
@@ -175,6 +182,11 @@ export async function planLegacyCohortImport(
       sourceSha256: manifest.sourceWorkbook.sha256,
       planSha256: existingSourceBatch.confirmationPlanSha256,
       sourceRows: manifest.sourceRowCount,
+      includedSourceRows: manifest.people.reduce(
+        (sum, person) => sum + person.sources.length,
+        0,
+      ),
+      excludedSourceRows: manifest.excludedSources.length,
       people: 0,
       guardians: 0,
       payments: 0,
@@ -232,7 +244,11 @@ export async function planLegacyCohortImport(
   }
 
   const programCodes = [
-    ...new Set(manifest.people.map((person) => person.applicant.programCode)),
+    ...new Set(
+      manifest.people.flatMap((person) =>
+        person.applicant.programCode ? [person.applicant.programCode] : [],
+      ),
+    ),
   ];
   const programs = await db.program.findMany({
     where: { code: { in: programCodes } },
@@ -242,11 +258,21 @@ export async function planLegacyCohortImport(
     programs.map((program) => [program.code, program]),
   );
   for (const person of manifest.people) {
-    if (!programByCode.has(person.applicant.programCode)) {
+    if (
+      person.applicant.programCode &&
+      !programByCode.has(person.applicant.programCode)
+    ) {
       blockers.push({
         code: "program_not_found",
         personKey: person.personKey,
         message: "Reviewed program code does not exist",
+      });
+    } else if (!person.applicant.programCode) {
+      warnings.push({
+        code: "program_unassigned",
+        personKey: person.personKey,
+        message:
+          "Student will be imported without a program and requires later registrar assignment",
       });
     }
     if (yearStart && !person.legacyStudentNo.startsWith(`F${yearStart}`)) {
@@ -459,8 +485,8 @@ export async function planLegacyCohortImport(
       ? [guardian.identityDecision.personId]
       : [],
   );
-  const guardianEmails = manifest.guardians.map(
-    (guardian) => guardian.email.finalEmail,
+  const guardianEmails = manifest.guardians.flatMap((guardian) =>
+    guardian.email.finalEmail ? [guardian.email.finalEmail] : [],
   );
   const [existingGuardians, guardianApplicantEmailCollisions] =
     await Promise.all([
@@ -504,9 +530,19 @@ export async function planLegacyCohortImport(
   }
   const guardianById = new Map(existingGuardians.map((row) => [row.id, row]));
   for (const guardian of manifest.guardians) {
+    const finalEmail = guardian.email.finalEmail;
     const byEmail = existingGuardians.filter(
-      (row) => row.email.trim().toLowerCase() === guardian.email.finalEmail,
+      (row) =>
+        finalEmail !== null && row.email?.trim().toLowerCase() === finalEmail,
     );
+    if (!finalEmail) {
+      warnings.push({
+        code: "guardian_email_unavailable",
+        guardianKey: guardian.guardianKey,
+        message:
+          "Guardian will remain a contact-only parent until staff add a real email",
+      });
+    }
     if (guardian.identityDecision.disposition === "create_new") {
       if (byEmail.length > 0) {
         blockers.push({
@@ -526,8 +562,8 @@ export async function planLegacyCohortImport(
       !existing ||
       existing.kind !== "parent" ||
       !existing.roles.includes("parent") ||
-      existing.email.trim().toLowerCase() !== guardian.email.finalEmail ||
-      byEmail.length !== 1 ||
+      (existing.email?.trim().toLowerCase() ?? null) !== finalEmail ||
+      (finalEmail !== null && byEmail.length !== 1) ||
       existingName !== reviewedName ||
       existing.guardianProfile?.phone !== guardian.phone ||
       (existing.guardianProfile?.address ?? null) !== guardian.address
@@ -648,6 +684,11 @@ export async function planLegacyCohortImport(
     sourceSha256: manifest.sourceWorkbook.sha256,
     planSha256: sha256(stableJson(anchor)),
     sourceRows: manifest.sourceRowCount,
+    includedSourceRows: manifest.people.reduce(
+      (sum, person) => sum + person.sources.length,
+      0,
+    ),
+    excludedSourceRows: manifest.excludedSources.length,
     people: manifest.people.length,
     guardians: manifest.guardians.length,
     payments: manifest.people.reduce(
@@ -767,6 +808,13 @@ export async function executeLegacyCohortImport(
   const noCashSourceRows = [...sourceDispositionByCoordinate.values()].filter(
     (disposition) => disposition === "no_cash",
   ).length;
+  const explicitlyExcludedSourceRows = manifest.excludedSources.length;
+  const excludedHoldCodeCounts = manifest.excludedSources
+    .flatMap((source) => source.holdCodes)
+    .reduce<Record<string, number>>((counts, code) => {
+      counts[code] = (counts[code] ?? 0) + 1;
+      return counts;
+    }, {});
   const skippedSourceRows = manifest.sourceRowCount - importedSourceRows;
   const excludedSourceXof = extraction.rows.reduce((sum, row) => {
     const disposition = sourceDispositionByCoordinate.get(
@@ -836,6 +884,7 @@ export async function executeLegacyCohortImport(
                   kind: "parent",
                   roles: ["parent"],
                   passwordHash: null,
+                  mustChangePassword: false,
                 },
               });
               guardianId = person.id;
@@ -888,10 +937,14 @@ export async function executeLegacyCohortImport(
                     manifestSha256: plan.manifestSha256,
                     status: "pending",
                     academicYear: manifest.academicYear.label,
-                    sourceGroupCount: plan.payments + noCashSourceRows,
+                    sourceGroupCount:
+                      plan.payments +
+                      noCashSourceRows +
+                      explicitlyExcludedSourceRows,
                     totalRows: manifest.sourceRowCount,
                     skippedRows: skippedSourceRows,
-                    excludedSourceGroups: noCashSourceRows,
+                    excludedSourceGroups:
+                      noCashSourceRows + explicitlyExcludedSourceRows,
                     sourceTotalXof: BigInt(manifest.sourcePaidTotalXof),
                     excludedXof: BigInt(excludedSourceXof),
                     reviewedAdjustmentXof: BigInt(sourceControlDifferenceXof),
@@ -900,6 +953,8 @@ export async function executeLegacyCohortImport(
                       skippedSourceRows,
                       duplicateSourceRows,
                       noCashSourceRows,
+                      explicitlyExcludedSourceRows,
+                      excludedHoldCodeCounts,
                       ledgerPaymentCount: plan.payments,
                       sourceControlDifferenceXof,
                     },
@@ -1179,6 +1234,10 @@ export async function executeLegacyCohortImport(
                 manifestSha256: plan.manifestSha256,
                 academicYearId: manifest.academicYear.id,
                 sourceRows: manifest.sourceRowCount,
+                includedSourceRows: plan.includedSourceRows,
+                excludedSourceRows: plan.excludedSourceRows,
+                excludedHoldCodeCounts,
+                exclusionReview: manifest.exclusionReview ?? null,
                 people: manifest.people.length,
                 guardians: manifest.guardians.length,
                 payments: plan.payments,

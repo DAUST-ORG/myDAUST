@@ -16,7 +16,7 @@ import { GuardiansService } from "./guardians.service.js";
 // Local zod (the api's own instance) — keeps the ESM/CJS dual-package hazard away from shared.
 const CreateGuardianInput = z.object({
   fullName: z.string().min(1).max(120),
-  email: z.string().email().max(160),
+  email: z.string().trim().email().max(160).optional(),
   phone: z.string().trim().max(40).optional(),
   address: z.string().trim().max(300).optional(),
   studentIds: z.array(z.string().min(1).max(64)).min(1).max(20),
@@ -29,7 +29,7 @@ const SetChildrenInput = z.object({
 
 const UpdateGuardianInput = z.object({
   fullName: z.string().min(1).max(120).optional(),
-  email: z.string().email().max(160).optional(),
+  email: z.string().trim().email().max(160).optional(),
   phone: z.string().trim().max(40).nullable().optional(),
   address: z.string().trim().max(300).nullable().optional(),
 });
@@ -41,7 +41,7 @@ const LinkStudentGuardianInput = z.object({
 
 const CreateStudentGuardianInput = z.object({
   fullName: z.string().trim().min(1).max(120),
-  email: z.string().trim().email().max(160),
+  email: z.string().trim().email().max(160).optional(),
   phone: z.string().trim().max(40).optional(),
   address: z.string().trim().max(300).optional(),
   relation: z.string().trim().max(40).optional(),

@@ -38,6 +38,7 @@ const STATUS_META: Record<
   { label: string; tone: "success" | "warning" | "error" }
 > = {
   active: { label: "Login active", tone: "success" },
+  "contact-only": { label: "Contact only", tone: "warning" },
   "not-provisioned": { label: "No login yet", tone: "warning" },
   invited: { label: "Invite sent", tone: "warning" },
   "invite-expired": { label: "Invite expired", tone: "error" },
@@ -102,7 +103,7 @@ export function StudentGuardians({
       if (!needle) return true;
       return (
         guardian.name.toLowerCase().includes(needle) ||
-        guardian.email.toLowerCase().includes(needle) ||
+        (guardian.email ?? "").toLowerCase().includes(needle) ||
         (guardian.phone ?? "").toLowerCase().includes(needle)
       );
     });
@@ -153,13 +154,13 @@ export function StudentGuardians({
   }
 
   async function submitCreate() {
-    if (!form.fullName.trim() || !form.email.trim()) return;
+    if (!form.fullName.trim()) return;
     setBusy(true);
     setError(null);
     try {
       const result = await createStudentGuardian(studentId, {
         fullName: form.fullName.trim(),
-        email: form.email.trim(),
+        email: form.email.trim() || undefined,
         phone: form.phone.trim() || undefined,
         address: form.address.trim() || undefined,
         relation: form.relation.trim() || undefined,
@@ -384,20 +385,35 @@ export function StudentGuardians({
                       flex: "1 1 280px",
                     }}
                   >
-                    <a
-                      href={`mailto:${guardian.email}`}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 7,
-                        color: "var(--fg1)",
-                        textDecoration: "none",
-                        overflowWrap: "anywhere",
-                      }}
-                    >
-                      <Mail size={14} color="var(--daust-steel)" />
-                      {guardian.email}
-                    </a>
+                    {guardian.email ? (
+                      <a
+                        href={`mailto:${guardian.email}`}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 7,
+                          color: "var(--fg1)",
+                          textDecoration: "none",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        <Mail size={14} color="var(--daust-steel)" />
+                        {guardian.email}
+                      </a>
+                    ) : (
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 7,
+                          color: "var(--fg2)",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        <Mail size={14} color="var(--daust-steel)" />
+                        No email
+                      </span>
+                    )}
                     {guardian.phone ? (
                       <a
                         href={`tel:${guardian.phone}`}
@@ -527,7 +543,7 @@ export function StudentGuardians({
                         overflowWrap: "anywhere",
                       }}
                     >
-                      {guardian.email}
+                      {guardian.email ?? "No email"}
                     </span>
                   </span>
                 </label>
@@ -556,7 +572,7 @@ export function StudentGuardians({
             <Button
               variant="navy"
               onClick={submitCreate}
-              disabled={busy || !form.fullName.trim() || !form.email.trim()}
+              disabled={busy || !form.fullName.trim()}
             >
               {busy ? "Creating…" : "Create & link"}
             </Button>
@@ -570,8 +586,9 @@ export function StudentGuardians({
             </div>
           )}
           <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            Use this only when no parent account already exists for the email.
-            Parent emails cannot overlap student, faculty, or staff accounts.
+            Email is optional for a contact-only parent. When supplied, it
+            cannot overlap a student, faculty, staff, or existing parent
+            account.
           </p>
           <Field label="Full name">
             <Input
@@ -581,13 +598,20 @@ export function StudentGuardians({
               }
             />
           </Field>
-          <Field label="Email">
+          <Field
+            label="Email (optional)"
+            hint="Add one later before creating a login or sending an invitation."
+          >
             <Input
               type="email"
               inputMode="email"
               value={form.email}
               onChange={(value) =>
-                setForm((current) => ({ ...current, email: value }))
+                setForm((current) => ({
+                  ...current,
+                  email: value,
+                  sendInvite: value.trim() ? current.sendInvite : false,
+                }))
               }
             />
           </Field>
@@ -639,6 +663,7 @@ export function StudentGuardians({
             <input
               type="checkbox"
               checked={form.sendInvite}
+              disabled={!form.email.trim()}
               onChange={(event) =>
                 setForm((current) => ({
                   ...current,
@@ -656,7 +681,7 @@ export function StudentGuardians({
                 style={{ display: "block", fontSize: 12 }}
               >
                 Off by default. Creating the relationship alone does not create
-                a login or send email.
+                a login or send email. A real email is required to enable this.
               </span>
             </span>
           </label>

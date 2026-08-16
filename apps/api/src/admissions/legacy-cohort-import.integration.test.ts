@@ -30,14 +30,22 @@ let prisma: PrismaClient;
 let actorEmail: string;
 let academicYearId: string;
 
+async function expectConstraint(
+  operation: Promise<unknown>,
+  constraintName: string,
+): Promise<void> {
+  await expect(operation).rejects.toThrow(constraintName);
+}
+
 function buildReviewedCohort(input?: {
   workbookSha?: string;
   firstStudentNo?: string;
   secondStudentNo?: string;
   firstStudentEmail?: string;
-  firstGuardianEmail?: string;
+  firstGuardianEmail?: string | null;
   secondStudentEmail?: string;
-  secondGuardianEmail?: string;
+  secondGuardianEmail?: string | null;
+  programCode?: string | null;
   documentedReference?: string;
 }) {
   const suffix = randomUUID().slice(0, 8);
@@ -50,11 +58,26 @@ function buildReviewedCohort(input?: {
   const firstStudentEmail =
     input?.firstStudentEmail ?? `legacy-paid-${suffix}@test.local`;
   const firstGuardianEmail =
-    input?.firstGuardianEmail ?? `legacy-parent-paid-${suffix}@test.local`;
+    input?.firstGuardianEmail === undefined ? null : input.firstGuardianEmail;
   const secondStudentEmail =
     input?.secondStudentEmail ?? `legacy-unpaid-${suffix}@test.local`;
   const secondGuardianEmail =
-    input?.secondGuardianEmail ?? `legacy-parent-unpaid-${suffix}@test.local`;
+    input?.secondGuardianEmail === undefined ? null : input.secondGuardianEmail;
+  const programCode =
+    input?.programCode === undefined ? null : input.programCode;
+  const guardianEmailDecision = (email: string | null) =>
+    email
+      ? {
+          sourceEmail: email,
+          finalEmail: email,
+          disposition: "use_source" as const,
+        }
+      : {
+          sourceEmail: null,
+          finalEmail: null,
+          disposition: "unavailable" as const,
+          reason: REVIEW_REASON,
+        };
   const extraction = TrustedLegacyCohortExtractionSchema.parse({
     schemaVersion: 1,
     extractor: { name: "legacy-cohort-extractor", version: "1" },
@@ -108,11 +131,7 @@ function buildReviewedCohort(input?: {
         lastName: "Parent",
         phone: "+221700000101",
         address: null,
-        email: {
-          sourceEmail: firstGuardianEmail,
-          finalEmail: firstGuardianEmail,
-          disposition: "use_source",
-        },
+        email: guardianEmailDecision(firstGuardianEmail),
         identityDecision: {
           disposition: "create_new",
           reviewed: true,
@@ -125,11 +144,7 @@ function buildReviewedCohort(input?: {
         lastName: "Parent",
         phone: "+221700000102",
         address: null,
-        email: {
-          sourceEmail: secondGuardianEmail,
-          finalEmail: secondGuardianEmail,
-          disposition: "use_source",
-        },
+        email: guardianEmailDecision(secondGuardianEmail),
         identityDecision: {
           disposition: "create_new",
           reviewed: true,
@@ -147,7 +162,7 @@ function buildReviewedCohort(input?: {
           firstName: "Paid",
           lastName: "Student",
           dateOfBirth: "2006-03-12",
-          programCode: "BSCS",
+          programCode,
           phone: "+221700000201",
           term: "Fall 2026",
           studentEmail: {
@@ -200,7 +215,7 @@ function buildReviewedCohort(input?: {
           firstName: "Unpaid",
           lastName: "Student",
           dateOfBirth: "2006-04-13",
-          programCode: "BSCS",
+          programCode,
           phone: "+221700000202",
           term: "Fall 2026",
           studentEmail: {
@@ -447,7 +462,13 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
       projectedActivations: 1,
       pendingAfterImport: 1,
     });
-    expect(dryRun.warnings).toHaveLength(1);
+    expect(dryRun.warnings.map((warning) => warning.code).sort()).toEqual([
+      "guardian_email_unavailable",
+      "guardian_email_unavailable",
+      "legacy_payment_evidence_gap",
+      "program_unassigned",
+      "program_unassigned",
+    ]);
     expect({
       applicants: await prisma.applicant.count(),
       students: await prisma.student.count(),
@@ -528,7 +549,7 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
 
     const records = await prisma.legacyCohortImportPerson.findMany({
       include: {
-        applicant: true,
+        applicant: { include: { activeOnboardingPaymentLink: true } },
         student: { include: { person: true, guardians: true } },
         invoice: { include: { payments: true } },
         rows: true,
@@ -540,6 +561,9 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
     const unpaid = records[1]!;
     expect(paid.legacyStudentNo).toBe("F202600001");
     expect(paid.student.studentNo).toBe("F202600001");
+    expect(paid.student.programId).toBeNull();
+    expect(paid.applicant.programCode).toBeNull();
+    expect(paid.applicant.parentEmail).toBeNull();
     expect(paid.applicant.onboardingStatus).toBe("enrolled");
     expect(paid.student.recordStatus).toBe("active");
     expect(paid.student.person.roles).toEqual(["student"]);
@@ -570,6 +594,12 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
     expect(paid.rows).toHaveLength(1);
     expect(paid.student.guardians).toHaveLength(1);
     expect(unpaid.legacyStudentNo).toBe("F202600002");
+    expect(unpaid.student.programId).toBeNull();
+    expect(unpaid.applicant.programCode).toBeNull();
+    expect(unpaid.applicant.parentEmail).toBeNull();
+    expect(unpaid.applicant.activeOnboardingPaymentLink?.payeeMeta).toBe(
+      "F202600002",
+    );
     expect(unpaid.applicant.onboardingStatus).toBe("payment_pending");
     expect(unpaid.student.recordStatus).toBe("pending_payment");
     expect(unpaid.student.person.roles).toEqual([]);
@@ -581,6 +611,10 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
       unpaid.rows.find((row) => row.disposition === "duplicate")?.duplicateOfId,
     ).toBeTruthy();
     expect(await prisma.guardianProfile.count()).toBe(2);
+    expect(
+      await prisma.person.count({ where: { kind: "parent", email: null } }),
+    ).toBe(2);
+    expect(await prisma.guardianInvite.count()).toBe(0);
     expect(
       await prisma.studentNumberSequence.findUniqueOrThrow({
         where: { academicYearStart: 2026 },
@@ -620,6 +654,75 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
       reviewedAdjustmentXof: 0n,
     });
   }, 120_000);
+
+  it("enforces contact-only parent email and credential constraints", async () => {
+    await expectConstraint(
+      prisma.person.create({
+        data: {
+          firstName: "Missing",
+          lastName: "Staff Email",
+          kind: "staff",
+          roles: ["registrar"],
+        },
+      }),
+      "Person_null_email_parent_only_check",
+    );
+    await expectConstraint(
+      prisma.person.create({
+        data: {
+          email: "   ",
+          firstName: "Blank",
+          lastName: "Parent Email",
+          kind: "parent",
+          roles: ["parent"],
+        },
+      }),
+      "Person_email_nonblank_check",
+    );
+    await expectConstraint(
+      prisma.person.create({
+        data: {
+          email: null,
+          firstName: "Password",
+          lastName: "Without Email",
+          kind: "parent",
+          roles: ["parent"],
+          passwordHash: "not-a-real-hash",
+        },
+      }),
+      "Person_null_email_no_password_check",
+    );
+    await expectConstraint(
+      prisma.person.create({
+        data: {
+          email: null,
+          firstName: "Forced Change",
+          lastName: "Without Email",
+          kind: "parent",
+          roles: ["parent"],
+          mustChangePassword: true,
+        },
+      }),
+      "Person_null_email_no_forced_change_check",
+    );
+  });
+
+  it("still blocks an unknown non-null reviewed program", async () => {
+    const { manifest } = buildReviewedCohort({
+      workbookSha: "2".repeat(64),
+      firstStudentNo: "F202600301",
+      secondStudentNo: "F202600302",
+      programCode: "UNKNOWN",
+    });
+
+    const plan = await planLegacyCohortImport(prisma, manifest, { actorEmail });
+
+    expect(plan.blockers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "program_not_found" }),
+      ]),
+    );
+  });
 
   it("blocks a documented reference already retained in canonical ledger evidence", async () => {
     const existing = await prisma.legacyCohortImportPerson.findFirstOrThrow({
