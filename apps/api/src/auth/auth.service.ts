@@ -20,6 +20,7 @@ export class AuthService {
     });
     if (
       !person ||
+      !person.email ||
       !person.passwordHash ||
       (person.student !== null && person.student.recordStatus !== "active")
     ) {

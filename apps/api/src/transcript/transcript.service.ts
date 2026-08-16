@@ -14,6 +14,7 @@ import type {
   TranscriptView,
 } from "@mydaust/shared";
 import type { AuthUser } from "../auth/current-user.js";
+import { requirePersonEmail } from "../auth/person-email.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
 import { AcademicStandingService } from "../academic-catalog/academic-standing.service.js";
@@ -172,7 +173,7 @@ export class TranscriptService {
       id: student.id,
       studentNo: student.studentNo,
       name: `${student.person.firstName} ${student.person.lastName}`.trim(),
-      email: student.person.email,
+      email: requirePersonEmail(student.person.email, "Student"),
       program: student.program,
     };
     const rows: TranscriptLedgerRow[] = entries.map((entry) => ({

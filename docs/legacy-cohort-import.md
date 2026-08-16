@@ -13,7 +13,7 @@ workbook, trusted extraction, and reviewed manifest agree byte-for-byte.
 
 ## Inputs and decisions
 
-Keep all three inputs under the gitignored `private-imports/` directory with
+Keep all inputs under the gitignored `private-imports/` directory with
 owner-only permissions (`chmod 600`); the command rejects more permissive
 files:
 
@@ -23,12 +23,17 @@ files:
    row fingerprints, paid/unpaid labels, source F-IDs, and source payment
    amounts. Its canonical digest must match the manifest.
 3. A reviewed manifest that assigns every physical source row exactly once.
+4. When the manifest contains `excludedSources`, the exact review workbook and
+   immutable hold-notes file named and hashed by `exclusionReview`. Both paths
+   are mandatory at runtime and both files are SHA-256 verified before any
+   database access.
 
 The reviewed manifest must resolve all of the following before confirmation:
 
 - one explicit, unique `F<academic-year><sequence>` ID per person group;
 - exact grouping of repeated rows and direct duplicate-to-canonical links;
-- a real program, academic year, final student email, and at least one guardian;
+- an academic year, final student email, and at least one guardian (a reviewed
+  legacy record may deliberately leave its program unassigned);
 - guardian creation or an exact reviewed existing-parent link;
 - a disposition for every paid and unpaid source row;
 - payment amount, settlement date, method, and reference evidence.
@@ -71,6 +76,8 @@ pnpm --filter @mydaust/api build
 LEGACY_COHORT_IMPORT_MANIFEST_PATH=/absolute/private/path/reviewed-manifest.json \
 LEGACY_COHORT_IMPORT_EXTRACTION_PATH=/absolute/private/path/trusted-extraction.json \
 LEGACY_COHORT_IMPORT_WORKBOOK_PATH=/absolute/private/path/source.xlsx \
+LEGACY_COHORT_IMPORT_REVIEW_WORKBOOK_PATH=/absolute/private/path/review-v3.xlsx \
+LEGACY_COHORT_IMPORT_HOLD_NOTES_PATH=/absolute/private/path/hold-notes.json \
 LEGACY_COHORT_IMPORT_ACTOR_EMAIL=reviewing-admin@daust.net \
 pnpm --filter @mydaust/api import:legacy-cohort
 ```
@@ -90,6 +97,8 @@ LEGACY_COHORT_IMPORT_PLAN_SHA256=<exact-clean-plan-sha256> \
 LEGACY_COHORT_IMPORT_MANIFEST_PATH=/absolute/private/path/reviewed-manifest.json \
 LEGACY_COHORT_IMPORT_EXTRACTION_PATH=/absolute/private/path/trusted-extraction.json \
 LEGACY_COHORT_IMPORT_WORKBOOK_PATH=/absolute/private/path/source.xlsx \
+LEGACY_COHORT_IMPORT_REVIEW_WORKBOOK_PATH=/absolute/private/path/review-v3.xlsx \
+LEGACY_COHORT_IMPORT_HOLD_NOTES_PATH=/absolute/private/path/hold-notes.json \
 LEGACY_COHORT_IMPORT_ACTOR_EMAIL=reviewing-admin@daust.net \
 pnpm --filter @mydaust/api import:legacy-cohort
 ```
@@ -104,8 +113,18 @@ of a completed workbook/manifest are no-ops.
 Each historical cash entry is appended to the canonical Payment ledger,
 allocated to installments and fee components, and passed through the same
 enrollment gate as live settlements. A student activates only after net verified
-cash reaches the dynamic first installment. Unpaid and partially paid students
-remain `pending_payment`.
+cash reaches the dynamic first installment. By default, unpaid and partially
+paid students remain `pending_payment`.
+
+An exceptional retired-platform migration can instead declare the strict
+reviewed policy `onboardingPolicy.disposition:
+"activate_all_legacy_students"`. It requires `reviewed: true` and a substantial
+reason. The importer still posts every historical cash entry first through the
+canonical settlement path. It then activates only the included records still
+pending, leaves `activatedByPaymentId` empty for those override activations,
+cancels their onboarding links, grants the Student role, and writes a dedicated
+audit event. Payment-gate activations retain their actual activating Payment.
+Normal admissions and manifests using `respect_payment_gate` are unchanged.
 
 The reviewed manifest must use `notificationPolicy: "suppress_all"`. The
 importer sends no acceptance email, receipt, or account-setup invitation. When

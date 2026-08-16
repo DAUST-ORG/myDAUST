@@ -56,6 +56,7 @@ export default function ParentsPage() {
     id: string;
     fullName: string;
     email: string;
+    hadEmail: boolean;
     phone: string;
     address: string;
     studentIds: string[];
@@ -89,7 +90,7 @@ export default function ParentsPage() {
     return (rows ?? []).filter(
       (g) =>
         g.name.toLowerCase().includes(needle) ||
-        g.email.toLowerCase().includes(needle) ||
+        (g.email ?? "").toLowerCase().includes(needle) ||
         (g.phone ?? "").toLowerCase().includes(needle) ||
         g.children.some(
           (c) =>
@@ -99,8 +100,7 @@ export default function ParentsPage() {
     );
   }, [rows, listQuery]);
 
-  const valid =
-    form.fullName.trim() && form.email.trim() && form.studentIds.length > 0;
+  const valid = form.fullName.trim() && form.studentIds.length > 0;
 
   async function submit() {
     if (!valid) return;
@@ -109,7 +109,7 @@ export default function ParentsPage() {
     try {
       const created = await createGuardian({
         fullName: form.fullName.trim(),
-        email: form.email.trim(),
+        email: form.email.trim() || undefined,
         phone: form.phone.trim() || undefined,
         address: form.address.trim() || undefined,
         studentIds: form.studentIds,
@@ -120,7 +120,9 @@ export default function ParentsPage() {
           ? `Parent account created for ${form.fullName.trim()} · ID ${created.id}. The password-setup email was sent to ${created.email}.`
           : created.inviteDelivery === "not_needed"
             ? `${form.fullName.trim()} was linked to the selected student account(s). Their existing parent login remains active.`
-            : `Parent account created for ${form.fullName.trim()} · ID ${created.id}, but email delivery was not confirmed. Use Resend invite to try again and retrieve the setup link.`,
+            : created.inviteDelivery === "not_requested"
+              ? `${form.fullName.trim()} was created as a contact-only parent. Add an email before creating a login.`
+              : `Parent account created for ${form.fullName.trim()} · ID ${created.id}, but email delivery was not confirmed. Use Resend invite to try again and retrieve the setup link.`,
       );
       setAdding(false);
       setForm({
@@ -142,13 +144,18 @@ export default function ParentsPage() {
   }
 
   async function saveEdit() {
-    if (!editing || !editing.fullName.trim() || !editing.email.trim()) return;
+    if (
+      !editing ||
+      !editing.fullName.trim() ||
+      (editing.hadEmail && !editing.email.trim())
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
       const updated = await updateGuardian(editing.id, {
         fullName: editing.fullName.trim(),
-        email: editing.email.trim(),
+        email: editing.email.trim() || undefined,
         phone: editing.phone.trim() || null,
         address: editing.address.trim() || null,
       });
@@ -193,12 +200,13 @@ export default function ParentsPage() {
     }
   }
 
-  async function resend(id: string, email: string) {
+  async function resend(guardian: Pick<GuardianRow, "id" | "email">) {
+    if (!guardian.email) return;
     try {
-      const result = await resendGuardianInvite(id);
+      const result = await resendGuardianInvite(guardian.id);
       setNote(
         result.inviteDelivery === "sent"
-          ? `Invitation sent to ${email}.`
+          ? `Invitation sent to ${guardian.email}.`
           : `Email delivery was not confirmed. Give the guardian this one-time setup link securely: ${result.inviteLink}`,
       );
     } catch (e) {
@@ -244,7 +252,9 @@ export default function ParentsPage() {
     }
   }
 
-  const missingLogins = (rows ?? []).filter((row) => !row.hasLogin).length;
+  const missingLogins = (rows ?? []).filter(
+    (row) => row.email && !row.hasLogin,
+  ).length;
 
   return (
     <>
@@ -354,7 +364,7 @@ export default function ParentsPage() {
                     </span>
                   </td>
                   <td>
-                    <div className="muted">{g.email}</div>
+                    <div className="muted">{g.email ?? "No email"}</div>
                     {g.phone && (
                       <div className="muted" style={{ fontSize: 12 }}>
                         {g.phone}
@@ -371,17 +381,21 @@ export default function ParentsPage() {
                       tone={
                         g.status === "active"
                           ? "success"
-                          : g.status === "invited" ||
-                              g.status === "not-provisioned"
+                          : g.status === "contact-only"
                             ? "warning"
-                            : "error"
+                            : g.status === "invited" ||
+                                g.status === "not-provisioned"
+                              ? "warning"
+                              : "error"
                       }
                     >
                       {g.status === "not-provisioned"
                         ? "Needs login"
-                        : g.status === "invite-expired"
-                          ? "Invite expired"
-                          : g.status}
+                        : g.status === "contact-only"
+                          ? "Contact only"
+                          : g.status === "invite-expired"
+                            ? "Invite expired"
+                            : g.status}
                     </Badge>
                   </td>
                   <td>
@@ -399,34 +413,37 @@ export default function ParentsPage() {
                         alignItems: "center",
                       }}
                     >
-                      {g.status !== "active" && (
+                      {g.email && g.status !== "active" && (
                         <Button
                           size="sm"
                           icon={<Mail size={12} />}
-                          onClick={() => resend(g.id, g.email)}
+                          onClick={() => resend(g)}
                         >
                           Resend invite
                         </Button>
                       )}
-                      <Button
-                        size="sm"
-                        icon={<KeyRound size={12} />}
-                        onClick={() => provisionOne(g.id)}
-                        disabled={provisioning !== null}
-                      >
-                        {provisioning === g.id
-                          ? "Generating…"
-                          : g.hasLogin
-                            ? "Reset password"
-                            : "Generate login"}
-                      </Button>
+                      {g.email && (
+                        <Button
+                          size="sm"
+                          icon={<KeyRound size={12} />}
+                          onClick={() => provisionOne(g.id)}
+                          disabled={provisioning !== null}
+                        >
+                          {provisioning === g.id
+                            ? "Generating…"
+                            : g.hasLogin
+                              ? "Reset password"
+                              : "Generate login"}
+                        </Button>
+                      )}
                       <IconButton
                         label="Edit parent"
                         onClick={() =>
                           setEditing({
                             id: g.id,
                             fullName: g.name,
-                            email: g.email,
+                            email: g.email ?? "",
+                            hadEmail: g.email !== null,
                             phone: g.phone ?? "",
                             address: g.address ?? "",
                             studentIds: g.children.map((c) => c.studentId),
@@ -463,7 +480,11 @@ export default function ParentsPage() {
                 Cancel
               </Button>
               <Button variant="navy" onClick={submit} disabled={busy || !valid}>
-                {busy ? "Creating…" : "Create & send invite"}
+                {busy
+                  ? "Creating…"
+                  : form.email.trim()
+                    ? "Create & send invite"
+                    : "Create contact"}
               </Button>
             </>
           }
@@ -475,7 +496,10 @@ export default function ParentsPage() {
                 onChange={(v) => setForm((f) => ({ ...f, fullName: v }))}
               />
             </Field>
-            <Field label="Email" hint="The password-setup link is sent here.">
+            <Field
+              label="Email (optional)"
+              hint="Without an email, this remains a contact-only parent with no login."
+            >
               <Input
                 value={form.email}
                 onChange={(v) => setForm((f) => ({ ...f, email: v }))}
@@ -532,7 +556,9 @@ export default function ParentsPage() {
                 variant="navy"
                 onClick={saveEdit}
                 disabled={
-                  busy || !editing.fullName.trim() || !editing.email.trim()
+                  busy ||
+                  !editing.fullName.trim() ||
+                  (editing.hadEmail && !editing.email.trim())
                 }
               >
                 {busy ? "Saving…" : "Save changes"}
@@ -549,7 +575,14 @@ export default function ParentsPage() {
                 }
               />
             </Field>
-            <Field label="Email">
+            <Field
+              label={editing.hadEmail ? "Email" : "Email (optional)"}
+              hint={
+                editing.hadEmail
+                  ? "An established login email cannot be cleared here."
+                  : "Add an email before sending an invitation or creating a login."
+              }
+            >
               <Input
                 type="email"
                 value={editing.email}
@@ -606,8 +639,8 @@ export default function ParentsPage() {
         >
           <p style={{ margin: 0 }}>
             Delete the guardian account for <strong>{removing.name}</strong> (
-            {removing.email})? This revokes their access to the assigned student
-            record(s). This cannot be undone.
+            {removing.email ?? "no email"})? This revokes their access to the
+            assigned student record(s). This cannot be undone.
           </p>
         </Modal>
       )}

@@ -16,6 +16,7 @@ import {
   verifyLegacyCohortManifestExtraction,
 } from "./legacy-cohort-import.extraction.js";
 import { applyHistoricalCashSettlementInTransaction } from "../finance/historical-cash-settlement.js";
+import { cancelOnboardingPaymentAttemptsInTransaction } from "../finance/admission-payment-gate.js";
 import { normalizeExternalReference } from "../finance/historical-payment-import.manifest.js";
 import {
   externalReferenceFingerprintSha256,
@@ -46,6 +47,8 @@ export type LegacyCohortImportPlan = {
   sourceSha256: string;
   planSha256: string;
   sourceRows: number;
+  includedSourceRows: number;
+  excludedSourceRows: number;
   people: number;
   guardians: number;
   payments: number;
@@ -54,7 +57,12 @@ export type LegacyCohortImportPlan = {
   projectedActivations: number;
   feeSchedule: { id: string; revision: number; totalXof: number } | null;
   blockers: LegacyCohortImportBlocker[];
-  warnings: { code: string; message: string; personKey?: string }[];
+  warnings: {
+    code: string;
+    message: string;
+    personKey?: string;
+    guardianKey?: string;
+  }[];
 };
 
 export type LegacyCohortImportResult = {
@@ -175,6 +183,11 @@ export async function planLegacyCohortImport(
       sourceSha256: manifest.sourceWorkbook.sha256,
       planSha256: existingSourceBatch.confirmationPlanSha256,
       sourceRows: manifest.sourceRowCount,
+      includedSourceRows: manifest.people.reduce(
+        (sum, person) => sum + person.sources.length,
+        0,
+      ),
+      excludedSourceRows: manifest.excludedSources.length,
       people: 0,
       guardians: 0,
       payments: 0,
@@ -232,7 +245,11 @@ export async function planLegacyCohortImport(
   }
 
   const programCodes = [
-    ...new Set(manifest.people.map((person) => person.applicant.programCode)),
+    ...new Set(
+      manifest.people.flatMap((person) =>
+        person.applicant.programCode ? [person.applicant.programCode] : [],
+      ),
+    ),
   ];
   const programs = await db.program.findMany({
     where: { code: { in: programCodes } },
@@ -242,11 +259,21 @@ export async function planLegacyCohortImport(
     programs.map((program) => [program.code, program]),
   );
   for (const person of manifest.people) {
-    if (!programByCode.has(person.applicant.programCode)) {
+    if (
+      person.applicant.programCode &&
+      !programByCode.has(person.applicant.programCode)
+    ) {
       blockers.push({
         code: "program_not_found",
         personKey: person.personKey,
         message: "Reviewed program code does not exist",
+      });
+    } else if (!person.applicant.programCode) {
+      warnings.push({
+        code: "program_unassigned",
+        personKey: person.personKey,
+        message:
+          "Student will be imported without a program and requires later registrar assignment",
       });
     }
     if (yearStart && !person.legacyStudentNo.startsWith(`F${yearStart}`)) {
@@ -459,8 +486,8 @@ export async function planLegacyCohortImport(
       ? [guardian.identityDecision.personId]
       : [],
   );
-  const guardianEmails = manifest.guardians.map(
-    (guardian) => guardian.email.finalEmail,
+  const guardianEmails = manifest.guardians.flatMap((guardian) =>
+    guardian.email.finalEmail ? [guardian.email.finalEmail] : [],
   );
   const [existingGuardians, guardianApplicantEmailCollisions] =
     await Promise.all([
@@ -504,9 +531,19 @@ export async function planLegacyCohortImport(
   }
   const guardianById = new Map(existingGuardians.map((row) => [row.id, row]));
   for (const guardian of manifest.guardians) {
+    const finalEmail = guardian.email.finalEmail;
     const byEmail = existingGuardians.filter(
-      (row) => row.email.trim().toLowerCase() === guardian.email.finalEmail,
+      (row) =>
+        finalEmail !== null && row.email?.trim().toLowerCase() === finalEmail,
     );
+    if (!finalEmail) {
+      warnings.push({
+        code: "guardian_email_unavailable",
+        guardianKey: guardian.guardianKey,
+        message:
+          "Guardian will remain a contact-only parent until staff add a real email",
+      });
+    }
     if (guardian.identityDecision.disposition === "create_new") {
       if (byEmail.length > 0) {
         blockers.push({
@@ -526,8 +563,8 @@ export async function planLegacyCohortImport(
       !existing ||
       existing.kind !== "parent" ||
       !existing.roles.includes("parent") ||
-      existing.email.trim().toLowerCase() !== guardian.email.finalEmail ||
-      byEmail.length !== 1 ||
+      (existing.email?.trim().toLowerCase() ?? null) !== finalEmail ||
+      (finalEmail !== null && byEmail.length !== 1) ||
       existingName !== reviewedName ||
       existing.guardianProfile?.phone !== guardian.phone ||
       (existing.guardianProfile?.address ?? null) !== guardian.address
@@ -548,8 +585,8 @@ export async function planLegacyCohortImport(
           installmentCount: feeSchedule.rows.length,
         })
       : 0;
-  let projectedActivations = 0;
-  let pendingAfterImport = 0;
+  let paymentGateActivations = 0;
+  let paymentGatePending = 0;
   for (const person of manifest.people) {
     const total = person.payments.reduce(
       (sum, payment) => sum + payment.amountXof,
@@ -563,9 +600,9 @@ export async function planLegacyCohortImport(
       });
     }
     if (total >= firstInstallmentXof && firstInstallmentXof > 0) {
-      projectedActivations += 1;
+      paymentGateActivations += 1;
     } else {
-      pendingAfterImport += 1;
+      paymentGatePending += 1;
     }
     for (const payment of person.payments) {
       const settledOn = paymentDate(payment);
@@ -586,6 +623,19 @@ export async function planLegacyCohortImport(
       }
     }
   }
+  const activateAllLegacyStudents =
+    manifest.onboardingPolicy.disposition === "activate_all_legacy_students";
+  const projectedActivations = activateAllLegacyStudents
+    ? manifest.people.length
+    : paymentGateActivations;
+  const pendingAfterImport = activateAllLegacyStudents ? 0 : paymentGatePending;
+  if (activateAllLegacyStudents) {
+    warnings.push({
+      code: "reviewed_legacy_activation_override",
+      message:
+        "Every included legacy record will be activated after canonical historical-cash processing, including records below the enrollment payment gate",
+    });
+  }
 
   const paymentAmountXof = manifest.people.reduce(
     (sum, person) =>
@@ -598,6 +648,7 @@ export async function planLegacyCohortImport(
   );
   const anchor = {
     manifestSha256,
+    onboardingPolicy: manifest.onboardingPolicy,
     academicYear: academicYear
       ? {
           id: academicYear.id,
@@ -648,6 +699,11 @@ export async function planLegacyCohortImport(
     sourceSha256: manifest.sourceWorkbook.sha256,
     planSha256: sha256(stableJson(anchor)),
     sourceRows: manifest.sourceRowCount,
+    includedSourceRows: manifest.people.reduce(
+      (sum, person) => sum + person.sources.length,
+      0,
+    ),
+    excludedSourceRows: manifest.excludedSources.length,
     people: manifest.people.length,
     guardians: manifest.guardians.length,
     payments: manifest.people.reduce(
@@ -702,6 +758,110 @@ async function suppressLegacyCohortActivationInviteInTransaction(
       data: {
         batchId,
         studentId: activation.studentId,
+        notificationPolicy: "suppress_all",
+      },
+    },
+  });
+}
+
+async function activateLegacyCohortStudentByReviewedOverrideInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    applicantId: string;
+    studentId: string;
+    personId: string;
+    invoiceId: string;
+    cohortBatchId: string;
+    manifestSha256: string;
+    actorId: string;
+    reason: string;
+  },
+): Promise<void> {
+  const [person, activeInvite] = await Promise.all([
+    tx.person.findUnique({
+      where: { id: input.personId },
+      select: { roles: true },
+    }),
+    tx.studentInvite.findFirst({
+      where: { studentPersonId: input.personId },
+      select: { id: true },
+    }),
+  ]);
+  if (!person) throw new Error("Legacy cohort Student Person is missing");
+  if (activeInvite) {
+    throw new Error(
+      "Reviewed legacy activation override cannot consume or replace an account invite",
+    );
+  }
+
+  const now = new Date();
+  const claimed = await tx.applicant.updateMany({
+    where: {
+      id: input.applicantId,
+      studentId: input.studentId,
+      enrollmentInvoiceId: input.invoiceId,
+      onboardingStatus: "payment_pending",
+      activatedByPaymentId: null,
+    },
+    data: {
+      onboardingStatus: "enrolled",
+      enrolledAt: now,
+      activeOnboardingPaymentLinkId: null,
+      statusTokenHash: null,
+      statusTokenExpiresAt: now,
+      statusTokenRevokedAt: now,
+    },
+  });
+  if (claimed.count !== 1) {
+    throw new Error(
+      "Reviewed legacy activation override could not claim the pending applicant",
+    );
+  }
+
+  await tx.student.update({
+    where: { id: input.studentId },
+    data: { recordStatus: "active", enrolledAt: now },
+  });
+  await tx.person.update({
+    where: { id: input.personId },
+    data: {
+      roles: person.roles.includes("student")
+        ? person.roles
+        : [...person.roles, "student"],
+    },
+  });
+  const onboardingLinks = await tx.paymentLink.findMany({
+    where: { onboardingApplicantId: input.applicantId },
+    select: { id: true },
+  });
+  await tx.paymentLink.updateMany({
+    where: {
+      onboardingApplicantId: input.applicantId,
+      status: "active",
+    },
+    data: { status: "cancelled" },
+  });
+  await cancelOnboardingPaymentAttemptsInTransaction(
+    tx,
+    onboardingLinks.map((link) => link.id),
+    "Legacy cohort enrollment was activated by reviewed migration policy",
+    "preserve",
+  );
+  await tx.auditLog.create({
+    data: {
+      entity: "Applicant",
+      entityId: input.applicantId,
+      action: "legacy-cohort-onboarding-override-activated",
+      actorId: input.actorId,
+      data: {
+        cohortBatchId: input.cohortBatchId,
+        manifestSha256: input.manifestSha256,
+        studentId: input.studentId,
+        invoiceId: input.invoiceId,
+        activatedByPaymentId: null,
+        onboardingPolicy: "activate_all_legacy_students",
+        reviewed: true,
+        reason: input.reason,
         notificationPolicy: "suppress_all",
       },
     },
@@ -767,6 +927,13 @@ export async function executeLegacyCohortImport(
   const noCashSourceRows = [...sourceDispositionByCoordinate.values()].filter(
     (disposition) => disposition === "no_cash",
   ).length;
+  const explicitlyExcludedSourceRows = manifest.excludedSources.length;
+  const excludedHoldCodeCounts = manifest.excludedSources
+    .flatMap((source) => source.holdCodes)
+    .reduce<Record<string, number>>((counts, code) => {
+      counts[code] = (counts[code] ?? 0) + 1;
+      return counts;
+    }, {});
   const skippedSourceRows = manifest.sourceRowCount - importedSourceRows;
   const excludedSourceXof = extraction.rows.reduce((sum, row) => {
     const disposition = sourceDispositionByCoordinate.get(
@@ -836,6 +1003,7 @@ export async function executeLegacyCohortImport(
                   kind: "parent",
                   roles: ["parent"],
                   passwordHash: null,
+                  mustChangePassword: false,
                 },
               });
               guardianId = person.id;
@@ -888,10 +1056,14 @@ export async function executeLegacyCohortImport(
                     manifestSha256: plan.manifestSha256,
                     status: "pending",
                     academicYear: manifest.academicYear.label,
-                    sourceGroupCount: plan.payments + noCashSourceRows,
+                    sourceGroupCount:
+                      plan.payments +
+                      noCashSourceRows +
+                      explicitlyExcludedSourceRows,
                     totalRows: manifest.sourceRowCount,
                     skippedRows: skippedSourceRows,
-                    excludedSourceGroups: noCashSourceRows,
+                    excludedSourceGroups:
+                      noCashSourceRows + explicitlyExcludedSourceRows,
                     sourceTotalXof: BigInt(manifest.sourcePaidTotalXof),
                     excludedXof: BigInt(excludedSourceXof),
                     reviewedAdjustmentXof: BigInt(sourceControlDifferenceXof),
@@ -900,6 +1072,8 @@ export async function executeLegacyCohortImport(
                       skippedSourceRows,
                       duplicateSourceRows,
                       noCashSourceRows,
+                      explicitlyExcludedSourceRows,
+                      excludedHoldCodeCounts,
                       ledgerPaymentCount: plan.payments,
                       sourceControlDifferenceXof,
                     },
@@ -956,6 +1130,11 @@ export async function executeLegacyCohortImport(
               academicYearId: manifest.academicYear.id,
               studentNo: person.legacyStudentNo,
               studentNoSource: "legacy_explicit",
+              statusCapabilityPolicy:
+                manifest.onboardingPolicy.disposition ===
+                "activate_all_legacy_students"
+                  ? "suppress"
+                  : "create",
             });
             const personRecord = await tx.legacyCohortImportPerson.create({
               data: {
@@ -1077,6 +1256,27 @@ export async function executeLegacyCohortImport(
                 activated = true;
               }
             }
+            if (
+              !activated &&
+              manifest.onboardingPolicy.disposition ===
+                "activate_all_legacy_students"
+            ) {
+              await activateLegacyCohortStudentByReviewedOverrideInTransaction(
+                tx,
+                {
+                  applicantId: applicant.id,
+                  studentId: gate.studentId,
+                  personId: gate.personId,
+                  invoiceId: gate.invoiceId,
+                  cohortBatchId: cohortBatch.id,
+                  manifestSha256: plan.manifestSha256,
+                  actorId: plan.actorId,
+                  reason: manifest.onboardingPolicy.reason,
+                },
+              );
+              activatedStudents += 1;
+              activated = true;
+            }
             if (activated) {
               await tx.legacyCohortImportPerson.update({
                 where: { id: personRecord.id },
@@ -1179,12 +1379,17 @@ export async function executeLegacyCohortImport(
                 manifestSha256: plan.manifestSha256,
                 academicYearId: manifest.academicYear.id,
                 sourceRows: manifest.sourceRowCount,
+                includedSourceRows: plan.includedSourceRows,
+                excludedSourceRows: plan.excludedSourceRows,
+                excludedHoldCodeCounts,
+                exclusionReview: manifest.exclusionReview ?? null,
                 people: manifest.people.length,
                 guardians: manifest.guardians.length,
                 payments: plan.payments,
                 importedXof: plan.paymentAmountXof,
                 activatedStudents,
                 notificationPolicy: manifest.notificationPolicy,
+                onboardingPolicy: manifest.onboardingPolicy,
               },
             },
           });

@@ -7,6 +7,7 @@ import {
 import bcrypt from "bcryptjs";
 import { Prisma } from "@mydaust/db";
 import { normalizeStudentNumber } from "@mydaust/shared";
+import { requirePersonEmail } from "../auth/person-email.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
@@ -293,7 +294,7 @@ export class RegistrarService {
       );
     }
     const person = student.person;
-    let email = person.email;
+    let email = requirePersonEmail(person.email, "Student");
 
     if (!email.toLowerCase().endsWith("@mydaust.com")) {
       if (!student.personalEmail) {

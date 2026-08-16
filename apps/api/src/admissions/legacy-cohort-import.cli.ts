@@ -9,7 +9,10 @@ import {
   parseTrustedLegacyCohortExtraction,
   verifyLegacyCohortManifestExtraction,
 } from "./legacy-cohort-import.extraction.js";
-import { parseLegacyCohortManifest } from "./legacy-cohort-import.manifest.js";
+import {
+  parseLegacyCohortManifest,
+  verifyLegacyCohortExclusionReviewArtifacts,
+} from "./legacy-cohort-import.manifest.js";
 import {
   LegacyCohortImportBlockedError,
   executeLegacyCohortImport,
@@ -26,6 +29,12 @@ const environmentSchema = z
     LEGACY_COHORT_IMPORT_MANIFEST_PATH: z.string().trim().min(1),
     LEGACY_COHORT_IMPORT_EXTRACTION_PATH: z.string().trim().min(1),
     LEGACY_COHORT_IMPORT_WORKBOOK_PATH: z.string().trim().min(1),
+    LEGACY_COHORT_IMPORT_REVIEW_WORKBOOK_PATH: z
+      .string()
+      .trim()
+      .min(1)
+      .optional(),
+    LEGACY_COHORT_IMPORT_HOLD_NOTES_PATH: z.string().trim().min(1).optional(),
     LEGACY_COHORT_IMPORT_ACTOR_EMAIL: z
       .string()
       .trim()
@@ -109,6 +118,39 @@ async function main(): Promise<void> {
   const manifest = parseLegacyCohortManifest(manifestBytes);
   const extraction = parseTrustedLegacyCohortExtraction(extractionBytes);
   verifyLegacyCohortManifestExtraction(manifest, extraction);
+  if (manifest.exclusionReview) {
+    if (
+      !env.LEGACY_COHORT_IMPORT_REVIEW_WORKBOOK_PATH ||
+      !env.LEGACY_COHORT_IMPORT_HOLD_NOTES_PATH
+    ) {
+      throw new LegacyCohortImportBlockedError(
+        "Reviewed exclusions require explicit review-workbook and hold-notes paths",
+        {},
+      );
+    }
+    const reviewWorkbookPath = resolve(
+      env.LEGACY_COHORT_IMPORT_REVIEW_WORKBOOK_PATH,
+    );
+    const holdNotesPath = resolve(env.LEGACY_COHORT_IMPORT_HOLD_NOTES_PATH);
+    const [reviewWorkbookBytes, holdNotesBytes] = await Promise.all([
+      readBounded(
+        reviewWorkbookPath,
+        MAX_WORKBOOK_BYTES,
+        "Legacy cohort review workbook",
+      ),
+      readBounded(holdNotesPath, MAX_JSON_BYTES, "Legacy cohort hold notes"),
+    ]);
+    verifyLegacyCohortExclusionReviewArtifacts(manifest, {
+      reviewWorkbook: {
+        fileName: basename(reviewWorkbookPath),
+        bytes: reviewWorkbookBytes,
+      },
+      holdNotes: {
+        fileName: basename(holdNotesPath),
+        bytes: holdNotesBytes,
+      },
+    });
+  }
   const workbookSha256 = createHash("sha256")
     .update(workbookBytes)
     .digest("hex");

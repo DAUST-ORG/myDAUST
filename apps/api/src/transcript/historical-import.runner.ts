@@ -131,7 +131,7 @@ async function findStudents(client: ImportReadClient, studentNos: string[]) {
     id: string;
     studentNo: string;
     recordStatus: string;
-    person: { email: string };
+    person: { email: string | null };
   }> = [];
   for (const chunk of chunks(studentNos)) {
     students.push(

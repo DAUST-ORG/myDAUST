@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
 import { normalizeStudentNumber, toDakarDateKey } from "@mydaust/shared";
 import { assignStandardPackageInTransaction } from "../finance/standard-package.js";
+import { isLegacyCohortStudentNumber } from "./legacy-cohort-import.manifest.js";
 
 const STATUS_TOKEN_BYTES = 32;
 
@@ -22,7 +23,7 @@ export type PaymentGateCreationResult = {
   invoiceId: string;
   paymentLinkId: string;
   requiredEnrollmentCashXof: number;
-  statusToken: string;
+  statusToken: string | null;
 };
 
 /**
@@ -40,9 +41,20 @@ export async function createPaymentGatedAcceptanceInTransaction(
     academicYearId: string;
     studentNo: string;
     studentNoSource: "generated" | "legacy_explicit";
+    statusCapabilityPolicy?: "create" | "suppress";
   },
 ): Promise<PaymentGateCreationResult> {
+  const reviewedStudentNo = input.studentNo.normalize("NFKC").trim();
   const studentNo = normalizeStudentNumber(input.studentNo);
+  const statusCapabilityPolicy = input.statusCapabilityPolicy ?? "create";
+  if (
+    statusCapabilityPolicy === "suppress" &&
+    input.studentNoSource !== "legacy_explicit"
+  ) {
+    throw new BadRequestException(
+      "Applicant status capabilities can only be suppressed for a reviewed legacy acceptance",
+    );
+  }
   const applicant = await tx.applicant.findUnique({
     where: { id: input.applicantId },
   });
@@ -67,12 +79,13 @@ export async function createPaymentGatedAcceptanceInTransaction(
       "A valid date of birth is required before acceptance",
     );
   }
-  if (!applicant.programCode) {
+  const isReviewedLegacy = input.studentNoSource === "legacy_explicit";
+  if (!applicant.programCode && !isReviewedLegacy) {
     throw new BadRequestException("A program is required before acceptance");
   }
   if (
-    input.studentNoSource === "legacy_explicit" &&
-    !/^F\d{5,}$/.test(studentNo)
+    isReviewedLegacy &&
+    (reviewedStudentNo !== studentNo || !isLegacyCohortStudentNumber(studentNo))
   ) {
     throw new BadRequestException(
       "A reviewed legacy acceptance requires an explicit permanent F-ID",
@@ -80,7 +93,9 @@ export async function createPaymentGatedAcceptanceInTransaction(
   }
 
   const [program, academicYear, existingStudentNo] = await Promise.all([
-    tx.program.findUnique({ where: { code: applicant.programCode } }),
+    applicant.programCode
+      ? tx.program.findUnique({ where: { code: applicant.programCode } })
+      : Promise.resolve(null),
     tx.academicYear.findUnique({ where: { id: input.academicYearId } }),
     tx.student.findFirst({
       where: {
@@ -89,7 +104,9 @@ export async function createPaymentGatedAcceptanceInTransaction(
       select: { id: true },
     }),
   ]);
-  if (!program) throw new BadRequestException("Unknown applicant program");
+  if (applicant.programCode && !program) {
+    throw new BadRequestException("Unknown applicant program");
+  }
   if (!academicYear) throw new BadRequestException("Unknown academic year");
   if (existingStudentNo) {
     throw new BadRequestException(
@@ -124,7 +141,7 @@ export async function createPaymentGatedAcceptanceInTransaction(
     data: {
       personId: person.id,
       studentNo,
-      programId: program.id,
+      programId: program?.id ?? null,
       dateOfBirth: new Date(
         `${applicant.dateOfBirth.toISOString().slice(0, 10)}T00:00:00Z`,
       ),
@@ -171,7 +188,7 @@ export async function createPaymentGatedAcceptanceInTransaction(
       amountXof: firstInstallment.amountDue,
       purpose: "First enrollment installment",
       payeeName: `${applicant.firstName} ${applicant.lastName}`.trim(),
-      payeeMeta: `${studentNo} · ${program.code}`,
+      payeeMeta: program ? `${studentNo} · ${program.code}` : studentNo,
       studentId: student.id,
       invoiceId: invoice.id,
       costCenterCode: invoice.costCenterCode,
@@ -180,7 +197,8 @@ export async function createPaymentGatedAcceptanceInTransaction(
       onboardingApplicantId: applicant.id,
     },
   });
-  const statusToken = newApplicantStatusCapability();
+  const statusToken =
+    statusCapabilityPolicy === "create" ? newApplicantStatusCapability() : null;
   await tx.applicant.update({
     where: { id: applicant.id },
     data: {
@@ -191,9 +209,11 @@ export async function createPaymentGatedAcceptanceInTransaction(
       enrollmentInvoiceId: invoice.id,
       requiredEnrollmentCashXof: firstInstallment.amountDue,
       activeOnboardingPaymentLinkId: paymentLink.id,
-      statusTokenHash: hashApplicantStatusCapability(statusToken),
-      statusTokenExpiresAt: null,
-      statusTokenRevokedAt: null,
+      statusTokenHash: statusToken
+        ? hashApplicantStatusCapability(statusToken)
+        : null,
+      statusTokenExpiresAt: statusToken ? null : now,
+      statusTokenRevokedAt: statusToken ? null : now,
       acceptedAt: applicant.acceptedAt ?? now,
       paymentPendingAt: now,
       onboardingCancelledAt: null,
@@ -214,6 +234,7 @@ export async function createPaymentGatedAcceptanceInTransaction(
           invoiceId: invoice.id,
           requiredEnrollmentCashXof: firstInstallment.amountDue,
           paymentLinkId: paymentLink.id,
+          statusCapabilityPolicy,
         },
       },
       {

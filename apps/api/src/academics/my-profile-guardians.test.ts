@@ -27,7 +27,7 @@ describe("AcademicsService.myProfile guardian links", () => {
           guardian: {
             firstName: "Moussa",
             lastName: "Example",
-            email: "moussa@example.com",
+            email: null,
             guardianProfile: null,
           },
         },
@@ -80,7 +80,7 @@ describe("AcademicsService.myProfile guardian links", () => {
       {
         name: "Moussa Example",
         relation: null,
-        email: "moussa@example.com",
+        email: null,
         phone: null,
       },
     ]);

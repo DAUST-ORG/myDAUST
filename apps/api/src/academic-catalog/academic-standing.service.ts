@@ -9,6 +9,7 @@ import {
   type AcademicStanding,
   type AcademicStandingRule,
 } from "@mydaust/shared";
+import { requirePersonEmail } from "../auth/person-email.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { AcademicCatalogService } from "./academic-catalog.service.js";
 
@@ -182,7 +183,10 @@ export class AcademicStandingService {
         createdBy: active.createdBy
           ? {
               name: `${active.createdBy.firstName} ${active.createdBy.lastName}`.trim(),
-              email: active.createdBy.email,
+              email: requirePersonEmail(
+                active.createdBy.email,
+                "Standing override creator",
+              ),
             }
           : null,
       },
@@ -248,7 +252,10 @@ export class AcademicStandingService {
           createdBy: active.createdBy
             ? {
                 name: `${active.createdBy.firstName} ${active.createdBy.lastName}`.trim(),
-                email: active.createdBy.email,
+                email: requirePersonEmail(
+                  active.createdBy.email,
+                  "Standing override creator",
+                ),
               }
             : null,
         },
