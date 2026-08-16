@@ -273,7 +273,7 @@ function GuardiansCard({ guardians }: { guardians: MyProfile["guardians"] }) {
         <div>
           {guardians.map((guardian, index) => (
             <article
-              key={`${guardian.email}-${index}`}
+              key={`${guardian.name}-${guardian.email ?? "no-email"}-${index}`}
               style={{
                 display: "flex",
                 flexWrap: "wrap",
@@ -314,20 +314,34 @@ function GuardiansCard({ guardians }: { guardians: MyProfile["guardians"] }) {
                   flex: "1 1 280px",
                 }}
               >
-                <a
-                  href={`mailto:${guardian.email}`}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 7,
-                    color: "var(--fg1)",
-                    textDecoration: "none",
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  <Mail size={14} color="var(--daust-steel)" />
-                  {guardian.email}
-                </a>
+                {guardian.email ? (
+                  <a
+                    href={`mailto:${guardian.email}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 7,
+                      color: "var(--fg1)",
+                      textDecoration: "none",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    <Mail size={14} color="var(--daust-steel)" />
+                    {guardian.email}
+                  </a>
+                ) : (
+                  <span
+                    className="muted"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 7,
+                    }}
+                  >
+                    <Mail size={14} color="var(--daust-steel)" />
+                    No email
+                  </span>
+                )}
                 {guardian.phone && (
                   <a
                     href={`tel:${guardian.phone}`}

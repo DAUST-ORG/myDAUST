@@ -11,6 +11,7 @@ import {
   type FacultyProfileInput,
   safeLink,
 } from "@mydaust/shared";
+import { requirePersonEmail } from "../auth/person-email.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 /** Uploaded photo path (/uploads/...) or an http(s) URL; anything else → null. */
@@ -193,7 +194,9 @@ export class FacultyService {
   /** Comms: edit the name + profile fields (upserting the profile row). */
   async update(personId: string, input: FacultyProfileInput, actorId: string) {
     const person = await this.mustFaculty(personId);
-    const email = input.email?.trim().toLowerCase() ?? person.email;
+    const email =
+      input.email?.trim().toLowerCase() ??
+      requirePersonEmail(person.email, "Faculty member");
     if (email !== person.email) {
       const existing = await this.prisma.person.findUnique({
         where: { email },

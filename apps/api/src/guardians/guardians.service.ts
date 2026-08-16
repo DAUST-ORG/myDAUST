@@ -35,7 +35,7 @@ function attendanceRate(records: { status: string }[]): number | null {
 
 export interface CreateGuardianInput {
   fullName: string;
-  email: string;
+  email?: string;
   phone?: string;
   address?: string;
   studentIds: string[];
@@ -49,7 +49,7 @@ export interface LinkStudentGuardianInput {
 
 export interface CreateStudentGuardianInput {
   fullName: string;
-  email: string;
+  email?: string;
   phone?: string;
   address?: string;
   relation?: string;
@@ -82,10 +82,28 @@ export class GuardiansService {
     return { firstName, lastName: parts.join(" ") || firstName };
   }
 
+  private optionalEmail(value: string | undefined): string | null {
+    if (value === undefined) return null;
+    const email = value.trim().toLowerCase();
+    if (!email) {
+      throw new BadRequestException(
+        "Email cannot be blank; omit it when the address is unavailable",
+      );
+    }
+    return email;
+  }
+
   private accountStatus(guardian: {
+    email: string | null;
     passwordHash: string | null;
     guardianInvites: { expiresAt: Date }[];
-  }): "active" | "not-provisioned" | "invited" | "invite-expired" {
+  }):
+    | "active"
+    | "contact-only"
+    | "not-provisioned"
+    | "invited"
+    | "invite-expired" {
+    if (!guardian.email) return "contact-only";
     if (guardian.passwordHash) return "active";
     const invite = guardian.guardianInvites[0];
     if (!invite) return "not-provisioned";
@@ -243,11 +261,16 @@ export class GuardiansService {
     studentId: string,
     input: CreateStudentGuardianInput,
   ) {
-    const email = input.email.trim().toLowerCase();
+    const email = this.optionalEmail(input.email);
+    if (input.sendInvite && !email) {
+      throw new BadRequestException(
+        "Add a real email before requesting a password-setup invitation",
+      );
+    }
     const { firstName, lastName } = this.splitName(input.fullName);
     let guardian: {
       id: string;
-      email: string;
+      email: string | null;
       firstName: string;
       lastName: string;
     };
@@ -266,9 +289,11 @@ export class GuardiansService {
           );
         }
 
-        const existing = await tx.person.findFirst({
-          where: { email: { equals: email, mode: "insensitive" } },
-        });
+        const existing = email
+          ? await tx.person.findFirst({
+              where: { email: { equals: email, mode: "insensitive" } },
+            })
+          : null;
         if (existing?.kind === "parent") {
           throw new ConflictException(
             "A parent account already uses this email. Link the existing parent instead.",
@@ -287,6 +312,8 @@ export class GuardiansService {
             lastName,
             kind: "parent",
             roles: ["parent"],
+            passwordHash: null,
+            mustChangePassword: false,
           },
           select: { id: true, email: true, firstName: true, lastName: true },
         });
@@ -330,13 +357,14 @@ export class GuardiansService {
       throw error;
     }
 
-    const invite = input.sendInvite
-      ? await this.issueInvite(
-          guardian.id,
-          guardian.email,
-          `${guardian.firstName} ${guardian.lastName}`.trim(),
-        )
-      : null;
+    const invite =
+      input.sendInvite && guardian.email
+        ? await this.issueInvite(
+            guardian.id,
+            guardian.email,
+            `${guardian.firstName} ${guardian.lastName}`.trim(),
+          )
+        : null;
     return {
       id: guardian.id,
       email: guardian.email,
@@ -399,7 +427,7 @@ export class GuardiansService {
         "Link at least one student to the guardian",
       );
     }
-    const email = input.email.trim().toLowerCase();
+    const email = this.optionalEmail(input.email);
     const students = await this.prisma.student.findMany({
       where: { id: { in: input.studentIds }, recordStatus: "active" },
     });
@@ -407,7 +435,11 @@ export class GuardiansService {
       throw new BadRequestException("One or more students do not exist");
     }
 
-    const existing = await this.prisma.person.findUnique({ where: { email } });
+    const existing = email
+      ? await this.prisma.person.findFirst({
+          where: { email: { equals: email, mode: "insensitive" } },
+        })
+      : null;
     if (existing && existing.kind !== "parent") {
       throw new BadRequestException(
         "That email already belongs to a non-guardian account",
@@ -427,6 +459,8 @@ export class GuardiansService {
             lastName,
             kind: "parent",
             roles: ["parent"],
+            passwordHash: null,
+            mustChangePassword: false,
           },
         });
 
@@ -471,6 +505,15 @@ export class GuardiansService {
         email: guardian.email,
         inviteExpiresAt: null,
         inviteDelivery: "not_needed" as const,
+      };
+    }
+
+    if (!guardian.email) {
+      return {
+        id: guardian.id,
+        email: null,
+        inviteExpiresAt: null,
+        inviteDelivery: "not_requested" as const,
       };
     }
 
@@ -523,6 +566,11 @@ export class GuardiansService {
       where: { id: guardianId, kind: "parent" },
     });
     if (!guardian) throw new NotFoundException("Guardian not found");
+    if (!guardian.email) {
+      throw new BadRequestException(
+        "Add a real email before sending a password-setup invitation",
+      );
+    }
     if (guardian.passwordHash) {
       throw new BadRequestException("This guardian has already set a password");
     }
@@ -558,6 +606,11 @@ export class GuardiansService {
       where: { id: guardianId, kind: "parent" },
     });
     if (!guardian) throw new NotFoundException("Guardian not found");
+    if (!guardian.email) {
+      throw new BadRequestException(
+        "Add a real email before generating a parent login",
+      );
+    }
 
     const tempPassword = this.randomTempPassword();
     const provisionedAt = new Date();
@@ -596,7 +649,7 @@ export class GuardiansService {
   /** Bulk provision only guardians who do not already have a password. */
   async provisionAllMissing(actorId: string) {
     const guardians = await this.prisma.person.findMany({
-      where: { kind: "parent", passwordHash: null },
+      where: { kind: "parent", email: { not: null }, passwordHash: null },
       select: { id: true },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
@@ -662,6 +715,13 @@ export class GuardiansService {
   ) {
     const guardian = await this.prisma.person.findFirst({
       where: { id: guardianId, kind: "parent" },
+      include: {
+        guardianInvites: {
+          where: { usedAt: null },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
     });
     if (!guardian) throw new NotFoundException("Guardian not found");
 
@@ -673,7 +733,14 @@ export class GuardiansService {
     }
     if (input.email !== undefined) {
       const email = input.email.trim().toLowerCase();
-      const clash = await this.prisma.person.findUnique({ where: { email } });
+      if (!email) {
+        throw new BadRequestException(
+          "Email cannot be blank; omit it when the address is unavailable",
+        );
+      }
+      const clash = await this.prisma.person.findFirst({
+        where: { email: { equals: email, mode: "insensitive" } },
+      });
       if (clash && clash.id !== guardianId) {
         throw new BadRequestException(
           "That email already belongs to another account",
@@ -683,7 +750,10 @@ export class GuardiansService {
     }
     const emailChanged =
       data.email !== undefined && data.email !== guardian.email;
-    const invalidateInvites = emailChanged && !guardian.passwordHash;
+    const invalidateInvites =
+      emailChanged &&
+      !guardian.passwordHash &&
+      guardian.guardianInvites.length > 0;
     const updated = await this.prisma.$transaction(async (tx) => {
       const person = await tx.person.update({
         where: { id: guardianId },
@@ -731,13 +801,14 @@ export class GuardiansService {
       return person;
     });
 
-    const replacementInvite = invalidateInvites
-      ? await this.issueInvite(
-          updated.id,
-          updated.email,
-          `${updated.firstName} ${updated.lastName}`,
-        )
-      : null;
+    const replacementInvite =
+      invalidateInvites && updated.email
+        ? await this.issueInvite(
+            updated.id,
+            updated.email,
+            `${updated.firstName} ${updated.lastName}`,
+          )
+        : null;
     return {
       id: updated.id,
       name: `${updated.firstName} ${updated.lastName}`,
@@ -795,6 +866,8 @@ export class GuardiansService {
       include: { guardian: true },
     });
     if (gInvite) {
+      if (!gInvite.guardian.email) throw invalidInvite();
+      const guardianEmail = gInvite.guardian.email;
       const passwordHash = await bcrypt.hash(password, 10);
       const redeemedAt = new Date();
       await this.prisma.$transaction(async (tx) => {
@@ -828,7 +901,7 @@ export class GuardiansService {
           },
         });
       });
-      return { ok: true, email: gInvite.guardian.email };
+      return { ok: true, email: guardianEmail };
     }
 
     const sInvite = await this.prisma.studentInvite.findUnique({
@@ -836,6 +909,8 @@ export class GuardiansService {
       include: { person: { include: { student: true } } },
     });
     if (sInvite) {
+      if (!sInvite.person.email) throw invalidInvite();
+      const studentEmail = sInvite.person.email;
       const passwordHash = await bcrypt.hash(password, 10);
       const redeemedAt = new Date();
       await this.prisma.$transaction(async (tx) => {
@@ -873,7 +948,7 @@ export class GuardiansService {
           },
         });
       });
-      return { ok: true, email: sInvite.person.email };
+      return { ok: true, email: studentEmail };
     }
 
     // Same generic failure for unknown, used and expired tokens — no oracle.

@@ -207,10 +207,53 @@ export function verifyLegacyCohortManifestExtraction(
       }
     }
   }
-  for (const coordinate of extractedByCoordinate.keys()) {
-    if (!represented.has(coordinate)) {
+  const excludedByCoordinate = new Map(
+    manifest.excludedSources.map((source) => [
+      legacyCohortCoordinate(source),
+      source,
+    ]),
+  );
+  for (const [coordinate, excluded] of excludedByCoordinate) {
+    const extracted = extractedByCoordinate.get(coordinate);
+    if (!extracted) {
       issues.push(
-        `${coordinate}: trusted source row has no manifest disposition`,
+        `${coordinate}: excluded coordinate is absent from extraction`,
+      );
+      continue;
+    }
+    if (excluded.rowFingerprintSha256 !== extracted.rowFingerprintSha256) {
+      issues.push(
+        `${coordinate}: excluded row fingerprint differs from extraction`,
+      );
+    }
+    if (represented.has(coordinate)) {
+      issues.push(`${coordinate}: source row is both included and excluded`);
+    }
+  }
+  for (const coordinate of extractedByCoordinate.keys()) {
+    if (!represented.has(coordinate) && !excludedByCoordinate.has(coordinate)) {
+      issues.push(
+        `${coordinate}: trusted source row has no included or excluded manifest disposition`,
+      );
+    }
+  }
+
+  const includedRawLegacyIds = new Set<string>();
+  for (const coordinate of represented.keys()) {
+    const raw = extractedByCoordinate
+      .get(coordinate)
+      ?.sourceLegacyStudentNo?.trim()
+      .toUpperCase();
+    if (raw) includedRawLegacyIds.add(raw);
+  }
+  for (const coordinate of excludedByCoordinate.keys()) {
+    const raw = extractedByCoordinate
+      .get(coordinate)
+      ?.sourceLegacyStudentNo?.trim()
+      .toUpperCase();
+    if (raw && includedRawLegacyIds.has(raw)) {
+      issues.push(
+        `${coordinate}: an excluded source F-ID cannot remain on an included person group`,
       );
     }
   }

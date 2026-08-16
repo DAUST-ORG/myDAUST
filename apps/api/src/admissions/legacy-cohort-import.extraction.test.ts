@@ -36,6 +36,7 @@ function extraction(overrides: Record<string, unknown> = {}) {
 function manifestFor(
   trusted = extraction(),
   personOverrides: Record<string, unknown> = {},
+  manifestOverrides: Record<string, unknown> = {},
 ) {
   return LegacyCohortManifestSchema.parse({
     schemaVersion: 1,
@@ -119,6 +120,7 @@ function manifestFor(
       },
     ],
     reviewNote: REASON,
+    ...manifestOverrides,
   });
 }
 
@@ -140,6 +142,118 @@ describe("legacy cohort extraction binding", () => {
     expect(() =>
       verifyLegacyCohortManifestExtraction(manifestFor(trusted), trusted),
     ).not.toThrow();
+  });
+
+  it("binds reviewed exclusions to the full trusted extraction", () => {
+    const trusted = extraction({
+      sourceRowCount: 2,
+      rows: [
+        extraction().rows[0],
+        {
+          sourceSheet: "UNPAID",
+          sourceRowNumber: 3,
+          rowFingerprintSha256: "e".repeat(64),
+          sourceLabel: "unpaid",
+          sourceLegacyStudentNo: "F202600002",
+          paymentAmountXof: null,
+        },
+      ],
+    });
+    const reviewed = manifestFor(
+      trusted,
+      {},
+      {
+        sourceRowCount: 2,
+        excludedSources: [
+          {
+            sourceSheet: "UNPAID",
+            sourceRowNumber: 3,
+            rowFingerprintSha256: "e".repeat(64),
+            holdCodes: ["identity_review_required"],
+            reason: REASON,
+            reviewed: true,
+          },
+        ],
+        exclusionReview: {
+          reviewWorkbook: {
+            fileName: "Fall_2026_Legacy_Students_Production_Review_v3.xlsx",
+            sha256: "b".repeat(64),
+          },
+          holdNotes: {
+            fileName: "Fall_2026_Legacy_Students_Holds.json",
+            sha256: "c".repeat(64),
+          },
+        },
+      },
+    );
+
+    expect(() =>
+      verifyLegacyCohortManifestExtraction(reviewed, trusted),
+    ).not.toThrow();
+
+    const drifted = extraction({
+      sourceRowCount: 2,
+      rows: [
+        trusted.rows[0],
+        {
+          ...trusted.rows[1],
+          rowFingerprintSha256: "d".repeat(64),
+        },
+      ],
+    });
+    expectMismatch(
+      () => verifyLegacyCohortManifestExtraction(reviewed, drifted),
+      /excluded row fingerprint differs/,
+    );
+  });
+
+  it("rejects a partial-person exclusion that leaves the same source F-ID included", () => {
+    const trusted = extraction({
+      sourceRowCount: 2,
+      rows: [
+        extraction().rows[0],
+        {
+          sourceSheet: "UNPAID",
+          sourceRowNumber: 3,
+          rowFingerprintSha256: "e".repeat(64),
+          sourceLabel: "unpaid",
+          sourceLegacyStudentNo: "F202600001",
+          paymentAmountXof: null,
+        },
+      ],
+    });
+    const reviewed = manifestFor(
+      trusted,
+      {},
+      {
+        sourceRowCount: 2,
+        excludedSources: [
+          {
+            sourceSheet: "UNPAID",
+            sourceRowNumber: 3,
+            rowFingerprintSha256: "e".repeat(64),
+            holdCodes: ["group_review_required"],
+            reason: REASON,
+            reviewed: true,
+          },
+        ],
+        exclusionReview: {
+          reviewWorkbook: {
+            fileName: "Fall_2026_Legacy_Students_Production_Review_v3.xlsx",
+            sha256: "b".repeat(64),
+          },
+          holdNotes: {
+            fileName: "Fall_2026_Legacy_Students_Holds.json",
+            sha256: "c".repeat(64),
+          },
+        },
+      },
+    );
+
+    expectMismatch(
+      () => verifyLegacyCohortManifestExtraction(reviewed, trusted),
+      /cannot remain on an included person group/,
+    );
   });
 
   it("rejects source fingerprint and extraction digest drift", () => {

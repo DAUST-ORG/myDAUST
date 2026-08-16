@@ -3718,12 +3718,17 @@ export const getChildPiSpiRequest = (studentId: string, txId: string) =>
 export interface GuardianRow {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   address: string | null;
   hasLogin: boolean;
   mustChangePassword: boolean;
-  status: string; // active | not-provisioned | invited | invite-expired
+  status:
+    | "active"
+    | "contact-only"
+    | "not-provisioned"
+    | "invited"
+    | "invite-expired";
   children: {
     studentId: string;
     studentNo: string;
@@ -3734,13 +3739,18 @@ export interface GuardianRow {
 export interface StudentGuardianLink {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   address: string | null;
   relation: string | null;
   hasLogin: boolean;
   mustChangePassword: boolean;
-  status: "active" | "not-provisioned" | "invited" | "invite-expired";
+  status:
+    | "active"
+    | "contact-only"
+    | "not-provisioned"
+    | "invited"
+    | "invite-expired";
 }
 /** Public: a guardian redeeming their single-use password-setup invite. */
 export const redeemGuardianInvite = (token: string, password: string) =>
@@ -3765,7 +3775,7 @@ export const createStudentGuardian = (
   studentId: string,
   input: {
     fullName: string;
-    email: string;
+    email?: string;
     phone?: string;
     address?: string;
     relation?: string;
@@ -3774,7 +3784,7 @@ export const createStudentGuardian = (
 ) =>
   request<{
     id: string;
-    email: string;
+    email: string | null;
     inviteExpiresAt: string | null;
     inviteDelivery: "sent" | "not_sent" | "not_requested";
   }>(`/guardians/students/${encodeURIComponent(studentId)}/create`, {
@@ -3788,7 +3798,7 @@ export const unlinkStudentGuardian = (studentId: string, guardianId: string) =>
   );
 export const createGuardian = (input: {
   fullName: string;
-  email: string;
+  email?: string;
   phone?: string;
   address?: string;
   studentIds: string[];
@@ -3796,9 +3806,9 @@ export const createGuardian = (input: {
 }) =>
   request<{
     id: string;
-    email: string;
+    email: string | null;
     inviteExpiresAt: string | null;
-    inviteDelivery: "sent" | "not_sent" | "not_needed";
+    inviteDelivery: "sent" | "not_sent" | "not_needed" | "not_requested";
   }>("/guardians", {
     method: "POST",
     body: JSON.stringify(input),
@@ -3827,7 +3837,7 @@ export const updateGuardian = (
   request<{
     id: string;
     name: string;
-    email: string;
+    email: string | null;
     inviteDelivery: "sent" | "not_sent" | null;
     inviteExpiresAt: string | null;
   }>(`/guardians/${id}`, {
@@ -4023,7 +4033,7 @@ export interface MyProfile {
   guardians: {
     name: string;
     relation: string | null;
-    email: string;
+    email: string | null;
     phone: string | null;
   }[];
   /** Saved PI-SPI payment alias, prefilled on the billing screen. */

@@ -385,7 +385,7 @@ model ManagementActualEntry {
 
 model Person {
   id                         String                    @id @default(uuid())
-  email                      String                    @unique
+  email                      String?                   @unique
   firstName                  String
   lastName                   String
   kind                       PersonKind

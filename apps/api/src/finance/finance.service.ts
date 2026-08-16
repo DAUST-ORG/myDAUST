@@ -21,6 +21,7 @@ import {
   type WireApprovalInput,
   type WirePaymentConfig,
 } from "@mydaust/shared";
+import { requirePersonEmail } from "../auth/person-email.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import {
@@ -429,7 +430,7 @@ export class FinanceService {
     await this.emailWireSubmitted(
       wire.id,
       notificationRecipients,
-      invoice.student.person.email,
+      requirePersonEmail(invoice.student.person.email, "Student"),
     );
     return this.wireSummary(wire);
   }
@@ -2565,8 +2566,9 @@ export class FinanceService {
       },
     });
     if (!p) return;
+    const studentEmail = requirePersonEmail(p.student.person.email, "Student");
     await this.mail.send({
-      to: p.student.person.email,
+      to: studentEmail,
       subject: `Payment receipt — ${p.invoice.term.name}`,
       html: `
         <h2>Payment received</h2>
@@ -2581,7 +2583,7 @@ export class FinanceService {
     });
     if (
       p.initiatedByEmail &&
-      p.initiatedByEmail.toLowerCase() !== p.student.person.email.toLowerCase()
+      p.initiatedByEmail.toLowerCase() !== studentEmail.toLowerCase()
     ) {
       const payerName = p.initiatedBy
         ? `${p.initiatedBy.firstName} ${p.initiatedBy.lastName}`.trim()
@@ -4352,7 +4354,7 @@ export class FinanceService {
     }
 
     await this.mail.send({
-      to: payment.student.person.email,
+      to: requirePersonEmail(payment.student.person.email, "Student"),
       subject: "Your DAUST payment has been refunded",
       html: `<h2>Refund processed</h2><p>Hi ${payment.student.person.firstName}, a refund of <strong>${payment.amount.toLocaleString("en-US")} XOF</strong> has been recorded${reason ? ` (${reason})` : ""}. Your balance has been updated accordingly.</p>`,
     });
@@ -4967,7 +4969,7 @@ export class FinanceService {
         studentId: student.id,
         invoiceId: onboarding.enrollmentInvoice.id,
         amountXof,
-        contactEmail: student.person.email,
+        contactEmail: requirePersonEmail(student.person.email, "Student"),
       };
     }
     const account = await this.loadPayableAccount(student.id);
@@ -4976,7 +4978,7 @@ export class FinanceService {
       studentId: student.id,
       invoiceId: invoice.id,
       amountXof: amount,
-      contactEmail: student.person.email,
+      contactEmail: requirePersonEmail(student.person.email, "Student"),
     };
   }
 

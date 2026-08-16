@@ -4,6 +4,7 @@ import { chmod, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { PrismaClient } from "@mydaust/db";
 import { z } from "zod";
+import { requirePersonEmail } from "../auth/person-email.js";
 import { classifyAcceptedApplicant } from "./accepted-applicant-reconciliation.js";
 
 const environmentSchema = z.object({
@@ -51,7 +52,10 @@ async function main() {
       studentId: student.id,
       studentNo: student.studentNo,
       recordStatus: student.recordStatus,
-      personEmail: student.person.email,
+      personEmail: requirePersonEmail(
+        student.person.email,
+        "Student reconciliation candidate",
+      ),
       personalEmail: student.personalEmail,
       dateOfBirth: student.dateOfBirth,
       programCode: student.program?.code ?? null,
