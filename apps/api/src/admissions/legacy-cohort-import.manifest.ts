@@ -353,6 +353,23 @@ const GuardianSchema = z
   })
   .strict();
 
+const OnboardingPolicySchema = z
+  .discriminatedUnion("disposition", [
+    z
+      .object({
+        disposition: z.literal("respect_payment_gate"),
+      })
+      .strict(),
+    z
+      .object({
+        disposition: z.literal("activate_all_legacy_students"),
+        reviewed: z.literal(true),
+        reason: ReviewedReasonSchema,
+      })
+      .strict(),
+  ])
+  .default({ disposition: "respect_payment_gate" });
+
 export const LegacyCohortManifestSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -378,6 +395,7 @@ export const LegacyCohortManifestSchema = z
       .strict(),
     currency: z.literal("XOF"),
     notificationPolicy: z.literal("suppress_all"),
+    onboardingPolicy: OnboardingPolicySchema,
     guardians: z.array(GuardianSchema).min(1).max(MAX_ROWS),
     people: z.array(PersonGroupSchema).min(1).max(MAX_ROWS),
     excludedSources: z.array(ExcludedSourceSchema).max(MAX_ROWS).default([]),
@@ -816,6 +834,38 @@ export function legacyCohortManifestDigest(
   manifest: LegacyCohortManifest,
 ): string {
   return createHash("sha256").update(canonicalJson(manifest)).digest("hex");
+}
+
+export function verifyLegacyCohortExclusionReviewArtifacts(
+  manifest: LegacyCohortManifest,
+  artifacts?: {
+    reviewWorkbook: { fileName: string; bytes: Buffer };
+    holdNotes: { fileName: string; bytes: Buffer };
+  },
+): void {
+  if (!manifest.exclusionReview) return;
+  if (!artifacts) {
+    throw new Error(
+      "Reviewed exclusions require the bound review workbook and hold-notes artifacts",
+    );
+  }
+  for (const key of ["reviewWorkbook", "holdNotes"] as const) {
+    const expected = manifest.exclusionReview[key];
+    const received = artifacts[key];
+    if (received.fileName !== expected.fileName) {
+      throw new Error(
+        `${key} file name does not match the reviewed exclusion binding`,
+      );
+    }
+    const receivedSha256 = createHash("sha256")
+      .update(received.bytes)
+      .digest("hex");
+    if (receivedSha256 !== expected.sha256) {
+      throw new Error(
+        `${key} SHA-256 does not match the reviewed exclusion binding`,
+      );
+    }
+  }
 }
 
 export function legacyCohortPersonDigest(person: LegacyCohortPerson): string {
