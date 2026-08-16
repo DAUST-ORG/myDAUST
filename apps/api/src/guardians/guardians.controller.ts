@@ -34,6 +34,20 @@ const UpdateGuardianInput = z.object({
   address: z.string().trim().max(300).nullable().optional(),
 });
 
+const LinkStudentGuardianInput = z.object({
+  guardianId: z.string().uuid(),
+  relation: z.string().trim().max(40).nullable().optional(),
+});
+
+const CreateStudentGuardianInput = z.object({
+  fullName: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(160),
+  phone: z.string().trim().max(40).optional(),
+  address: z.string().trim().max(300).optional(),
+  relation: z.string().trim().max(40).optional(),
+  sendInvite: z.boolean().optional().default(false),
+});
+
 const RedeemInviteInput = z.object({
   token: z.string().min(20).max(200),
   password: z.string().min(10).max(200),
@@ -67,6 +81,50 @@ export class GuardiansController {
     return this.guardians.create(
       user.personId,
       CreateGuardianInput.parse(body),
+    );
+  }
+
+  @Get("students/:studentId")
+  listForStudent(@Param("studentId") studentId: string) {
+    return this.guardians.listForStudent(studentId);
+  }
+
+  @Post("students/:studentId/link")
+  linkToStudent(
+    @CurrentUser() user: AuthUser,
+    @Param("studentId") studentId: string,
+    @Body() body: unknown,
+  ) {
+    return this.guardians.linkToStudent(
+      user.personId,
+      studentId,
+      LinkStudentGuardianInput.parse(body),
+    );
+  }
+
+  @Post("students/:studentId/create")
+  createForStudent(
+    @CurrentUser() user: AuthUser,
+    @Param("studentId") studentId: string,
+    @Body() body: unknown,
+  ) {
+    return this.guardians.createForStudent(
+      user.personId,
+      studentId,
+      CreateStudentGuardianInput.parse(body),
+    );
+  }
+
+  @Delete("students/:studentId/:guardianId")
+  unlinkFromStudent(
+    @CurrentUser() user: AuthUser,
+    @Param("studentId") studentId: string,
+    @Param("guardianId") guardianId: string,
+  ) {
+    return this.guardians.unlinkFromStudent(
+      user.personId,
+      studentId,
+      guardianId,
     );
   }
 

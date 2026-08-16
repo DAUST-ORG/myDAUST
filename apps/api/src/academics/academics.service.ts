@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
-import type { AcademicStanding } from "@mydaust/shared";
+import { deriveAcademicStanding, type AcademicStanding } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
   bestPointsByCourse,
@@ -2860,34 +2860,34 @@ export class AcademicsService {
 
   /** Registrar/admin: one student's academic file (profile, enrollments, transcript, GPA, balance). */
   async adminStudentDetail(studentId: string) {
-    const [student, transcriptView, standingPolicy] = await Promise.all([
-      this.prisma.student.findUnique({
-        where: { id: studentId },
-        include: {
-          person: true,
-          program: { include: { department: true } },
-          holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
-          invoices: {
-            include: { plan: { include: { installments: true } } },
-          },
-          transcriptEntries: { where: { voidedAt: null } },
-          enrollments: {
-            include: {
-              section: {
-                include: { course: true, term: true, instructor: true },
-              },
-            },
-            orderBy: { enrolledAt: "desc" },
-          },
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        person: true,
+        program: { include: { department: true } },
+        holds: { where: { active: true }, orderBy: { placedAt: "asc" } },
+        invoices: {
+          include: { plan: { include: { installments: true } } },
         },
-      }),
-      this.transcript.view(studentId),
+        transcriptEntries: { where: { voidedAt: null } },
+        enrollments: {
+          include: {
+            section: {
+              include: { course: true, term: true, instructor: true },
+            },
+          },
+          orderBy: { enrolledAt: "desc" },
+        },
+      },
+    });
+    if (!student) throw new NotFoundException("Student not found");
+
+    const [transcriptView, standingPolicy] = await Promise.all([
+      student.recordStatus === "pending_payment"
+        ? Promise.resolve(null)
+        : this.transcript.view(studentId),
       this.standings.policyForStudent(studentId),
     ]);
-    if (!student) throw new NotFoundException("Student not found");
-    if (student.recordStatus === "pending_payment") {
-      throw new NotFoundException("Student not found");
-    }
     const { gpa, completedCredits } = summarizeTranscriptRows(
       student.transcriptEntries,
     );
@@ -2895,6 +2895,27 @@ export class AcademicsService {
       .filter((e) => e.status === "enrolled")
       .reduce((c, e) => c + e.section.course.credits, 0);
     const summary = deriveApiAccountPosition(student.invoices).summary;
+    const academicProgress =
+      transcriptView?.academicProgress ??
+      (await this.catalogs.progress({
+        programId: student.programId,
+        catalogYearId: student.catalogYearId,
+        catalogYearLabel: student.catalogYear,
+        earnedCredits: completedCredits,
+        inProgressCredits: currentTermCredits,
+      }));
+    const academicStanding: AcademicStanding =
+      transcriptView?.academicStanding ?? {
+        ...deriveAcademicStanding(
+          standingPolicy.rules,
+          standingPolicy.notYetGraded,
+          null,
+          false,
+        ),
+        source: "computed",
+        catalog: standingPolicy.catalog,
+        override: null,
+      };
     return {
       id: student.id,
       studentNo: student.studentNo,
@@ -2911,14 +2932,14 @@ export class AcademicsService {
       gpa,
       completedCredits,
       currentTermCredits,
-      academicProgress: transcriptView.academicProgress,
-      standing: transcriptView.academicStanding.label,
-      academicStanding: transcriptView.academicStanding,
+      academicProgress,
+      standing: academicStanding.label,
+      academicStanding,
       standingPolicy,
       status:
         student.recordStatus === "archived"
           ? "archived"
-          : transcriptView.academicStanding.code === "academic_probation"
+          : academicStanding.code === "academic_probation"
             ? "probation"
             : "active",
       recordStatus: student.recordStatus,

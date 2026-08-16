@@ -1197,6 +1197,7 @@ export interface AdminStudentDetail {
   };
   standing: string;
   status: string;
+  recordStatus: "pending_payment" | "active" | "archived";
   balance: number;
   summary?: AccountBalanceSummary;
   dateOfBirth: string | null;
@@ -3730,6 +3731,17 @@ export interface GuardianRow {
     relation: string | null;
   }[];
 }
+export interface StudentGuardianLink {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  relation: string | null;
+  hasLogin: boolean;
+  mustChangePassword: boolean;
+  status: "active" | "not-provisioned" | "invited" | "invite-expired";
+}
 /** Public: a guardian redeeming their single-use password-setup invite. */
 export const redeemGuardianInvite = (token: string, password: string) =>
   request<{ ok: boolean }>("/guardian-invites/redeem", {
@@ -3737,6 +3749,43 @@ export const redeemGuardianInvite = (token: string, password: string) =>
     body: JSON.stringify({ token, password }),
   });
 export const getGuardians = () => request<GuardianRow[]>("/guardians");
+export const getStudentGuardians = (studentId: string) =>
+  request<StudentGuardianLink[]>(
+    `/guardians/students/${encodeURIComponent(studentId)}`,
+  );
+export const linkStudentGuardian = (
+  studentId: string,
+  input: { guardianId: string; relation?: string | null },
+) =>
+  request<{ ok: boolean }>(
+    `/guardians/students/${encodeURIComponent(studentId)}/link`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+export const createStudentGuardian = (
+  studentId: string,
+  input: {
+    fullName: string;
+    email: string;
+    phone?: string;
+    address?: string;
+    relation?: string;
+    sendInvite?: boolean;
+  },
+) =>
+  request<{
+    id: string;
+    email: string;
+    inviteExpiresAt: string | null;
+    inviteDelivery: "sent" | "not_sent" | "not_requested";
+  }>(`/guardians/students/${encodeURIComponent(studentId)}/create`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export const unlinkStudentGuardian = (studentId: string, guardianId: string) =>
+  request<{ ok: boolean }>(
+    `/guardians/students/${encodeURIComponent(studentId)}/${encodeURIComponent(guardianId)}`,
+    { method: "DELETE" },
+  );
 export const createGuardian = (input: {
   fullName: string;
   email: string;

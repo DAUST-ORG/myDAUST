@@ -14,7 +14,10 @@ const activation = {
 
 function service(send: ReturnType<typeof vi.fn>) {
   const prisma = {
-    applicant: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    applicant: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findUnique: vi.fn().mockResolvedValue({ studentInviteSentAt: null }),
+    },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   };
   return {
@@ -90,5 +93,26 @@ describe("student activation invitation delivery", () => {
     expect(html).toContain("S&lt;2026&amp;1");
     expect(html).not.toContain("<img src=x");
     expect(prisma.applicant.updateMany).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]?.[0]?.idempotencyKey).toMatch(
+      /^student-activation\/applicant-1\/[0-9a-f]{32}$/,
+    );
+  });
+
+  it("does not report sent when the delivery marker cannot be claimed", async () => {
+    vi.stubEnv("DATABASE_URL", "postgresql://test:test@localhost:5432/test");
+    vi.stubEnv("PORTAL_ORIGIN", "https://portal.example.test");
+    const send = vi.fn().mockResolvedValue({ sent: true, id: "mail-1" });
+    const { finance, prisma } = service(send);
+    prisma.applicant.updateMany.mockResolvedValue({ count: 0 });
+
+    await finance.deliverStudentActivationInvite(activation);
+
+    expect(prisma.applicant.findUnique).toHaveBeenCalledOnce();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: "student-invite-delivery-marker-pending",
+        data: expect.objectContaining({ providerMessageId: "mail-1" }),
+      }),
+    });
   });
 });

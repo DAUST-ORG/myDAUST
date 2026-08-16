@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { normalizeStudentNumber } from "@mydaust/shared";
 import { z } from "zod";
 
 const MAX_MANIFEST_ROWS = 25_000;
@@ -12,7 +13,8 @@ export const StudentNumberSchema = z
   .regex(
     /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
     "Student numbers may contain only letters, numbers, dots, underscores, and hyphens",
-  );
+  )
+  .transform(normalizeStudentNumber);
 
 export const TranscriptImportObjectKeySchema = z
   .string()

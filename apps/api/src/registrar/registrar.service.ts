@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@mydaust/db";
+import { normalizeStudentNumber } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
@@ -67,9 +68,13 @@ export class RegistrarService {
    * back the student instead of leaving an active account outside the billing cohort.
    */
   async createStudent(actorId: string, input: RegistrarStudentInput) {
-    const studentNo = input.studentNo.trim();
+    const studentNo = normalizeStudentNumber(input.studentNo);
     if (!studentNo) throw new BadRequestException("A Student ID is required");
-    if (await this.prisma.student.findUnique({ where: { studentNo } })) {
+    if (
+      await this.prisma.student.findFirst({
+        where: { studentNo: { equals: studentNo, mode: "insensitive" } },
+      })
+    ) {
       throw new BadRequestException(
         `This ID is already assigned to another student.`,
       );
