@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { COST_CENTER_TUITION } from "@mydaust/shared";
+import { COST_CENTER_TUITION, normalizeStudentNumber } from "@mydaust/shared";
 import { PrismaClient } from "@prisma/client";
 
 // One-off import of the real active-student roster into a bootstrapped prod DB.
@@ -159,7 +159,7 @@ async function main() {
   const seenEmails = new Set<string>();
 
   for (const r of rows) {
-    const studentNo = r["ID Number"]?.trim();
+    const studentNo = normalizeStudentNumber(r["ID Number"] ?? "");
     if (!studentNo) {
       skipped.push("(blank ID)");
       continue;

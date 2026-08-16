@@ -6,7 +6,11 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma } from "@mydaust/db";
-import { toDakarDateKey, type ApplicationInput } from "@mydaust/shared";
+import {
+  normalizeStudentNumber,
+  toDakarDateKey,
+  type ApplicationInput,
+} from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { AppConfigService } from "../app-config/app-config.service.js";
@@ -517,11 +521,13 @@ export class AdmissionsService {
           );
         }
 
-        const studentNo = await this.allocateStudentNo(
-          tx,
-          academicYearStart(academicYear.label, academicYear.startsOn),
-          applicant.firstName,
-          applicant.lastName,
+        const studentNo = normalizeStudentNumber(
+          await this.allocateStudentNo(
+            tx,
+            academicYearStart(academicYear.label, academicYear.startsOn),
+            applicant.firstName,
+            applicant.lastName,
+          ),
         );
         const now = new Date();
         const person = await tx.person.create({

@@ -12,6 +12,7 @@ import { Prisma } from "@mydaust/db";
 import {
   COST_CENTER_TUITION,
   FEE_STRUCTURE,
+  normalizeStudentNumber,
   WirePaymentConfig as WirePaymentConfigSchema,
   splitEvenXof,
   toDakarDateKey,
@@ -56,6 +57,7 @@ import {
   type EnrollmentActivation,
   verifiedEnrollmentCashXof,
 } from "./admission-payment-gate.js";
+import { deliverStudentActivationInviteAfterCommit } from "./activation-invite-delivery.js";
 
 // Shared fee constants are bootstrap fallbacks only. Standard billing always reads
 // the current administrator-approved FeeSchedule revision from the database.
@@ -2545,48 +2547,11 @@ export class FinanceService {
 
   /** Deliver the account setup secret created atomically by the enrollment gate. */
   async deliverStudentActivationInvite(activation: EnrollmentActivation) {
-    let sent = false;
-    try {
-      const setupUrl = `${loadEnv().PORTAL_ORIGIN}/set-password?token=${encodeURIComponent(activation.inviteToken)}`;
-      sent = (
-        await this.mail.send({
-          to: activation.email,
-          subject: "Your myDAUST student account is ready",
-          html: `
-            <h2>Enrollment confirmed</h2>
-            <p>Hello ${escapeHtml(activation.name)},</p>
-            <p>DAUST has verified your first installment and activated your student record.</p>
-            <table cellpadding="6">
-              <tr><td><strong>Student ID</strong></td><td>${escapeHtml(activation.studentNo)}</td></tr>
-              <tr><td><strong>Setup link expires</strong></td><td>${activation.inviteExpiresAt.toISOString()}</td></tr>
-            </table>
-            <p><a href="${setupUrl}">Set up your myDAUST password</a>.</p>
-            <p>If the link expires, Admissions can send you a new one.</p>
-          `,
-        })
-      ).sent;
-    } catch {
-      sent = false;
-    }
-    if (sent) {
-      await this.prisma.applicant.updateMany({
-        where: {
-          id: activation.applicantId,
-          onboardingStatus: "enrolled",
-          studentInviteSentAt: null,
-        },
-        data: { studentInviteSentAt: new Date() },
-      });
-      return;
-    }
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Applicant",
-        entityId: activation.applicantId,
-        action: "student-invite-delivery-pending",
-        data: { studentId: activation.studentId },
-      },
-    });
+    await deliverStudentActivationInviteAfterCommit(
+      this.prisma,
+      this.mail,
+      activation,
+    );
   }
 
   /** Email a payment receipt to the student (best-effort; dev-logs without a provider). */
@@ -3224,9 +3189,14 @@ export class FinanceService {
     if (Number.isNaN(dob.getTime()))
       throw new BadRequestException("Invalid date of birth");
 
-    const studentNo =
-      input.studentNo?.trim() || (await this.generateStudentNo());
-    if (await this.prisma.student.findUnique({ where: { studentNo } })) {
+    const studentNo = normalizeStudentNumber(
+      input.studentNo || (await this.generateStudentNo()),
+    );
+    if (
+      await this.prisma.student.findFirst({
+        where: { studentNo: { equals: studentNo, mode: "insensitive" } },
+      })
+    ) {
       throw new BadRequestException(`Student ID ${studentNo} already exists`);
     }
     const email =

@@ -31,6 +31,9 @@ enum PaymentMethod {
   // request-to-pay: the payer approves in their own banking app, so settlement is
   // asynchronous rather than a redirect return.
   pi_spi
+  // Accounting-only value for reviewed legacy cash whose original rail is not
+  // recoverable. Payer-facing checkout endpoints must never offer this method.
+  legacy_unknown
 }
 
 /**
@@ -411,6 +414,7 @@ model Person {
   paymentSubmissionsAudited  PaymentSubmission[]       @relation("PaymentSubmissionAuditor")
   transcriptImportBatches    TranscriptImportBatch[]   @relation("TranscriptImportBatchCreator")
   paymentImportBatches       PaymentImportBatch[]      @relation("PaymentImportBatchCreator")
+  legacyCohortImportBatches  LegacyCohortImportBatch[] @relation("LegacyCohortImportBatchCreator")
   transcriptEntriesCreated   TranscriptEntry[]         @relation("TranscriptEntryCreator")
   transcriptEntriesUpdated   TranscriptEntry[]         @relation("TranscriptEntryUpdater")
   transcriptEntriesVoided    TranscriptEntry[]         @relation("TranscriptEntryVoider")
@@ -487,6 +491,7 @@ model Student {
   // rosters without deleting their academic or financial history.
   recordStatus         StudentRecordStatus       @default(active)
   applicant            Applicant?                @relation("ApplicantStudent")
+  legacyCohortImport   LegacyCohortImportPerson?
   holds                StudentHold[]
   alerts               StudentAlert[]
   watchers             StaffWatch[]
@@ -585,6 +590,7 @@ model Invoice {
   paymentSubmissions  PaymentSubmission[]
   piSpiRequests       PiSpiRequest[]
   enrollmentForApplicant Applicant?                 @relation("ApplicantEnrollmentInvoice")
+  legacyCohortImport      LegacyCohortImportPerson?
   createdAt           DateTime                   @default(now())
   updatedAt           DateTime                   @updatedAt
 
@@ -635,6 +641,9 @@ model Payment {
   provider             String                       @default("manual")
   // Idempotency anchor: the gateway transaction reference is unique.
   providerRef          String                       @unique
+  /// SHA-256 of payment method + canonical external accounting reference.
+  /// Nullable for ordinary gateway payments; reviewed historical imports set it.
+  externalReferenceFingerprintSha256 String?        @unique
   /// Durable origin of the payment attempt (student_portal, parent_portal, public_bill, ...).
   source               String                       @default("legacy")
   initiatedById        String?
@@ -655,6 +664,7 @@ model Payment {
   submission           PaymentSubmission?
   piSpiRequest         PiSpiRequest?
   activatedApplicant   Applicant?                   @relation("ApplicantActivationPayment")
+  legacyCohortRows     LegacyCohortImportRow[]
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
 
@@ -688,6 +698,8 @@ model PaymentImportBatch {
   importedXof            BigInt                   @default(0)
   alreadyRecordedXof     BigInt                   @default(0)
   excludedXof            BigInt                   @default(0)
+  /// Signed, explicitly reviewed difference between source controls and posted/excluded cash.
+  reviewedAdjustmentXof  BigInt                   @default(0)
   errorSummary           Json?
   note                   String?
   createdById            String
@@ -696,9 +708,95 @@ model PaymentImportBatch {
   updatedAt              DateTime                 @updatedAt
   importedAt             DateTime?
   payments               Payment[]
+  legacyCohortImportBatch LegacyCohortImportBatch?
 
   @@index([status, createdAt])
   @@index([createdById, createdAt])
+}
+
+/// One reviewed, idempotent import of a legacy admissions cohort. The workbook
+/// stays outside the application; immutable coordinates, fingerprints, legacy
+/// IDs, and authoritative record links remain as durable provenance.
+model LegacyCohortImportBatch {
+  id                     String                   @id @default(uuid())
+  sourceFileName         String
+  sourceSha256           String                   @unique
+  sourceExtractionSha256 String
+  manifestSha256         String                   @unique
+  confirmationPlanSha256 String
+  status                 PaymentImportBatchStatus @default(pending)
+  academicYearId         String
+  academicYear           AcademicYear             @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  sourceRowCount         Int
+  personCount            Int
+  paymentCount           Int
+  sourcePaidTotalXof     BigInt                   @default(0)
+  importedPaymentXof     BigInt                   @default(0)
+  notificationPolicy     String
+  paymentImportBatchId   String?                  @unique
+  paymentImportBatch     PaymentImportBatch?      @relation(fields: [paymentImportBatchId], references: [id], onDelete: Restrict)
+  createdById            String
+  createdBy              Person                   @relation("LegacyCohortImportBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  importedAt             DateTime?
+  people                 LegacyCohortImportPerson[]
+  rows                   LegacyCohortImportRow[]
+
+  @@index([academicYearId, status])
+  @@index([createdById, createdAt])
+}
+
+/// One explicit grouping decision. legacyStudentNo is the permanent F-ID and
+/// never consumes the normal StudentNumberSequence used by future applicants.
+model LegacyCohortImportPerson {
+  id                       String                    @id @default(uuid())
+  batchId                  String
+  batch                    LegacyCohortImportBatch   @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  personKey                String
+  groupDigestSha256        String
+  legacyStudentNo          String
+  applicantId              String                    @unique
+  applicant                Applicant                 @relation(fields: [applicantId], references: [id], onDelete: Restrict)
+  studentId                String                    @unique
+  student                  Student                   @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  invoiceId                String                    @unique
+  invoice                  Invoice                   @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  onboardingStatusAtImport ApplicantOnboardingStatus
+  createdAt                DateTime                  @default(now())
+  rows                     LegacyCohortImportRow[]
+
+  @@unique([batchId, personKey])
+  @@unique([batchId, legacyStudentNo])
+  @@index([legacyStudentNo])
+}
+
+/// Immutable source-row provenance. Repeated physical rows may belong to one
+/// person/payment only when the reviewed manifest says so explicitly.
+model LegacyCohortImportRow {
+  id                   String                    @id @default(uuid())
+  batchId              String
+  batch                LegacyCohortImportBatch   @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  personRecordId       String
+  personRecord         LegacyCohortImportPerson  @relation(fields: [personRecordId], references: [id], onDelete: Restrict)
+  sourceSheet          String
+  sourceRowNumber      Int
+  rowFingerprintSha256 String
+  sourceLegacyStudentNo String?
+  sourceLabel          String
+  disposition          String
+  paymentId            String?
+  payment              Payment?                  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  duplicateOfId        String?
+  duplicateOf          LegacyCohortImportRow?     @relation("LegacyCohortRowDuplicate", fields: [duplicateOfId], references: [id], onDelete: Restrict)
+  duplicates           LegacyCohortImportRow[]    @relation("LegacyCohortRowDuplicate")
+  createdAt            DateTime                   @default(now())
+
+  @@unique([batchId, sourceSheet, sourceRowNumber])
+  @@unique([batchId, rowFingerprintSha256])
+  @@index([personRecordId])
+  @@index([paymentId])
+  @@index([sourceLegacyStudentNo])
 }
 
 /// Authoritative package component carried by one invoice. Amounts always reconcile
@@ -1014,6 +1112,7 @@ model Applicant {
   term               String? // intake term, e.g. "Fall 2026"
   piSpiRequests      PiSpiRequest[]
   paymentSubmissions PaymentSubmission[]
+  legacyCohortImport LegacyCohortImportPerson?
   createdAt          DateTime            @default(now())
 
   @@index([stage])
@@ -1736,6 +1835,7 @@ model AcademicYear {
   expenses                Expense[]
   students                Student[]                 @relation("StudentCatalogYear")
   admittedApplicants      Applicant[]               @relation("ApplicantAdmissionAcademicYear")
+  legacyCohortImportBatches LegacyCohortImportBatch[]
   catalogRevisions        AcademicCatalogRevision[]
   createdAt               DateTime                  @default(now())
 

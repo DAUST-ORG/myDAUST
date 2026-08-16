@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -41,6 +42,20 @@ export interface CreateGuardianInput {
   relation?: string;
 }
 
+export interface LinkStudentGuardianInput {
+  guardianId: string;
+  relation?: string | null;
+}
+
+export interface CreateStudentGuardianInput {
+  fullName: string;
+  email: string;
+  phone?: string;
+  address?: string;
+  relation?: string;
+  sendInvite: boolean;
+}
+
 @Injectable()
 export class GuardiansService {
   constructor(
@@ -67,6 +82,18 @@ export class GuardiansService {
     return { firstName, lastName: parts.join(" ") || firstName };
   }
 
+  private accountStatus(guardian: {
+    passwordHash: string | null;
+    guardianInvites: { expiresAt: Date }[];
+  }): "active" | "not-provisioned" | "invited" | "invite-expired" {
+    if (guardian.passwordHash) return "active";
+    const invite = guardian.guardianInvites[0];
+    if (!invite) return "not-provisioned";
+    return invite.expiresAt.getTime() < Date.now()
+      ? "invite-expired"
+      : "invited";
+  }
+
   /** Readable temporary password with ambiguous characters removed. */
   private randomTempPassword(): string {
     const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -90,11 +117,14 @@ export class GuardiansService {
           where: { student: { recordStatus: "active" } },
           include: { student: { include: { person: true } } },
         },
-        guardianInvites: { orderBy: { createdAt: "desc" }, take: 1 },
+        guardianInvites: {
+          where: { usedAt: null },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
       },
     });
     return guardians.map((g) => {
-      const invite = g.guardianInvites[0];
       return {
         id: g.id,
         name: `${g.firstName} ${g.lastName}`,
@@ -104,13 +134,7 @@ export class GuardiansService {
         hasLogin: g.passwordHash !== null,
         mustChangePassword: g.mustChangePassword,
         // Imported guardians may have neither a password nor an invite yet.
-        status: g.passwordHash
-          ? "active"
-          : !invite
-            ? "not-provisioned"
-            : invite.expiresAt.getTime() < Date.now()
-              ? "invite-expired"
-              : "invited",
+        status: this.accountStatus(g),
         children: g.guardianOf.map((link) => ({
           studentId: link.studentId,
           studentNo: link.student.studentNo,
@@ -119,6 +143,249 @@ export class GuardiansService {
         })),
       };
     });
+  }
+
+  /** Staff-only relationship view used by a single Student profile. */
+  async listForStudent(studentId: string) {
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      select: { id: true },
+    });
+    if (!student) throw new NotFoundException("Student not found");
+
+    const links = await this.prisma.guardianStudent.findMany({
+      where: { studentId, guardian: { kind: "parent" } },
+      orderBy: { createdAt: "asc" },
+      include: {
+        guardian: {
+          include: {
+            guardianProfile: true,
+            guardianInvites: {
+              where: { usedAt: null },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+
+    return links.map((link) => ({
+      id: link.guardian.id,
+      name: `${link.guardian.firstName} ${link.guardian.lastName}`.trim(),
+      email: link.guardian.email,
+      phone: link.guardian.guardianProfile?.phone ?? null,
+      address: link.guardian.guardianProfile?.address ?? null,
+      relation: link.relation,
+      hasLogin: link.guardian.passwordHash !== null,
+      mustChangePassword: link.guardian.mustChangePassword,
+      status: this.accountStatus(link.guardian),
+    }));
+  }
+
+  /** Add one existing parent without replacing any of their other child links. */
+  async linkToStudent(
+    actorId: string,
+    studentId: string,
+    input: LinkStudentGuardianInput,
+  ) {
+    const relation = input.relation?.trim() || null;
+    await this.prisma.$transaction(async (tx) => {
+      const [student, guardian] = await Promise.all([
+        tx.student.findFirst({
+          where: {
+            id: studentId,
+            recordStatus: { in: ["active", "pending_payment"] },
+          },
+          select: { id: true },
+        }),
+        tx.person.findFirst({
+          where: { id: input.guardianId, kind: "parent" },
+          select: { id: true },
+        }),
+      ]);
+      if (!student) {
+        throw new BadRequestException(
+          "Only active or payment-pending students may receive a parent link",
+        );
+      }
+      if (!guardian) throw new NotFoundException("Parent account not found");
+
+      await tx.guardianStudent.upsert({
+        where: {
+          guardianId_studentId: {
+            guardianId: guardian.id,
+            studentId: student.id,
+          },
+        },
+        create: { guardianId: guardian.id, studentId: student.id, relation },
+        update: input.relation === undefined ? {} : { relation },
+      });
+      await tx.auditLog.create({
+        data: {
+          entity: "GuardianStudent",
+          entityId: `${guardian.id}:${student.id}`,
+          action: "guardian-linked-to-student",
+          actorId,
+          data: { guardianId: guardian.id, studentId: student.id, relation },
+        },
+      });
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Create one new parent and link it to this Student. No credential or invite is
+   * issued unless the staff member explicitly asks for one in this request.
+   */
+  async createForStudent(
+    actorId: string,
+    studentId: string,
+    input: CreateStudentGuardianInput,
+  ) {
+    const email = input.email.trim().toLowerCase();
+    const { firstName, lastName } = this.splitName(input.fullName);
+    let guardian: {
+      id: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+    };
+    try {
+      guardian = await this.prisma.$transaction(async (tx) => {
+        const student = await tx.student.findFirst({
+          where: {
+            id: studentId,
+            recordStatus: { in: ["active", "pending_payment"] },
+          },
+          select: { id: true },
+        });
+        if (!student) {
+          throw new BadRequestException(
+            "Only active or payment-pending students may receive a parent link",
+          );
+        }
+
+        const existing = await tx.person.findFirst({
+          where: { email: { equals: email, mode: "insensitive" } },
+        });
+        if (existing?.kind === "parent") {
+          throw new ConflictException(
+            "A parent account already uses this email. Link the existing parent instead.",
+          );
+        }
+        if (existing) {
+          throw new ConflictException(
+            "That email already belongs to a non-parent account",
+          );
+        }
+
+        const created = await tx.person.create({
+          data: {
+            email,
+            firstName,
+            lastName,
+            kind: "parent",
+            roles: ["parent"],
+          },
+          select: { id: true, email: true, firstName: true, lastName: true },
+        });
+        const phone = input.phone?.trim() || null;
+        const address = input.address?.trim() || null;
+        if (input.phone !== undefined || input.address !== undefined) {
+          await tx.guardianProfile.create({
+            data: { guardianId: created.id, phone, address },
+          });
+        }
+        const relation = input.relation?.trim() || null;
+        await tx.guardianStudent.create({
+          data: { guardianId: created.id, studentId: student.id, relation },
+        });
+        await tx.auditLog.create({
+          data: {
+            entity: "GuardianStudent",
+            entityId: `${created.id}:${student.id}`,
+            action: "guardian-created-and-linked",
+            actorId,
+            data: {
+              guardianId: created.id,
+              studentId: student.id,
+              relation,
+              inviteRequested: input.sendInvite,
+            },
+          },
+        });
+        return created;
+      });
+    } catch (error) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? (error as { code?: unknown }).code
+          : null;
+      if (code === "P2002") {
+        throw new ConflictException(
+          "That email was assigned while this form was open. Link the existing parent instead.",
+        );
+      }
+      throw error;
+    }
+
+    const invite = input.sendInvite
+      ? await this.issueInvite(
+          guardian.id,
+          guardian.email,
+          `${guardian.firstName} ${guardian.lastName}`.trim(),
+        )
+      : null;
+    return {
+      id: guardian.id,
+      email: guardian.email,
+      inviteExpiresAt: invite?.expiresAt ?? null,
+      inviteDelivery: invite
+        ? invite.sent
+          ? ("sent" as const)
+          : ("not_sent" as const)
+        : ("not_requested" as const),
+    };
+  }
+
+  /** Revoke only this relationship. The parent Person and other links survive. */
+  async unlinkFromStudent(
+    actorId: string,
+    studentId: string,
+    guardianId: string,
+  ) {
+    const [student, guardian] = await Promise.all([
+      this.prisma.student.findUnique({
+        where: { id: studentId },
+        select: { id: true },
+      }),
+      this.prisma.person.findFirst({
+        where: { id: guardianId, kind: "parent" },
+        select: { id: true },
+      }),
+    ]);
+    if (!student) throw new NotFoundException("Student not found");
+    if (!guardian) throw new NotFoundException("Parent account not found");
+
+    await this.prisma.$transaction(async (tx) => {
+      const removed = await tx.guardianStudent.deleteMany({
+        where: { guardianId: guardian.id, studentId: student.id },
+      });
+      if (removed.count !== 1) {
+        throw new NotFoundException("Parent is not linked to this student");
+      }
+      await tx.auditLog.create({
+        data: {
+          entity: "GuardianStudent",
+          entityId: `${guardian.id}:${student.id}`,
+          action: "guardian-unlinked-from-student",
+          actorId,
+          data: { guardianId: guardian.id, studentId: student.id },
+        },
+      });
+    });
+    return { ok: true };
   }
 
   /**
