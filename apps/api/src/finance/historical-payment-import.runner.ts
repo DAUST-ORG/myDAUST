@@ -17,6 +17,10 @@ import {
   normalizeExternalReference,
   normalizePaymentIdentityName,
 } from "./historical-payment-import.manifest.js";
+import {
+  externalReferenceFingerprintSha256,
+  paymentReferenceEvidence,
+} from "./payment-reference.js";
 
 const IMPORT_ROLES = new Set(["admin", "bursar"]);
 
@@ -309,49 +313,6 @@ function cloneInvoice(record: {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function jsonObject(
-  value: Prisma.JsonValue | null,
-): Record<string, Prisma.JsonValue> | null {
-  if (!value || Array.isArray(value) || typeof value !== "object") return null;
-  return value as Record<string, Prisma.JsonValue>;
-}
-
-function paymentReferenceEvidence(payment: {
-  providerRef: string;
-  ipnPayload: Prisma.JsonValue | null;
-  submission: { bankReference: string | null } | null;
-}): { normalized: Set<string>; hashes: Set<string> } {
-  const normalized = new Set<string>();
-  const hashes = new Set<string>();
-  const providerRef = normalizeExternalReference(payment.providerRef);
-  if (providerRef) normalized.add(providerRef);
-  const bankReference = normalizeExternalReference(
-    payment.submission?.bankReference,
-  );
-  if (bankReference) normalized.add(bankReference);
-
-  const payload = jsonObject(payment.ipnPayload);
-  if (!payload) return { normalized, hashes };
-  for (const key of [
-    "externalReference",
-    "bankReference",
-    "reference",
-    "chequeNumber",
-  ]) {
-    const value = payload[key];
-    if (typeof value !== "string") continue;
-    const reference = normalizeExternalReference(value);
-    if (reference) normalized.add(reference);
-  }
-  for (const key of ["externalReferenceSha256", "externalReferenceHash"]) {
-    const value = payload[key];
-    if (typeof value === "string" && /^[0-9a-f]{64}$/i.test(value)) {
-      hashes.add(value.toLowerCase());
-    }
-  }
-  return { normalized, hashes };
 }
 
 function dateDistanceDays(left: string, right: string): number {
@@ -1254,6 +1215,11 @@ export async function executeHistoricalPaymentImport(
             status: "success",
             provider: "historical_import",
             providerRef: planned.providerRef,
+            externalReferenceFingerprintSha256:
+              externalReferenceFingerprintSha256(
+                planned.method,
+                row.externalReference,
+              ),
             source: "historical_workbook",
             settledAt: historicalSettlementTimestamp(planned.settledOn),
             importBatchId: batch.id,

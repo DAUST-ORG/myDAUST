@@ -48,6 +48,7 @@ import {
 } from "@/components/AccountBalance";
 import { EditStudentModal, type EditSection } from "./EditStudentModal";
 import { StudentDocuments } from "./StudentDocuments";
+import { StudentGuardians } from "./StudentGuardians";
 import { TranscriptManager } from "./TranscriptManager";
 
 const ENROLL_BADGE: Record<string, string> = {
@@ -71,7 +72,7 @@ export default function AdminStudentDetailPage() {
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState<EditSection | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [canManageTranscript, setCanManageTranscript] = useState(false);
+  const [canManageStudent, setCanManageStudent] = useState(false);
   const [standingOpen, setStandingOpen] = useState(false);
   const [standingCode, setStandingCode] = useState("");
   const [standingReason, setStandingReason] = useState("");
@@ -162,11 +163,11 @@ export default function AdminStudentDetailPage() {
   useEffect(() => {
     getMe()
       .then((me) =>
-        setCanManageTranscript(
+        setCanManageStudent(
           me.roles.some((role) => role === "admin" || role === "registrar"),
         ),
       )
-      .catch(() => setCanManageTranscript(false));
+      .catch(() => setCanManageStudent(false));
   }, []);
 
   async function drop(enrollmentId: string) {
@@ -278,9 +279,19 @@ export default function AdminStudentDetailPage() {
           >
             <HeroPill
               icon={BadgeCheck}
-              tone={s.status === "probation" ? "warn" : "ok"}
+              tone={
+                s.recordStatus === "pending_payment" || s.status === "probation"
+                  ? "warn"
+                  : "ok"
+              }
             >
-              {s.status === "probation" ? "Probation" : "Enrolled"}
+              {s.recordStatus === "pending_payment"
+                ? "Payment pending"
+                : s.recordStatus === "archived"
+                  ? "Archived"
+                  : s.status === "probation"
+                    ? "Probation"
+                    : "Enrolled"}
             </HeroPill>
             {s.program && <HeroPill icon={GraduationCap}>{s.program}</HeroPill>}
             <HeroPill icon={CalendarDays}>
@@ -347,12 +358,17 @@ export default function AdminStudentDetailPage() {
         <Tabs
           tabs={[
             { value: "overview", label: "Overview" },
-            { value: "academics", label: "Academics" },
-            ...(canManageTranscript
+            ...(s.recordStatus !== "pending_payment"
+              ? [{ value: "academics", label: "Academics" }]
+              : []),
+            ...(canManageStudent && s.recordStatus !== "pending_payment"
               ? [{ value: "transcript", label: "Transcript" }]
               : []),
             { value: "finance", label: "Finance" },
             { value: "personal", label: "Personal & contact" },
+            ...(canManageStudent
+              ? [{ value: "parents", label: "Parents & guardians" }]
+              : []),
             { value: "documents", label: "Documents" },
             { value: "activity", label: "Activity" },
           ]}
@@ -427,7 +443,7 @@ export default function AdminStudentDetailPage() {
         </div>
       )}
 
-      {tab === "academics" && (
+      {tab === "academics" && s.recordStatus !== "pending_payment" && (
         <div
           style={{
             display: "grid",
@@ -567,9 +583,11 @@ export default function AdminStudentDetailPage() {
         </div>
       )}
 
-      {tab === "transcript" && canManageTranscript && (
-        <TranscriptManager studentId={id} />
-      )}
+      {tab === "transcript" &&
+        canManageStudent &&
+        s.recordStatus !== "pending_payment" && (
+          <TranscriptManager studentId={id} />
+        )}
 
       {tab === "finance" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -819,6 +837,10 @@ export default function AdminStudentDetailPage() {
             <KV k="Campus physician" v={s.physician ?? "—"} />
           </ProfileCard>
         </div>
+      )}
+
+      {tab === "parents" && canManageStudent && (
+        <StudentGuardians studentId={id} recordStatus={s.recordStatus} />
       )}
 
       {tab === "documents" && <StudentDocuments studentId={id} />}
