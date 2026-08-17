@@ -15,14 +15,38 @@ export const metadata: Metadata = {
     description:
       "An American-style, five-year engineering university in Somone, Senegal. Rigorous academics, state-of-the-art labs, and research that shapes the continent.",
   },
-  icons: { icon: "/favicon.svg" },
+  icons: {
+    icon: [
+      {
+        url: "/daust-favicon.png",
+        type: "image/png",
+        sizes: "512x512",
+      },
+    ],
+    shortcut: "/daust-favicon.png",
+    apple: [
+      {
+        url: "/daust-favicon.png",
+        type: "image/png",
+        sizes: "512x512",
+      },
+    ],
+  },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
       <head>
-        <script dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('js');" }} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "document.documentElement.classList.add('js');",
+          }}
+        />
       </head>
       <body>{children}</body>
     </html>
