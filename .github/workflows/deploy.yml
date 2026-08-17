@@ -29,9 +29,10 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      # workflow_dispatch forces both jobs; otherwise the path filter decides.
+      # workflow_dispatch forces every deploy job; otherwise the path filter decides.
       app: ${{ steps.filter.outputs.app == 'true' || github.event_name == 'workflow_dispatch' }}
       vitrine: ${{ steps.filter.outputs.vitrine == 'true' || github.event_name == 'workflow_dispatch' }}
+      tunnel: ${{ steps.filter.outputs.tunnel == 'true' || github.event_name == 'workflow_dispatch' }}
     steps:
       # Full history so paths-filter diffs against the real previous commit, not the default branch.
       - uses: actions/checkout@v4
@@ -50,6 +51,10 @@ jobs:
             vitrine:
               - 'apps/vitrine/**'
               - 'packages/shared/**'
+            tunnel:
+              - 'infra/tunnel/**'
+              - 'infra/tunnel-prod/**'
+              - '.github/workflows/deploy.yml'
 
   app:
     needs: changes
@@ -160,12 +165,22 @@ jobs:
           aws ecs describe-task-definition --task-definition "$TD" --query 'taskDefinition' --output json \
             | jq --arg img "$ECR/daust-api:$TAG" \
                  --arg transcript_bucket "daust-$ENV_NAME-transcript-imports-961828155948" \
+                 --arg vitrine_origin "$([ "$ENV_NAME" = "prod" ] && echo 'https://daust.org' || echo 'https://daust.azt.dev')" \
+                 --arg additional_cors_origins "$([ "$ENV_NAME" = "prod" ] && echo 'https://daust.net,https://www.daust.org' || echo '')" \
                  'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
                   | .containerDefinitions[0].image = $img
                   | .containerDefinitions[0].environment =
                       ((.containerDefinitions[0].environment // [])
-                       | map(select(.name != "TRANSCRIPT_IMPORT_BUCKET"))
-                       + [{"name":"TRANSCRIPT_IMPORT_BUCKET","value":$transcript_bucket}])' > api-td.json
+                       | map(select(
+                           .name != "TRANSCRIPT_IMPORT_BUCKET"
+                           and .name != "VITRINE_ORIGIN"
+                           and .name != "ADDITIONAL_CORS_ORIGINS"
+                         ))
+                       + [
+                           {"name":"TRANSCRIPT_IMPORT_BUCKET","value":$transcript_bucket},
+                           {"name":"VITRINE_ORIGIN","value":$vitrine_origin},
+                           {"name":"ADDITIONAL_CORS_ORIGINS","value":$additional_cors_origins}
+                         ])' > api-td.json
           NEW=$(aws ecs register-task-definition --cli-input-json file://api-td.json \
                 --query 'taskDefinition.taskDefinitionArn' --output text)
           aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
@@ -304,3 +319,51 @@ jobs:
 
       - name: Sync to the environment bucket
         run: aws s3 sync apps/vitrine/out/ "s3://daust-$ENV_NAME-vitrine-961828155948/" --delete
+
+  tunnel:
+    needs: changes
+    if: needs.changes.outputs.tunnel == 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECR login
+        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR"
+
+      - name: Build and push tunnel image
+        run: |
+          TAG="${GITHUB_SHA::7}-${GITHUB_REF_NAME}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          if [ "$ENV_NAME" = "prod" ]; then
+            TUNNEL_DIR="infra/tunnel-prod"
+          else
+            TUNNEL_DIR="infra/tunnel"
+          fi
+          docker build -t "$ECR/daust-tunnel:$TAG" "$TUNNEL_DIR"
+          docker push "$ECR/daust-tunnel:$TAG"
+
+      - name: Roll tunnel to the new image
+        run: |
+          CLUSTER="daust-$ENV_NAME"
+          SERVICE="daust-$ENV_NAME-tunnel"
+          TD=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+                --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$TD" --query 'taskDefinition' --output json \
+            | jq --arg img "$ECR/daust-tunnel:$TAG" \
+                 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+                  | .containerDefinitions[0].image = $img' > tunnel-td.json
+          NEW=$(aws ecs register-task-definition --cli-input-json file://tunnel-td.json \
+                --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$NEW" >/dev/null
+          echo "tunnel -> $NEW"
+
+      - name: Wait for tunnel rollout
+        run: |
+          aws ecs wait services-stable --cluster "daust-$ENV_NAME" \
+            --services "daust-$ENV_NAME-tunnel"

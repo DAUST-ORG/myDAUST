@@ -10,6 +10,16 @@ const schema = z
     DATABASE_URL: z.string().url(),
     PORTAL_ORIGIN: z.string().url().default("http://localhost:3000"),
     VITRINE_ORIGIN: z.string().url().default("http://localhost:3001"),
+    ADDITIONAL_CORS_ORIGINS: z
+      .string()
+      .default("")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((origin) => origin.trim())
+          .filter(Boolean),
+      )
+      .pipe(z.array(z.string().url())),
     // Public bill-payment portal (payment.daust.net).
     PAYMENT_ORIGIN: z.string().url().default("http://localhost:3000"),
     WIRE_PROOFS_BUCKET: z.string().min(3).optional(),

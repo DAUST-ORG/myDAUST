@@ -37,7 +37,12 @@ async function bootstrap() {
   );
   app.enableCors({
     origin: [
-      ...new Set([env.PORTAL_ORIGIN, env.VITRINE_ORIGIN, env.PAYMENT_ORIGIN]),
+      ...new Set([
+        env.PORTAL_ORIGIN,
+        env.VITRINE_ORIGIN,
+        env.PAYMENT_ORIGIN,
+        ...env.ADDITIONAL_CORS_ORIGINS,
+      ]),
     ],
     credentials: true, // session cookie flows cross-origin (same-site localhost)
     allowedHeaders: [

@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-// daust.net/admin is just an entry point: send editors to the portal-hosted CMS.
+// daust.org/admin is just an entry point: send editors to the portal-hosted CMS.
 export default function AdminRedirect() {
   useEffect(() => {
     const h = window.location.host;
