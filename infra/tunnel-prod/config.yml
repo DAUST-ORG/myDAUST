@@ -15,6 +15,15 @@ ingress:
     service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
   - hostname: payment.daust.azt.dev
     service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
+  - hostname: daust.org
+    service: http://daust-prod-vitrine-961828155948.s3-website-us-east-1.amazonaws.com
+    originRequest:
+      # S3 website endpoints route by Host header; forward the bucket host, not the edge host.
+      httpHostHeader: daust-prod-vitrine-961828155948.s3-website-us-east-1.amazonaws.com
+  - hostname: www.daust.org
+    service: http://daust-prod-vitrine-961828155948.s3-website-us-east-1.amazonaws.com
+    originRequest:
+      httpHostHeader: daust-prod-vitrine-961828155948.s3-website-us-east-1.amazonaws.com
   - hostname: daust.net
     service: http://daust-prod-vitrine-961828155948.s3-website-us-east-1.amazonaws.com
     originRequest:
