@@ -75,7 +75,7 @@ function vitrineOrigin(): string {
   const h = window.location.host;
   if (h.startsWith("localhost")) return "http://localhost:3001";
   if (h.includes("azt.dev")) return "https://daust.azt.dev";
-  return "https://daust.net";
+  return "https://daust.org";
 }
 
 function publicFacultyUrl(a: AdminFacultyItem): string {
