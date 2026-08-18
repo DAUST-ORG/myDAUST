@@ -177,7 +177,8 @@ export function HeroMedia({
   const embed = heroMediaEmbedUrl(media, providerOrigin);
 
   return (
-    <>
+    // Size container for .hero-video-embed, which is sized to cover this box.
+    <div className="hero-media" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
       {poster && (
         // eslint-disable-next-line @next/next/no-img-element -- poster paints under the optional media; withheld until the CMS doc resolves so the baked default never flashes
         <img
@@ -220,6 +221,7 @@ export function HeroMedia({
       {showVideo && embed && (
         <iframe
           ref={iframeRef}
+          className="hero-video-embed"
           id={media.kind === "youtube" ? "daust-hero-youtube" : undefined}
           src={embed}
           title="DAUST campus background video"
@@ -234,10 +236,6 @@ export function HeroMedia({
           tabIndex={-1}
           aria-hidden="true"
           style={{
-            position: "absolute",
-            inset: "-10%",
-            width: "120%",
-            height: "120%",
             border: 0,
             pointerEvents: "none",
             opacity: media.kind === "youtube" && !providerPlaying ? 0 : 1,
@@ -273,6 +271,6 @@ export function HeroMedia({
           )}
         </button>
       )}
-    </>
+    </div>
   );
 }
