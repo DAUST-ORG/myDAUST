@@ -10,7 +10,7 @@ import { AiPanel } from "@/components/AiPanel";
 import { ApplyModal } from "@/components/ApplyModal";
 import { CookieBanner } from "@/components/CookieBanner";
 import { buildSiteContent, HIDEABLE_SECTIONS, siteImgMap, type Lang, type PageKey, type PublicFacultyMember, type PublicNewsArticle, type PublicNewsArticleFull, type SiteOverrides, slugify } from "@/lib/content";
-import { assetUrl, getNews, getNewsArticle, getPreviewContent, getPublicFaculty, getPublishedContent, submitContact } from "@/lib/api";
+import { assetUrl, getCachedPublishedContent, getNews, getNewsArticle, getPreviewContent, getPublicFaculty, getPublishedContent, submitContact } from "@/lib/api";
 
 const WRAP: React.CSSProperties = { maxWidth: 1240, margin: "0 auto", padding: "0 40px" };
 
@@ -54,6 +54,13 @@ function PageHero({ kicker, title, sub, cta }: { kicker: string; title: string; 
 
 const primaryBtn: React.CSSProperties = { fontFamily: "var(--font-body)", fontWeight: 700, fontSize: 13, letterSpacing: ".05em", textTransform: "uppercase", border: "none", borderRadius: 3, padding: "16px 32px", background: "var(--daust-orange)", color: "#fff", cursor: "pointer" };
 
+/** Initial CMS state for a mount: the cached published doc — except in preview mode, which must wait for its draft. */
+function initialPublishedOverrides(): SiteOverrides | null {
+  if (typeof window === "undefined") return null;
+  if (new URLSearchParams(window.location.search).get("preview")) return null;
+  return getCachedPublishedContent();
+}
+
 export default function Site() {
   const [page, setPage] = useState<PageKey>("home");
   const [lang, setLang] = useState<Lang>("en");
@@ -67,7 +74,13 @@ export default function Site() {
   const [contactMessage, setContactMessage] = useState("");
   const [contactBusy, setContactBusy] = useState(false);
   const [contactErr, setContactErr] = useState<string | null>(null);
-  const [overrides, setOverrides] = useState<SiteOverrides | null>(null);
+  // Seeded from the module cache so a remount paints the correct hero on its
+  // first frame instead of bouncing back to the baked-in default. Preview
+  // sessions (?preview=<token>) always start empty and wait for the draft.
+  const [overrides, setOverrides] = useState<SiteOverrides | null>(initialPublishedOverrides);
+  // False until the CMS doc settles (either way); the hero withholds its poster
+  // until then so the build-time default never flashes before the real image.
+  const [contentReady, setContentReady] = useState<boolean>(() => initialPublishedOverrides() !== null);
   const [newsList, setNewsList] = useState<PublicNewsArticle[]>([]);
   const [articleSlug, setArticleSlug] = useState<string | null>(null);
   const [article, setArticle] = useState<PublicNewsArticleFull | null>(null);
@@ -76,7 +89,11 @@ export default function Site() {
   // Pull the CMS content once. `?preview=<token>` renders the pending draft (token from the CMS).
   useEffect(() => {
     const token = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("preview") : null;
-    (token ? getPreviewContent(token) : getPublishedContent()).then((o) => o && setOverrides(o));
+    (token ? getPreviewContent(token) : getPublishedContent()).then((o) => {
+      if (o) setOverrides(o);
+      // Settled either way — a failed fetch falls back to the baked defaults.
+      setContentReady(true);
+    });
   }, []);
 
   // Load published news; open a deep-linked article (?article=<slug>) on first load.
@@ -290,11 +307,18 @@ export default function Site() {
       {/* hero */}
       <section style={{ position: "relative", background: "var(--daust-navy-deep)", overflow: "hidden", minHeight: "84vh", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
         <div style={{ position: "absolute", inset: 0 }}>
+          {/* Poster is withheld until the CMS doc settles: painting IMG.hero
+              earlier shows the build-time default and then swaps to the
+              published image — the visible "old hero flashes first" bug. */}
           <HeroMedia
             label={fr ? "Campus / étudiants" : "Campus / students hero"}
-            poster={IMG.hero}
+            poster={contentReady ? IMG.hero : undefined}
             media={overrides?.heroMedia ?? { kind: "image" }}
           />
+          <noscript>
+            {/* eslint-disable-next-line @next/next/no-img-element -- static export */}
+            <img src={IMG.hero} alt={fr ? "Campus / étudiants" : "Campus / students hero"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+          </noscript>
         </div>
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg,rgba(10,26,48,.35) 0%,rgba(10,26,48,.15) 40%,rgba(10,26,48,.85) 100%)", pointerEvents: "none" }} />
         <div style={{ position: "relative", ...WRAP, width: "100%", padding: "0 40px 72px" }}>
