@@ -425,6 +425,157 @@ describe.skipIf(!DB_URL)("fee component approvals", () => {
     ]);
   });
 
+  it("stores a separate per-student component grid and isolates it from global amounts", async () => {
+    const fixture = await createFixture("individual-grid");
+    const before = await prisma.invoice.findUniqueOrThrow({
+      where: { id: fixture.invoice.id },
+      include: {
+        components: true,
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    const componentByKind = new Map(
+      before.components.map((component) => [component.kind, component]),
+    );
+    const amounts = {
+      tuition: [1_000_000, 800_000, 700_000, 475_000],
+      housing: [200_000, 180_000, 150_000, 150_000],
+      cafeteria: [200_000, 150_000, 150_000, 130_000],
+    };
+    const request = await approvals.request(admin, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: fixture.invoice.id,
+      reason: "Approved family-specific component schedule",
+      after: {
+        mode: "update",
+        installments: before.plan!.installments.map((installment, index) => {
+          const components = Object.entries(amounts).map(([kind, values]) => ({
+            invoiceComponentId: componentByKind.get(kind)!.id,
+            amountXof: values[index]!,
+          }));
+          return {
+            id: installment.id,
+            sequence: installment.sequence,
+            label: `Individual payment ${installment.sequence}`,
+            dueDate: installment.dueDate.toISOString().slice(0, 10),
+            amountDue: components.reduce(
+              (sum, component) => sum + component.amountXof,
+              0,
+            ),
+            components,
+          };
+        }),
+      },
+    });
+    expect(request).toMatchObject({
+      applied: true,
+      result: { total: 4_285_000, individualOverride: true },
+    });
+
+    const individual = await prisma.invoice.findUniqueOrThrow({
+      where: { id: fixture.invoice.id },
+      include: {
+        components: { orderBy: { kind: "asc" } },
+        plan: {
+          include: {
+            installments: {
+              orderBy: { sequence: "asc" },
+              include: { components: true },
+            },
+          },
+        },
+      },
+    });
+    expect(individual.paymentPlanOverride).toBe(true);
+    expect(individual.plan!.installments.map((row) => row.amountDue)).toEqual([
+      1_400_000, 1_130_000, 1_000_000, 755_000,
+    ]);
+    expect(
+      individual.plan!.installments.map((row) => row.components.length),
+    ).toEqual([3, 3, 3, 3]);
+    expect(individual.components).toMatchObject([
+      { kind: "cafeteria", amountXof: 630_000 },
+      { kind: "housing", amountXof: 680_000 },
+      { kind: "tuition", amountXof: 2_975_000 },
+    ]);
+
+    const current = await prisma.feeSchedule.findFirstOrThrow({
+      where: { academicYearLabel: fixture.label, status: "approved" },
+      include: {
+        rows: { orderBy: { sequence: "asc" } },
+        components: { orderBy: { sortOrder: "asc" } },
+      },
+    });
+    const globalPayload = schedulePayload(current);
+    globalPayload.components = globalPayload.components.map((component) =>
+      component.key === "tuition"
+        ? { ...component, annualAmountXof: 3_100_000 }
+        : component,
+    );
+    await approvals.request(admin, {
+      kind: "global_fee_schedule",
+      targetType: "FeeSchedule",
+      targetId: current.id,
+      academicYearLabel: fixture.label,
+      reason: "Global tuition revision",
+      after: globalPayload,
+    });
+
+    const isolated = await prisma.invoice.findUniqueOrThrow({
+      where: { id: fixture.invoice.id },
+      include: {
+        components: { orderBy: { kind: "asc" } },
+        plan: {
+          include: {
+            installments: {
+              orderBy: { sequence: "asc" },
+              include: { components: true },
+            },
+          },
+        },
+      },
+    });
+    expect(isolated.totalAmount).toBe(4_285_000);
+    expect(isolated.feeScheduleRevision).toBe(2);
+    expect(
+      isolated.components.find((row) => row.kind === "tuition")?.amountXof,
+    ).toBe(2_975_000);
+    expect(isolated.plan!.installments.map((row) => row.amountDue)).toEqual([
+      1_400_000, 1_130_000, 1_000_000, 755_000,
+    ]);
+
+    const restore = await approvals.request(admin, {
+      kind: "payment_plan",
+      targetType: "Invoice",
+      targetId: fixture.invoice.id,
+      reason: "Return student to the approved global plan",
+      after: { mode: "restore_standard" },
+    });
+    expect(restore).toMatchObject({ applied: true });
+    const restored = await prisma.invoice.findUniqueOrThrow({
+      where: { id: fixture.invoice.id },
+      include: {
+        components: true,
+        plan: {
+          include: {
+            installments: {
+              orderBy: { sequence: "asc" },
+              include: { components: true },
+            },
+          },
+        },
+      },
+    });
+    expect(restored).toMatchObject({
+      totalAmount: 4_410_000,
+      paymentPlanOverride: false,
+    });
+    expect(
+      restored.plan!.installments.flatMap((row) => row.components),
+    ).toHaveLength(0);
+  });
+
   it("blocks removal when a component has a net settled allocation", async () => {
     const fixture = await createFixture("allocated");
     const cafeteria = await prisma.invoiceComponent.findUniqueOrThrow({

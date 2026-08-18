@@ -125,6 +125,16 @@ const UpdatePlanInput = z.object({
         dueDate: z.string().date(),
         amountDue: z.number().int().min(0).max(100_000_000),
         label: z.string().max(80).nullish(),
+        components: z
+          .array(
+            z.object({
+              invoiceComponentId: z.string().min(1).max(64),
+              amountXof: z.number().int().min(0).max(100_000_000),
+            }),
+          )
+          .min(1)
+          .max(50)
+          .optional(),
       }),
     )
     .min(1)
@@ -140,6 +150,16 @@ const ReplacePlanInput = z.object({
         dueDate: z.string().date(),
         amountDue: z.number().int().min(0).max(100_000_000),
         label: z.string().max(80).nullish(),
+        components: z
+          .array(
+            z.object({
+              invoiceComponentId: z.string().min(1).max(64),
+              amountXof: z.number().int().min(0).max(100_000_000),
+            }),
+          )
+          .min(1)
+          .max(50)
+          .optional(),
       }),
     )
     .min(1)

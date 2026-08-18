@@ -153,7 +153,15 @@ export default function BillingPage() {
             invoiceOrder,
             sequence: i.sequence,
             description: `Installment ${i.sequence} — ${inv.term}`,
-            note: `Installment ${i.sequence} of ${inv.installments.length}`,
+            note:
+              i.components && i.components.length > 0
+                ? i.components
+                    .map(
+                      (component) =>
+                        `${component.label}: ${formatXof(component.amountXof)}`,
+                    )
+                    .join(" · ")
+                : `Installment ${i.sequence} of ${inv.installments.length}`,
             amount: i.amountDue,
             outstanding: installmentOutstanding(i),
             dueDate: i.dueDate,

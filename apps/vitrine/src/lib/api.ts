@@ -16,15 +16,38 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 export const assetUrl = (u?: string): string | undefined =>
   u && u.startsWith("/uploads") ? `${API_URL}${u}` : u;
 
+/**
+ * Module-scope cache for the published CMS doc. The page component has been
+ * observed mounting twice in the exported build; without this, the second mount
+ * re-renders the baked-in default hero for a beat before its own fetch resolves.
+ * Caching the resolved doc (and reusing the in-flight promise) makes a remount
+ * paint the correct image on its very first frame.
+ */
+let publishedContentPromise: Promise<SiteOverrides | null> | null = null;
+let publishedContentCache: SiteOverrides | null = null;
+
+/** Last successfully fetched published doc, if any — for initial state on remount. */
+export function getCachedPublishedContent(): SiteOverrides | null {
+  return publishedContentCache;
+}
+
 /** The CMS override doc the live site serves. Returns null on any failure (site falls back to defaults). */
-export async function getPublishedContent(): Promise<SiteOverrides | null> {
-  try {
-    const res = await fetch(`${API_URL}/api/content/published`);
-    if (!res.ok) return null;
-    return (await res.json()) as SiteOverrides;
-  } catch {
-    return null;
-  }
+export function getPublishedContent(): Promise<SiteOverrides | null> {
+  publishedContentPromise ??= (async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/content/published`);
+      if (!res.ok) return null;
+      publishedContentCache = (await res.json()) as SiteOverrides;
+      return publishedContentCache;
+    } catch {
+      return null;
+    }
+  })().then((result) => {
+    // A failed fetch is not cached: a later mount retries instead of pinning defaults.
+    if (result === null) publishedContentPromise = null;
+    return result;
+  });
+  return publishedContentPromise;
 }
 
 /** Preview mode: the pending draft, fetched by capability token (works cross-domain, no cookie). */

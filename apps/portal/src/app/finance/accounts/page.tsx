@@ -60,6 +60,16 @@ function toDateInput(iso: string | null): string {
   return iso ? iso.slice(0, 10) : "";
 }
 
+function splitAmount(total: number, parts: number): number[] {
+  if (parts <= 0) return [];
+  const base = Math.floor(total / parts);
+  const remainder = total - base * parts;
+  return Array.from(
+    { length: parts },
+    (_, index) => base + (index < remainder ? 1 : 0),
+  );
+}
+
 interface DraftRow {
   /** Present only when editing an existing billing — the installment being updated. */
   id?: string;
@@ -68,6 +78,15 @@ interface DraftRow {
   amountXof: number;
   /** Approved plans cannot reduce an installment below cash already settled. */
   amountPaid?: number;
+  components: DraftComponent[];
+}
+
+interface DraftComponent {
+  invoiceComponentId: string;
+  key: string;
+  label: string;
+  amountXof: number;
+  allocatedXof: number;
 }
 
 interface BillingDraft {
@@ -208,6 +227,7 @@ export default function FinanceAccounts() {
         label: r.label,
         dueDate: toDateInput(r.dueOn),
         amountXof: which === "tuition" ? r.amountTuitionXof : r.amountFullXof,
+        components: [],
       })),
     [feeRows],
   );
@@ -234,19 +254,51 @@ export default function FinanceAccounts() {
           "A payment-plan change for this billing is already awaiting administrator approval.",
         );
       }
+      const activeComponents = (invoice.components ?? []).filter(
+        (component) => component.selected && component.amountXof > 0,
+      );
+      const componentSplits = new Map(
+        activeComponents.map((component) => [
+          component.id,
+          splitAmount(component.amountXof, invoice.installments.length),
+        ]),
+      );
       setDraft({
         invoiceId: invoice.id,
         studentId: row.id,
         plan: invoice.description === planLabel("tuition") ? "tuition" : "full",
         planType: invoice.planType,
         invoice,
-        rows: invoice.installments.map((i) => ({
-          id: i.id,
-          label: i.label ?? `Installment ${i.sequence}`,
-          dueDate: toDateInput(i.dueDate),
-          amountXof: i.amountDue,
-          amountPaid: i.amountPaid,
-        })),
+        rows: invoice.installments.map((installment, index) => {
+          const stored = new Map(
+            (installment.components ?? []).map((component) => [
+              component.invoiceComponentId,
+              component.amountXof,
+            ]),
+          );
+          const components = activeComponents.map((component) => ({
+            invoiceComponentId: component.id,
+            key: component.key,
+            label: component.label,
+            amountXof:
+              stored.get(component.id) ??
+              componentSplits.get(component.id)![index]!,
+            allocatedXof: component.allocatedXof,
+          }));
+          return {
+            id: installment.id,
+            label: installment.label ?? `Payment ${installment.sequence}`,
+            dueDate: toDateInput(installment.dueDate),
+            amountXof: components.length
+              ? components.reduce(
+                  (sum, component) => sum + component.amountXof,
+                  0,
+                )
+              : installment.amountDue,
+            amountPaid: installment.amountPaid,
+            components,
+          };
+        }),
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not open that billing.");
@@ -270,7 +322,50 @@ export default function FinanceAccounts() {
     );
   }
 
+  function editComponent(
+    rowIndex: number,
+    componentIndex: number,
+    value: string,
+  ) {
+    const amountXof = Math.max(0, Number(value.replace(/[^0-9]/g, "")) || 0);
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            rows: current.rows.map((row, index) => {
+              if (index !== rowIndex) return row;
+              const components = row.components.map((component, position) =>
+                position === componentIndex
+                  ? { ...component, amountXof }
+                  : component,
+              );
+              return {
+                ...row,
+                components,
+                amountXof: components.reduce(
+                  (sum, component) => sum + component.amountXof,
+                  0,
+                ),
+              };
+            }),
+          }
+        : current,
+    );
+  }
+
   const total = draft?.rows.reduce((sum, r) => sum + r.amountXof, 0) ?? 0;
+  const componentTotals = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const row of draft?.rows ?? []) {
+      for (const component of row.components) {
+        totals.set(
+          component.invoiceComponentId,
+          (totals.get(component.invoiceComponentId) ?? 0) + component.amountXof,
+        );
+      }
+    }
+    return totals;
+  }, [draft]);
   const valid =
     draft !== null &&
     draft.studentId !== "" &&
@@ -279,7 +374,14 @@ export default function FinanceAccounts() {
       (r) =>
         r.dueDate !== "" &&
         r.amountXof > 0 &&
-        r.amountXof >= (r.amountPaid ?? 0),
+        r.amountXof >= (r.amountPaid ?? 0) &&
+        r.components.every((component) => component.amountXof >= 0),
+    ) &&
+    (draft.rows[0]?.components ?? []).every(
+      (component) =>
+        (componentTotals.get(component.invoiceComponentId) ?? 0) > 0 &&
+        (componentTotals.get(component.invoiceComponentId) ?? 0) >=
+          component.allocatedXof,
     ) &&
     total > 0 &&
     (!draft.invoiceId || requestReason.trim().length > 0);
@@ -299,6 +401,14 @@ export default function FinanceAccounts() {
               dueDate: r.dueDate,
               amountDue: r.amountXof,
               label: r.label,
+              ...(r.components.length
+                ? {
+                    components: r.components.map((component) => ({
+                      invoiceComponentId: component.invoiceComponentId,
+                      amountXof: component.amountXof,
+                    })),
+                  }
+                : {}),
             })),
           requestReason.trim(),
         );
@@ -641,7 +751,7 @@ export default function FinanceAccounts() {
           open
           onClose={() => setDraft(null)}
           title={draft.invoiceId ? "Edit student billing" : "New Billing"}
-          width={560}
+          width={960}
           footer={
             <>
               <Button
@@ -660,7 +770,7 @@ export default function FinanceAccounts() {
                 {busy
                   ? "Saving…"
                   : draft.invoiceId
-                    ? "Submit change"
+                    ? "Submit individual plan"
                     : "Assign full package"}
               </Button>
             </>
@@ -668,7 +778,7 @@ export default function FinanceAccounts() {
         >
           <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>
             {draft.invoiceId
-              ? "Annual charges set this student’s total. Approved component exceptions remain selected while later global fee amounts continue to apply; payment-date exceptions use an individual schedule."
+              ? "Set this student’s tuition, cafeteria, housing, and other selected charges separately for every payment. The four-payment grid becomes an individual plan and no longer inherits global amounts."
               : "Assign the administrator-approved tuition, housing, and cafeteria package."}
           </p>
 
@@ -799,11 +909,11 @@ export default function FinanceAccounts() {
                     color: "var(--daust-navy)",
                   }}
                 >
-                  Payment dates
+                  Individual payment plan
                 </span>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {draft.invoiceId
-                    ? "Amounts are calculated from annual charges"
+                    ? "Individual component amounts · each row and column must reconcile"
                     : "From the approved global revision"}
                 </span>
               </div>
@@ -815,47 +925,179 @@ export default function FinanceAccounts() {
                 </p>
               )}
 
-              {draft.rows.map((r, i) => (
-                <div
-                  key={r.id ?? i}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fit, minmax(min(145px, 100%), 1fr))",
-                    gap: 10,
-                    alignItems: "center",
-                    marginBottom: 8,
-                  }}
-                >
-                  <Input
-                    value={r.label}
-                    onChange={(v) => editRow(i, { label: v })}
-                    disabled={!draft.invoiceId}
-                    placeholder={`Installment ${i + 1}`}
-                  />
-                  <Input
-                    type="date"
-                    value={r.dueDate}
-                    onChange={(v) => editRow(i, { dueDate: v })}
-                    disabled={!draft.invoiceId}
-                  />
-                  <span style={{ display: "grid", gap: 3 }}>
+              {draft.invoiceId &&
+              (draft.rows[0]?.components.length ?? 0) > 0 ? (
+                <div style={{ overflowX: "auto", margin: "0 -4px" }}>
+                  <table
+                    style={{
+                      minWidth: 700,
+                      borderCollapse: "separate",
+                      borderSpacing: "4px 7px",
+                    }}
+                  >
+                    <thead>
+                      <tr>
+                        <th style={{ minWidth: 150 }}>Payment</th>
+                        <th style={{ minWidth: 142 }}>Due date</th>
+                        {draft.rows[0]!.components.map((component) => (
+                          <th
+                            key={component.invoiceComponentId}
+                            style={{ minWidth: 132, textAlign: "right" }}
+                          >
+                            {component.label}
+                          </th>
+                        ))}
+                        <th style={{ minWidth: 130, textAlign: "right" }}>
+                          Payment total
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {draft.rows.map((row, rowIndex) => (
+                        <tr key={row.id ?? rowIndex}>
+                          <td>
+                            <label>
+                              <span className="sr-only">
+                                Payment {rowIndex + 1} label
+                              </span>
+                              <Input
+                                value={row.label}
+                                onChange={(value) =>
+                                  editRow(rowIndex, { label: value })
+                                }
+                                placeholder={`Payment ${rowIndex + 1}`}
+                              />
+                            </label>
+                          </td>
+                          <td>
+                            <label>
+                              <span className="sr-only">
+                                Payment {rowIndex + 1} due date
+                              </span>
+                              <Input
+                                type="date"
+                                value={row.dueDate}
+                                onChange={(value) =>
+                                  editRow(rowIndex, { dueDate: value })
+                                }
+                              />
+                            </label>
+                          </td>
+                          {row.components.map((component, componentIndex) => {
+                            const columnTotal =
+                              componentTotals.get(
+                                component.invoiceComponentId,
+                              ) ?? 0;
+                            return (
+                              <td key={component.invoiceComponentId}>
+                                <label>
+                                  <span className="sr-only">
+                                    {component.label}, payment {rowIndex + 1}
+                                  </span>
+                                  <Input
+                                    value={component.amountXof}
+                                    onChange={(value) =>
+                                      editComponent(
+                                        rowIndex,
+                                        componentIndex,
+                                        value,
+                                      )
+                                    }
+                                    invalid={
+                                      columnTotal <= 0 ||
+                                      columnTotal < component.allocatedXof
+                                    }
+                                    align="right"
+                                    inputMode="numeric"
+                                  />
+                                </label>
+                              </td>
+                            );
+                          })}
+                          <td style={{ textAlign: "right" }}>
+                            <strong
+                              style={{
+                                display: "block",
+                                fontVariantNumeric: "tabular-nums",
+                                color:
+                                  row.amountXof < (row.amountPaid ?? 0)
+                                    ? "var(--danger)"
+                                    : "var(--fg1)",
+                              }}
+                            >
+                              {formatXof(row.amountXof)}
+                            </strong>
+                            {(row.amountPaid ?? 0) > 0 && (
+                              <span
+                                className="muted"
+                                style={{ fontSize: 10.5 }}
+                              >
+                                {formatXof(row.amountPaid ?? 0)} paid
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <th colSpan={2} style={{ textAlign: "left" }}>
+                          Student annual totals
+                        </th>
+                        {draft.rows[0]!.components.map((component) => (
+                          <th
+                            key={component.invoiceComponentId}
+                            style={{ textAlign: "right" }}
+                          >
+                            {formatXof(
+                              componentTotals.get(
+                                component.invoiceComponentId,
+                              ) ?? 0,
+                            )}
+                          </th>
+                        ))}
+                        <th style={{ textAlign: "right" }}>
+                          {formatXof(total)}
+                        </th>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ) : (
+                draft.rows.map((row, index) => (
+                  <div
+                    key={row.id ?? index}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(min(145px, 100%), 1fr))",
+                      gap: 10,
+                      alignItems: "center",
+                      marginBottom: 8,
+                    }}
+                  >
                     <Input
-                      value={r.amountXof}
+                      value={row.label}
+                      onChange={(value) => editRow(index, { label: value })}
+                      disabled={!draft.invoiceId}
+                      placeholder={`Payment ${index + 1}`}
+                    />
+                    <Input
+                      type="date"
+                      value={row.dueDate}
+                      onChange={(value) => editRow(index, { dueDate: value })}
+                      disabled={!draft.invoiceId}
+                    />
+                    <Input
+                      value={row.amountXof}
                       onChange={() => {}}
                       disabled
-                      invalid={r.amountXof < (r.amountPaid ?? 0)}
                       align="right"
                       inputMode="numeric"
                     />
-                    {(r.amountPaid ?? 0) > 0 && (
-                      <span className="muted" style={{ fontSize: 10.5 }}>
-                        {formatXof(r.amountPaid ?? 0)} already paid
-                      </span>
-                    )}
-                  </span>
-                </div>
-              ))}
+                  </div>
+                ))
+              )}
 
               <div
                 style={{
@@ -878,7 +1120,7 @@ export default function FinanceAccounts() {
             {draft.invoiceId && (
               <Field
                 label="Reason for change"
-                hint="Required for payment-date changes. Charge changes have their own approval reason above."
+                hint="Required for an individual plan and retained in the approval history. Charge selection changes have their own reason above."
               >
                 <textarea
                   value={requestReason}
