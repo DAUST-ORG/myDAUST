@@ -570,7 +570,20 @@ export class FinanceService {
       orderBy: { createdAt: "desc" },
       include: {
         term: true,
-        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+        plan: {
+          include: {
+            installments: {
+              orderBy: { sequence: "asc" },
+              include: {
+                components: {
+                  include: {
+                    invoiceComponent: { select: { kind: true, label: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
         payments: { orderBy: { createdAt: "desc" } },
         paymentSubmissions: { orderBy: { createdAt: "desc" } },
       },
@@ -600,9 +613,18 @@ export class FinanceService {
         summary,
         effectiveOutstandingXof: summary.outstandingXof,
         effectiveStatus: summary.standing,
-        installments: (inv.plan?.installments ?? []).map((installment) =>
-          decorateInstallment(installment, derived),
-        ),
+        installments: (inv.plan?.installments ?? []).map((installment) => ({
+          ...decorateInstallment(installment, derived),
+          components: (installment.components ?? []).map((component) => ({
+            id: component.id,
+            invoiceComponentId: component.invoiceComponentId,
+            componentKey: component.invoiceComponent.kind,
+            label:
+              component.invoiceComponent.label ||
+              displayFeeComponentLabel(component.invoiceComponent.kind),
+            amountXof: component.amountDue,
+          })),
+        })),
         payments: inv.payments.map((p) => ({
           id: p.id,
           amount: p.amount,
@@ -2855,7 +2877,20 @@ export class FinanceService {
         include: {
           term: true,
           plan: {
-            include: { installments: { orderBy: { sequence: "asc" } } },
+            include: {
+              installments: {
+                orderBy: { sequence: "asc" },
+                include: {
+                  components: {
+                    include: {
+                      invoiceComponent: {
+                        select: { kind: true, label: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
           payments: { orderBy: { createdAt: "desc" } },
           paymentSubmissions: { orderBy: { createdAt: "desc" } },
@@ -3046,9 +3081,18 @@ export class FinanceService {
           effectiveOutstandingXof: summary.outstandingXof,
           effectiveStatus: summary.standing,
           hasPlan: !!inv.plan,
-          installments: (inv.plan?.installments ?? []).map((installment) =>
-            decorateInstallment(installment, derived),
-          ),
+          installments: (inv.plan?.installments ?? []).map((installment) => ({
+            ...decorateInstallment(installment, derived),
+            components: (installment.components ?? []).map((component) => ({
+              id: component.id,
+              invoiceComponentId: component.invoiceComponentId,
+              componentKey: component.invoiceComponent.kind,
+              label:
+                component.invoiceComponent.label ||
+                displayFeeComponentLabel(component.invoiceComponent.kind),
+              amountXof: component.amountDue,
+            })),
+          })),
           payments: inv.payments.map((p) => ({
             id: p.id,
             amount: p.amount,

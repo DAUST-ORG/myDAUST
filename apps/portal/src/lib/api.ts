@@ -297,6 +297,13 @@ export interface BillingInstallment {
   paymentProgress?: InstallmentPaymentProgress;
   dueState?: InstallmentDueState;
   daysPastDue?: number;
+  components?: {
+    id: string;
+    invoiceComponentId: string;
+    componentKey: string;
+    label: string;
+    amountXof: number;
+  }[];
 }
 export interface BillingPayment {
   id: string;
@@ -1956,6 +1963,13 @@ export interface AccountInstallment {
   paymentProgress?: InstallmentPaymentProgress;
   dueState?: InstallmentDueState;
   daysPastDue?: number;
+  components?: {
+    id: string;
+    invoiceComponentId: string;
+    componentKey: string;
+    label: string;
+    amountXof: number;
+  }[];
 }
 export type InvoicePackageType =
   "standard_full" | "standard_tuition_legacy" | "custom" | "credit";
@@ -2243,6 +2257,10 @@ export const updatePaymentPlan = (
     dueDate: string;
     amountDue: number;
     label?: string | null;
+    components?: {
+      invoiceComponentId: string;
+      amountXof: number;
+    }[];
   }[],
   requestReason: string,
 ) =>
@@ -2258,6 +2276,10 @@ export const replacePaymentPlan = (
     dueDate: string;
     amountDue: number;
     label?: string | null;
+    components?: {
+      invoiceComponentId: string;
+      amountXof: number;
+    }[];
   }[],
   requestReason: string,
 ) =>

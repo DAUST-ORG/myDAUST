@@ -623,6 +623,10 @@ model Installment {
   amountPaid  Int                 @default(0)
   status      InstallmentStatus   @default(pending)
   allocations PaymentAllocation[]
+  /// Optional per-student split of this due amount across the invoice's charge
+  /// components. Absence means the installment inherits the standard aggregate
+  /// schedule; presence freezes Finance's individual component schedule.
+  components  InstallmentComponent[]
 
   @@unique([planId, sequence])
   @@index([dueDate])
@@ -814,12 +818,30 @@ model InvoiceComponent {
   costCenter          CostCenter                   @relation(fields: [costCenterCode], references: [code])
   amountXof           Int
   allocations         PaymentComponentAllocation[]
+  installments        InstallmentComponent[]
   createdAt           DateTime                     @default(now())
   updatedAt           DateTime                     @updatedAt
 
   @@unique([invoiceId, kind])
   @@index([costCenterCode])
   @@index([scheduleComponentId])
+}
+
+/// One component cell in a student's individual installment grid. The row total
+/// reconciles to Installment.amountDue and each component's column total
+/// reconciles to InvoiceComponent.amountXof.
+model InstallmentComponent {
+  id                 String           @id @default(uuid())
+  installmentId      String
+  installment        Installment      @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+  invoiceComponentId String
+  invoiceComponent   InvoiceComponent @relation(fields: [invoiceComponentId], references: [id], onDelete: Cascade)
+  amountDue          Int
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([installmentId, invoiceComponentId])
+  @@index([invoiceComponentId])
 }
 
 /// Explicit per-student selection relative to the approved package defaults.
