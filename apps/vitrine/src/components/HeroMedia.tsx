@@ -84,7 +84,8 @@ export function HeroMedia({
   label,
 }: {
   media: HeroMediaValue;
-  poster: string;
+  /** Backdrop image. Omitted while the CMS doc is still loading — the section's navy ground shows instead of a stale default. */
+  poster?: string;
   label: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -93,13 +94,21 @@ export function HeroMedia({
   const [failed, setFailed] = useState(false);
   const [paused, setPaused] = useState(true);
   const [providerPlaying, setProviderPlaying] = useState(false);
-  const [providerOrigin, setProviderOrigin] = useState<string>();
+  const [posterLoaded, setPosterLoaded] = useState(false);
+  // Resolved synchronously so the embed URL never changes between the iframe's
+  // first render and the next — a late origin swap aborts the initial embed load.
+  // (The iframe is never in the prerendered HTML: `eligible` starts false, so
+  // reading window in the initializer cannot cause a hydration mismatch.)
+  const [providerOrigin] = useState<string | undefined>(() =>
+    typeof window === "undefined" ? undefined : window.location.origin,
+  );
   const mediaKey = JSON.stringify(media);
+
+  useEffect(() => setPosterLoaded(false), [poster]);
 
   useEffect(() => {
     setFailed(false);
     setProviderPlaying(false);
-    setProviderOrigin(window.location.origin);
     const connection = (
       navigator as Navigator & { connection?: { saveData?: boolean } }
     ).connection;
@@ -169,19 +178,24 @@ export function HeroMedia({
 
   return (
     <>
-      {/* eslint-disable-next-line @next/next/no-img-element -- poster must paint before optional media */}
-      <img
-        src={assetUrl(poster)}
-        alt={label}
-        fetchPriority="high"
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-        }}
-      />
+      {poster && (
+        // eslint-disable-next-line @next/next/no-img-element -- poster paints under the optional media; withheld until the CMS doc resolves so the baked default never flashes
+        <img
+          src={assetUrl(poster)}
+          alt={label}
+          fetchPriority="high"
+          onLoad={() => setPosterLoaded(true)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            opacity: posterLoaded ? 1 : 0,
+            transition: "opacity 240ms ease",
+          }}
+        />
+      )}
       {showVideo && source && (
         <video
           ref={videoRef}
