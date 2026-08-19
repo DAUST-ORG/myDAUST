@@ -295,9 +295,9 @@ export function buildContent(lang: Lang) {
   ];
 
   const ventures = [
-    { tag: T("Robotics & AI", "Robotique & IA"), name: "Caytu Robotics", desc: T("A DAUST-affiliated venture building AI and robotics solutions for African markets.", "Une startup affiliée à DAUST développant des solutions d’IA et de robotique pour les marchés africains."), href: "https://caytu.ai", cta: "Visit caytu.ai →" },
-    { tag: T("Clean Energy", "Énergie propre"), name: "SolarBox", desc: T("Solar energy solutions expanding reliable, affordable power access.", "Des solutions d’énergie solaire pour un accès fiable et abordable à l’électricité."), href: "http://www.solarbox.energy/", cta: "Visit solarbox.energy →" },
-    { tag: T("Aerospace & Space", "Aérospatial & Spatial"), name: "Jawji", desc: T("A DAUST-affiliated space research and technology company building drones, rockets and the platforms that control them.", "Une entreprise de recherche et technologie spatiale affiliée à DAUST, développant drones, fusées et les plateformes qui les contrôlent."), href: "https://jawji.space", cta: T("Visit jawji.space →", "Visiter jawji.space →") },
+    { tag: T("Robotics & AI", "Robotique & IA"), name: "Caytu Robotics", desc: T("A DAUST-affiliated venture building AI and robotics solutions for African markets.", "Une startup affiliée à DAUST développant des solutions d’IA et de robotique pour les marchés africains."), href: "https://caytu.ai", logo: "/images/caytu-logo.png", cta: "Visit caytu.ai →" },
+    { tag: T("Clean Energy", "Énergie propre"), name: "SolarBox", desc: T("Solar energy solutions expanding reliable, affordable power access.", "Des solutions d’énergie solaire pour un accès fiable et abordable à l’électricité."), href: "http://www.solarbox.energy/", logo: "/images/solarbox-logo.png", cta: "Visit solarbox.energy →" },
+    { tag: T("Aerospace & Space", "Aérospatial & Spatial"), name: "Jawji", desc: T("A DAUST-affiliated space research and technology company building drones, rockets and the platforms that control them.", "Une entreprise de recherche et technologie spatiale affiliée à DAUST, développant drones, fusées et les plateformes qui les contrôlent."), href: "https://jawji.space", logo: "/images/jawji-logo.png", cta: T("Visit jawji.space →", "Visiter jawji.space →") },
   ];
 
   const campusFeatures = [
@@ -735,7 +735,7 @@ export function sanitizeSiteOverrides(raw: SiteOverrides): SiteOverrides {
   const collections: SiteOverrides["collections"] = {};
   if (col.ventures) {
     collections.ventures = col.ventures.slice(0, 50).map((v) => ({
-      name: (v.name ?? "").slice(0, 120), href: safeLink(v.href), tag: bi(v.tag), desc: bi(v.desc), cta: bi(v.cta),
+      name: (v.name ?? "").slice(0, 120), href: safeLink(v.href), logo: safeUrl(v.logo), tag: bi(v.tag), desc: bi(v.desc), cta: bi(v.cta),
     }));
   }
   if (col.faculty) {
@@ -793,7 +793,7 @@ export function buildSiteContent(lang: Lang, overrides?: SiteOverrides): Content
     for (const [key, value] of Object.entries(clean.images)) images[key] = value;
     if (clean.collections?.ventures) {
       content.ventures = clean.collections.ventures.map((v) => ({
-        tag: v.tag[lang], name: v.name, desc: v.desc[lang], href: v.href, cta: v.cta[lang],
+        tag: v.tag[lang], name: v.name, desc: v.desc[lang], href: v.href, logo: v.logo, cta: v.cta[lang],
       }));
     }
     if (clean.collections?.faculty) {
@@ -822,7 +822,7 @@ export function defaultCollections(): { ventures: VentureItem[]; faculty: Facult
     role: { en: d.role, fr: fr.directors[i]!.role },
     }));
   const ventures = en.ventures.map((v, i) => ({
-    name: v.name, href: v.href,
+    name: v.name, href: v.href, logo: v.logo ?? "",
     tag: { en: v.tag, fr: fr.ventures[i]!.tag },
     desc: { en: v.desc, fr: fr.ventures[i]!.desc },
     cta: { en: v.cta, fr: fr.ventures[i]!.cta },
@@ -846,6 +846,8 @@ export type Bi = z.infer<typeof Bi>;
 export const VentureItemInput = z.object({
   name: z.string().max(120),
   href: z.string().max(300),
+  /** Uploaded or linked logo. Defaulted so drafts saved before this field existed still parse. */
+  logo: z.string().max(300).default(""),
   tag: Bi,
   desc: Bi,
   cta: Bi,
