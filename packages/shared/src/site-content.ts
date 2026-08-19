@@ -166,9 +166,15 @@ export function buildContent(lang: Lang) {
     ] },
   ];
 
-  const heroStats = [
+  /**
+   * Headline facts, rendered twice: the navy band on the homepage and the facts row on
+   * About. One array because two copies drifted — Comms set the About row to 1:30 in the
+   * CMS while the homepage kept shipping the built-in 1:5. `mark` is a BLACKLIST_LEAF, so
+   * the CMS edits the number and not the suffix.
+   */
+  const stats = [
     { n: "100", mark: "%", label: T("Graduate job placement", "Insertion des diplômés") },
-    { n: "1:5", mark: "", label: T("Faculty–student ratio", "Ratio enseignant–étudiant") },
+    { n: "1:30", mark: "", label: T("Faculty–student ratio", "Ratio enseignant–étudiant") },
     { n: "100", mark: "+", label: T("Student design projects", "Projets étudiants") },
     { n: "2017", mark: "", label: T("Founded in Somone", "Fondée à Somone") },
   ];
@@ -307,13 +313,6 @@ export function buildContent(lang: Lang) {
     { icon: "flask-conical", title: T("Labs & Makerspace", "Labos & Makerspace"), desc: T("State-of-the-art teaching and research labs, open to students from year one.", "Des laboratoires d’enseignement et de recherche de pointe, ouverts aux étudiants dès la première année.") },
     { icon: "users-round", title: T("Clubs & Community", "Clubs & Communauté"), desc: T("Students are encouraged to be active in one or more of the student organizations on campus.", "Les étudiants sont encouragés à s’investir dans une ou plusieurs associations du campus.") },
     { icon: "utensils", title: T("Cafeteria & Dining", "Cafétéria & Restauration"), desc: T("On-campus cafeteria serving balanced daily meals, with full or half board options.", "Une cafétéria sur le campus propose des repas équilibrés au quotidien, en pension complète ou demi-pension.") },
-  ];
-
-  const aboutFacts = [
-    { n: "100%", label: T("Graduate job placement", "Insertion des diplômés") },
-    { n: "1:5", label: T("Faculty–student ratio", "Ratio enseignant–étudiant") },
-    { n: "100+", label: T("Student design projects", "Projets étudiants") },
-    { n: "2017", label: T("Founded in Somone", "Fondée à Somone") },
   ];
 
   const timeline = [
@@ -466,10 +465,10 @@ export function buildContent(lang: Lang) {
   );
 
   return {
-    fr, tx, nav, suggestions, footCols, heroStats, pillars, recognition, programs,
+    fr, tx, nav, suggestions, footCols, stats, pillars, recognition, programs,
     impactStats, news, model, admSteps, scholarships, tuition, admReq, faq,
     researchAreas, directors, researchStats, faculty, ventureSteps, ventures,
-    campusFeatures, aboutFacts, timeline, portalRoles, contactInfo, privacySections,
+    campusFeatures, timeline, portalRoles, contactInfo, privacySections,
     chatKb, chatFallback,
   };
 }
@@ -526,7 +525,7 @@ export const SITE_SECTION_LABELS: Record<string, string> = {
   pillars: "Why DAUST · pillars",
   programs: "Programs",
   recognition: "Recognition",
-  heroStats: "Hero stats",
+  stats: "Headline stats (homepage band + About)",
   impactStats: "Impact stats",
   news: "News & Stories",
   model: "Academic model",
@@ -542,7 +541,6 @@ export const SITE_SECTION_LABELS: Record<string, string> = {
   ventureSteps: "Venture program steps",
   ventures: "Startups & partners",
   campusFeatures: "Campus features",
- aboutFacts: "About · facts",
  timeline: "About · timeline",
   portalRoles: "Portal roles",
   contactInfo: "Contact info",
