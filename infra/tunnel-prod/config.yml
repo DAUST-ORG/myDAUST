@@ -7,11 +7,19 @@ ingress:
   # mydaust.daust.net -> <tunnel-id>.cfargotunnel.com in Cloudflare + a tunnel restart.
   - hostname: mydaust.daust.net
     service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
+  # App on the .org domain. Needs a proxied CNAME mydaust.daust.org ->
+  # <tunnel-id>.cfargotunnel.com; unlisted hostnames fall through to the 404 below.
+  - hostname: mydaust.daust.org
+    service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
   # Transition alias until daust.net DNS is live everywhere.
   - hostname: my-daust.azt.dev
     service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
   # Public bill portal; same ALB (portal middleware rewrites its root to /pay-bill).
   - hostname: payment.daust.net
+    service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
+  # .org equivalent of the bill portal. PAYMENT_ORIGIN still points at the .net host,
+  # so this is accepted but not yet canonical; flip the origin once its DNS is verified.
+  - hostname: payment.daust.org
     service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
   - hostname: payment.daust.azt.dev
     service: http://daust-prod-alb-1688944790.us-east-1.elb.amazonaws.com
