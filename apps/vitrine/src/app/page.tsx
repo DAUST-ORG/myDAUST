@@ -399,7 +399,7 @@ export default function Site() {
       {/* hero stats */}
       <section data-sec="heroStats" style={{ background: "var(--daust-navy)" }}>
         <div className="grid-4" style={{ ...WRAP, display: "grid", gridTemplateColumns: "repeat(4,1fr)" }}>
-          {c.heroStats.map((s) => (
+          {c.stats.map((s) => (
             <div key={s.label} style={{ padding: "56px 32px", borderLeft: "1px solid rgba(255,255,255,.14)" }}>
               <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(40px,4.4vw,58px)", lineHeight: 1, letterSpacing: "-.01em", color: "#fff" }}>{s.n}<span style={{ color: "var(--daust-orange)" }}>{s.mark}</span></div>
               <div style={{ fontFamily: "var(--font-body)", fontSize: 13, letterSpacing: ".02em", color: "var(--fg-on-navy-muted)", marginTop: 12 }}>{s.label}</div>
@@ -812,9 +812,9 @@ export default function Site() {
       <PageHero kicker={tx.aboutKicker} title={tx.aboutTitle} sub={tx.aboutSub} />
       <section style={{ background: "#fff" }}>
         <div className="grid-4" style={{ ...WRAP, display: "grid", gridTemplateColumns: "repeat(4,1fr)", borderBottom: "1px solid var(--border)" }}>
-          {c.aboutFacts.map((f) => (
+          {c.stats.map((f) => (
             <div key={f.label} style={{ padding: "52px 32px", borderLeft: "1px solid var(--border)" }}>
-              <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(34px,3.6vw,46px)", lineHeight: 1, color: "var(--daust-navy)", letterSpacing: "-.01em" }}>{f.n}</div>
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(34px,3.6vw,46px)", lineHeight: 1, color: "var(--daust-navy)", letterSpacing: "-.01em" }}>{f.n}{f.mark}</div>
               <div style={{ fontFamily: "var(--font-body)", fontSize: 13.5, color: "var(--fg2)", marginTop: 12 }}>{f.label}</div>
             </div>
           ))}
