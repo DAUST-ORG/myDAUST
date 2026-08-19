@@ -171,7 +171,9 @@ module "api_service" {
     { name = "PORTAL_ORIGIN", value = local.public_url },
     { name = "VITRINE_ORIGIN", value = local.vitrine_url },
     # Keep the former public origin functional while daust.net redirects and DNS caches drain.
-    { name = "ADDITIONAL_CORS_ORIGINS", value = "https://daust.net,https://www.daust.org" },
+    # Keep in sync with the jq map in .github/workflows/deploy.yml: an operator apply
+    # rewrites this task definition, so a narrower list here silently drops origins CI set.
+    { name = "ADDITIONAL_CORS_ORIGINS", value = "https://daust.net,https://www.daust.org,https://mydaust.daust.org,https://payment.daust.org" },
     { name = "PAYMENT_ORIGIN", value = local.payment_url },
     { name = "WIRE_PROOFS_BUCKET", value = module.wire_proofs.name },
     { name = "MEDIA_BUCKET", value = module.media.name },

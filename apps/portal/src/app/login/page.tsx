@@ -17,8 +17,13 @@ const DEMO_ACCOUNTS = [
   { email: "admin@daust.edu", role: "Admin" },
 ];
 const DEMO_PASSWORD = "daust-dev-2026";
-// One image serves every environment, so demo helpers are gated by hostname at runtime.
-const PROD_HOSTS = ["my.daust.net", "mydaust.daust.net", "my-daust.azt.dev"];
+/**
+ * One image serves every environment, so demo helpers are gated by hostname at runtime.
+ * This is an allowlist of hosts that MAY show them, not a denylist of production hosts:
+ * a denylist fails open, so every host added later (payment.daust.net, mydaust.daust.org)
+ * silently exposed the seeded credentials until someone remembered to list it.
+ */
+const DEMO_HOSTS = ["localhost", "127.0.0.1", "daust-staging.azt.dev"];
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,7 +34,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
   useEffect(() => {
-    setShowDemo(!PROD_HOSTS.includes(window.location.hostname));
+    setShowDemo(DEMO_HOSTS.includes(window.location.hostname));
   }, []);
 
   async function submit(e: React.FormEvent) {

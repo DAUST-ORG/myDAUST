@@ -166,7 +166,7 @@ jobs:
             | jq --arg img "$ECR/daust-api:$TAG" \
                  --arg transcript_bucket "daust-$ENV_NAME-transcript-imports-961828155948" \
                  --arg vitrine_origin "$([ "$ENV_NAME" = "prod" ] && echo 'https://daust.org' || echo 'https://daust.azt.dev')" \
-                 --arg additional_cors_origins "$([ "$ENV_NAME" = "prod" ] && echo 'https://daust.net,https://www.daust.org' || echo '')" \
+                 --arg additional_cors_origins "$([ "$ENV_NAME" = "prod" ] && echo 'https://daust.net,https://www.daust.org,https://mydaust.daust.org,https://payment.daust.org' || echo '')" \
                  'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
                   | .containerDefinitions[0].image = $img
                   | .containerDefinitions[0].environment =
