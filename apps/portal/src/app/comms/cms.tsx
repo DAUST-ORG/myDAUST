@@ -478,21 +478,61 @@ export function VenturesEditor({ draft }: { draft: Draft }) {
   const { ov, setOv, loaded } = draft;
   const items = (ov.collections?.ventures ?? defaultCollections().ventures) as VentureItem[];
   const overridden = ov.collections?.ventures !== undefined;
+  const [uploadingLogo, setUploadingLogo] = useState<number | null>(null);
+  const [logoErr, setLogoErr] = useState<string | null>(null);
   const set = (next: VentureItem[]) => setOv((prev) => ({ ...prev, collections: { ...(prev.collections ?? {}), ventures: next } }));
   const reset = () => setOv((prev) => { const c = { ...(prev.collections ?? {}) }; delete c.ventures; return { ...prev, collections: c }; });
   const update = (i: number, patch: Partial<VentureItem>) => set(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
   const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= items.length) return; const a = [...items]; [a[i], a[j]] = [a[j]!, a[i]!]; set(a); };
-  const add = () => set([...items, { name: "New startup", href: "https://", tag: { en: "", fr: "" }, desc: { en: "", fr: "" }, cta: { en: "Learn more →", fr: "En savoir plus →" } }]);
+  const add = () => set([...items, { name: "New startup", href: "https://", logo: "", tag: { en: "", fr: "" }, desc: { en: "", fr: "" }, cta: { en: "Learn more →", fr: "En savoir plus →" } }]);
+
+  async function onLogo(i: number, file: File | undefined) {
+    if (!file) return;
+    setUploadingLogo(i);
+    setLogoErr(null);
+    try {
+      const { url } = await uploadFile(file);
+      update(i, { logo: url });
+    } catch (e) {
+      setLogoErr(e instanceof Error ? e.message : "Logo upload failed.");
+    } finally {
+      setUploadingLogo(null);
+    }
+  }
 
   if (!loaded) return <div style={{ color: "var(--fg3)", padding: 20 }}>Loading…</div>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <CollectionToolbar label="Add startup" onAdd={add} overridden={overridden} onReset={reset} />
+      {logoErr && <div style={{ color: "var(--danger)", fontSize: 12.5 }}>{logoErr}</div>}
       {items.map((it, i) => (
         <ItemFrame key={i} title={it.name} index={i} total={items.length} onUp={() => move(i, -1)} onDown={() => move(i, 1)} onRemove={() => set(items.filter((_, idx) => idx !== i))}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Name</div><Input value={it.name} onChange={(v) => update(i, { name: v })} /></div>
             <div><div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Link (URL)</div><Input value={it.href} onChange={(v) => update(i, { href: v })} /></div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "var(--fg3)", marginBottom: 6 }}>Logo</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 132, height: 56, display: "grid", placeItems: "center", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", background: "var(--surface-2)", flexShrink: 0 }}>
+                {it.logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={previewSrc(it.logo)} alt={`${it.name} logo`} style={{ maxWidth: "88%", maxHeight: "80%", objectFit: "contain" }} />
+                ) : (
+                  <span style={{ fontSize: 11, color: "var(--fg3)" }}>No logo</span>
+                )}
+              </div>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--daust-navy)", cursor: "pointer" }}>
+                <Upload size={14} />
+                {uploadingLogo === i ? "Uploading…" : it.logo ? "Replace" : "Upload"}
+                <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onLogo(i, e.target.files?.[0])} disabled={uploadingLogo !== null} />
+              </label>
+              {it.logo && (
+                <button onClick={() => update(i, { logo: "" })} style={{ fontSize: 12, color: "var(--fg3)", background: "none", border: "none", cursor: "pointer" }}>
+                  Remove
+                </button>
+              )}
+            </div>
           </div>
           <BiInput label="Tag" value={it.tag} onChange={(v) => update(i, { tag: v })} />
           <BiInput label="Description" value={it.desc} onChange={(v) => update(i, { desc: v })} multiline />

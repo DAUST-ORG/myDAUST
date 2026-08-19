@@ -14,7 +14,11 @@ import { assetUrl, getCachedPublishedContent, getNews, getNewsArticle, getPrevie
 
 const WRAP: React.CSSProperties = { maxWidth: 1240, margin: "0 auto", padding: "0 40px" };
 
-/** Partner logos rendered on the Startups & Partners cards (keyed by venture name). */
+/**
+ * Legacy fallback for startup logos, keyed by venture name. Logos are now a field
+ * on the venture itself, set in the CMS; this only still resolves logos for entries
+ * published before that field existed, and only while their name is unchanged.
+ */
 const VENTURE_LOGOS: Record<string, string> = {
   "Caytu Robotics": "/images/caytu-logo.png",
   SolarBox: "/images/solarbox-logo.png",
@@ -743,7 +747,7 @@ export default function Site() {
           <SectionHead num="02" label={tx.startKicker} />
           <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)", marginTop: 40 }}>
             {c.ventures.map((v) => {
-              const logo = VENTURE_LOGOS[v.name];
+              const logo = assetUrl(v.logo) || VENTURE_LOGOS[v.name];
               return (
                 <a key={v.name} href={v.href} target="_blank" rel="noopener" className="card-lift reveal" style={{ background: "#fff", padding: "32px 28px", display: "block", color: "inherit" }}>
                   {logo ? (
