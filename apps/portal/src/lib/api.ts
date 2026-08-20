@@ -831,6 +831,12 @@ export interface MyAssignment {
   score: number | null;
   feedback: string | null;
   submittedAt: string | null;
+  description: string | null;
+  weight: number;
+  /** What was already handed in — the submit form doubles as the edit form. */
+  text: string | null;
+  fileUrl: string | null;
+  fileName: string | null;
 }
 export const getMyAssignments = () =>
   request<MyAssignment[]>("/academics/my/assignments");

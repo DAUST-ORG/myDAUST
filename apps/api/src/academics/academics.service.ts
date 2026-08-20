@@ -1342,8 +1342,23 @@ export class AcademicsService {
   ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     const day = new Date(input.date);
-    await this.prisma.$transaction(
-      input.records.map((r) =>
+    // Owning the section is not enough: the unique key is [enrollmentId, date], so an
+    // enrollment id from another section would upsert a row whose sectionId disagrees
+    // with its enrollment — invisible to getAttendance (filters sectionId) but counted
+    // by myAttendance (joins through the enrollment). Prove membership first.
+    const enrollments = await this.prisma.enrollment.findMany({
+      where: { sectionId },
+      select: { id: true },
+    });
+    const roster = new Set(enrollments.map((e) => e.id));
+    const foreign = input.records.filter((r) => !roster.has(r.enrollmentId));
+    if (foreign.length > 0) {
+      throw new BadRequestException(
+        "Attendance records must belong to this section's roster",
+      );
+    }
+    await this.prisma.$transaction([
+      ...input.records.map((r) =>
         this.prisma.attendanceRecord.upsert({
           where: {
             enrollmentId_date: { enrollmentId: r.enrollmentId, date: day },
@@ -1357,7 +1372,16 @@ export class AcademicsService {
           },
         }),
       ),
-    );
+      this.prisma.auditLog.create({
+        data: {
+          entity: "Section",
+          entityId: sectionId,
+          action: "attendance-marked",
+          actorId: personId,
+          data: { date: input.date, count: input.records.length },
+        },
+      }),
+    ]);
     return { ok: true };
   }
 
@@ -1615,6 +1639,13 @@ export class AcademicsService {
           score: s?.score ?? null,
           feedback: s?.feedback ?? null,
           submittedAt: s?.submittedAt ?? null,
+          // The submit form doubles as the edit form, so it needs to render what was
+          // already handed in — without these it opens blank on every resubmit.
+          description: a.description,
+          weight: a.weight,
+          text: s?.text ?? null,
+          fileUrl: s?.fileUrl ?? null,
+          fileName: s?.fileName ?? null,
         };
       }),
     );
@@ -1642,13 +1673,18 @@ export class AcademicsService {
     if (!enrollment || enrollment.status === "dropped") {
       throw new ForbiddenException("You are not enrolled in this section");
     }
-    const data = {
+    const base = {
       text: input.text?.trim() || null,
-      fileUrl: input.fileUrl ?? null,
-      fileName: input.fileName ?? null,
       status: "submitted" as const,
       submittedAt: new Date(),
     };
+    // A resubmit that carries no file must not erase the one already stored: the form is
+    // also how a student edits their text, and `fileUrl ?? null` would blank the upload.
+    // Absent means "leave it"; clearing an attachment is not something the UI offers.
+    const file =
+      input.fileUrl === undefined
+        ? {}
+        : { fileUrl: input.fileUrl, fileName: input.fileName ?? null };
     return this.prisma.submission.upsert({
       where: {
         assignmentId_enrollmentId: {
@@ -1656,8 +1692,14 @@ export class AcademicsService {
           enrollmentId: enrollment.id,
         },
       },
-      update: data,
-      create: { assignmentId, enrollmentId: enrollment.id, ...data },
+      update: { ...base, ...file },
+      create: {
+        assignmentId,
+        enrollmentId: enrollment.id,
+        ...base,
+        fileUrl: input.fileUrl ?? null,
+        fileName: input.fileName ?? null,
+      },
     });
   }
 
@@ -1688,7 +1730,7 @@ export class AcademicsService {
         courseCode: s.course.code,
         title: s.course.title,
         credits: s.course.credits,
-        description: null as string | null,
+        description: s.course.description,
         term: s.term.name,
         instructor: s.instructor
           ? `${s.instructor.firstName} ${s.instructor.lastName}`
@@ -1697,7 +1739,11 @@ export class AcademicsService {
         room: s.room,
         prerequisites: s.course.prerequisites.map((p) => p.code),
         status: enrollment.status,
-        grade: enrollment.grade,
+        // `Enrollment.grade` is a mutable faculty draft — `submitGrades` writes it on
+        // "save draft", outside the finalize branch. Only the registrar's approval flips
+        // the enrollment to `completed`, so that status is an exact proxy for "approved"
+        // and is what gates this read. Without it a provisional grade reaches the student.
+        grade: enrollment.status === "completed" ? enrollment.grade : null,
       },
       assignments: s.assignments.map((a) => {
         const sub = byAssignment.get(a.id);
@@ -3298,8 +3344,9 @@ export class AcademicsService {
 
   /** Faculty dashboard: KPIs, class cards, today's timeline, needs-attention. */
   async facultyOverview(personId: string) {
+    const term = await this.currentTerm();
     const sections = await this.prisma.section.findMany({
-      where: { instructorId: personId },
+      where: { instructorId: personId, ...(term ? { termId: term.id } : {}) },
       include: {
         course: true,
         term: true,
@@ -3743,8 +3790,13 @@ export class AcademicsService {
 
   /** Sections taught by a faculty member. */
   async mySections(instructorPersonId: string) {
+    // Term-scoped like mySchedule. This list feeds the five section-scoped faculty
+    // screens, all of which auto-select the first entry — an unscoped list makes a
+    // prior-term section the default target for grade entry and attendance writes.
+    const term = await this.currentTerm();
+    if (!term) return [];
     const sections = await this.prisma.section.findMany({
-      where: { instructorId: instructorPersonId },
+      where: { instructorId: instructorPersonId, termId: term.id },
       include: {
         course: true,
         term: true,
