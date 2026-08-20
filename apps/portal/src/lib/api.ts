@@ -1546,30 +1546,7 @@ export const broadcastToSection = (
   );
 
 // --- Campus: events + library ---
-export interface CampusEvent {
-  id: string;
-  title: string;
-  description: string | null;
-  location: string | null;
-  category: string;
-  startsAt: string;
-  endsAt: string | null;
-}
-export const getEvents = () => request<CampusEvent[]>("/campus/events");
 
-export interface LibraryResource {
-  id: string;
-  title: string;
-  author: string | null;
-  kind: string;
-  subject: string | null;
-  callNumber: string | null;
-  available: boolean;
-}
-export const getLibrary = (q?: string) =>
-  request<LibraryResource[]>(
-    `/campus/library${q ? `?q=${encodeURIComponent(q)}` : ""}`,
-  );
 
 // --- Dining ---
 export interface DiningPass {
