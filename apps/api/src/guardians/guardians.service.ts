@@ -986,8 +986,11 @@ export class GuardiansService {
   /** A child's per-course attendance. Late counts as half a present. */
   async childAttendance(guardianId: string, studentId: string) {
     await this.assertGuardianOf(guardianId, studentId);
+    // Mirrors the student's own view: registrar approval flips enrollments to
+    // "completed", so filtering on "enrolled" alone erased the term from this screen
+    // the moment grades were published.
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { studentId, status: "enrolled" },
+      where: { studentId, status: { in: ["enrolled", "completed"] } },
       include: { section: { include: { course: true } }, attendance: true },
     });
 

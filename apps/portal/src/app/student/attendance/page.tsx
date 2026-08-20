@@ -45,7 +45,8 @@ export default function StudentAttendance() {
         <Card>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {data.rows.map((r, i) => (
-              <div key={r.code} style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <details key={r.code} style={{ borderBottom: "1px solid var(--divider)", paddingBottom: 12 }}>
+              <summary style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", cursor: r.sessions.length ? "pointer" : "default", listStyle: "none" }}>
                 <span
                   style={{
                     width: 5,
@@ -73,7 +74,38 @@ export default function StudentAttendance() {
                     big
                   />
                 </div>
-              </div>
+              </summary>
+              {r.sessions.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "10px 0 0 19px" }}>
+                  {r.sessions.map((ss) => (
+                    <span
+                      key={ss.date}
+                      title={ss.status}
+                      style={{
+                        fontSize: 11.5,
+                        padding: "3px 9px",
+                        borderRadius: "var(--radius-pill)",
+                        fontWeight: 600,
+                        background:
+                          ss.status === "present"
+                            ? "rgba(46,125,82,.12)"
+                            : ss.status === "late"
+                              ? "rgba(237,132,37,.14)"
+                              : "rgba(163,41,27,.12)",
+                        color:
+                          ss.status === "present"
+                            ? "var(--success-500)"
+                            : ss.status === "late"
+                              ? "var(--warning-500)"
+                              : "var(--error-500)",
+                      }}
+                    >
+                      {new Date(`${ss.date}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                    </span>
+                  ))}
+                </div>
+              )}
+              </details>
             ))}
           </div>
           <p className="muted" style={{ fontSize: 12, margin: "18px 0 0" }}>

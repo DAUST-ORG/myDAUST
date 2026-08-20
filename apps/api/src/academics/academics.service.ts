@@ -993,9 +993,15 @@ export class AcademicsService {
 
   /** Per-course attendance for the signed-in student. Late counts as half a present. */
   async myAttendance(studentId: string) {
+    // "completed" is included deliberately: registrar approval flips enrollments from
+    // enrolled to completed, and filtering on "enrolled" alone made the whole term's
+    // attendance vanish from the student's screen the moment grades were published.
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { studentId, status: "enrolled" },
-      include: { section: { include: { course: true } }, attendance: true },
+      where: { studentId, status: { in: ["enrolled", "completed"] } },
+      include: {
+        section: { include: { course: true, term: true } },
+        attendance: { orderBy: { date: "desc" } },
+      },
     });
     const rows = enrollments.map((e) => {
       const present = e.attendance.filter((a) => a.status === "present").length;
@@ -1005,9 +1011,16 @@ export class AcademicsService {
       return {
         code: e.section.course.code,
         title: e.section.course.title,
+        term: e.section.term.name,
         present,
         late,
         absent,
+        // The dates were already loaded and thrown away, so a student seeing 78% could
+        // not name the days behind it.
+        sessions: e.attendance.map((a) => ({
+          date: a.date.toISOString().slice(0, 10),
+          status: a.status as string,
+        })),
         pct:
           total === 0
             ? null
@@ -1356,13 +1369,49 @@ export class AcademicsService {
     );
     return {
       date,
+      // `recorded` is what separates an untaken session from a genuinely all-present
+      // one. Defaulting the status to "present" meant opening a date and pressing save
+      // wrote a full house of attendance nobody had taken.
+      recorded: records.length > 0,
       students: enrollments.map((e) => ({
         enrollmentId: e.id,
         studentNo: e.student.studentNo,
         name: `${e.student.person.firstName} ${e.student.person.lastName}`,
-        status: byEnrollment.get(e.id) ?? "present",
+        status: byEnrollment.get(e.id) ?? null,
       })),
     };
+  }
+
+  /**
+   * Dates this section has a roll call for, newest first, with per-date tallies.
+   * The design specifies this as a "Recorded sessions" card; there was no endpoint for
+   * it, so an instructor could not tell which sessions they had already taken.
+   */
+  async attendanceSessions(
+    sectionId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    const records = await this.prisma.attendanceRecord.findMany({
+      where: { sectionId },
+      orderBy: { date: "desc" },
+      select: { date: true, status: true },
+    });
+    const byDate = new Map<
+      string,
+      { date: string; present: number; late: number; absent: number }
+    >();
+    for (const r of records) {
+      const key = r.date.toISOString().slice(0, 10);
+      const row =
+        byDate.get(key) ?? { date: key, present: 0, late: 0, absent: 0 };
+      if (r.status === "present") row.present += 1;
+      else if (r.status === "late") row.late += 1;
+      else if (r.status === "absent") row.absent += 1;
+      byDate.set(key, row);
+    }
+    return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date));
   }
 
   async markAttendance(

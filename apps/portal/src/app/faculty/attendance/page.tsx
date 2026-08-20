@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Avatar, Button, Card, EmptyState } from "@/components/ui";
 import { CourseTabs, courseTitle } from "../CourseTabs";
 import {
+  type AttendanceSession,
   type AttendanceSheet,
   type TeachingSection,
   getAttendance,
+  getAttendanceSessions,
   getTeaching,
   markAttendance,
 } from "@/lib/api";
@@ -22,7 +24,11 @@ export default function FacultyAttendance() {
   const [sectionId, setSectionId] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [sheet, setSheet] = useState<AttendanceSheet | null>(null);
+  /** Only students the instructor has actually marked. Unmarked stay out entirely, so
+   *  saving a session never invents attendance for someone who was not called. */
   const [marks, setMarks] = useState<Record<string, string>>({});
+  const [sessions, setSessions] = useState<AttendanceSession[]>([]);
+  const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -40,11 +46,24 @@ export default function FacultyAttendance() {
     getAttendance(sectionId, date)
       .then((s) => {
         setSheet(s);
-        setMarks(Object.fromEntries(s.students.map((x) => [x.enrollmentId, x.status])));
+        setMarks(
+          Object.fromEntries(
+            s.students
+              .filter((x) => x.status !== null)
+              .map((x) => [x.enrollmentId, x.status as string]),
+          ),
+        );
+        setDirty(false);
       })
       .catch((e: Error) => setMsg({ kind: "err", text: e.message }));
   }, [sectionId, date]);
   useEffect(load, [load]);
+
+  const loadSessions = useCallback(() => {
+    if (!sectionId) return;
+    getAttendanceSessions(sectionId).then(setSessions).catch(() => {});
+  }, [sectionId]);
+  useEffect(loadSessions, [loadSessions]);
 
   const section = sections?.find((s) => s.id === sectionId);
   const counts = { present: 0, late: 0, absent: 0 };
@@ -55,6 +74,7 @@ export default function FacultyAttendance() {
   function allPresent() {
     if (!sheet) return;
     setMarks(Object.fromEntries(sheet.students.map((s) => [s.enrollmentId, "present"])));
+    setDirty(true);
   }
 
   async function save() {
@@ -63,7 +83,13 @@ export default function FacultyAttendance() {
     try {
       const records = Object.entries(marks).map(([enrollmentId, status]) => ({ enrollmentId, status }));
       await markAttendance(sectionId, date, records);
-      setMsg({ kind: "ok", text: "Attendance recorded." });
+      setMsg({
+        kind: "ok",
+        text: `Attendance recorded for ${records.length} student${records.length === 1 ? "" : "s"}.`,
+      });
+      setDirty(false);
+      load();
+      loadSessions();
     } catch (e) {
       setMsg({ kind: "err", text: (e as Error).message });
     } finally {
@@ -118,7 +144,7 @@ export default function FacultyAttendance() {
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
                 <Button variant="secondary" size="sm" onClick={allPresent}>All present</Button>
-                <Button variant="navy" disabled={busy} onClick={save}>Save session</Button>
+                <Button variant="navy" disabled={busy || !dirty} onClick={save}>{busy ? "Saving…" : "Save session"}</Button>
               </div>
             </div>
 
@@ -146,7 +172,7 @@ export default function FacultyAttendance() {
                     return (
                       <button
                         key={seg.value}
-                        onClick={() => setMarks({ ...marks, [s.enrollmentId]: seg.value })}
+                        onClick={() => { setMarks({ ...marks, [s.enrollmentId]: seg.value }); setDirty(true); }}
                         className="sis-btn"
                         style={{
                           flex: 1,
@@ -170,6 +196,46 @@ export default function FacultyAttendance() {
             ))}
 
             {sheet && sheet.students.length === 0 && <EmptyState title="No students enrolled in this section" />}
+          </Card>
+
+          <Card title="Recorded sessions">
+            {sessions.length === 0 ? (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                No sessions recorded for this course yet.
+              </p>
+            ) : (
+              sessions.map((ss) => (
+                <button
+                  key={ss.date}
+                  onClick={() => setDate(ss.date)}
+                  className="sis-btn"
+                  style={{
+                    display: "flex",
+                    width: "100%",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "11px 0",
+                    borderBottom: "1px solid var(--divider)",
+                    background: "none",
+                    border: "none",
+                    borderRadius: 0,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
+                    {new Date(`${ss.date}T00:00:00`).toLocaleDateString(undefined, {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--success-500)" }}>{ss.present}P</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--warning-500)" }}>{ss.late}L</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--error-500)" }}>{ss.absent}A</span>
+                </button>
+              ))
+            )}
           </Card>
         </>
       )}

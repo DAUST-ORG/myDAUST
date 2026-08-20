@@ -472,6 +472,16 @@ export class AcademicsController {
     return this.academics.getAttendance(id, date, user.personId, user.roles.includes("admin"));
   }
 
+  @Get("sections/:id/attendance/sessions")
+  @Roles("faculty", "admin")
+  attendanceSessions(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.academics.attendanceSessions(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
+  }
+
   @Post("sections/:id/attendance")
   @Roles("faculty", "admin")
   markAttendance(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
