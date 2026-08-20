@@ -54,8 +54,16 @@ export class UploadsController {
     @Res() response: Response,
   ) {
     const file = await this.storage.get(filename);
+    // Images are site assets the vitrine depends on caching. Everything else through this
+    // route is a document — student coursework, passport scans, immunization records, aid
+    // letters — and `immutable` for a year means deleting the record does not stop the
+    // edge serving the file. Revocation has to be possible, so documents are never cached.
+    const cacheable = isInlineSafe(file.contentType) &&
+      file.contentType.startsWith("image/");
     response.set({
-      "Cache-Control": "public, max-age=31536000, immutable",
+      "Cache-Control": cacheable
+        ? "public, max-age=31536000, immutable"
+        : "private, no-store",
       "Content-Type": file.contentType,
       "Content-Length": String(file.body.length),
       "X-Content-Type-Options": "nosniff",
@@ -70,7 +78,14 @@ export class UploadsController {
     response.send(file.body);
   }
 
+  // The six call sites and the role each needs: faculty course materials (faculty),
+  // student assignment submissions (student), the site CMS and news editors
+  // (communications), the staff directory and student documents (registrar/admin).
+  // Kept on the method, never on the class: `getAllAndOverride([handler, class])` means
+  // a class-level list would lose to the narrower one on `site-video` below and silently
+  // widen that route. Without this the fail-open guard lets every session write here.
   @Post()
+  @Roles("student", "faculty", "registrar", "communications", "admin")
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),

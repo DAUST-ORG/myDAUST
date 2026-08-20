@@ -112,14 +112,20 @@ function Row({
       {graded && a.feedback && (
         <p className="muted" style={{ fontSize: 13, marginTop: 6 }}><strong>Feedback:</strong> {a.feedback}</p>
       )}
-      {open && <SubmitForm assignmentId={a.assignmentId} onDone={onSubmitted} />}
+      {open && <SubmitForm assignment={a} onDone={onSubmitted} />}
     </div>
   );
 }
 
-function SubmitForm({ assignmentId, onDone }: { assignmentId: string; onDone: () => void }) {
-  const [text, setText] = useState("");
-  const [file, setFile] = useState<{ url: string; name: string } | null>(null);
+function SubmitForm({ assignment, onDone }: { assignment: MyAssignment; onDone: () => void }) {
+  const assignmentId = assignment.assignmentId;
+  // Reopening "Resubmit" is how a student edits, so start from what they already sent.
+  const [text, setText] = useState(assignment.text ?? "");
+  const [file, setFile] = useState<{ url: string; name: string } | null>(
+    assignment.fileUrl
+      ? { url: assignment.fileUrl, name: assignment.fileName ?? "Attached file" }
+      : null,
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -154,6 +160,11 @@ function SubmitForm({ assignmentId, onDone }: { assignmentId: string; onDone: ()
 
   return (
     <div style={{ marginTop: 10, padding: 12, background: "var(--gray-50, #f7f8fa)", borderRadius: 8 }}>
+      {assignment.description && (
+        <p style={{ fontSize: 13.5, marginTop: 0, marginBottom: 10, whiteSpace: "pre-wrap" }}>
+          {assignment.description}
+        </p>
+      )}
       <textarea
         placeholder="Type your submission, or attach a file below…"
         value={text}
