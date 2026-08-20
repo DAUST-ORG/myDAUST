@@ -4,7 +4,6 @@ import { AcademicsModule } from "./academics/academics.module.js";
 import { AdmissionsModule } from "./admissions/admissions.module.js";
 import { AppConfigModule } from "./app-config/app-config.module.js";
 import { AuthModule } from "./auth/auth.module.js";
-import { CampusModule } from "./campus/campus.module.js";
 import { DiningModule } from "./dining/dining.module.js";
 import { FacultyModule } from "./faculty/faculty.module.js";
 import { HrModule } from "./hr/hr.module.js";
@@ -46,7 +45,6 @@ import { AcademicCatalogModule } from "./academic-catalog/academic-catalog.modul
     ContentModule,
     ContactModule,
     NewsModule,
-    CampusModule,
     AdmissionsModule,
     DiningModule,
     FacultyModule,
