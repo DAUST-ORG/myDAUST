@@ -187,3 +187,73 @@ describe("AcademicsService.markAttendance", () => {
     expect(prisma.$transaction.mock.calls[0]![0]).toHaveLength(3);
   });
 });
+
+describe("AcademicsService.gradeSubmission", () => {
+  function prismaFor(existing: { score: number | null; feedback: string | null }) {
+    const update = vi.fn().mockResolvedValue({});
+    return {
+      update,
+      prisma: {
+        submission: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "sub-1",
+            assignmentId: "assignment-1",
+            ...existing,
+            assignment: { maxPoints: 20 },
+          }),
+          update,
+        },
+        auditLog: { create: vi.fn() },
+      },
+    };
+  }
+
+  function service(prisma: unknown) {
+    const s = new AcademicsService(prisma as never);
+    vi.spyOn(
+      s as unknown as { assertAssignmentOwner: () => Promise<void> },
+      "assertAssignmentOwner",
+    ).mockResolvedValue();
+    return s;
+  }
+
+  it("keeps existing feedback when a score is corrected without resending it", async () => {
+    const { prisma, update } = prismaFor({ score: 12, feedback: "Good structure." });
+
+    await service(prisma).gradeSubmission("sub-1", { score: 15 }, "faculty-1", false);
+
+    expect(update.mock.calls[0]![0].data).not.toHaveProperty("feedback");
+  });
+
+  it("writes feedback when the instructor supplies it", async () => {
+    const { prisma, update } = prismaFor({ score: null, feedback: null });
+
+    await service(prisma).gradeSubmission(
+      "sub-1",
+      { score: 15, feedback: "Check your carry logic." },
+      "faculty-1",
+      false,
+    );
+
+    expect(update.mock.calls[0]![0].data.feedback).toBe("Check your carry logic.");
+  });
+
+  it("returns the row to submitted when the score is cleared", async () => {
+    const { prisma, update } = prismaFor({ score: 15, feedback: "Good." });
+
+    await service(prisma).gradeSubmission("sub-1", { score: null }, "faculty-1", false);
+
+    const data = update.mock.calls[0]![0].data;
+    expect(data.score).toBeNull();
+    expect(data.status).toBe("submitted");
+    expect(data.gradedAt).toBeNull();
+  });
+
+  it("still rejects a score above the assignment maximum", async () => {
+    const { prisma } = prismaFor({ score: null, feedback: null });
+
+    await expect(
+      service(prisma).gradeSubmission("sub-1", { score: 99 }, "faculty-1", false),
+    ).rejects.toThrow(/exceeds max points/i);
+  });
+});
