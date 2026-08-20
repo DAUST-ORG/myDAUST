@@ -17,6 +17,7 @@ import { NewsModule } from "./news/news.module.js";
 import { FinanceModule } from "./finance/finance.module.js";
 import { GuardiansModule } from "./guardians/guardians.module.js";
 import { HealthController } from "./health.controller.js";
+import { EvaluationsModule } from "./evaluations/evaluations.module.js";
 import { NotificationsModule } from "./notifications/notifications.module.js";
 import { NavModule } from "./nav/nav.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
@@ -36,6 +37,7 @@ import { AcademicCatalogModule } from "./academic-catalog/academic-catalog.modul
     AuthModule,
     NavModule,
     NotificationsModule,
+    EvaluationsModule,
     FinanceModule,
     GuardiansModule,
     RegistrarModule,
