@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
 import { deriveAcademicStanding, type AcademicStanding } from "@mydaust/shared";
+import { NotificationsService } from "../notifications/notifications.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
   bestPointsByCourse,
@@ -278,7 +279,10 @@ export class AcademicsService {
   private readonly catalogs: AcademicCatalogService;
   private readonly standings: AcademicStandingService;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications?: NotificationsService,
+  ) {
     this.catalogs = new AcademicCatalogService(prisma);
     this.standings = new AcademicStandingService(prisma, this.catalogs);
     this.transcript = new TranscriptService(
@@ -1469,7 +1473,8 @@ export class AcademicsService {
     personId: string,
     isAdmin: boolean,
   ) {
-    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    const section = await this.assertSectionOwner(sectionId, personId, isAdmin);
+    let notifyEnrollmentIds: string[] = [];
     const assignment = await this.prisma.$transaction(async (tx) => {
       const created = await tx.assignment.create({
         data: {
@@ -1503,9 +1508,43 @@ export class AcademicsService {
           actorId: personId,
         },
       });
+      notifyEnrollmentIds = enrollments.map((e) => e.id);
       return created;
     });
+    // Outside the transaction: a dropped notification must never roll back the
+    // assignment, and there is no mail path to fail slowly.
+    await this.notifyEnrollments(
+      notifyEnrollmentIds,
+      "assignment_created",
+      `New assignment in ${section.course.code}`,
+      `${input.title} — due ${new Date(input.dueDate).toLocaleDateString("en-CA")}`,
+      "/student/assignments",
+    );
     return assignment;
+  }
+
+  /** Resolve enrollments to person ids and emit one notification each. Never throws. */
+  private async notifyEnrollments(
+    enrollmentIds: string[],
+    kind: "assignment_created" | "grade_posted" | "material_published",
+    title: string,
+    body?: string,
+    href?: string,
+  ) {
+    if (!this.notifications || enrollmentIds.length === 0) return;
+    const rows = await this.prisma.enrollment.findMany({
+      where: { id: { in: enrollmentIds } },
+      select: { student: { select: { personId: true } } },
+    });
+    await this.notifications.emit(
+      rows.map((r) => ({
+        personId: r.student.personId,
+        kind,
+        title,
+        body,
+        href,
+      })),
+    );
   }
 
   /** Resolve an assignment + its section, enforcing instructor ownership. */
@@ -1634,6 +1673,30 @@ export class AcademicsService {
         gradedAt: cleared ? null : new Date(),
       },
     });
+    if (this.notifications && !cleared) {
+      const owner = await this.prisma.submission.findUnique({
+        where: { id: submissionId },
+        select: {
+          enrollment: {
+            select: {
+              student: { select: { personId: true } },
+              section: { select: { course: { select: { code: true } } } },
+            },
+          },
+        },
+      });
+      if (owner) {
+        await this.notifications.emit([
+          {
+            personId: owner.enrollment.student.personId,
+            kind: "work_graded",
+            title: `Work graded in ${owner.enrollment.section.course.code}`,
+            body: `${submission.assignment.title ?? "An assignment"} has been marked.`,
+            href: "/student/assignments",
+          },
+        ]);
+      }
+    }
     await this.prisma.auditLog.create({
       data: {
         entity: "Submission",
@@ -1648,8 +1711,11 @@ export class AcademicsService {
 
   /** Student: all assignments across enrolled sections, joined to my own submission. */
   async myAssignments(studentId: string) {
+    // Includes "completed" for the same reason attendance does: registrar approval flips
+    // the enrollment, and filtering on "enrolled" alone erased the student's own
+    // coursework and their instructor's feedback the moment grades were published.
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { studentId, status: "enrolled" },
+      where: { studentId, status: { in: ["enrolled", "completed"] } },
       include: {
         section: {
           include: {

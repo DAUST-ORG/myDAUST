@@ -437,6 +437,7 @@ model Person {
   expensesApproved           Expense[]                 @relation("ExpenseApprover")
   expensesVoided             Expense[]                 @relation("ExpenseVoider")
   directorWidgetPreference   DirectorWidgetPreference?
+  notifications Notification[]
 }
 
 model Student {
@@ -2439,4 +2440,23 @@ model DirectorWidgetPreference {
   person     Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
   widgetKeys String[]
   updatedAt  DateTime @updatedAt
+}
+
+/// In-app notification. No email path by design — delivery is the nav badge and the
+/// notifications list. `readAt` is per-person, so there is no separate read-state table.
+model Notification {
+  id        String    @id @default(uuid())
+  personId  String
+  person    Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  /// Coarse event type: grade_posted | assignment_created | work_graded | material_published
+  kind      String
+  title     String
+  body      String?
+  /// Where clicking it should land the reader.
+  href      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([personId, readAt])
+  @@index([personId, createdAt])
 }

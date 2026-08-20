@@ -60,7 +60,9 @@ export type BadgeKey =
   | "billing"
   | "admissions"
   | "approvals"
-  | "approvalRequests";
+  | "approvalRequests"
+  | "grading"
+  | "notifications";
 
 export interface PortalNav {
   /** Small caps caption under the wordmark, e.g. "PARENT ACCESS". */
@@ -150,7 +152,12 @@ export const FACULTY_NAV: PortalNav = {
     g("Teaching", [
       { href: "/faculty/schedule", label: "Schedule", icon: CalendarDays },
       { href: "/faculty/grades", label: "Grade Entry", icon: GraduationCap },
-      { href: "/faculty/gradebook", label: "Gradebook", icon: Table2 },
+      {
+        href: "/faculty/gradebook",
+        label: "Gradebook",
+        icon: Table2,
+        badgeKey: "grading",
+      },
       { href: "/faculty/attendance", label: "Attendance", icon: CheckCheck },
       {
         href: "/faculty/materials",
