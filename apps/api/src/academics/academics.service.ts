@@ -1601,7 +1601,7 @@ export class AcademicsService {
 
   async gradeSubmission(
     submissionId: string,
-    input: { score: number; feedback?: string },
+    input: { score: number | null; feedback?: string },
     personId: string,
     isAdmin: boolean,
   ) {
@@ -1615,18 +1615,23 @@ export class AcademicsService {
       personId,
       isAdmin,
     );
-    if (input.score > submission.assignment.maxPoints) {
+    if (input.score !== null && input.score > submission.assignment.maxPoints) {
       throw new BadRequestException(
         `Score exceeds max points (${submission.assignment.maxPoints})`,
       );
     }
+    const cleared = input.score === null;
     const updated = await this.prisma.submission.update({
       where: { id: submissionId },
       data: {
         score: input.score,
-        feedback: input.feedback ?? null,
-        status: "graded",
-        gradedAt: new Date(),
+        // Only touch feedback when the caller sent it. Writing `?? null` here meant every
+        // later score edit erased the comment the instructor had written.
+        ...(input.feedback !== undefined
+          ? { feedback: input.feedback.trim() || null }
+          : {}),
+        status: cleared ? "submitted" : "graded",
+        gradedAt: cleared ? null : new Date(),
       },
     });
     await this.prisma.auditLog.create({

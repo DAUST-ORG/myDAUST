@@ -61,7 +61,10 @@ export const SubmitAssignmentInput = z
 export type SubmitAssignmentInput = z.infer<typeof SubmitAssignmentInput>;
 
 export const GradeSubmissionInput = z.object({
-  score: z.number().int().min(0).max(1000),
+  // Nullable so a score can be cleared: a mistyped grade had no way back before.
+  score: z.number().int().min(0).max(1000).nullable(),
+  // Absent means "leave the existing comment"; an empty string clears it. Without the
+  // distinction every score correction would silently wipe the instructor's feedback.
   feedback: z.string().max(5000).optional(),
 });
 export type GradeSubmissionInput = z.infer<typeof GradeSubmissionInput>;

@@ -810,7 +810,9 @@ export const getAssignmentSubmissions = (assignmentId: string) =>
   );
 export const gradeSubmission = (
   submissionId: string,
-  score: number,
+  /** null clears the grade and returns the row to "submitted". */
+  score: number | null,
+  /** Omit to leave the existing comment untouched. */
   feedback?: string,
 ) =>
   request(`/academics/submissions/${submissionId}/grade`, {
