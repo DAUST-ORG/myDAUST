@@ -557,6 +557,7 @@ model Term {
   sections             Section[]
   transcriptEntries    TranscriptEntry[]
   gradeSubmissionItems GradeSubmissionItem[]
+  evaluationWindows CourseEvaluationWindow[]
 }
 
 model Invoice {
@@ -1253,6 +1254,8 @@ model Section {
 
   @@unique([courseId, termId, sectionCode])
   @@index([termId])
+  evaluationSchedules CourseEvaluationSchedule[]
+  evaluationResponses CourseEvaluationResponse[]
 }
 
 model Enrollment {
@@ -1272,6 +1275,7 @@ model Enrollment {
   @@unique([studentId, sectionId])
   @@index([sectionId])
   @@index([studentId])
+  evaluationReceipts CourseEvaluationReceipt[]
 }
 
 model AttendanceRecord {
@@ -2459,4 +2463,88 @@ model Notification {
 
   @@index([personId, readAt])
   @@index([personId, createdAt])
+}
+
+enum CourseEvaluationKind {
+  midterm
+  final
+}
+
+enum CourseEvaluationStatus {
+  draft
+  open
+  closed
+}
+
+/// A round of student course evaluations for one term. The director owns the outer
+/// bounds; each instructor may narrow their own section inside them.
+model CourseEvaluationWindow {
+  id                    String                 @id @default(uuid())
+  termId                String
+  term                  Term                   @relation(fields: [termId], references: [id], onDelete: Cascade)
+  kind                  CourseEvaluationKind
+  status                CourseEvaluationStatus @default(draft)
+  /// Earliest a section may open, and latest it may close.
+  boundsOpenAt          DateTime
+  boundsCloseAt         DateTime
+  /// Below this many responses a section's results stay hidden. Director-configurable.
+  minResponsesToRelease Int                    @default(5)
+  createdById           String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  schedules CourseEvaluationSchedule[]
+  responses CourseEvaluationResponse[]
+  receipts  CourseEvaluationReceipt[]
+
+  @@unique([termId, kind])
+}
+
+/// An instructor narrowing their own section's window inside the director's bounds.
+/// Optional by design: a section with no row runs the full bounds, so a professor who
+/// never touches this is still evaluated. Inaction cannot cancel a round.
+model CourseEvaluationSchedule {
+  id        String                 @id @default(uuid())
+  windowId  String
+  window    CourseEvaluationWindow @relation(fields: [windowId], references: [id], onDelete: Cascade)
+  sectionId String
+  section   Section                @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  opensAt   DateTime
+  closesAt  DateTime
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  @@unique([windowId, sectionId])
+}
+
+/// One student's answers. Carries NO link to the student, deliberately and load-bearing:
+/// anonymity here is a shape, not a policy, so nothing downstream can undo it by
+/// accident. `submittedOn` is a calendar date rather than an instant because two rows
+/// written seconds apart in a six-person section would correlate with the receipts.
+model CourseEvaluationResponse {
+  id          String                 @id @default(uuid())
+  windowId    String
+  window      CourseEvaluationWindow @relation(fields: [windowId], references: [id], onDelete: Cascade)
+  sectionId   String
+  section     Section                @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  overall     Int
+  clarity     Int
+  workload    Int
+  comment     String?
+  submittedOn DateTime               @db.Date
+
+  @@index([windowId, sectionId])
+}
+
+/// Records THAT an enrollment responded, never what they said. Written in the same
+/// transaction as the response, sharing no key with it, so the two cannot be joined.
+model CourseEvaluationReceipt {
+  id           String                 @id @default(uuid())
+  windowId     String
+  window       CourseEvaluationWindow @relation(fields: [windowId], references: [id], onDelete: Cascade)
+  enrollmentId String
+  enrollment   Enrollment             @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  submittedAt  DateTime               @default(now())
+
+  @@unique([windowId, enrollmentId])
 }
