@@ -157,7 +157,12 @@ export const FACULTY_NAV: PortalNav = {
         label: "Course Materials",
         icon: FolderOpen,
       },
-      { href: "/faculty/messages", label: "Messages", icon: Mail },
+      {
+        href: "/faculty/messages",
+        label: "Messages",
+        icon: Mail,
+        badgeKey: "messages",
+      },
     ]),
   ],
 };
