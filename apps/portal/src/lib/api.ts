@@ -4596,3 +4596,52 @@ export type EvaluationResults =
     };
 export const getSectionEvaluations = (sectionId: string) =>
   request<EvaluationResults[]>(`/evaluations/sections/${sectionId}/results`);
+
+// --- Course evaluations: director ---
+export interface EvaluationWindow {
+  id: string;
+  termId: string;
+  term?: { name: string };
+  kind: "midterm" | "final";
+  status: "draft" | "open" | "closed";
+  boundsOpenAt: string;
+  boundsCloseAt: string;
+  minResponsesToRelease: number;
+}
+export interface EvaluationWindowResults {
+  window: EvaluationWindow;
+  totalResponses: number;
+  sections: {
+    sectionId: string;
+    course: string;
+    sectionCode: string;
+    instructor: string | null;
+    responseCount: number;
+    meetsFloor: boolean;
+    overall: number | null;
+    clarity: number | null;
+    workload: number | null;
+    comments: string[];
+  }[];
+}
+export const getEvaluationWindows = () =>
+  request<EvaluationWindow[]>("/evaluations/windows");
+export const upsertEvaluationWindow = (body: {
+  termId: string;
+  kind: "midterm" | "final";
+  status?: "draft" | "open" | "closed";
+  boundsOpenAt: string;
+  boundsCloseAt: string;
+  minResponsesToRelease?: number;
+}) =>
+  request<EvaluationWindow>("/evaluations/windows", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+export const getEvaluationWindowResults = (windowId: string) =>
+  request<EvaluationWindowResults>(`/evaluations/windows/${windowId}/results`);
+export const releaseEvaluationWindow = (windowId: string, released: boolean) =>
+  request<EvaluationWindow>(`/evaluations/windows/${windowId}/release`, {
+    method: "POST",
+    body: JSON.stringify({ released }),
+  });
