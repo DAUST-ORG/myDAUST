@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
 import { deriveAcademicStanding, type AcademicStanding } from "@mydaust/shared";
+import { NotificationsService } from "../notifications/notifications.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
   bestPointsByCourse,
@@ -278,7 +279,10 @@ export class AcademicsService {
   private readonly catalogs: AcademicCatalogService;
   private readonly standings: AcademicStandingService;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications?: NotificationsService,
+  ) {
     this.catalogs = new AcademicCatalogService(prisma);
     this.standings = new AcademicStandingService(prisma, this.catalogs);
     this.transcript = new TranscriptService(
@@ -993,9 +997,15 @@ export class AcademicsService {
 
   /** Per-course attendance for the signed-in student. Late counts as half a present. */
   async myAttendance(studentId: string) {
+    // "completed" is included deliberately: registrar approval flips enrollments from
+    // enrolled to completed, and filtering on "enrolled" alone made the whole term's
+    // attendance vanish from the student's screen the moment grades were published.
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { studentId, status: "enrolled" },
-      include: { section: { include: { course: true } }, attendance: true },
+      where: { studentId, status: { in: ["enrolled", "completed"] } },
+      include: {
+        section: { include: { course: true, term: true } },
+        attendance: { orderBy: { date: "desc" } },
+      },
     });
     const rows = enrollments.map((e) => {
       const present = e.attendance.filter((a) => a.status === "present").length;
@@ -1005,9 +1015,16 @@ export class AcademicsService {
       return {
         code: e.section.course.code,
         title: e.section.course.title,
+        term: e.section.term.name,
         present,
         late,
         absent,
+        // The dates were already loaded and thrown away, so a student seeing 78% could
+        // not name the days behind it.
+        sessions: e.attendance.map((a) => ({
+          date: a.date.toISOString().slice(0, 10),
+          status: a.status as string,
+        })),
         pct:
           total === 0
             ? null
@@ -1023,6 +1040,40 @@ export class AcademicsService {
               rated.reduce((s, r) => s + (r.pct ?? 0), 0) / rated.length,
             ),
       rows,
+    };
+  }
+
+  /**
+   * Every section this student has a real enrollment in, current and past, with the
+   * sectionId the materials read path needs.
+   *
+   * The courses screen builds its "previous" list from the transcript, which carries
+   * neither sectionId nor enrollmentId — and `TranscriptEntry.enrollmentId` is nullable,
+   * so legacy imported rows have no section at all. Those courses genuinely have no
+   * materials, and the UI must not offer a link for them. This endpoint is the source of
+   * truth for which past courses are openable.
+   */
+  async myCourses(studentId: string) {
+    const term = await this.currentTerm();
+    const rows = await this.prisma.enrollment.findMany({
+      where: { studentId, status: { in: ["enrolled", "completed"] } },
+      include: { section: { include: { course: true, term: true } } },
+      orderBy: { enrolledAt: "desc" },
+    });
+    const shape = (e: (typeof rows)[number]) => ({
+      enrollmentId: e.id,
+      sectionId: e.sectionId,
+      courseCode: e.section.course.code,
+      title: e.section.course.title,
+      credits: e.section.course.credits,
+      sectionCode: e.section.sectionCode,
+      term: e.section.term.name,
+      status: e.status,
+      grade: e.status === "completed" ? e.grade : null,
+    });
+    return {
+      current: rows.filter((e) => term && e.section.termId === term.id).map(shape),
+      past: rows.filter((e) => !term || e.section.termId !== term.id).map(shape),
     };
   }
 
@@ -1322,13 +1373,49 @@ export class AcademicsService {
     );
     return {
       date,
+      // `recorded` is what separates an untaken session from a genuinely all-present
+      // one. Defaulting the status to "present" meant opening a date and pressing save
+      // wrote a full house of attendance nobody had taken.
+      recorded: records.length > 0,
       students: enrollments.map((e) => ({
         enrollmentId: e.id,
         studentNo: e.student.studentNo,
         name: `${e.student.person.firstName} ${e.student.person.lastName}`,
-        status: byEnrollment.get(e.id) ?? "present",
+        status: byEnrollment.get(e.id) ?? null,
       })),
     };
+  }
+
+  /**
+   * Dates this section has a roll call for, newest first, with per-date tallies.
+   * The design specifies this as a "Recorded sessions" card; there was no endpoint for
+   * it, so an instructor could not tell which sessions they had already taken.
+   */
+  async attendanceSessions(
+    sectionId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    const records = await this.prisma.attendanceRecord.findMany({
+      where: { sectionId },
+      orderBy: { date: "desc" },
+      select: { date: true, status: true },
+    });
+    const byDate = new Map<
+      string,
+      { date: string; present: number; late: number; absent: number }
+    >();
+    for (const r of records) {
+      const key = r.date.toISOString().slice(0, 10);
+      const row =
+        byDate.get(key) ?? { date: key, present: 0, late: 0, absent: 0 };
+      if (r.status === "present") row.present += 1;
+      else if (r.status === "late") row.late += 1;
+      else if (r.status === "absent") row.absent += 1;
+      byDate.set(key, row);
+    }
+    return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date));
   }
 
   async markAttendance(
@@ -1342,8 +1429,23 @@ export class AcademicsService {
   ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     const day = new Date(input.date);
-    await this.prisma.$transaction(
-      input.records.map((r) =>
+    // Owning the section is not enough: the unique key is [enrollmentId, date], so an
+    // enrollment id from another section would upsert a row whose sectionId disagrees
+    // with its enrollment — invisible to getAttendance (filters sectionId) but counted
+    // by myAttendance (joins through the enrollment). Prove membership first.
+    const enrollments = await this.prisma.enrollment.findMany({
+      where: { sectionId },
+      select: { id: true },
+    });
+    const roster = new Set(enrollments.map((e) => e.id));
+    const foreign = input.records.filter((r) => !roster.has(r.enrollmentId));
+    if (foreign.length > 0) {
+      throw new BadRequestException(
+        "Attendance records must belong to this section's roster",
+      );
+    }
+    await this.prisma.$transaction([
+      ...input.records.map((r) =>
         this.prisma.attendanceRecord.upsert({
           where: {
             enrollmentId_date: { enrollmentId: r.enrollmentId, date: day },
@@ -1357,7 +1459,16 @@ export class AcademicsService {
           },
         }),
       ),
-    );
+      this.prisma.auditLog.create({
+        data: {
+          entity: "Section",
+          entityId: sectionId,
+          action: "attendance-marked",
+          actorId: personId,
+          data: { date: input.date, count: input.records.length },
+        },
+      }),
+    ]);
     return { ok: true };
   }
 
@@ -1411,7 +1522,8 @@ export class AcademicsService {
     personId: string,
     isAdmin: boolean,
   ) {
-    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    const section = await this.assertSectionOwner(sectionId, personId, isAdmin);
+    let notifyEnrollmentIds: string[] = [];
     const assignment = await this.prisma.$transaction(async (tx) => {
       const created = await tx.assignment.create({
         data: {
@@ -1445,9 +1557,43 @@ export class AcademicsService {
           actorId: personId,
         },
       });
+      notifyEnrollmentIds = enrollments.map((e) => e.id);
       return created;
     });
+    // Outside the transaction: a dropped notification must never roll back the
+    // assignment, and there is no mail path to fail slowly.
+    await this.notifyEnrollments(
+      notifyEnrollmentIds,
+      "assignment_created",
+      `New assignment in ${section.course.code}`,
+      `${input.title} — due ${new Date(input.dueDate).toLocaleDateString("en-CA")}`,
+      "/student/assignments",
+    );
     return assignment;
+  }
+
+  /** Resolve enrollments to person ids and emit one notification each. Never throws. */
+  private async notifyEnrollments(
+    enrollmentIds: string[],
+    kind: "assignment_created" | "grade_posted" | "material_published",
+    title: string,
+    body?: string,
+    href?: string,
+  ) {
+    if (!this.notifications || enrollmentIds.length === 0) return;
+    const rows = await this.prisma.enrollment.findMany({
+      where: { id: { in: enrollmentIds } },
+      select: { student: { select: { personId: true } } },
+    });
+    await this.notifications.emit(
+      rows.map((r) => ({
+        personId: r.student.personId,
+        kind,
+        title,
+        body,
+        href,
+      })),
+    );
   }
 
   /** Resolve an assignment + its section, enforcing instructor ownership. */
@@ -1543,7 +1689,7 @@ export class AcademicsService {
 
   async gradeSubmission(
     submissionId: string,
-    input: { score: number; feedback?: string },
+    input: { score: number | null; feedback?: string },
     personId: string,
     isAdmin: boolean,
   ) {
@@ -1557,20 +1703,49 @@ export class AcademicsService {
       personId,
       isAdmin,
     );
-    if (input.score > submission.assignment.maxPoints) {
+    if (input.score !== null && input.score > submission.assignment.maxPoints) {
       throw new BadRequestException(
         `Score exceeds max points (${submission.assignment.maxPoints})`,
       );
     }
+    const cleared = input.score === null;
     const updated = await this.prisma.submission.update({
       where: { id: submissionId },
       data: {
         score: input.score,
-        feedback: input.feedback ?? null,
-        status: "graded",
-        gradedAt: new Date(),
+        // Only touch feedback when the caller sent it. Writing `?? null` here meant every
+        // later score edit erased the comment the instructor had written.
+        ...(input.feedback !== undefined
+          ? { feedback: input.feedback.trim() || null }
+          : {}),
+        status: cleared ? "submitted" : "graded",
+        gradedAt: cleared ? null : new Date(),
       },
     });
+    if (this.notifications && !cleared) {
+      const owner = await this.prisma.submission.findUnique({
+        where: { id: submissionId },
+        select: {
+          enrollment: {
+            select: {
+              student: { select: { personId: true } },
+              section: { select: { course: { select: { code: true } } } },
+            },
+          },
+        },
+      });
+      if (owner) {
+        await this.notifications.emit([
+          {
+            personId: owner.enrollment.student.personId,
+            kind: "work_graded",
+            title: `Work graded in ${owner.enrollment.section.course.code}`,
+            body: `${submission.assignment.title ?? "An assignment"} has been marked.`,
+            href: "/student/assignments",
+          },
+        ]);
+      }
+    }
     await this.prisma.auditLog.create({
       data: {
         entity: "Submission",
@@ -1585,8 +1760,11 @@ export class AcademicsService {
 
   /** Student: all assignments across enrolled sections, joined to my own submission. */
   async myAssignments(studentId: string) {
+    // Includes "completed" for the same reason attendance does: registrar approval flips
+    // the enrollment, and filtering on "enrolled" alone erased the student's own
+    // coursework and their instructor's feedback the moment grades were published.
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { studentId, status: "enrolled" },
+      where: { studentId, status: { in: ["enrolled", "completed"] } },
       include: {
         section: {
           include: {
@@ -1615,6 +1793,13 @@ export class AcademicsService {
           score: s?.score ?? null,
           feedback: s?.feedback ?? null,
           submittedAt: s?.submittedAt ?? null,
+          // The submit form doubles as the edit form, so it needs to render what was
+          // already handed in — without these it opens blank on every resubmit.
+          description: a.description,
+          weight: a.weight,
+          text: s?.text ?? null,
+          fileUrl: s?.fileUrl ?? null,
+          fileName: s?.fileName ?? null,
         };
       }),
     );
@@ -1642,13 +1827,18 @@ export class AcademicsService {
     if (!enrollment || enrollment.status === "dropped") {
       throw new ForbiddenException("You are not enrolled in this section");
     }
-    const data = {
+    const base = {
       text: input.text?.trim() || null,
-      fileUrl: input.fileUrl ?? null,
-      fileName: input.fileName ?? null,
       status: "submitted" as const,
       submittedAt: new Date(),
     };
+    // A resubmit that carries no file must not erase the one already stored: the form is
+    // also how a student edits their text, and `fileUrl ?? null` would blank the upload.
+    // Absent means "leave it"; clearing an attachment is not something the UI offers.
+    const file =
+      input.fileUrl === undefined
+        ? {}
+        : { fileUrl: input.fileUrl, fileName: input.fileName ?? null };
     return this.prisma.submission.upsert({
       where: {
         assignmentId_enrollmentId: {
@@ -1656,8 +1846,14 @@ export class AcademicsService {
           enrollmentId: enrollment.id,
         },
       },
-      update: data,
-      create: { assignmentId, enrollmentId: enrollment.id, ...data },
+      update: { ...base, ...file },
+      create: {
+        assignmentId,
+        enrollmentId: enrollment.id,
+        ...base,
+        fileUrl: input.fileUrl ?? null,
+        fileName: input.fileName ?? null,
+      },
     });
   }
 
@@ -1688,7 +1884,7 @@ export class AcademicsService {
         courseCode: s.course.code,
         title: s.course.title,
         credits: s.course.credits,
-        description: null as string | null,
+        description: s.course.description,
         term: s.term.name,
         instructor: s.instructor
           ? `${s.instructor.firstName} ${s.instructor.lastName}`
@@ -1697,7 +1893,11 @@ export class AcademicsService {
         room: s.room,
         prerequisites: s.course.prerequisites.map((p) => p.code),
         status: enrollment.status,
-        grade: enrollment.grade,
+        // `Enrollment.grade` is a mutable faculty draft — `submitGrades` writes it on
+        // "save draft", outside the finalize branch. Only the registrar's approval flips
+        // the enrollment to `completed`, so that status is an exact proxy for "approved"
+        // and is what gates this read. Without it a provisional grade reaches the student.
+        grade: enrollment.status === "completed" ? enrollment.grade : null,
       },
       assignments: s.assignments.map((a) => {
         const sub = byAssignment.get(a.id);
@@ -3298,8 +3498,9 @@ export class AcademicsService {
 
   /** Faculty dashboard: KPIs, class cards, today's timeline, needs-attention. */
   async facultyOverview(personId: string) {
+    const term = await this.currentTerm();
     const sections = await this.prisma.section.findMany({
-      where: { instructorId: personId },
+      where: { instructorId: personId, ...(term ? { termId: term.id } : {}) },
       include: {
         course: true,
         term: true,
@@ -3494,60 +3695,6 @@ export class AcademicsService {
     };
   }
 
-  /** Advisees = distinct students across the faculty's sections, with cumulative GPA + risk flag. */
-  async facultyAdvisees(personId: string) {
-    const enrollments = await this.prisma.enrollment.findMany({
-      where: {
-        section: { instructorId: personId },
-        status: { in: ["enrolled", "completed"] },
-      },
-      include: {
-        student: {
-          include: {
-            person: true,
-            program: true,
-            transcriptEntries: { where: { voidedAt: null } },
-          },
-        },
-      },
-    });
-    const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
-
-    const adviseeRecords = studentIds.map(
-      (sid) =>
-        enrollments.find((enrollment) => enrollment.studentId === sid)!.student,
-    );
-    const adviseeSummaries = adviseeRecords.map((student) =>
-      summarizeTranscriptRows(student.transcriptEntries),
-    );
-    const adviseeStandings = await this.standings.resolveMany(
-      adviseeRecords.map((student, index) => ({
-        studentId: student.id,
-        programId: student.programId,
-        catalogYearId: student.catalogYearId,
-        catalogYearLabel: student.catalogYear,
-        cumulativeGpa:
-          adviseeSummaries[index]!.attemptedCredits > 0
-            ? adviseeSummaries[index]!.gpa
-            : null,
-        hasGpaBearingCoursework: adviseeSummaries[index]!.attemptedCredits > 0,
-      })),
-    );
-    const advisees = adviseeRecords.map((student, index) => {
-      const gpa = adviseeSummaries[index]!.gpa;
-      return {
-        studentNo: student.studentNo,
-        name: `${student.person.firstName} ${student.person.lastName}`,
-        program: student.program?.code ?? "—",
-        gpa,
-        atRisk: gpa > 0 && gpa < 2.5,
-        deansList: adviseeStandings[index]?.code === "deans_list",
-        academicStanding: adviseeStandings[index] ?? null,
-      };
-    });
-    advisees.sort((a, b) => a.name.localeCompare(b.name));
-    return advisees;
-  }
 
   /** Faculty teaching sections for the schedule grid (with day/time fields). */
   async mySchedule(instructorPersonId: string) {
@@ -3587,6 +3734,37 @@ export class AcademicsService {
     });
   }
 
+  /**
+   * Materials a student may read for a section they are or were enrolled in.
+   *
+   * Deliberately not keyed by course code: `SectionMaterial` belongs to a section, and
+   * resolving a code to sections would hand over another instructor's files from a term
+   * the student never attended. `published` is the instructor's visibility switch, so it
+   * is an authorization decision here, not decoration. Rows with no file are dropped —
+   * they render as dead links.
+   *
+   * The gate stops enumeration of titles and filenames. It does not protect the bytes:
+   * `GET /uploads/:filename` is @Public, so a leaked URL still resolves. Nothing belongs
+   * on this path that is harmful once the URL escapes.
+   */
+  async studentSectionMaterials(studentId: string, sectionId: string) {
+    const enrollment = await this.prisma.enrollment.findUnique({
+      where: { studentId_sectionId: { studentId, sectionId } },
+      select: { status: true },
+    });
+    if (!enrollment) {
+      throw new NotFoundException("You are not enrolled in this section");
+    }
+    if (enrollment.status === "dropped") {
+      throw new ForbiddenException("You are not enrolled in this section");
+    }
+    const materials = await this.prisma.sectionMaterial.findMany({
+      where: { sectionId, published: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+    });
+    return materials.filter((m) => Boolean(m.fileUrl));
+  }
+
   async createSectionMaterial(
     sectionId: string,
     input: {
@@ -3600,11 +3778,19 @@ export class AcademicsService {
     isAdmin: boolean,
   ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
+    // Append rather than pile everything on 0, or the explicit order the reorder
+    // endpoint maintains is undone by the next upload.
+    const last = await this.prisma.sectionMaterial.findFirst({
+      where: { sectionId },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
     const material = await this.prisma.sectionMaterial.create({
       data: {
         sectionId,
         title: input.title,
         kind: input.kind,
+        sortOrder: (last?.sortOrder ?? -1) + 1,
         ...(input.category ? { category: input.category as never } : {}),
         fileUrl: input.fileUrl ?? null,
         fileName: input.fileName ?? null,
@@ -3631,10 +3817,23 @@ export class AcademicsService {
     });
     if (!material) throw new NotFoundException("Material not found");
     await this.assertSectionOwner(material.sectionId, personId, isAdmin);
-    return this.prisma.sectionMaterial.update({
-      where: { id: materialId },
-      data: { published: !material.published },
-    });
+    // Now that students read `published`, this toggle grants and revokes access — audit
+    // it like every other authorization mutation in this service.
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.sectionMaterial.update({
+        where: { id: materialId },
+        data: { published: !material.published },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "SectionMaterial",
+          entityId: materialId,
+          action: material.published ? "unpublished" : "published",
+          actorId: personId,
+        },
+      }),
+    ]);
+    return updated;
   }
 
   async deleteSectionMaterial(
@@ -3702,49 +3901,15 @@ export class AcademicsService {
     });
   }
 
-  async listSectionPosts(
-    sectionId: string,
-    personId: string,
-    isAdmin: boolean,
-  ) {
-    await this.assertSectionOwner(sectionId, personId, isAdmin);
-    return this.prisma.sectionPost.findMany({
-      where: { sectionId },
-      orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
-    });
-  }
-
-  async createSectionPost(
-    sectionId: string,
-    input: { title: string; body: string },
-    personId: string,
-    authorName: string,
-    isAdmin: boolean,
-  ) {
-    await this.assertSectionOwner(sectionId, personId, isAdmin);
-    const post = await this.prisma.sectionPost.create({
-      data: {
-        sectionId,
-        title: input.title,
-        body: input.body,
-        author: authorName,
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "SectionPost",
-        entityId: post.id,
-        action: "created",
-        actorId: personId,
-      },
-    });
-    return post;
-  }
-
   /** Sections taught by a faculty member. */
   async mySections(instructorPersonId: string) {
+    // Term-scoped like mySchedule. This list feeds the five section-scoped faculty
+    // screens, all of which auto-select the first entry — an unscoped list makes a
+    // prior-term section the default target for grade entry and attendance writes.
+    const term = await this.currentTerm();
+    if (!term) return [];
     const sections = await this.prisma.section.findMany({
-      where: { instructorId: instructorPersonId },
+      where: { instructorId: instructorPersonId, termId: term.id },
       include: {
         course: true,
         term: true,

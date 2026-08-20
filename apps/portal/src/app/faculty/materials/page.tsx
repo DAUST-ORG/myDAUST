@@ -10,6 +10,8 @@ import {
   FileText,
   File as FileIcon,
   Link2,
+  Eye,
+  EyeOff,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -29,6 +31,7 @@ import {
   deleteSectionMaterial,
   getSectionMaterials,
   reorderSectionMaterials,
+  toggleSectionMaterial,
 } from "@/lib/api-faculty";
 
 const CATEGORIES: { key: MaterialCategory; label: string; icon: typeof FileText }[] = [
@@ -47,6 +50,7 @@ export default function FacultyMaterials() {
   const [uploading, setUploading] = useState<MaterialCategory | null>(null);
   const [moving, setMoving] = useState<string | null>(null);
   const [removing, setRemoving] = useState<SectionMaterial | null>(null);
+  const [publishing, setPublishing] = useState<string | null>(null);
 
   useEffect(() => {
     getTeaching()
@@ -62,6 +66,20 @@ export default function FacultyMaterials() {
     getSectionMaterials(sectionId).then(setMaterials).catch((e: Error) => setMsg(e.message));
   }, [sectionId]);
   useEffect(load, [load]);
+
+  /** Publish state is what students read, so it is the one control that grants access. */
+  async function togglePublished(m: SectionMaterial) {
+    setPublishing(m.id);
+    setMsg(null);
+    try {
+      await toggleSectionMaterial(m.id);
+      load();
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setPublishing(null);
+    }
+  }
 
   const section = sections?.find((s) => s.id === sectionId);
 
@@ -243,6 +261,17 @@ export default function FacultyMaterials() {
                             </span>
                           </a>
                           <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                            <IconButton
+                              label={
+                                m.published
+                                  ? `Hide ${m.fileName ?? m.title} from students`
+                                  : `Show ${m.fileName ?? m.title} to students`
+                              }
+                              disabled={publishing !== null}
+                              onClick={() => togglePublished(m)}
+                            >
+                              {m.published ? <Eye size={13} /> : <EyeOff size={13} />}
+                            </IconButton>
                             <IconButton
                               label={`Move ${m.fileName ?? m.title} up`}
                               disabled={moving !== null || i === 0}

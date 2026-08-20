@@ -21,11 +21,6 @@ const CreateMaterialInput = z.object({
   fileName: z.string().min(1).optional(),
 });
 
-const CreatePostInput = z.object({
-  title: z.string().min(1).max(200),
-  body: z.string().min(1).max(5000),
-});
-
 const ReorderMaterialsInput = z.object({
   orderedIds: z.array(z.string().min(1)).min(1),
 });
@@ -431,11 +426,6 @@ export class AcademicsController {
     return this.academics.mySchedule(user.personId);
   }
 
-  @Get("teaching/advisees")
-  @Roles("faculty", "admin")
-  teachingAdvisees(@CurrentUser() user: AuthUser) {
-    return this.academics.facultyAdvisees(user.personId);
-  }
 
   @Get("sections/:id/insights")
   @Roles("faculty", "admin")
@@ -470,6 +460,16 @@ export class AcademicsController {
     @Query("date") date: string,
   ) {
     return this.academics.getAttendance(id, date, user.personId, user.roles.includes("admin"));
+  }
+
+  @Get("sections/:id/attendance/sessions")
+  @Roles("faculty", "admin")
+  attendanceSessions(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.academics.attendanceSessions(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Post("sections/:id/attendance")
@@ -545,18 +545,7 @@ export class AcademicsController {
     return this.academics.reorderSectionMaterials(id, input.orderedIds, user.personId, user.roles.includes("admin"));
   }
 
-  @Get("sections/:id/posts")
-  @Roles("faculty", "admin")
-  sectionPosts(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.academics.listSectionPosts(id, user.personId, user.roles.includes("admin"));
-  }
 
-  @Post("sections/:id/posts")
-  @Roles("faculty", "admin")
-  createSectionPost(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
-    const input = CreatePostInput.parse(body);
-    return this.academics.createSectionPost(id, input, user.personId, user.name, user.roles.includes("admin"));
-  }
 
   // --- Assignments (student) ---
 
@@ -577,5 +566,17 @@ export class AcademicsController {
   @Roles("student")
   courseDetail(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.academics.courseDetail(user.studentId!, id);
+  }
+
+  @Get("my/courses")
+  @Roles("student")
+  myCourses(@CurrentUser() user: AuthUser) {
+    return this.academics.myCourses(user.studentId!);
+  }
+
+  @Get("my/sections/:id/materials")
+  @Roles("student")
+  mySectionMaterials(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.academics.studentSectionMaterials(user.studentId!, id);
   }
 }

@@ -20,10 +20,12 @@ describe("AcademicsService.createAssignment", () => {
       ),
     };
     const service = new AcademicsService(prisma as never);
+    // assertSectionOwner resolves to the section with its course included;
+    // createAssignment reads the code for the notification title.
     vi.spyOn(
-      service as unknown as { assertSectionOwner: () => Promise<void> },
+      service as unknown as { assertSectionOwner: () => Promise<unknown> },
       "assertSectionOwner",
-    ).mockResolvedValue();
+    ).mockResolvedValue({ id: "section-1", course: { code: "CSC 101" } });
 
     await service.createAssignment(
       "section-1",

@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import { Prisma } from "@mydaust/db";
 import { normalizeStudentNumber } from "@mydaust/shared";
 import { requirePersonEmail } from "../auth/person-email.js";
+import { NotificationsService } from "../notifications/notifications.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
@@ -59,6 +60,7 @@ export class RegistrarService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
+    private readonly notifications?: NotificationsService,
   ) {}
 
   // --- Students -----------------------------------------------------------
@@ -794,7 +796,7 @@ export class RegistrarService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const reviewedAt = new Date();
       const claimed = await tx.gradeSubmission.updateMany({
         where: { id, status: "submitted" },
@@ -924,6 +926,30 @@ export class RegistrarService {
       });
       return tx.gradeSubmission.findUniqueOrThrow({ where: { id } });
     });
+
+    // Publication is the moment a grade becomes real to the student, and until now it
+    // notified nobody. Emitted after the transaction so a notification cannot roll back
+    // a published transcript.
+    if (decision === "approved" && this.notifications) {
+      const published = await this.prisma.gradeSubmissionItem.findMany({
+        where: { gradeSubmissionId: id, version: submission.version },
+        select: {
+          courseCode: true,
+          student: { select: { personId: true } },
+        },
+      });
+      await this.notifications.emit(
+        published.map((item) => ({
+          personId: item.student.personId,
+          kind: "grade_posted" as const,
+          title: `Your ${item.courseCode} grade has been published`,
+          body: "The registrar has approved this course's final grades.",
+          href: "/student/grades",
+        })),
+      );
+    }
+
+    return result;
   }
 
   // --- Student success (early alert) --------------------------------------

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -18,6 +20,7 @@ import {
   Modal,
   Select,
 } from "@/components/ui";
+import { SectionInsights } from "@/components/SectionInsights";
 import { CourseTabs } from "../CourseTabs";
 import {
   type SectionAssignment,
@@ -71,8 +74,9 @@ interface Student {
   studentNo: string;
 }
 
-/** score + submissionId per assignment, per enrollment. */
-type ScoreCell = { submissionId: string | null; score: number | null };
+/** score + submissionId per assignment, per enrollment. `status` distinguishes a student
+ *  who handed nothing in from one who did — the grid looked identical either way. */
+type ScoreCell = { submissionId: string | null; score: number | null; status: string };
 type ScoreMap = Record<string, Record<string, ScoreCell>>;
 
 const BLANK_ITEM = {
@@ -128,7 +132,7 @@ export default function FacultyGradebook() {
         next[assignmentId] = Object.fromEntries(
           sheet.submissions.map((s) => [
             s.enrollmentId,
-            { submissionId: s.submissionId, score: s.score },
+            { submissionId: s.submissionId, score: s.score, status: s.status },
           ]),
         );
       });
@@ -150,16 +154,22 @@ export default function FacultyGradebook() {
   ) {
     const cell = scores[assignmentId]?.[enrollmentId];
     if (!cell?.submissionId) return;
-    const score = raw === "" ? null : Number(raw);
-    if (score === null || Number.isNaN(score)) return;
+    const score = raw.trim() === "" ? null : Number(raw);
+    if (score !== null && Number.isNaN(score)) return;
+    if (score === cell.score) return;
     setMsg(null);
     try {
+      // Clearing is a real action now: a mistyped score had no way back.
       await gradeSubmission(cell.submissionId, score);
       setScores((prev) => ({
         ...prev,
         [assignmentId]: {
           ...prev[assignmentId],
-          [enrollmentId]: { ...cell, score },
+          [enrollmentId]: {
+            ...cell,
+            score,
+            status: score === null ? "submitted" : "graded",
+          },
         },
       }));
     } catch (e) {
@@ -378,7 +388,13 @@ export default function FacultyGradebook() {
                                 background: cat.color,
                               }}
                             />
-                            {c.title}
+                            <Link
+                              href={`/faculty/submissions/${c.id}`}
+                              title={`Open submissions for ${c.title}`}
+                              style={{ color: "inherit" }}
+                            >
+                              {c.title}
+                            </Link>
                           </span>
                           <span
                             style={{

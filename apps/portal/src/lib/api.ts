@@ -662,16 +662,6 @@ export interface FacultyScheduleItem {
 export const getFacultySchedule = () =>
   request<FacultyScheduleItem[]>("/academics/teaching/schedule");
 
-export interface Advisee {
-  studentNo: string;
-  name: string;
-  program: string;
-  gpa: number | null;
-  atRisk: boolean;
-  deansList: boolean;
-}
-export const getAdvisees = () =>
-  request<Advisee[]>("/academics/teaching/advisees");
 
 export interface SectionInsights {
   course: string;
@@ -709,8 +699,6 @@ export interface Gradebook {
     status: string;
   }[];
 }
-export const getGradebook = (sectionId: string) =>
-  request<Gradebook>(`/academics/sections/${sectionId}/gradebook`);
 export const submitGrades = (
   sectionId: string,
   grades: { enrollmentId: string; grade: string | null }[],
@@ -723,13 +711,26 @@ export const submitGrades = (
 
 export interface AttendanceSheet {
   date: string;
+  /** False when this session has no roll call yet — distinct from an all-present one. */
+  recorded: boolean;
   students: {
     enrollmentId: string;
     studentNo: string;
     name: string;
-    status: string;
+    /** null when this student has no mark for the date. */
+    status: string | null;
   }[];
 }
+export interface AttendanceSession {
+  date: string;
+  present: number;
+  late: number;
+  absent: number;
+}
+export const getAttendanceSessions = (sectionId: string) =>
+  request<AttendanceSession[]>(
+    `/academics/sections/${sectionId}/attendance/sessions`,
+  );
 export const getAttendance = (sectionId: string, date: string) =>
   request<AttendanceSheet>(
     `/academics/sections/${sectionId}/attendance?date=${date}`,
@@ -810,7 +811,9 @@ export const getAssignmentSubmissions = (assignmentId: string) =>
   );
 export const gradeSubmission = (
   submissionId: string,
-  score: number,
+  /** null clears the grade and returns the row to "submitted". */
+  score: number | null,
+  /** Omit to leave the existing comment untouched. */
   feedback?: string,
 ) =>
   request(`/academics/submissions/${submissionId}/grade`, {
@@ -831,7 +834,40 @@ export interface MyAssignment {
   score: number | null;
   feedback: string | null;
   submittedAt: string | null;
+  description: string | null;
+  weight: number;
+  /** What was already handed in — the submit form doubles as the edit form. */
+  text: string | null;
+  fileUrl: string | null;
+  fileName: string | null;
 }
+/** A material as a student sees it — always published, always with a file. */
+export interface StudentMaterial {
+  id: string;
+  title: string;
+  kind: string;
+  category: string;
+  fileUrl: string;
+  fileName: string | null;
+  createdAt: string;
+}
+export const getMySectionMaterials = (sectionId: string) =>
+  request<StudentMaterial[]>(`/academics/my/sections/${sectionId}/materials`);
+
+export interface MyCourse {
+  enrollmentId: string;
+  sectionId: string;
+  courseCode: string;
+  title: string;
+  credits: number;
+  sectionCode: string;
+  term: string;
+  status: string;
+  grade: string | null;
+}
+export const getMyCourses = () =>
+  request<{ current: MyCourse[]; past: MyCourse[] }>("/academics/my/courses");
+
 export const getMyAssignments = () =>
   request<MyAssignment[]>("/academics/my/assignments");
 export const submitAssignment = (
@@ -4033,10 +4069,13 @@ export interface MyAttendance {
   rows: {
     code: string;
     title: string;
+    term: string;
     present: number;
     late: number;
     absent: number;
     pct: number | null;
+    /** The individual class days behind the percentage, newest first. */
+    sessions: { date: string; status: string }[];
   }[];
 }
 export const getMyAttendance = () =>
@@ -4495,3 +4534,65 @@ export const previewBroadcast = (
     `/comms/broadcasts/preview?${qs.toString()}`,
   );
 };
+
+// --- In-app notifications (no email path by design) ---
+export interface AppNotification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  href: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+export const getNotifications = () =>
+  request<AppNotification[]>("/notifications");
+export const markNotificationsRead = () =>
+  request<{ marked: number }>("/notifications/read-all", { method: "POST" });
+
+// --- Course evaluations ---
+export interface PendingEvaluation {
+  windowId: string;
+  kind: "midterm" | "final";
+  sectionId: string;
+  course: string;
+  instructor: string | null;
+  closesAt: string;
+}
+export const getPendingEvaluations = () =>
+  request<PendingEvaluation[]>("/evaluations/my/pending");
+export const submitEvaluation = (
+  sectionId: string,
+  body: {
+    windowId: string;
+    overall: number;
+    clarity: number;
+    workload: number;
+    comment?: string;
+  },
+) =>
+  request<{ ok: boolean }>(`/evaluations/my/sections/${sectionId}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export type EvaluationResults =
+  | {
+      windowId: string;
+      kind: string;
+      responseCount: number;
+      visible: true;
+      overall: number | null;
+      clarity: number | null;
+      workload: number | null;
+      comments: string[];
+    }
+  | {
+      windowId: string;
+      kind: string;
+      responseCount: number;
+      visible: false;
+      reason: "not_released" | "too_few_responses" | "grades_not_approved";
+    };
+export const getSectionEvaluations = (sectionId: string) =>
+  request<EvaluationResults[]>(`/evaluations/sections/${sectionId}/results`);
