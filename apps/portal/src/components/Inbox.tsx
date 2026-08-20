@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import {
   type Contact,
+  type TeachingSection,
   type ThreadDetail,
   type ThreadSummary,
+  broadcastToSection,
   getContacts,
   getThread,
   getThreads,
@@ -46,7 +48,17 @@ function fmtTime(iso: string) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-export function Inbox() {
+export interface InboxProps {
+  eyebrow?: string;
+  title?: string;
+  /**
+   * When supplied, the composer gains a "Whole course" mode that sends through
+   * broadcastToSection. Absent, the component renders exactly as the student inbox does.
+   */
+  sections?: TeachingSection[];
+}
+
+export function Inbox({ eyebrow = "Conversations", title = "Messages", sections }: InboxProps = {}) {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [sel, setSel] = useState<string | null>(null);
   const [detail, setDetail] = useState<ThreadDetail | null>(null);
@@ -86,8 +98,8 @@ export function Inbox() {
 
   return (
     <>
-      <p className="eyebrow">Conversations</p>
-      <h1 className="page-title">Messages</h1>
+      <p className="eyebrow">{eyebrow}</p>
+      <h1 className="page-title">{title}</h1>
 
       <div
         style={{
@@ -144,7 +156,7 @@ export function Inbox() {
 
         {/* Conversation / composer */}
         {composing ? (
-          <NewMessage
+          <NewMessage sections={sections}
             onCancel={() => setComposing(false)}
             onSent={async (threadId) => {
               setComposing(false);
@@ -204,7 +216,19 @@ export function Inbox() {
   );
 }
 
-function NewMessage({ onCancel, onSent }: { onCancel: () => void; onSent: (threadId: string) => void }) {
+function NewMessage({
+  onCancel,
+  onSent,
+  sections,
+}: {
+  onCancel: () => void;
+  onSent: (threadId: string) => void;
+  sections?: TeachingSection[];
+}) {
+  const canBroadcast = Boolean(sections && sections.length > 0);
+  const [mode, setMode] = useState<"individual" | "course">("individual");
+  const [sectionId, setSectionId] = useState("");
+  const [subject, setSubject] = useState("");
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [recipientId, setRecipientId] = useState("");
   const [body, setBody] = useState("");
@@ -218,11 +242,23 @@ function NewMessage({ onCancel, onSent }: { onCancel: () => void; onSent: (threa
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (sections?.[0]) setSectionId((cur) => cur || sections[0]!.id);
+  }, [sections]);
+
   async function submit() {
-    if (!recipientId || !body.trim()) return;
+    if (!body.trim()) return;
+    if (mode === "course" ? !sectionId : !recipientId) return;
     setBusy(true);
     setErr(null);
     try {
+      if (mode === "course") {
+        // Fans out into per-student 1:1 threads, so each reply comes back privately —
+        // and every recipient thread lands in this same inbox as real sent history.
+        await broadcastToSection(sectionId, body, subject.trim() || undefined);
+        onSent("");
+        return;
+      }
       const { threadId } = await startThread(recipientId, body);
       onSent(threadId);
     } catch (e) {
@@ -238,14 +274,45 @@ function NewMessage({ onCancel, onSent }: { onCancel: () => void; onSent: (threa
         <h3 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 18, flex: 1 }}>New message</h3>
         <button onClick={onCancel}>Cancel</button>
       </div>
-      <label>
-        <span className="muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>To</span>
-        <select value={recipientId} onChange={(e) => setRecipientId(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)" }}>
-          {contacts.map((c) => (
-            <option key={c.id} value={c.id}>{c.name} — {c.role.replace("_", " ")}</option>
+      {canBroadcast && (
+        <div style={{ display: "flex", gap: 8 }}>
+          {(["individual", "course"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={mode === m ? "primary" : ""}
+              onClick={() => setMode(m)}
+            >
+              {m === "individual" ? "One student" : "Whole course"}
+            </button>
           ))}
-        </select>
-      </label>
+        </div>
+      )}
+      {mode === "course" ? (
+        <>
+          <label>
+            <span className="muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>Course</span>
+            <select value={sectionId} onChange={(e) => setSectionId(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)" }}>
+              {(sections ?? []).map((s) => (
+                <option key={s.id} value={s.id}>{s.course} · {s.sectionCode}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className="muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>Subject</span>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Optional" style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)" }} />
+          </label>
+        </>
+      ) : (
+        <label>
+          <span className="muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>To</span>
+          <select value={recipientId} onChange={(e) => setRecipientId(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)" }}>
+            {contacts.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} — {c.role.replace("_", " ")}</option>
+            ))}
+          </select>
+        </label>
+      )}
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
@@ -254,9 +321,9 @@ function NewMessage({ onCancel, onSent }: { onCancel: () => void; onSent: (threa
         style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 9, padding: "11px 13px", fontSize: 13.5, resize: "vertical", lineHeight: 1.5 }}
       />
       {err && <span className="muted" style={{ color: "var(--bad)" }}>{err}</span>}
-      {contacts.length === 0 && <span className="muted">No contacts available to message yet.</span>}
+      {mode === "individual" && contacts.length === 0 && <span className="muted">No contacts available to message yet.</span>}
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button className="primary" onClick={submit} disabled={busy || !recipientId || !body.trim()}>{busy ? "Sending…" : "Send"}</button>
+        <button className="primary" onClick={submit} disabled={busy || !body.trim() || (mode === "course" ? !sectionId : !recipientId)}>{busy ? "Sending…" : "Send"}</button>
       </div>
     </div>
   );
