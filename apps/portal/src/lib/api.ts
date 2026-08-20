@@ -4546,3 +4546,18 @@ export const previewBroadcast = (
     `/comms/broadcasts/preview?${qs.toString()}`,
   );
 };
+
+// --- In-app notifications (no email path by design) ---
+export interface AppNotification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  href: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+export const getNotifications = () =>
+  request<AppNotification[]>("/notifications");
+export const markNotificationsRead = () =>
+  request<{ marked: number }>("/notifications/read-all", { method: "POST" });

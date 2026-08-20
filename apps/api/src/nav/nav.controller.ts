@@ -130,6 +130,22 @@ export class NavController {
       }
     }
 
+    if (roles.includes("faculty")) {
+      // Exactly the count facultyOverview already computes as itemsToGrade.
+      const toGrade = await this.prisma.submission.count({
+        where: {
+          status: "submitted",
+          assignment: { section: { instructorId: user.personId } },
+        },
+      });
+      if (toGrade > 0) out.grading = String(toGrade);
+    }
+
+    const notifications = await this.prisma.notification.count({
+      where: { personId: user.personId, readAt: null },
+    });
+    if (notifications > 0) out.notifications = String(notifications);
+
     const unread = await this.unreadThreads(user.personId);
     if (unread > 0) out.messages = String(unread);
 
