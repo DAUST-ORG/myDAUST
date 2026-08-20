@@ -723,13 +723,26 @@ export const submitGrades = (
 
 export interface AttendanceSheet {
   date: string;
+  /** False when this session has no roll call yet — distinct from an all-present one. */
+  recorded: boolean;
   students: {
     enrollmentId: string;
     studentNo: string;
     name: string;
-    status: string;
+    /** null when this student has no mark for the date. */
+    status: string | null;
   }[];
 }
+export interface AttendanceSession {
+  date: string;
+  present: number;
+  late: number;
+  absent: number;
+}
+export const getAttendanceSessions = (sectionId: string) =>
+  request<AttendanceSession[]>(
+    `/academics/sections/${sectionId}/attendance/sessions`,
+  );
 export const getAttendance = (sectionId: string, date: string) =>
   request<AttendanceSheet>(
     `/academics/sections/${sectionId}/attendance?date=${date}`,
@@ -4068,10 +4081,13 @@ export interface MyAttendance {
   rows: {
     code: string;
     title: string;
+    term: string;
     present: number;
     late: number;
     absent: number;
     pct: number | null;
+    /** The individual class days behind the percentage, newest first. */
+    sessions: { date: string; status: string }[];
   }[];
 }
 export const getMyAttendance = () =>
