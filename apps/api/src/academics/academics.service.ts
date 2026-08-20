@@ -3695,60 +3695,6 @@ export class AcademicsService {
     };
   }
 
-  /** Advisees = distinct students across the faculty's sections, with cumulative GPA + risk flag. */
-  async facultyAdvisees(personId: string) {
-    const enrollments = await this.prisma.enrollment.findMany({
-      where: {
-        section: { instructorId: personId },
-        status: { in: ["enrolled", "completed"] },
-      },
-      include: {
-        student: {
-          include: {
-            person: true,
-            program: true,
-            transcriptEntries: { where: { voidedAt: null } },
-          },
-        },
-      },
-    });
-    const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
-
-    const adviseeRecords = studentIds.map(
-      (sid) =>
-        enrollments.find((enrollment) => enrollment.studentId === sid)!.student,
-    );
-    const adviseeSummaries = adviseeRecords.map((student) =>
-      summarizeTranscriptRows(student.transcriptEntries),
-    );
-    const adviseeStandings = await this.standings.resolveMany(
-      adviseeRecords.map((student, index) => ({
-        studentId: student.id,
-        programId: student.programId,
-        catalogYearId: student.catalogYearId,
-        catalogYearLabel: student.catalogYear,
-        cumulativeGpa:
-          adviseeSummaries[index]!.attemptedCredits > 0
-            ? adviseeSummaries[index]!.gpa
-            : null,
-        hasGpaBearingCoursework: adviseeSummaries[index]!.attemptedCredits > 0,
-      })),
-    );
-    const advisees = adviseeRecords.map((student, index) => {
-      const gpa = adviseeSummaries[index]!.gpa;
-      return {
-        studentNo: student.studentNo,
-        name: `${student.person.firstName} ${student.person.lastName}`,
-        program: student.program?.code ?? "—",
-        gpa,
-        atRisk: gpa > 0 && gpa < 2.5,
-        deansList: adviseeStandings[index]?.code === "deans_list",
-        academicStanding: adviseeStandings[index] ?? null,
-      };
-    });
-    advisees.sort((a, b) => a.name.localeCompare(b.name));
-    return advisees;
-  }
 
   /** Faculty teaching sections for the schedule grid (with day/time fields). */
   async mySchedule(instructorPersonId: string) {
@@ -3953,45 +3899,6 @@ export class AcademicsService {
       where: { sectionId },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
-  }
-
-  async listSectionPosts(
-    sectionId: string,
-    personId: string,
-    isAdmin: boolean,
-  ) {
-    await this.assertSectionOwner(sectionId, personId, isAdmin);
-    return this.prisma.sectionPost.findMany({
-      where: { sectionId },
-      orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
-    });
-  }
-
-  async createSectionPost(
-    sectionId: string,
-    input: { title: string; body: string },
-    personId: string,
-    authorName: string,
-    isAdmin: boolean,
-  ) {
-    await this.assertSectionOwner(sectionId, personId, isAdmin);
-    const post = await this.prisma.sectionPost.create({
-      data: {
-        sectionId,
-        title: input.title,
-        body: input.body,
-        author: authorName,
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "SectionPost",
-        entityId: post.id,
-        action: "created",
-        actorId: personId,
-      },
-    });
-    return post;
   }
 
   /** Sections taught by a faculty member. */

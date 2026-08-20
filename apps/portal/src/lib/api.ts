@@ -662,16 +662,6 @@ export interface FacultyScheduleItem {
 export const getFacultySchedule = () =>
   request<FacultyScheduleItem[]>("/academics/teaching/schedule");
 
-export interface Advisee {
-  studentNo: string;
-  name: string;
-  program: string;
-  gpa: number | null;
-  atRisk: boolean;
-  deansList: boolean;
-}
-export const getAdvisees = () =>
-  request<Advisee[]>("/academics/teaching/advisees");
 
 export interface SectionInsights {
   course: string;
@@ -709,8 +699,6 @@ export interface Gradebook {
     status: string;
   }[];
 }
-export const getGradebook = (sectionId: string) =>
-  request<Gradebook>(`/academics/sections/${sectionId}/gradebook`);
 export const submitGrades = (
   sectionId: string,
   grades: { enrollmentId: string; grade: string | null }[],
@@ -4561,3 +4549,50 @@ export const getNotifications = () =>
   request<AppNotification[]>("/notifications");
 export const markNotificationsRead = () =>
   request<{ marked: number }>("/notifications/read-all", { method: "POST" });
+
+// --- Course evaluations ---
+export interface PendingEvaluation {
+  windowId: string;
+  kind: "midterm" | "final";
+  sectionId: string;
+  course: string;
+  instructor: string | null;
+  closesAt: string;
+}
+export const getPendingEvaluations = () =>
+  request<PendingEvaluation[]>("/evaluations/my/pending");
+export const submitEvaluation = (
+  sectionId: string,
+  body: {
+    windowId: string;
+    overall: number;
+    clarity: number;
+    workload: number;
+    comment?: string;
+  },
+) =>
+  request<{ ok: boolean }>(`/evaluations/my/sections/${sectionId}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export type EvaluationResults =
+  | {
+      windowId: string;
+      kind: string;
+      responseCount: number;
+      visible: true;
+      overall: number | null;
+      clarity: number | null;
+      workload: number | null;
+      comments: string[];
+    }
+  | {
+      windowId: string;
+      kind: string;
+      responseCount: number;
+      visible: false;
+      reason: "not_released" | "too_few_responses" | "grades_not_approved";
+    };
+export const getSectionEvaluations = (sectionId: string) =>
+  request<EvaluationResults[]>(`/evaluations/sections/${sectionId}/results`);
