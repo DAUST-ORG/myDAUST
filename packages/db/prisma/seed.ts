@@ -737,9 +737,12 @@ async function seedTrackD() {
   if (ce201 && (await prisma.sectionMaterial.count({ where: { sectionId: ce201.id } })) === 0) {
     await prisma.sectionMaterial.createMany({
       data: [
-        { sectionId: ce201.id, title: "Week 1 — Boolean Algebra Slides", kind: "Slides", fileName: "week1-boolean.pdf", published: true },
-        { sectionId: ce201.id, title: "Lab Manual — Digital Systems", kind: "Document", fileName: "lab-manual.pdf", published: true },
-        { sectionId: ce201.id, title: "K-map Tutorial Video", kind: "Video", published: false },
+        // fileUrl matters: a material without one renders as a dead link, and the
+        // student read path filters those out. The unpublished row exercises the gate.
+        { sectionId: ce201.id, title: "Course syllabus", kind: "Document", category: "syllabus", sortOrder: 0, fileUrl: "/uploads/seed-ce201-syllabus.pdf", fileName: "ce201-syllabus.pdf", published: true },
+        { sectionId: ce201.id, title: "Week 1 — Boolean Algebra Slides", kind: "Slides", category: "lecture_notes", sortOrder: 1, fileUrl: "/uploads/seed-ce201-week1.pdf", fileName: "week1-boolean.pdf", published: true },
+        { sectionId: ce201.id, title: "Lab Manual — Digital Systems", kind: "Document", category: "assignments", sortOrder: 2, fileUrl: "/uploads/seed-ce201-lab-manual.pdf", fileName: "lab-manual.pdf", published: true },
+        { sectionId: ce201.id, title: "K-map Tutorial Video", kind: "Video", category: "resources", sortOrder: 3, fileUrl: "/uploads/seed-ce201-kmap.mp4", fileName: "kmap.mp4", published: false },
       ],
     });
     await prisma.sectionPost.createMany({

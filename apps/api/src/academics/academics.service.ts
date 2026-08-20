@@ -1026,6 +1026,40 @@ export class AcademicsService {
     };
   }
 
+  /**
+   * Every section this student has a real enrollment in, current and past, with the
+   * sectionId the materials read path needs.
+   *
+   * The courses screen builds its "previous" list from the transcript, which carries
+   * neither sectionId nor enrollmentId — and `TranscriptEntry.enrollmentId` is nullable,
+   * so legacy imported rows have no section at all. Those courses genuinely have no
+   * materials, and the UI must not offer a link for them. This endpoint is the source of
+   * truth for which past courses are openable.
+   */
+  async myCourses(studentId: string) {
+    const term = await this.currentTerm();
+    const rows = await this.prisma.enrollment.findMany({
+      where: { studentId, status: { in: ["enrolled", "completed"] } },
+      include: { section: { include: { course: true, term: true } } },
+      orderBy: { enrolledAt: "desc" },
+    });
+    const shape = (e: (typeof rows)[number]) => ({
+      enrollmentId: e.id,
+      sectionId: e.sectionId,
+      courseCode: e.section.course.code,
+      title: e.section.course.title,
+      credits: e.section.course.credits,
+      sectionCode: e.section.sectionCode,
+      term: e.section.term.name,
+      status: e.status,
+      grade: e.status === "completed" ? e.grade : null,
+    });
+    return {
+      current: rows.filter((e) => term && e.section.termId === term.id).map(shape),
+      past: rows.filter((e) => !term || e.section.termId !== term.id).map(shape),
+    };
+  }
+
   async myEnrollments(studentId: string) {
     const enr = await this.prisma.enrollment.findMany({
       where: { studentId, status: "enrolled" },
@@ -3634,6 +3668,37 @@ export class AcademicsService {
     });
   }
 
+  /**
+   * Materials a student may read for a section they are or were enrolled in.
+   *
+   * Deliberately not keyed by course code: `SectionMaterial` belongs to a section, and
+   * resolving a code to sections would hand over another instructor's files from a term
+   * the student never attended. `published` is the instructor's visibility switch, so it
+   * is an authorization decision here, not decoration. Rows with no file are dropped —
+   * they render as dead links.
+   *
+   * The gate stops enumeration of titles and filenames. It does not protect the bytes:
+   * `GET /uploads/:filename` is @Public, so a leaked URL still resolves. Nothing belongs
+   * on this path that is harmful once the URL escapes.
+   */
+  async studentSectionMaterials(studentId: string, sectionId: string) {
+    const enrollment = await this.prisma.enrollment.findUnique({
+      where: { studentId_sectionId: { studentId, sectionId } },
+      select: { status: true },
+    });
+    if (!enrollment) {
+      throw new NotFoundException("You are not enrolled in this section");
+    }
+    if (enrollment.status === "dropped") {
+      throw new ForbiddenException("You are not enrolled in this section");
+    }
+    const materials = await this.prisma.sectionMaterial.findMany({
+      where: { sectionId, published: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+    });
+    return materials.filter((m) => Boolean(m.fileUrl));
+  }
+
   async createSectionMaterial(
     sectionId: string,
     input: {
@@ -3647,11 +3712,19 @@ export class AcademicsService {
     isAdmin: boolean,
   ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
+    // Append rather than pile everything on 0, or the explicit order the reorder
+    // endpoint maintains is undone by the next upload.
+    const last = await this.prisma.sectionMaterial.findFirst({
+      where: { sectionId },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
     const material = await this.prisma.sectionMaterial.create({
       data: {
         sectionId,
         title: input.title,
         kind: input.kind,
+        sortOrder: (last?.sortOrder ?? -1) + 1,
         ...(input.category ? { category: input.category as never } : {}),
         fileUrl: input.fileUrl ?? null,
         fileName: input.fileName ?? null,
@@ -3678,10 +3751,23 @@ export class AcademicsService {
     });
     if (!material) throw new NotFoundException("Material not found");
     await this.assertSectionOwner(material.sectionId, personId, isAdmin);
-    return this.prisma.sectionMaterial.update({
-      where: { id: materialId },
-      data: { published: !material.published },
-    });
+    // Now that students read `published`, this toggle grants and revokes access — audit
+    // it like every other authorization mutation in this service.
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.sectionMaterial.update({
+        where: { id: materialId },
+        data: { published: !material.published },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "SectionMaterial",
+          entityId: materialId,
+          action: material.published ? "unpublished" : "published",
+          actorId: personId,
+        },
+      }),
+    ]);
+    return updated;
   }
 
   async deleteSectionMaterial(

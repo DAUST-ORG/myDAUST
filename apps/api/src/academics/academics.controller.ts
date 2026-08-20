@@ -578,4 +578,16 @@ export class AcademicsController {
   courseDetail(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.academics.courseDetail(user.studentId!, id);
   }
+
+  @Get("my/courses")
+  @Roles("student")
+  myCourses(@CurrentUser() user: AuthUser) {
+    return this.academics.myCourses(user.studentId!);
+  }
+
+  @Get("my/sections/:id/materials")
+  @Roles("student")
+  mySectionMaterials(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.academics.studentSectionMaterials(user.studentId!, id);
+  }
 }

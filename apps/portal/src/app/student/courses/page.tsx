@@ -6,7 +6,9 @@ import { FolderOpen } from "lucide-react";
 import {
   type GradeRow,
   type MyEnrollment,
+  type MyCourse,
   getCurrentTerm,
+  getMyCourses,
   getMyEnrollments,
   getMyGrades,
 } from "@/lib/api";
@@ -25,14 +27,21 @@ export default function CoursesPage() {
   const [mine, setMine] = useState<MyEnrollment[]>([]);
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [term, setTerm] = useState("");
+  /* Only enrollments carry a sectionId, so this is what decides whether a past course
+     is openable. Transcript-only rows (legacy imports) have no section and no materials. */
+  const [pastCourses, setPastCourses] = useState<MyCourse[]>([]);
 
   useEffect(() => {
     getMyEnrollments().then(setMine).catch(() => {});
+    getMyCourses().then((c) => setPastCourses(c.past)).catch(() => {});
     getMyGrades().then(setGrades).catch(() => {});
     getCurrentTerm().then((t) => setTerm(t.name)).catch(() => {});
   }, []);
 
-  /* One row per course code, keeping the first (most recent) term it was taken in. */
+  /* One row per course code, most recent term first. Two sources, because neither is
+     complete on its own: the transcript is canonical and carries legacy courses that
+     have no enrollment, while enrollments are the only place a sectionId exists — and a
+     course only has materials if we can name its section. */
   const previous = useMemo(() => {
     const seen = new Set<string>();
     const out: GradeRow[] = [];
@@ -41,8 +50,19 @@ export default function CoursesPage() {
       seen.add(g.courseCode);
       out.push(g);
     }
+    for (const c of pastCourses) {
+      if (seen.has(c.courseCode)) continue;
+      seen.add(c.courseCode);
+      out.push({
+        courseCode: c.courseCode,
+        title: c.title,
+        term: c.term,
+        grade: c.grade,
+        credits: c.credits,
+      } as GradeRow);
+    }
     return out;
-  }, [grades]);
+  }, [grades, pastCourses]);
 
   return (
     <>
@@ -98,17 +118,25 @@ export default function CoursesPage() {
         </div>
       )}
 
-      <SectionTitle title="Previous courses" sub="Materials remain available for courses you have taken." />
+      <SectionTitle title="Previous courses" sub="Courses you have taken. Those with a link still have materials posted." />
       {previous.length === 0 ? (
         <EmptyState title="No completed courses yet" />
       ) : (
         <Card pad={false}>
           {previous.map((g, i) => {
             const tone = gradeTone(g.grade);
+            const openable = pastCourses.find((p) => p.courseCode === g.courseCode);
+            const Row = openable ? Link : "div";
+            const rowProps = openable
+              ? { href: `/student/courses/${openable.sectionId}` }
+              : {};
             return (
-              <div
+              <Row
                 key={g.courseCode}
+                {...(rowProps as { href: string })}
                 style={{
+                  color: "inherit",
+                  textDecoration: "none",
                   display: "flex",
                   alignItems: "center",
                   gap: 14,
@@ -133,7 +161,7 @@ export default function CoursesPage() {
                 >
                   {g.grade ?? "—"}
                 </span>
-              </div>
+              </Row>
             );
           })}
         </Card>
