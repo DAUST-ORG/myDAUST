@@ -93,6 +93,7 @@ export const STUDENT_NAV: PortalNav = {
         badgeKey: "register",
       },
       { href: "/student/courses", label: "My Courses", icon: BookOpen },
+      { href: "/student/assignments", label: "Assignments", icon: ListChecks },
       { href: "/student/schedule", label: "Schedule", icon: CalendarDays },
       { href: "/student/grades", label: "Grades", icon: GraduationCap },
       { href: "/student/degree", label: "Degree Progress", icon: Target },
@@ -120,9 +121,11 @@ export const STUDENT_NAV: PortalNav = {
         icon: Mail,
         badgeKey: "messages",
       },
+      { href: "/student/evaluations", label: "Evaluations", icon: ClipboardCheck },
     ]),
     g("Account", [
       { href: "/student/profile", label: "My Profile", icon: UserRound },
+      { href: "/student/documents", label: "Documents", icon: FolderOpen },
     ]),
   ],
 };
@@ -170,6 +173,7 @@ export const FACULTY_NAV: PortalNav = {
         icon: Mail,
         badgeKey: "messages",
       },
+      { href: "/faculty/evaluations", label: "Evaluations", icon: ClipboardCheck },
     ]),
   ],
 };
@@ -334,6 +338,12 @@ export type PortalKey = keyof typeof PORTALS;
  * maps. `{term}` is substituted with the active term name at render time.
  */
 export const PAGE_META: Record<string, { title: string; crumb: string }> = {
+  "/student/assignments": { title: "Assignments", crumb: "Coursework · {term}" },
+  "/student/evaluations": { title: "Course evaluations", crumb: "Anonymous feedback" },
+  "/student/documents": { title: "Documents", crumb: "Letters & records" },
+  "/student/courses/": { title: "My Courses", crumb: "Course detail · {term}" },
+  "/faculty/evaluations": { title: "Course evaluations", crumb: "What your students said" },
+  "/faculty/submissions/": { title: "Submissions", crumb: "Review & grade" },
   // student
   "/student": { title: "Dashboard", crumb: "Academic overview · {term}" },
   "/student/registration": {
