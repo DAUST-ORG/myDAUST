@@ -20,6 +20,7 @@ import {
   Modal,
   Select,
 } from "@/components/ui";
+import { SectionInsights } from "@/components/SectionInsights";
 import { CourseTabs } from "../CourseTabs";
 import {
   type SectionAssignment,

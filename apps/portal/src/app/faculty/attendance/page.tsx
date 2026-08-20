@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Avatar, Button, Card, EmptyState } from "@/components/ui";
+import { SectionInsights } from "@/components/SectionInsights";
 import { CourseTabs, courseTitle } from "../CourseTabs";
 import {
   type AttendanceSession,
@@ -118,6 +119,7 @@ export default function FacultyAttendance() {
       {sections && sections.length > 0 && (
         <>
           <CourseTabs sections={sections} value={sectionId} onChange={setSectionId} />
+          <SectionInsights sectionId={sectionId} />
 
           <Card>
             <div
