@@ -264,6 +264,11 @@ export const DIRECTOR_NAV: PortalNav = {
         label: "Payment Verifications",
         icon: Banknote,
       },
+      {
+        href: "/director/evaluations",
+        label: "Course Evaluations",
+        icon: ClipboardList,
+      },
     ]),
   ],
 };
@@ -343,6 +348,7 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/student/documents": { title: "Documents", crumb: "Letters & records" },
   "/student/courses/": { title: "My Courses", crumb: "Course detail · {term}" },
   "/faculty/evaluations": { title: "Course evaluations", crumb: "What your students said" },
+  "/director/evaluations": { title: "Course evaluations", crumb: "Rounds, results & release" },
   "/faculty/submissions/": { title: "Submissions", crumb: "Review & grade" },
   // student
   "/student": { title: "Dashboard", crumb: "Academic overview · {term}" },
