@@ -68,7 +68,6 @@ interface FormState {
   parentEmail: string;
   allergies: string;
   source: string;
-  essay: string;
 }
 
 const EMPTY: FormState = {
@@ -92,7 +91,6 @@ const EMPTY: FormState = {
   parentEmail: "",
   allergies: "",
   source: "",
-  essay: "",
 };
 
 export function ApplyModal({
@@ -228,7 +226,6 @@ export function ApplyModal({
         parentEmail: nn(f.parentEmail),
         allergies: nn(f.allergies),
         source: nn(f.source),
-        essay: nn(f.essay),
       });
       setResult(res);
     } catch (e) {
@@ -978,14 +975,6 @@ export function ApplyModal({
                       </select>
                     </F>
                   </Row>
-                  <F label={t("Statement of purpose", "Lettre de motivation")}>
-                    <textarea
-                      rows={4}
-                      value={f.essay}
-                      onChange={(e) => set("essay", e.target.value)}
-                      style={{ ...field, resize: "vertical", lineHeight: 1.5 }}
-                    />
-                  </F>
                 </Grid>
               )}
 
