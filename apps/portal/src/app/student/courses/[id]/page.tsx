@@ -1,11 +1,26 @@
 "use client";
 
+import { Download, FileText } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { type CourseDetail, getCourseDetail } from "@/lib/api";
+import {
+  type CourseDetail,
+  type StudentMaterial,
+  fileUrl,
+  getCourseDetail,
+  getMySectionMaterials,
+} from "@/lib/api";
 
-const TABS = ["Overview", "Assignments", "Grade"] as const;
+const TABS = ["Overview", "Materials", "Assignments", "Grade"] as const;
+
+const MATERIAL_GROUPS: { key: string; label: string }[] = [
+  { key: "syllabus", label: "Syllabus" },
+  { key: "lecture_notes", label: "Lecture notes" },
+  { key: "assignments", label: "Assignments" },
+  { key: "quizzes", label: "Quizzes" },
+  { key: "resources", label: "Resources" },
+];
 type Tab = (typeof TABS)[number];
 
 const STATUS_BADGE: Record<string, string> = {
@@ -19,9 +34,19 @@ export default function CourseDetailPage() {
   const [data, setData] = useState<CourseDetail | null>(null);
   const [tab, setTab] = useState<Tab>("Overview");
   const [err, setErr] = useState<string | null>(null);
+  const [materials, setMaterials] = useState<StudentMaterial[] | null>(null);
+  const [materialsErr, setMaterialsErr] = useState<string | null>(null);
 
   useEffect(() => {
     getCourseDetail(id).then(setData).catch((e: Error) => setErr(e.message));
+  }, [id]);
+
+  useEffect(() => {
+    setMaterials(null);
+    setMaterialsErr(null);
+    getMySectionMaterials(id)
+      .then(setMaterials)
+      .catch((e: Error) => setMaterialsErr(e.message));
   }, [id]);
 
   if (err) return <p className="card" style={{ color: "var(--bad)" }}>{err}</p>;
@@ -50,6 +75,48 @@ export default function CourseDetailPage() {
           <p style={{ marginTop: 12 }}>{o.description ?? "No course description provided."}</p>
           {o.prerequisites.length > 0 && (
             <p className="muted" style={{ fontSize: 13 }}>Prerequisites: {o.prerequisites.join(", ")}</p>
+          )}
+        </div>
+      )}
+
+      {tab === "Materials" && (
+        <div className="card">
+          {materialsErr ? (
+            <p role="alert" style={{ color: "var(--error-500)", margin: 0 }}>{materialsErr}</p>
+          ) : materials === null ? (
+            <p role="status" className="muted" style={{ margin: 0 }}>Loading materials…</p>
+          ) : materials.length === 0 ? (
+            <p className="muted" style={{ margin: 0 }}>
+              Your instructor has not posted any materials for this course yet.
+            </p>
+          ) : (
+            MATERIAL_GROUPS.filter((g) => materials.some((m) => m.category === g.key)).map((g) => (
+              <div key={g.key} style={{ marginBottom: 18 }}>
+                <p className="eyebrow" style={{ marginBottom: 8 }}>{g.label}</p>
+                {materials
+                  .filter((m) => m.category === g.key)
+                  .map((m) => (
+                    <a
+                      key={m.id}
+                      href={fileUrl(m.fileUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "center",
+                        padding: "9px 0",
+                        borderTop: "1px solid var(--divider)",
+                        color: "inherit",
+                      }}
+                    >
+                      <FileText size={15} />
+                      <span style={{ flex: 1, fontSize: 13.5 }}>{m.title}</span>
+                      <Download size={14} />
+                    </a>
+                  ))}
+              </div>
+            ))
           )}
         </div>
       )}

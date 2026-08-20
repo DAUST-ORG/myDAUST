@@ -838,6 +838,33 @@ export interface MyAssignment {
   fileUrl: string | null;
   fileName: string | null;
 }
+/** A material as a student sees it — always published, always with a file. */
+export interface StudentMaterial {
+  id: string;
+  title: string;
+  kind: string;
+  category: string;
+  fileUrl: string;
+  fileName: string | null;
+  createdAt: string;
+}
+export const getMySectionMaterials = (sectionId: string) =>
+  request<StudentMaterial[]>(`/academics/my/sections/${sectionId}/materials`);
+
+export interface MyCourse {
+  enrollmentId: string;
+  sectionId: string;
+  courseCode: string;
+  title: string;
+  credits: number;
+  sectionCode: string;
+  term: string;
+  status: string;
+  grade: string | null;
+}
+export const getMyCourses = () =>
+  request<{ current: MyCourse[]; past: MyCourse[] }>("/academics/my/courses");
+
 export const getMyAssignments = () =>
   request<MyAssignment[]>("/academics/my/assignments");
 export const submitAssignment = (
