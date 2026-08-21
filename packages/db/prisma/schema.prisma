@@ -423,6 +423,9 @@ model Person {
   feeSchedulesApproved       FeeSchedule[]             @relation("FeeScheduleApprover")
   academicCatalogsCreated    AcademicCatalogRevision[] @relation("AcademicCatalogCreator")
   academicCatalogsApproved   AcademicCatalogRevision[] @relation("AcademicCatalogApprover")
+  infirmaryConsultations     Consultation[]            @relation("ConsultationClinician")
+  infirmaryPrescriptions     Prescription[]            @relation("PrescriptionAuthor")
+  infirmaryDocuments         InfirmaryDocument[]       @relation("DocumentUploader")
   standingOverridesCreated   StudentStandingOverride[] @relation("StandingOverrideCreator")
   standingOverridesUpdated   StudentStandingOverride[] @relation("StandingOverrideUpdater")
   standingOverridesCleared   StudentStandingOverride[] @relation("StandingOverrideClearer")
@@ -511,6 +514,12 @@ model Student {
   housing              HousingAssignment?
   roommateProfile      RoommateProfile?
   documents            StudentDocument[]
+  infirmaryConsultations Consultation[]
+  infirmaryPrescriptions Prescription[]
+  infirmaryAppointments InfirmaryAppointment[]
+  infirmaryDocuments    InfirmaryDocument[]
+  infirmaryFollowUps    FollowUp[]
+  infirmaryFormResponses InfirmaryFormResponse[]
   createdAt            DateTime                  @default(now())
 
   @@index([recordStatus])
@@ -2547,4 +2556,137 @@ model CourseEvaluationReceipt {
   submittedAt  DateTime               @default(now())
 
   @@unique([windowId, enrollmentId])
+}
+
+// ─── Infirmary ──────────────────────────────────────────────────────────────
+
+model Consultation {
+  id              String   @id @default(uuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  clinicianId     String?
+  clinician       Person?  @relation("ConsultationClinician", fields: [clinicianId], references: [id], onDelete: SetNull)
+  reason          String
+  visitType       String
+  clinicalNotes   String   @default("")
+  status          String   @default("Completed")
+  vitalsJson      Json?
+  diagnosis       String?
+  treatmentPlan   String?
+  followUpRequired Boolean @default(false)
+  visitedAt       DateTime @default(now())
+
+  prescriptions Prescription[]
+
+  @@index([studentId])
+  @@index([visitedAt])
+}
+
+model Prescription {
+  id              String   @id @default(uuid())
+  consultationId  String?
+  consultation    Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  authorId        String?
+  author          Person?  @relation("PrescriptionAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  medication      String
+  dosage          String
+  frequency       String
+  duration        String
+  instructions    String   @default("")
+  status          String   @default("Active")
+  prescribedAt    DateTime @default(now())
+
+  @@index([studentId])
+  @@index([prescribedAt])
+}
+
+model Medication {
+  id            String   @id @default(uuid())
+  name          String
+  category      String   @default("General")
+  stock         Int      @default(0)
+  unit          String   @default("tablets")
+  minStock      Int      @default(10)
+  expiryDate    DateTime
+  supplier      String   @default("")
+  lastRestocked DateTime @default(now())
+  status        String   @default("In Stock")
+
+  @@index([name])
+}
+
+model InfirmaryAppointment {
+  id          String   @id @default(uuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  time        String
+  type        String
+  reason      String
+  status      String   @default("Scheduled")
+  notes       String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@index([studentId])
+  @@index([date])
+}
+
+model InfirmaryDocument {
+  id           String   @id @default(uuid())
+  studentId    String
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  uploaderId   String?
+  uploader     Person?  @relation("DocumentUploader", fields: [uploaderId], references: [id], onDelete: SetNull)
+  name         String
+  type         String   @default("Other")
+  notes        String   @default("")
+  url          String?
+  createdAt    DateTime @default(now())
+
+  @@index([studentId])
+}
+
+model FollowUp {
+  id          String   @id @default(uuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  reason      String
+  dueDate     DateTime @db.Date
+  status      String   @default("Pending")
+  priority    String   @default("Medium")
+  notes       String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@index([studentId])
+  @@index([dueDate])
+}
+
+model InfirmaryForm {
+  id          String   @id @default(uuid())
+  name        String
+  description String   @default("")
+  questions   Json     @default("[]")
+  status      String   @default("Draft")
+  shareLink   String?
+  updatedAt   DateTime @updatedAt
+
+  responses InfirmaryFormResponse[]
+
+  @@index([status])
+}
+
+model InfirmaryFormResponse {
+  id           String   @id @default(uuid())
+  formId       String
+  form         InfirmaryForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  studentId    String
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentName  String
+  answers      Json     @default("{}")
+  submittedAt  DateTime @default(now())
+
+  @@index([formId])
+  @@index([studentId])
 }
