@@ -56,9 +56,18 @@ export class AuthController {
 
   /** Self-service password change (any authenticated role). Also clears the first-login flag. */
   @Post("change-password")
-  async changePassword(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+  async changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const input = ChangePasswordInput.parse(body);
-    await this.auth.changePassword(user.personId, input.currentPassword, input.newPassword);
+    const { sessionVersion } = await this.auth.changePassword(user.personId, input.currentPassword, input.newPassword);
+    // The change bumped the session version, which invalidates every cookie signed with the
+    // old password -- including the one this request arrived on. Re-mint it, or the caller is
+    // signed out by their own password change (and every first-login user with it).
+    const token = await this.jwt.signAsync({ ...user, sessionVersion });
+    res.cookie(SESSION_COOKIE, token, this.cookieOpts());
     return { ok: true };
   }
 }
