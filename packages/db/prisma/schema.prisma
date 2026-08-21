@@ -11,6 +11,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum PersonStatus {
+  active
+  // Cannot sign in; live sessions ended via Person.sessionVersion.
+  suspended
+}
+
 enum PersonKind {
   student
   faculty
@@ -395,6 +401,14 @@ model Person {
   passwordHash               String?
   // Set when a temp password was assigned; forces a change on next login.
   mustChangePassword         Boolean                   @default(false)
+  // Suspended accounts cannot sign in and their live sessions are ended (see sessionVersion).
+  // DB CHECK Person_suspended_has_timestamp keeps status and suspendedAt in agreement.
+  status                     PersonStatus              @default(active)
+  suspendedAt                DateTime?
+  suspendedById              String?
+  // Signed into the session JWT at login and compared on every authenticated request.
+  // Bump it to end every live session this person holds.
+  sessionVersion             Int                       @default(0)
   createdAt                  DateTime                  @default(now())
   student                    Student?
   taughtSections             Section[]                 @relation("Instructor")
@@ -441,6 +455,8 @@ model Person {
   expensesVoided             Expense[]                 @relation("ExpenseVoider")
   directorWidgetPreference   DirectorWidgetPreference?
   notifications Notification[]
+
+  @@index([status])
 }
 
 model Student {

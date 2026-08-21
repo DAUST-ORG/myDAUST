@@ -620,6 +620,8 @@ export class GuardiansService {
         data: {
           passwordHash: await bcrypt.hash(tempPassword, 10),
           mustChangePassword: true,
+          // Ends any session still holding the replaced password.
+          sessionVersion: { increment: 1 },
         },
       });
       // A previously issued setup link must not be able to replace the newly
@@ -885,7 +887,11 @@ export class GuardiansService {
         if (claim.count !== 1) throw invalidInvite();
         await tx.person.update({
           where: { id: gInvite.guardianId },
-          data: { passwordHash, mustChangePassword: false },
+          data: {
+            passwordHash,
+            mustChangePassword: false,
+            sessionVersion: { increment: 1 },
+          },
         });
         // Any other outstanding invites for this guardian are now moot.
         await tx.guardianInvite.updateMany({
@@ -933,7 +939,7 @@ export class GuardiansService {
         if (claim.count !== 1) throw invalidInvite();
         await tx.person.update({
           where: { id: sInvite.studentPersonId },
-          data: { passwordHash },
+          data: { passwordHash, sessionVersion: { increment: 1 } },
         });
         await tx.studentInvite.updateMany({
           where: { studentPersonId: sInvite.studentPersonId, usedAt: null },

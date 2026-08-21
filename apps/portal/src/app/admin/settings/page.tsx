@@ -2,9 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { APP_ROLES } from "@mydaust/shared";
 import {
-  type AppUser,
   type FeeItem,
   type ScholarshipTierRow,
   createScholarshipTier,
@@ -13,10 +11,8 @@ import {
   getFeeConfig,
   getMe,
   getScholarshipConfig,
-  getUsers,
   updateFeeItem,
   updateScholarshipTier,
-  updateUserRoles,
   getEmailTemplates,
   updateEmailTemplates,
 } from "@/lib/api";
@@ -41,29 +37,16 @@ function generalRows(currentTerm: string): [string, string][] {
 }
 
 export default function SettingsPage() {
-  const [users, setUsers] = useState<AppUser[]>([]);
-  const [myId, setMyId] = useState<string>("");
-  // Fees, scholarships and role management are all admin-only writes. A plain
-  // registrar views this page read-only, and must not fetch the admin users list
-  // (that endpoint 403s for them).
+  // Fees and scholarships are admin-only writes; a plain registrar views this read-only.
   const [isAdmin, setIsAdmin] = useState(false);
   const [isRegistrar, setIsRegistrar] = useState(false);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState<string[]>([]);
-  const [note, setNote] = useState<string | null>(null);
   const [currentTerm, setCurrentTerm] = useState("—");
 
   const load = useCallback(() => {
     getMe()
       .then((m) => {
-        setMyId(m.personId);
-        const admin = m.roles.includes("admin");
-        setIsAdmin(admin);
+        setIsAdmin(m.roles.includes("admin"));
         setIsRegistrar(m.roles.includes("registrar"));
-        if (admin)
-          getUsers()
-            .then(setUsers)
-            .catch(() => {});
       })
       .catch(() => {});
   }, []);
@@ -74,21 +57,6 @@ export default function SettingsPage() {
       .catch(() => {});
   }, [load]);
 
-  function startEdit(u: AppUser) {
-    setEditing(u.id);
-    setDraft([...u.roles]);
-    setNote(null);
-  }
-  async function saveRoles(id: string) {
-    try {
-      await updateUserRoles(id, draft);
-      setEditing(null);
-      setNote("Roles updated (audit-logged).");
-      load();
-    } catch (e) {
-      setNote((e as Error).message);
-    }
-  }
 
   return (
     <>
@@ -124,106 +92,11 @@ export default function SettingsPage() {
 
       {isAdmin && (
         <div className="card">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <p className="h1" style={{ fontSize: 16, flex: 1 }}>
-              Users & roles ({users.length})
-            </p>
-            {note && (
-              <span className="muted" style={{ fontSize: 13 }}>
-                {note}
-              </span>
-            )}
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Roles</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.name}</td>
-                  <td className="muted">{u.email}</td>
-                  <td>
-                    {editing === u.id ? (
-                      <span
-                        style={{ display: "flex", flexWrap: "wrap", gap: 8 }}
-                      >
-                        {APP_ROLES.map((r) => (
-                          <label
-                            key={r}
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 4,
-                              fontSize: 12,
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={draft.includes(r)}
-                              onChange={(e) =>
-                                setDraft(
-                                  e.target.checked
-                                    ? [...draft, r]
-                                    : draft.filter((x) => x !== r),
-                                )
-                              }
-                            />
-                            {r}
-                          </label>
-                        ))}
-                      </span>
-                    ) : (
-                      u.roles.map((r) => (
-                        <span
-                          key={r}
-                          className="badge pending"
-                          style={{ marginRight: 4 }}
-                        >
-                          {r}
-                        </span>
-                      ))
-                    )}
-                  </td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    {editing === u.id ? (
-                      <>
-                        <button
-                          className="primary"
-                          onClick={() => saveRoles(u.id)}
-                          style={{ fontSize: 12, marginRight: 6 }}
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={() => setEditing(null)}
-                          style={{ fontSize: 12 }}
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      u.id !== myId && (
-                        <button
-                          onClick={() => startEdit(u)}
-                          style={{ fontSize: 12 }}
-                        >
-                          Edit roles
-                        </button>
-                      )
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Role changes are audit-logged. You cannot edit your own roles.
+          <p className="h1" style={{ fontSize: 16 }}>Users &amp; roles</p>
+          <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+            Accounts, roles, password resets and suspension moved to{" "}
+            <a href="/director/users">Director &rarr; Users</a>, which covers every account
+            rather than only those already holding a role.
           </p>
         </div>
       )}

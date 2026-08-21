@@ -18,6 +18,7 @@ import { GuardiansModule } from "./guardians/guardians.module.js";
 import { HealthController } from "./health.controller.js";
 import { EvaluationsModule } from "./evaluations/evaluations.module.js";
 import { NotificationsModule } from "./notifications/notifications.module.js";
+import { UsersModule } from "./users/users.module.js";
 import { NavModule } from "./nav/nav.module.js";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { RegistrarModule } from "./registrar/registrar.module.js";
@@ -37,6 +38,7 @@ import { InfirmaryModule } from "./infirmary/infirmary.module.js";
     AuthModule,
     NavModule,
     NotificationsModule,
+    UsersModule,
     EvaluationsModule,
     FinanceModule,
     GuardiansModule,

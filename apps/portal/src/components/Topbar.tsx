@@ -34,8 +34,11 @@ const AREA_LINKS: { role: string; href: string; label: string }[] = [
   { role: "bursar", href: "/finance", label: "Finance Office" },
   { role: "admin", href: "/admin", label: "Registrar Portal" },
   { role: "registrar", href: "/admin", label: "Registrar Portal" },
-  { role: "hr", href: "/admin", label: "Registrar Portal" },
-  { role: "it_admin", href: "/admin", label: "Registrar Portal" },
+  { role: "communications", href: "/comms", label: "Website" },
+  // it_admin's area is directory administration, not the registrar console: the registrar
+  // endpoints 403 for it. hr has no area of its own and is deliberately absent rather than
+  // pointed at one it cannot load.
+  { role: "it_admin", href: "/director/users", label: "IT Administration" },
 ];
 
 const SEEN_KEY = "daust-announcements-seen";

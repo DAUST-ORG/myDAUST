@@ -241,7 +241,6 @@ export const REGISTRAR_NAV: PortalNav = {
     ]),
     g("Administration", [
       { href: "/admin/directory", label: "Directory", icon: BookUser },
-      { href: "/admin/staff", label: "Roles & Permissions", icon: ShieldCheck },
       { href: "/admin/settings", label: "Security & System", icon: Settings },
     ]),
     g("Communication", [
@@ -272,6 +271,9 @@ export const DIRECTOR_NAV: PortalNav = {
         label: "Course Evaluations",
         icon: ClipboardList,
       },
+    ]),
+    g("Administration", [
+      { href: "/director/users", label: "Users", icon: Users },
     ]),
   ],
 };
@@ -351,6 +353,17 @@ export const INFIRMARY_NAV: PortalNav = {
       { href: "/infirmary/forms", label: "Forms", icon: ClipboardList },
       { href: "/infirmary/analytics", label: "Analytics", icon: ChartNoAxesCombined },
       { href: "/infirmary/settings", label: "Settings", icon: Settings },
+/**
+ * IT administration. it_admin owns directory administration and nothing else today, so this
+ * area is deliberately one entry rather than a copy of the registrar sidebar -- which is
+ * where the role used to be pointed, and which it cannot actually load.
+ */
+export const IT_NAV: PortalNav = {
+  label: "IT Administration",
+  meta: "Accounts & access · IT",
+  groups: [
+    g("Administration", [
+      { href: "/director/users", label: "Users", icon: Users },
     ]),
   ],
 };
@@ -365,6 +378,7 @@ export const PORTALS = {
   finance: FINANCE_NAV,
   comms: COMMS_NAV,
   infirmary: INFIRMARY_NAV,
+  it: IT_NAV,
 } as const;
 export type PortalKey = keyof typeof PORTALS;
 
@@ -379,6 +393,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/student/courses/": { title: "My Courses", crumb: "Course detail · {term}" },
   "/faculty/evaluations": { title: "Course evaluations", crumb: "What your students said" },
   "/director/evaluations": { title: "Course evaluations", crumb: "Rounds, results & release" },
+  "/director/users": {
+    title: "Users",
+    crumb: "Accounts, roles & access · Administration",
+  },
   "/faculty/submissions/": { title: "Submissions", crumb: "Review & grade" },
   // student
   "/student": { title: "Dashboard", crumb: "Academic overview · {term}" },
@@ -463,10 +481,6 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/admin/directory": {
     title: "Directory",
     crumb: "Faculty & staff directory · Administration",
-  },
-  "/admin/staff": {
-    title: "Roles & Permissions",
-    crumb: "Role-based access control · Administration",
   },
   "/admin/settings": {
     title: "Security & System",
@@ -626,6 +640,7 @@ export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
     { role: "faculty", portal: "faculty", home: "/faculty" },
     { role: "communications", portal: "comms", home: "/comms" },
     { role: "infirmary", portal: "infirmary", home: "/infirmary" },
+    { role: "it_admin", portal: "it", home: "/director/users" },
     { role: "student", portal: "student", home: "/student" },
     { role: "parent", portal: "parent", home: "/parent" },
   ];
