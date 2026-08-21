@@ -16,6 +16,8 @@ import type {
   ProofPaymentMethod,
   PublicProofMethodConfig,
   TranscriptView,
+  ManagedUser,
+  ManagedUserPage,
 } from "@mydaust/shared";
 export type {
   AccountBalanceSummary,
@@ -34,6 +36,8 @@ export type {
   ProofPaymentMethod,
   PublicProofMethodConfig,
   TranscriptView,
+  ManagedUser,
+  ManagedUserPage,
 } from "@mydaust/shared";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -3527,6 +3531,37 @@ export const updateUserRoles = (personId: string, roles: string[]) =>
     method: "PATCH",
     body: JSON.stringify({ roles }),
   });
+
+// --- Directory administration (director: admin / it_admin) ---
+export const listManagedUsers = (query: Record<string, string | number | undefined>) => {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined && v !== "") qs.set(k, String(v));
+  }
+  return request<ManagedUserPage>(`/users?${qs.toString()}`);
+};
+export const createManagedUser = (body: unknown) =>
+  request<{ id: string; email: string; tempPassword: string | null }>("/users", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+export const updateManagedUser = (id: string, body: unknown) =>
+  request<{ id: string; email: string | null }>(`/users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+export const resetManagedUserPassword = (id: string) =>
+  request<{ id: string; name: string; email: string; tempPassword: string }>(
+    `/users/${id}/reset-password`,
+    { method: "POST" },
+  );
+export const suspendManagedUser = (id: string, reason?: string) =>
+  request<{ id: string; status: string }>(`/users/${id}/suspend`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+export const restoreManagedUser = (id: string) =>
+  request<{ id: string; status: string }>(`/users/${id}/restore`, { method: "POST" });
 export const getUsers = () => request<AppUser[]>("/academics/admin/users");
 
 // --- Payment links (bursar-generated; public pay page at /pay/[token]) ---
