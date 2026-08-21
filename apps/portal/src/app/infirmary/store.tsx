@@ -336,7 +336,7 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
           getInfirmaryDocuments().catch(() => []),
           getInfirmaryFollowUps().catch(() => []),
           getInfirmaryForms().catch(() => []),
-          getInfirmarySettings().catch(() => ({})),
+          getInfirmarySettings().catch(() => ({} as Record<string, unknown>)),
         ]);
 
       // Fetch form responses for each form
