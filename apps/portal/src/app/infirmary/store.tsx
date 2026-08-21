@@ -360,7 +360,7 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
         followUps: followUps.map(mapFollowUp),
         forms: forms.map(mapForm),
         formResponses: allResponses,
-        settings: mapSettings(settings),
+        settings: mapSettings(settings as Record<string, unknown>),
       });
     } catch {
       // API unreachable — keep empty store
