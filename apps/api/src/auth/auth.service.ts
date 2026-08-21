@@ -22,8 +22,11 @@ export class AuthService {
       !person ||
       !person.email ||
       !person.passwordHash ||
+      person.status !== "active" ||
       (person.student !== null && person.student.recordStatus !== "active")
     ) {
+      // One generic message for every rejection: a distinct "account suspended" reply
+      // would confirm the address exists to anyone probing it.
       throw new UnauthorizedException("Invalid credentials");
     }
 
@@ -36,6 +39,7 @@ export class AuthService {
       studentId: person.student?.id,
       email: person.email,
       name: `${person.firstName} ${person.lastName}`,
+      sessionVersion: person.sessionVersion,
     };
   }
 

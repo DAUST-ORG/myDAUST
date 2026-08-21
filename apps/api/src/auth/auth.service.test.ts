@@ -58,6 +58,8 @@ describe("AuthService student activation guard", () => {
           lastName: "Ndiaye",
           roles: ["student"],
           passwordHash,
+          status: "active",
+          sessionVersion: 0,
           student: { id: "student-1", recordStatus: "active" },
         }),
       },
@@ -71,5 +73,49 @@ describe("AuthService student activation guard", () => {
       studentId: "student-1",
       roles: ["student"],
     });
+  });
+});
+
+describe("AuthService suspension guard", () => {
+  const activePerson = async () => ({
+    id: "person-1",
+    email: "bursar@daust.edu",
+    firstName: "Awa",
+    lastName: "Ndiaye",
+    roles: ["bursar"],
+    passwordHash: await AuthService.hash("CorrectHorse9!"),
+    status: "active",
+    sessionVersion: 0,
+    student: null,
+  });
+
+  it("refuses a suspended account holding the correct password", async () => {
+    const prisma = {
+      person: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ ...(await activePerson()), status: "suspended" }),
+      },
+    };
+    const auth = new AuthService(prisma as never);
+
+    await expect(
+      auth.validateUser("bursar@daust.edu", "CorrectHorse9!"),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("admits the same account once restored, and carries its session version", async () => {
+    const prisma = {
+      person: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ ...(await activePerson()), sessionVersion: 4 }),
+      },
+    };
+    const auth = new AuthService(prisma as never);
+
+    await expect(
+      auth.validateUser("bursar@daust.edu", "CorrectHorse9!"),
+    ).resolves.toMatchObject({ personId: "person-1", sessionVersion: 4 });
   });
 });
