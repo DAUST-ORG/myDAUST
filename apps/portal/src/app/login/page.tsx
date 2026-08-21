@@ -15,6 +15,7 @@ const DEMO_ACCOUNTS = [
   { email: "amadou.ba@daust.edu", role: "Faculty" },
   { email: "parent@daust.edu", role: "Parent" },
   { email: "admin@daust.edu", role: "Admin" },
+  { email: "nurse@daust.edu", role: "Infirmary" },
 ];
 const DEMO_PASSWORD = "daust-dev-2026";
 /**
