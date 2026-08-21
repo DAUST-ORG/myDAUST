@@ -8,5 +8,7 @@ import { RegistrarService } from "./registrar.service.js";
   imports: [PrismaModule, MailModule],
   controllers: [RegistrarController],
   providers: [RegistrarService],
+  // UsersModule delegates student creation and login provisioning here.
+  exports: [RegistrarService],
 })
 export class RegistrarModule {}

@@ -4,54 +4,52 @@ import { describe, expect, it } from "vitest";
 /**
  * Every write to Person.passwordHash must also bump sessionVersion, or a session signed with
  * the replaced password stays valid for the remaining life of its 7-day cookie. That is the
- * whole point of the column, and it is the kind of rule a new provisioning path breaks
- * silently -- so this asserts the population rather than any one call site.
+ * whole point of the column, and it is exactly the rule a new provisioning path breaks
+ * silently -- so this asserts the whole population rather than any one call site.
  *
- * createFaculty is the one deliberate exemption: it writes the hash while creating the Person,
- * so there is no prior session to end.
+ * A write that creates the Person in the same statement has no prior session to end. Those
+ * mark themselves with SESSION_EXEMPT below, so the exemption is a deliberate, reviewable
+ * line in the code being exempted rather than a list kept in this file.
  */
-const EXEMPT = [
-  // path -> why it needs no bump
-  { file: "faculty/faculty.service.ts", reason: "createFaculty: brand-new Person" },
-];
+const SESSION_EXEMPT = "session-revocation-exempt";
 
-function ripgrep(pattern: string): string[] {
-  const out = execFileSync(
-    "grep",
-    ["-rn", "--include=*.ts", pattern, "src"],
-    { cwd: process.cwd(), encoding: "utf8" },
-  );
-  return out.split("\n").filter(Boolean);
+function grep(pattern: string): string[] {
+  try {
+    return execFileSync("grep", ["-rn", "--include=*.ts", pattern, "src"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    })
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    return []; // grep exits 1 when nothing matches
+  }
 }
 
 describe("session revocation coverage", () => {
   it("bumps sessionVersion at every site that replaces a password", () => {
-    const writes = ripgrep("passwordHash: await bcrypt.hash")
-      .concat(ripgrep("data: { passwordHash"))
-      .concat(ripgrep("^\\s*passwordHash,$"))
-      .filter((l) => !l.includes(".test.ts"));
+    const writes = [
+      ...grep("passwordHash: await bcrypt.hash"),
+      ...grep("data: { passwordHash"),
+      ...grep("^ *passwordHash,$"),
+    ].filter((line) => !line.includes(".test.ts"));
 
-    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.length, "found no password writes at all — has the idiom changed?")
+      .toBeGreaterThan(3);
 
-    // Each write site should sit within a few lines of a sessionVersion bump. Read the file
-    // once per hit and look at the surrounding statement rather than the single line.
-    const missing: string[] = [];
-    for (const hit of writes) {
+    const missing = writes.filter((hit) => {
       const [file, lineNo] = hit.split(":");
-      if (!file || !lineNo) continue;
-      if (EXEMPT.some((e) => file.endsWith(e.file) && Number(lineNo) < 140)) continue;
-      const body = execFileSync(
-        "sed",
-        [
-          "-n",
-          `${Math.max(1, Number(lineNo) - 6)},${Number(lineNo) + 8}p`,
-          file,
-        ],
-        { encoding: "utf8" },
-      );
-      if (!body.includes("sessionVersion")) missing.push(hit);
-    }
+      if (!file || !lineNo) return false;
+      const from = Math.max(1, Number(lineNo) - 8);
+      const body = execFileSync("sed", ["-n", `${from},${Number(lineNo) + 8}p`, file], {
+        encoding: "utf8",
+      });
+      return !body.includes("sessionVersion") && !body.includes(SESSION_EXEMPT);
+    });
 
-    expect(missing, `password writes with no sessionVersion bump:\n${missing.join("\n")}`).toEqual([]);
+    expect(
+      missing,
+      `password writes with neither a sessionVersion bump nor a "${SESSION_EXEMPT}" note:\n${missing.join("\n")}`,
+    ).toEqual([]);
   });
 });
