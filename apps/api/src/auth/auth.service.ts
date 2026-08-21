@@ -61,7 +61,7 @@ export class AuthService {
     personId: string,
     current: string,
     next: string,
-  ): Promise<void> {
+  ): Promise<{ sessionVersion: number }> {
     const person = await this.prisma.person.findUnique({
       where: { id: personId },
     });
@@ -70,9 +70,17 @@ export class AuthService {
     const ok = await bcrypt.compare(current, person.passwordHash);
     if (!ok) throw new BadRequestException("Current password is incorrect");
     const passwordHash = await bcrypt.hash(next, 10);
-    await this.prisma.person.update({
+    // Bumping the version ends every session signed with the old password. The caller's own
+    // cookie is re-minted by the controller, so changing a password does not sign you out of
+    // the tab you changed it in -- which would strand every first-login user.
+    const updated = await this.prisma.person.update({
       where: { id: personId },
-      data: { passwordHash, mustChangePassword: false },
+      data: {
+        passwordHash,
+        mustChangePassword: false,
+        sessionVersion: { increment: 1 },
+      },
+      select: { sessionVersion: true },
     });
     // Audit the action only — never the secret.
     await this.prisma.auditLog.create({
@@ -83,5 +91,6 @@ export class AuthService {
         actorId: personId,
       },
     });
+    return { sessionVersion: updated.sessionVersion };
   }
 }

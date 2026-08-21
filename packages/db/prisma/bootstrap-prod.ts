@@ -75,7 +75,14 @@ async function adminAccount(): Promise<string> {
   const hash = await bcrypt.hash(password, 12);
   await prisma.person.upsert({
     where: { email: "admin@daust.edu" },
-    update: { roles: ["admin", "bursar"], passwordHash: hash },
+    update: {
+      roles: ["admin", "bursar"],
+      passwordHash: hash,
+      status: "active",
+      suspendedAt: null,
+      suspendedById: null,
+      sessionVersion: { increment: 1 },
+    },
     create: {
       email: "admin@daust.edu",
       firstName: "DAUST",
