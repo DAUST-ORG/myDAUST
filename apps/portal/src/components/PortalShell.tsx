@@ -47,6 +47,7 @@ const VIEW_AS_ALL: (ViewAsOption & { roles: string[] })[] = [
     roles: ["communications", "admin"],
   },
   { key: "parent", label: "parent", href: "/parent", roles: ["parent"] },
+  { key: "infirmary", label: "infirmary", href: "/infirmary", roles: ["infirmary", "admin"] },
 ];
 
 /** Only the student portal has a profile screen behind the sidebar identity block. */
