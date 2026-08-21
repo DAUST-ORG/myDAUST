@@ -117,6 +117,8 @@ export class FacultyService {
         lastName: input.lastName.trim(),
         kind: "faculty",
         roles: ["faculty"],
+        // session-revocation-exempt: written while creating the Person, so there is no
+        // earlier session to end.
         ...(tempPassword
           ? {
               passwordHash: await bcrypt.hash(tempPassword, 10),
@@ -159,6 +161,8 @@ export class FacultyService {
       data: {
         passwordHash: await bcrypt.hash(tempPassword, 10),
         mustChangePassword: true,
+        // Ends any session still holding the replaced password.
+        sessionVersion: { increment: 1 },
       },
     });
     await this.prisma.auditLog.create({

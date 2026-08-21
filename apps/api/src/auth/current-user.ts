@@ -10,6 +10,12 @@ export interface AuthUser {
   studentId?: string;
   email: string;
   name: string;
+  /**
+   * Person.sessionVersion as of login. JwtStrategy compares it against the current row on
+   * every request, so bumping the column ends this session. Optional because tokens signed
+   * before this field existed carry no claim; those are treated as version 0.
+   */
+  sessionVersion?: number;
 }
 
 export const CurrentUser = createParamDecorator(

@@ -47,6 +47,12 @@ const VIEW_AS_ALL: (ViewAsOption & { roles: string[] })[] = [
     roles: ["communications", "admin"],
   },
   { key: "parent", label: "parent", href: "/parent", roles: ["parent"] },
+  {
+    key: "it",
+    label: "IT",
+    href: "/director/users",
+    roles: ["it_admin", "admin"],
+  },
 ];
 
 /** Only the student portal has a profile screen behind the sidebar identity block. */
@@ -56,13 +62,26 @@ const PROFILE_HREF: Partial<Record<PortalKey, string>> = {
 
 export function PortalShell({
   portal,
+  requiresRole,
+  fallbackPortal,
   children,
 }: {
   portal: PortalKey;
+  /**
+   * Role the primary portal's sidebar assumes. A route shared by two audiences names it
+   * here with a fallback, so someone who can use the page but not the rest of the area
+   * gets their own sidebar instead of one whose every other entry 403s.
+   */
+  requiresRole?: string;
+  fallbackPortal?: PortalKey;
   children: React.ReactNode;
 }) {
-  const nav = PORTALS[portal];
   const [me, setMe] = useState<Me | null>(null);
+  const effective =
+    requiresRole && fallbackPortal && me && !me.roles.includes(requiresRole)
+      ? fallbackPortal
+      : portal;
+  const nav = PORTALS[effective];
   const router = useRouter();
   const pathname = usePathname();
 
@@ -92,9 +111,9 @@ export function PortalShell({
       portalName={nav.label}
       portalMeta={nav.meta}
       nav={nav.groups}
-      viewAs={portal}
+      viewAs={effective}
       viewAsOptions={options.length > 1 ? options : undefined}
-      profileHref={PROFILE_HREF[portal]}
+      profileHref={PROFILE_HREF[effective]}
     >
       {children}
     </AppShell>

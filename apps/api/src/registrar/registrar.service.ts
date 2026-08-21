@@ -315,6 +315,8 @@ export class RegistrarService {
         email,
         passwordHash: await bcrypt.hash(tempPassword, 10),
         mustChangePassword: true,
+        // Ends any session still holding the replaced password.
+        sessionVersion: { increment: 1 },
       },
     });
     await this.prisma.auditLog.create({

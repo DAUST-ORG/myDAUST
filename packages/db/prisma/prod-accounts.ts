@@ -40,7 +40,17 @@ async function main() {
     const passwordHash = await bcrypt.hash(pw, 12);
     await prisma.person.upsert({
       where: { email: a.email },
-      update: { roles: [...a.roles], passwordHash },
+      // Also clears a suspension: this script is the break-glass path, and the DB CHECK
+      // rejects setting status back to 'active' without clearing suspendedAt in the same
+      // statement. Bump the session version so a hostile session cannot outlive the reset.
+      update: {
+        roles: [...a.roles],
+        passwordHash,
+        status: "active",
+        suspendedAt: null,
+        suspendedById: null,
+        sessionVersion: { increment: 1 },
+      },
       create: {
         email: a.email,
         firstName: a.firstName,
