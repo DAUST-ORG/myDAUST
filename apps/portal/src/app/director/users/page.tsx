@@ -56,6 +56,14 @@ const ASSIGNABLE = [
   "admin",
 ];
 
+/**
+ * Roles that grant API access but have no portal of their own yet, so the person lands
+ * nowhere useful. Said out loud rather than hidden, because the role is real.
+ */
+const ROLE_HINT: Record<string, string> = {
+  hr: "API access only — no dedicated screens yet",
+};
+
 const KIND_LABEL: Record<string, string> = {
   faculty: "Faculty",
   staff: "Staff",
@@ -209,7 +217,17 @@ export default function UsersPage() {
                         <StatusCell user={u} />
                       </td>
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                        {u.id !== me?.personId && (
+                        {u.id === me?.personId ? (
+                          <span className="muted" style={{ fontSize: 12 }}>You</span>
+                        ) : !canAdminister(u, isAdmin) ? (
+                          <span
+                            className="muted"
+                            style={{ fontSize: 12 }}
+                            title="Only an administrator can act on an account that holds the Admin role"
+                          >
+                            Admin only
+                          </span>
+                        ) : (
                           <span style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
                             <IconButton label={`Edit roles for ${u.name}`} onClick={() => setEditing(u)}>
                               <Pencil size={15} />
@@ -339,6 +357,15 @@ export default function UsersPage() {
       )}
     </>
   );
+}
+
+/**
+ * Mirrors the ceiling the API enforces: you may only act on someone whose every role you
+ * could grant, and only an admin grants admin. Offering the button and letting it 403 would
+ * be a control that does not work.
+ */
+function canAdminister(user: ManagedUser, isAdmin: boolean): boolean {
+  return isAdmin || !user.roles.includes("admin");
 }
 
 /** A roleless account still signs in, so it is called out rather than shown as a dash. */
@@ -472,6 +499,9 @@ function RoleChecklist({
               onChange={() => onToggle(r)}
             />
             <span style={{ fontSize: 13.5, fontWeight: 600 }}>{ROLE_LABEL[r]}</span>
+            {ROLE_HINT[r] && (
+              <span className="muted" style={{ fontSize: 11.5 }}>{ROLE_HINT[r]}</span>
+            )}
           </label>
         );
       })}
