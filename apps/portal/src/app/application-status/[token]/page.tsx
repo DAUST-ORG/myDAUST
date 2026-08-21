@@ -14,12 +14,10 @@ import {
   GraduationCap,
   Info,
   LockKeyhole,
-  Moon,
   ReceiptText,
   RefreshCw,
   ShieldCheck,
   Smartphone,
-  Sun,
   UserRoundCheck,
 } from "lucide-react";
 import {
@@ -79,7 +77,6 @@ export default function ApplicationStatusPage() {
   const [data, setData] = useState<PublicApplicationStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"missing" | "network" | null>(null);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,25 +94,7 @@ export default function ApplicationStatusPage() {
     }
   }, [token]);
 
-  useEffect(() => {
-    const stored = localStorage.getItem("daust-theme");
-    const preferredDark = window.matchMedia(
-      "(prefers-color-scheme: dark)",
-    ).matches;
-    const initial =
-      stored === "dark" || (!stored && preferredDark) ? "dark" : "light";
-    setTheme(initial);
-    document.documentElement.dataset.theme = initial;
-  }, []);
-
   useEffect(() => void load(), [load]);
-
-  function toggleTheme() {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    localStorage.setItem("daust-theme", next);
-    document.documentElement.dataset.theme = next;
-  }
 
   return (
     <main className={styles.page}>
@@ -130,14 +109,6 @@ export default function ApplicationStatusPage() {
             <span className={styles.secure}>
               <LockKeyhole size={14} /> Private link
             </span>
-            <button
-              className={styles.themeButton}
-              type="button"
-              onClick={toggleTheme}
-              aria-label={`Use ${theme === "dark" ? "light" : "dark"} mode`}
-            >
-              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
           </div>
         </div>
       </header>
