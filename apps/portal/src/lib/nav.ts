@@ -353,6 +353,10 @@ export const INFIRMARY_NAV: PortalNav = {
       { href: "/infirmary/forms", label: "Forms", icon: ClipboardList },
       { href: "/infirmary/analytics", label: "Analytics", icon: ChartNoAxesCombined },
       { href: "/infirmary/settings", label: "Settings", icon: Settings },
+    ]),
+  ],
+};
+
 /**
  * IT administration. it_admin owns directory administration and nothing else today, so this
  * area is deliberately one entry rather than a copy of the registrar sidebar -- which is
