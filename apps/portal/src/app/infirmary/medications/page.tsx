@@ -153,7 +153,20 @@ function ExpiryCell({ m }: { m: Medication }) {
 }
 
 export default function MedicationsPage() {
-  const { store, addMedication, updateMedication, deleteMedication } = useInfirmaryStore();
+  const { store, addMedication, updateMedication, deleteMedication, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
   const [q, setQ] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [form, setForm] = useState<Medication>(emptyForm);
@@ -201,7 +214,7 @@ export default function MedicationsPage() {
     setShowForm(true);
   }
 
-  function save() {
+  async function save() {
     if (!form.name.trim()) return;
     const data: Medication = {
       ...form,
@@ -211,9 +224,13 @@ export default function MedicationsPage() {
       minStock: Number(form.minStock) || 0,
       status: deriveStatus(Number(form.stock) || 0, Number(form.minStock) || 0, form.expiryDate),
     };
-    if (editing) updateMedication(editing, data);
-    else addMedication(data);
-    setShowForm(false);
+    try {
+      if (editing) await updateMedication(editing, data);
+      else await addMedication(data);
+      setShowForm(false);
+    } catch (e: any) {
+      alert(e?.message ?? "Failed to save");
+    }
   }
 
   const detailDays = detail ? daysUntil(detail.expiryDate) : 0;

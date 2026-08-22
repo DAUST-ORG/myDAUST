@@ -17,7 +17,20 @@ const INPUT = { padding: "8px 12px", borderRadius: "var(--radius-md)", border: "
 const LABEL = { display: "flex" as const, flexDirection: "column" as const, gap: 4, fontSize: 12.5, fontWeight: 600, color: "var(--fg2)" };
 
 export default function StudentsPage() {
-  const { store, addStudent, updateStudent, deleteStudent } = useInfirmaryStore();
+  const { store, addStudent, updateStudent, deleteStudent, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
   const [q, setQ] = useState("");
   const [form, setForm] = useState<Student>(EMPTY);
   const [editing, setEditing] = useState<string | null>(null);

@@ -115,7 +115,20 @@ function SectionBlock({ label, children }: { label: string; children: ReactNode 
 }
 
 export default function AppointmentsPage() {
-  const { store, addAppointment, updateAppointment, deleteAppointment } = useInfirmaryStore();
+  const { store, addAppointment, updateAppointment, deleteAppointment, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [form, setForm] = useState<Appointment>(emptyForm);
@@ -170,11 +183,15 @@ export default function AppointmentsPage() {
     setShowForm(true);
   }
 
-  function save() {
+  async function save() {
     if (!form.studentName.trim() || !form.reason.trim()) return;
-    if (editing) updateAppointment(editing, form);
-    else addAppointment(form);
-    setShowForm(false);
+    try {
+      if (editing) await updateAppointment(editing, form);
+      else await addAppointment(form);
+      setShowForm(false);
+    } catch (e: any) {
+      alert(e?.message ?? "Failed to save");
+    }
   }
 
   function pickStudent(id: string, name: string) {

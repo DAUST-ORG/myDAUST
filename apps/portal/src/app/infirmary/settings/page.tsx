@@ -39,7 +39,20 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 }
 
 export default function SettingsPage() {
-  const { store, updateSettings } = useInfirmaryStore();
+  const { store, updateSettings, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
   const [form, setForm] = useState<AppSettings>(() => ({ ...store.settings }));
   const [saved, setSaved] = useState(false);
 

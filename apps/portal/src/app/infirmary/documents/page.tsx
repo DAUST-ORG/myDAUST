@@ -105,7 +105,20 @@ function MetaTile({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export default function DocumentsPage() {
-  const { store, addDocument, updateDocument, deleteDocument } = useInfirmaryStore();
+  const { store, addDocument, updateDocument, deleteDocument, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
   const [form, setForm] = useState<MedicalDocument>(emptyForm);
@@ -161,11 +174,15 @@ export default function DocumentsPage() {
     setShowForm(true);
   }
 
-  function save() {
+  async function save() {
     if (!form.studentName.trim() || !form.name.trim()) return;
-    if (editing) updateDocument(editing, form);
-    else addDocument(form);
-    setShowForm(false);
+    try {
+      if (editing) await updateDocument(editing, form);
+      else await addDocument(form);
+      setShowForm(false);
+    } catch (e: any) {
+      alert(e?.message ?? "Failed to save");
+    }
   }
 
   function pickStudent(id: string, name: string) {
