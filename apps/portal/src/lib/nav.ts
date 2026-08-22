@@ -13,6 +13,7 @@ import {
   CheckCheck,
   ClipboardCheck,
   ClipboardList,
+  FileText,
   FolderOpen,
   GitBranch,
   GraduationCap,
@@ -27,10 +28,13 @@ import {
   MessageSquare,
   Network,
   Newspaper,
+  Pill,
   Receipt,
   Rocket,
   Scale,
   Settings,
+  ShieldCheck,
+  Stethoscope,
   Table2,
   Target,
   UserPlus,
@@ -327,6 +331,32 @@ export const COMMS_NAV: PortalNav = {
   ],
 };
 
+export const INFIRMARY_NAV: PortalNav = {
+  label: "Health Center",
+  meta: "Infirmary · Staff",
+  groups: [
+    g("Overview", [
+      { href: "/infirmary", label: "Dashboard", icon: LayoutDashboard },
+    ]),
+    g("Clinical", [
+      { href: "/infirmary/consultations", label: "Consultations", icon: Stethoscope },
+      { href: "/infirmary/prescriptions", label: "Prescriptions", icon: Pill },
+      { href: "/infirmary/medications", label: "Medications", icon: Pill },
+      { href: "/infirmary/appointments", label: "Appointments", icon: CalendarDays },
+    ]),
+    g("Records", [
+      { href: "/infirmary/students", label: "Students", icon: Users },
+      { href: "/infirmary/follow-ups", label: "Follow-ups", icon: ClipboardList },
+      { href: "/infirmary/documents", label: "Documents", icon: FileText },
+    ]),
+    g("Administration", [
+      { href: "/infirmary/forms", label: "Forms", icon: ClipboardList },
+      { href: "/infirmary/analytics", label: "Analytics", icon: ChartNoAxesCombined },
+      { href: "/infirmary/settings", label: "Settings", icon: Settings },
+    ]),
+  ],
+};
+
 /**
  * IT administration. it_admin owns directory administration and nothing else today, so this
  * area is deliberately one entry rather than a copy of the registrar sidebar -- which is
@@ -351,6 +381,7 @@ export const PORTALS = {
   registrar: REGISTRAR_NAV,
   finance: FINANCE_NAV,
   comms: COMMS_NAV,
+  infirmary: INFIRMARY_NAV,
   it: IT_NAV,
 } as const;
 export type PortalKey = keyof typeof PORTALS;
@@ -554,6 +585,51 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "My Requests",
     crumb: "Submitted changes · Finance",
   },
+  // infirmary
+  "/infirmary": {
+    title: "Dashboard",
+    crumb: "Health center overview",
+  },
+  "/infirmary/consultations": {
+    title: "Consultations",
+    crumb: "Clinical visits · Infirmary",
+  },
+  "/infirmary/prescriptions": {
+    title: "Prescriptions",
+    crumb: "Medication orders · Infirmary",
+  },
+  "/infirmary/medications": {
+    title: "Medications",
+    crumb: "Inventory management · Infirmary",
+  },
+  "/infirmary/appointments": {
+    title: "Appointments",
+    crumb: "Scheduled visits · Infirmary",
+  },
+  "/infirmary/students": {
+    title: "Students",
+    crumb: "Student health records · Infirmary",
+  },
+  "/infirmary/follow-ups": {
+    title: "Follow-ups",
+    crumb: "Pending follow-up tasks · Infirmary",
+  },
+  "/infirmary/documents": {
+    title: "Documents",
+    crumb: "Medical documents · Infirmary",
+  },
+  "/infirmary/forms": {
+    title: "Forms",
+    crumb: "Health forms & questionnaires · Infirmary",
+  },
+  "/infirmary/analytics": {
+    title: "Analytics",
+    crumb: "Health center metrics · Infirmary",
+  },
+  "/infirmary/settings": {
+    title: "Settings",
+    crumb: "Clinic configuration · Infirmary",
+  },
 };
 
 /**
@@ -567,6 +643,7 @@ export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
     { role: "bursar", portal: "finance", home: "/finance" },
     { role: "faculty", portal: "faculty", home: "/faculty" },
     { role: "communications", portal: "comms", home: "/comms" },
+    { role: "infirmary", portal: "infirmary", home: "/infirmary" },
     { role: "it_admin", portal: "it", home: "/director/users" },
     { role: "student", portal: "student", home: "/student" },
     { role: "parent", portal: "parent", home: "/parent" },

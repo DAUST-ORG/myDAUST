@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, LogOut, Menu, Moon, Search, Sun } from "lucide-react";
+import { Bell, LogOut, Menu, Search } from "lucide-react";
 import {
   type Announcement,
   type Me,
@@ -39,6 +39,7 @@ const AREA_LINKS: { role: string; href: string; label: string }[] = [
   // endpoints 403 for it. hr has no area of its own and is deliberately absent rather than
   // pointed at one it cannot load.
   { role: "it_admin", href: "/director/users", label: "IT Administration" },
+  { role: "infirmary", href: "/infirmary", label: "Health Center" },
 ];
 
 const SEEN_KEY = "daust-announcements-seen";
@@ -60,7 +61,6 @@ export function Topbar({
   const [data, setData] = useState<SearchHit[]>([]);
   const [news, setNews] = useState<Announcement[]>([]);
   const [seenAt, setSeenAt] = useState<number>(0);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const dataLoaded = useRef(false);
@@ -71,17 +71,7 @@ export function Topbar({
     getCurrentTerm().then((t) => setTerm(t.name)).catch(() => {});
     getAnnouncements().then(setNews).catch(() => {});
     setSeenAt(Number(localStorage.getItem(SEEN_KEY) ?? 0));
-    const saved = (localStorage.getItem("daust-theme") as "light" | "dark") ?? "light";
-    setTheme(saved);
-    document.documentElement.dataset.theme = saved;
   }, []);
-
-  function toggleTheme() {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    localStorage.setItem("daust-theme", next);
-    document.documentElement.dataset.theme = next;
-  }
 
   // Role-scoped quick data, fetched once on first search focus.
   const loadSearchData = useCallback(async () => {
@@ -310,10 +300,6 @@ export function Topbar({
                 ))}
               </div>
             )}
-            <button onClick={toggleTheme} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "11px 16px", border: "none", borderBottom: "1px solid var(--divider)", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--fg1)" }}>
-              {theme === "dark" ? <Sun size={15} color="var(--daust-orange)" /> : <Moon size={15} color="var(--daust-navy)" />}
-              {theme === "dark" ? "Light mode" : "Dark mode"}
-            </button>
             <button onClick={signOut} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "11px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--danger, #c0392b)" }}>
               <LogOut size={15} /> Sign out
             </button>
