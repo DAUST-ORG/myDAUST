@@ -110,7 +110,20 @@ function SectionBlock({ label, accent, children }: { label: string; accent?: boo
 }
 
 export default function ConsultationsPage() {
-  const { store, addConsultation, updateConsultation, deleteConsultation } = useInfirmaryStore();
+  const { store, addConsultation, updateConsultation, deleteConsultation, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [form, setForm] = useState<Consultation>(emptyForm);
@@ -165,11 +178,15 @@ export default function ConsultationsPage() {
     setShowForm(true);
   }
 
-  function save() {
+  async function save() {
     if (!form.studentName.trim() || !form.reason.trim()) return;
-    if (editing) updateConsultation(editing, form);
-    else addConsultation(form);
-    setShowForm(false);
+    try {
+      if (editing) await updateConsultation(editing, form);
+      else await addConsultation(form);
+      setShowForm(false);
+    } catch (e: any) {
+      alert(e?.message ?? "Failed to save");
+    }
   }
 
   function pickStudent(id: string, name: string) {

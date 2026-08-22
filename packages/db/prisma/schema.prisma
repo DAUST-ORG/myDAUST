@@ -2591,11 +2591,13 @@ model Consultation {
   treatmentPlan   String?
   followUpRequired Boolean @default(false)
   visitedAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   prescriptions Prescription[]
 
   @@index([studentId])
   @@index([visitedAt])
+  @@index([clinicianId])
 }
 
 model Prescription {
@@ -2613,9 +2615,12 @@ model Prescription {
   instructions    String   @default("")
   status          String   @default("Active")
   prescribedAt    DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([studentId])
   @@index([prescribedAt])
+  @@index([consultationId])
+  @@index([authorId])
 }
 
 model Medication {
@@ -2629,8 +2634,10 @@ model Medication {
   supplier      String   @default("")
   lastRestocked DateTime @default(now())
   status        String   @default("In Stock")
+  updatedAt     DateTime @updatedAt
 
   @@index([name])
+  @@index([status])
 }
 
 model InfirmaryAppointment {
@@ -2644,9 +2651,11 @@ model InfirmaryAppointment {
   status      String   @default("Scheduled")
   notes       String   @default("")
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([studentId])
   @@index([date])
+  @@index([status])
 }
 
 model InfirmaryDocument {
@@ -2660,8 +2669,10 @@ model InfirmaryDocument {
   notes        String   @default("")
   url          String?
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([studentId])
+  @@index([uploaderId])
 }
 
 model FollowUp {
@@ -2674,9 +2685,11 @@ model FollowUp {
   priority    String   @default("Medium")
   notes       String   @default("")
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([studentId])
   @@index([dueDate])
+  @@index([status])
 }
 
 model InfirmaryForm {
@@ -2696,7 +2709,7 @@ model InfirmaryForm {
 model InfirmaryFormResponse {
   id           String   @id @default(uuid())
   formId       String
-  form         InfirmaryForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  form         InfirmaryForm @relation(fields: [formId], references: [id], onDelete: Restrict)
   studentId    String
   student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
   studentName  String

@@ -108,7 +108,7 @@ function mapConsultation(c: InfirmaryConsultation): Consultation {
       : "",
     time: c.time ?? "",
     followUpRequired: c.followUpRequired ?? false,
-    vitals: c.vitals as Consultation["vitals"],
+    vitals: (c as any).vitalsJson as Consultation["vitals"],
     diagnosis: c.diagnosis,
     treatmentPlan: c.treatmentPlan,
   };
@@ -262,6 +262,7 @@ function settingsToApi(s: Partial<AppSettings>): Record<string, unknown> {
 type StoreContextType = {
   store: AppStore;
   loading: boolean;
+  error: string | null;
   addStudent: (s: Student) => void;
   updateStudent: (id: string, data: Partial<Student>) => void;
   deleteStudent: (id: string) => void;
@@ -321,21 +322,23 @@ function emptyStore(): AppStore {
 export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<AppStore>(emptyStore);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Fetch all data from API on mount
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const [students, consultations, prescriptions, medications, appointments, documents, followUps, forms, settings] =
         await Promise.all([
-          getInfirmaryStudents().catch(() => []),
-          getInfirmaryConsultations().catch(() => []),
-          getInfirmaryPrescriptions().catch(() => []),
-          getInfirmaryMedications().catch(() => []),
-          getInfirmaryAppointments().catch(() => []),
-          getInfirmaryDocuments().catch(() => []),
-          getInfirmaryFollowUps().catch(() => []),
-          getInfirmaryForms().catch(() => []),
+          getInfirmaryStudents(),
+          getInfirmaryConsultations(),
+          getInfirmaryPrescriptions(),
+          getInfirmaryMedications(),
+          getInfirmaryAppointments(),
+          getInfirmaryDocuments(),
+          getInfirmaryFollowUps(),
+          getInfirmaryForms(),
           getInfirmarySettings().catch(() => ({} as Record<string, unknown>)),
         ]);
 
@@ -346,7 +349,7 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
           const resps = await getInfirmaryFormResponses(f.id);
           allResponses.push(...resps.map(mapFormResponse));
         } catch {
-          // ignore
+          // ignore individual form response failures
         }
       }
 
@@ -362,8 +365,8 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
         formResponses: allResponses,
         settings: mapSettings(settings as Record<string, unknown>),
       });
-    } catch {
-      // API unreachable — keep empty store
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load infirmary data. Please refresh the page.");
     } finally {
       setLoading(false);
     }
@@ -395,7 +398,7 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
       clinicalNotes: c.clinicalNotes,
       status: c.status,
       followUpRequired: c.followUpRequired,
-      vitals: c.vitals,
+      vitalsJson: c.vitals ?? undefined,
       diagnosis: c.diagnosis,
       treatmentPlan: c.treatmentPlan,
     } as any);
@@ -423,7 +426,6 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
       duration: p.duration,
       instructions: p.instructions,
       status: p.status,
-      prescribedBy: p.prescribedBy,
     } as any);
     fetchAll();
   }, [fetchAll]);
@@ -494,7 +496,6 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
       name: d.name,
       type: d.type,
       notes: d.notes,
-      uploadedBy: d.uploadedBy,
     } as any);
     fetchAll();
   }, [fetchAll]);
@@ -585,6 +586,7 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
       value={{
         store,
         loading,
+        error,
         addStudent,
         updateStudent,
         deleteStudent,

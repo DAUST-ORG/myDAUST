@@ -855,6 +855,13 @@ async function seedInfirmary() {
     return;
   }
 
+  // Check if already seeded (idempotent)
+  const existingMeds = await prisma.medication.count();
+  if (existingMeds > 0) {
+    console.log("Infirmary seed already present, skipping.");
+    return;
+  }
+
   // Medications
   const meds = [
     { name: "Paracetamol", category: "Analgesic", stock: 200, unit: "tablets", minStock: 50, expiryDate: new Date("2027-06-01"), supplier: "PharmaSen", status: "In Stock" },

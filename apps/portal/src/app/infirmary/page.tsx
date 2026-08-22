@@ -14,7 +14,20 @@ import { useInfirmaryStore } from "./store";
 import { Card, Stat } from "@/components/ui";
 
 export default function InfirmaryDashboard() {
-  const { store } = useInfirmaryStore();
+  const { store, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
   const today = new Date().toISOString().slice(0, 10);
 
   const activeStudents = store.students.filter(

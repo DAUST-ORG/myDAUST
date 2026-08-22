@@ -124,7 +124,20 @@ function StatCard({ icon, color, value, label }: { icon: ReactNode; color: strin
 }
 
 export default function PrescriptionsPage() {
-  const { store, addPrescription, updatePrescription, deletePrescription } = useInfirmaryStore();
+  const { store, addPrescription, updatePrescription, deletePrescription, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [form, setForm] = useState<Prescription>(EMPTY);
@@ -151,20 +164,24 @@ export default function PrescriptionsPage() {
 
   function openAdd() { setForm(EMPTY); setEditing(null); setShowForm(true); }
   function openEdit(p: Prescription) { setForm({ ...p }); setEditing(p.id); setShowForm(true); }
-  function save() {
+  async function save() {
     if (!canSave) return;
-    if (editing) updatePrescription(editing, form);
-    else {
-      const student = store.students.find((s) => s.name.toLowerCase() === form.studentName.trim().toLowerCase());
-      addPrescription({
-        ...form,
-        id: form.id || `RX-${String(store.prescriptions.length + 1).padStart(3, "0")}`,
-        studentId: student?.id ?? "",
-        studentName: form.studentName.trim(),
-        medication: form.medication.trim(),
-      });
+    try {
+      if (editing) await updatePrescription(editing, form);
+      else {
+        const student = store.students.find((s) => s.name.toLowerCase() === form.studentName.trim().toLowerCase());
+        await addPrescription({
+          ...form,
+          id: form.id || `RX-${String(store.prescriptions.length + 1).padStart(3, "0")}`,
+          studentId: student?.id ?? "",
+          studentName: form.studentName.trim(),
+          medication: form.medication.trim(),
+        });
+      }
+      setShowForm(false);
+    } catch (e: any) {
+      alert(e?.message ?? "Failed to save");
     }
-    setShowForm(false);
   }
 
   const thStyle: CSSProperties = { textAlign: "left", padding: "10px 14px", fontWeight: 600, color: "var(--fg3)", fontSize: 11.5, letterSpacing: ".04em", textTransform: "uppercase", whiteSpace: "nowrap" };

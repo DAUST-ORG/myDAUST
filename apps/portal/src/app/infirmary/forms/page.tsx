@@ -386,7 +386,19 @@ function QuestionComposer({
 // ---------- Page ----------
 
 export default function FormsPage() {
-  const { store, addForm, updateForm, deleteForm, deleteFormResponse } = useInfirmaryStore();
+  const { store, addForm, updateForm, deleteForm, deleteFormResponse, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
 
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
@@ -450,19 +462,23 @@ export default function FormsPage() {
     setEditingId(null);
   }
 
-  function saveEditor() {
+  async function saveEditor() {
     const name = draft.name.trim();
     if (!name) return;
     const payload = { name, description: draft.description.trim(), status: draft.status, questions: draft.questions };
-    if (editingId) {
-      updateForm(editingId, payload);
-      showToast("Form updated");
-    } else {
-      addForm({ ...payload, id: "", responses: 0, completion: 0, updated: "Just now" });
-      showToast("Form created");
+    try {
+      if (editingId) {
+        await updateForm(editingId, payload);
+        showToast("Form updated");
+      } else {
+        await addForm({ ...payload, id: "", responses: 0, completion: 0, updated: "Just now" });
+        showToast("Form created");
+      }
+      setEditorOpen(false);
+      setEditingId(null);
+    } catch (e: any) {
+      alert(e?.message ?? "Failed to save");
     }
-    setEditorOpen(false);
-    setEditingId(null);
   }
 
   function openDetail(f: FormRecord) {

@@ -40,6 +40,7 @@ const AREA_LINKS: { role: string; href: string; label: string }[] = [
   // endpoints 403 for it. hr has no area of its own and is deliberately absent rather than
   // pointed at one it cannot load.
   { role: "it_admin", href: "/director/users", label: "IT Administration" },
+  { role: "infirmary", href: "/infirmary", label: "Health Center" },
 ];
 
 const SEEN_KEY = "daust-announcements-seen";

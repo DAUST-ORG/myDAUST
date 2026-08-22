@@ -99,7 +99,20 @@ function countBy<T>(items: T[], key: (item: T) => string): [string, number][] {
 }
 
 export default function AnalyticsPage() {
-  const { store } = useInfirmaryStore();
+  const { store, loading, error } = useInfirmaryStore();
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
   const { students, consultations, prescriptions, medications, appointments, documents, followUps, formResponses, forms } = store;
 
   // ---------- Students ----------

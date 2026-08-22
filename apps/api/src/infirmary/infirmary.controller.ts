@@ -7,7 +7,26 @@ import {
   Patch,
   Post,
 } from "@nestjs/common";
+import {
+  CreateConsultationInput,
+  UpdateConsultationInput,
+  CreatePrescriptionInput,
+  UpdatePrescriptionInput,
+  CreateMedicationInput,
+  UpdateMedicationInput,
+  CreateAppointmentInput,
+  UpdateAppointmentInput,
+  CreateDocumentInput,
+  UpdateDocumentInput,
+  CreateFollowUpInput,
+  UpdateFollowUpInput,
+  CreateFormInput,
+  UpdateFormInput,
+  CreateFormResponseInput,
+  UpdateSettingsInput,
+} from "@mydaust/shared";
 import { Roles } from "../auth/decorators.js";
+import { CurrentUser, type AuthUser } from "../auth/current-user.js";
 import { InfirmaryService } from "./infirmary.service.js";
 
 @Controller("infirmary")
@@ -22,8 +41,8 @@ export class InfirmaryController {
   }
 
   @Patch("settings")
-  updateSettings(@Body() body: Record<string, unknown>) {
-    return this.svc.updateSettings(body);
+  updateSettings(@Body() body: unknown) {
+    return this.svc.updateSettings(UpdateSettingsInput.parse(body) as Record<string, unknown>);
   }
 
   // ─── Students ────────────────────────────────────────────────
@@ -39,21 +58,18 @@ export class InfirmaryController {
   }
 
   @Post("consultations")
-  createConsultation(@Body() body: Record<string, unknown>) {
-    return this.svc.createConsultation(body);
+  createConsultation(@Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.createConsultation(CreateConsultationInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Patch("consultations/:id")
-  updateConsultation(
-    @Param("id") id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.svc.updateConsultation(id, body);
+  updateConsultation(@Param("id") id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.updateConsultation(id, UpdateConsultationInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Delete("consultations/:id")
-  deleteConsultation(@Param("id") id: string) {
-    return this.svc.deleteConsultation(id);
+  deleteConsultation(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.deleteConsultation(id, user.personId);
   }
 
   // ─── Prescriptions ───────────────────────────────────────────
@@ -63,21 +79,18 @@ export class InfirmaryController {
   }
 
   @Post("prescriptions")
-  createPrescription(@Body() body: Record<string, unknown>) {
-    return this.svc.createPrescription(body);
+  createPrescription(@Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.createPrescription(CreatePrescriptionInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Patch("prescriptions/:id")
-  updatePrescription(
-    @Param("id") id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.svc.updatePrescription(id, body);
+  updatePrescription(@Param("id") id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.updatePrescription(id, UpdatePrescriptionInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Delete("prescriptions/:id")
-  deletePrescription(@Param("id") id: string) {
-    return this.svc.deletePrescription(id);
+  deletePrescription(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.deletePrescription(id, user.personId);
   }
 
   // ─── Medications ─────────────────────────────────────────────
@@ -87,21 +100,18 @@ export class InfirmaryController {
   }
 
   @Post("medications")
-  createMedication(@Body() body: Record<string, unknown>) {
-    return this.svc.createMedication(body);
+  createMedication(@Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.createMedication(CreateMedicationInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Patch("medications/:id")
-  updateMedication(
-    @Param("id") id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.svc.updateMedication(id, body);
+  updateMedication(@Param("id") id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.updateMedication(id, UpdateMedicationInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Delete("medications/:id")
-  deleteMedication(@Param("id") id: string) {
-    return this.svc.deleteMedication(id);
+  deleteMedication(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.deleteMedication(id, user.personId);
   }
 
   // ─── Appointments ────────────────────────────────────────────
@@ -111,21 +121,18 @@ export class InfirmaryController {
   }
 
   @Post("appointments")
-  createAppointment(@Body() body: Record<string, unknown>) {
-    return this.svc.createAppointment(body);
+  createAppointment(@Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.createAppointment(CreateAppointmentInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Patch("appointments/:id")
-  updateAppointment(
-    @Param("id") id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.svc.updateAppointment(id, body);
+  updateAppointment(@Param("id") id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.updateAppointment(id, UpdateAppointmentInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Delete("appointments/:id")
-  deleteAppointment(@Param("id") id: string) {
-    return this.svc.deleteAppointment(id);
+  deleteAppointment(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.deleteAppointment(id, user.personId);
   }
 
   // ─── Documents ───────────────────────────────────────────────
@@ -135,21 +142,18 @@ export class InfirmaryController {
   }
 
   @Post("documents")
-  createDocument(@Body() body: Record<string, unknown>) {
-    return this.svc.createDocument(body);
+  createDocument(@Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.createDocument(CreateDocumentInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Patch("documents/:id")
-  updateDocument(
-    @Param("id") id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.svc.updateDocument(id, body);
+  updateDocument(@Param("id") id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.updateDocument(id, UpdateDocumentInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Delete("documents/:id")
-  deleteDocument(@Param("id") id: string) {
-    return this.svc.deleteDocument(id);
+  deleteDocument(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.deleteDocument(id, user.personId);
   }
 
   // ─── Follow-ups ──────────────────────────────────────────────
@@ -159,21 +163,18 @@ export class InfirmaryController {
   }
 
   @Post("follow-ups")
-  createFollowUp(@Body() body: Record<string, unknown>) {
-    return this.svc.createFollowUp(body);
+  createFollowUp(@Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.createFollowUp(CreateFollowUpInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Patch("follow-ups/:id")
-  updateFollowUp(
-    @Param("id") id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.svc.updateFollowUp(id, body);
+  updateFollowUp(@Param("id") id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.updateFollowUp(id, UpdateFollowUpInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Delete("follow-ups/:id")
-  deleteFollowUp(@Param("id") id: string) {
-    return this.svc.deleteFollowUp(id);
+  deleteFollowUp(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.deleteFollowUp(id, user.personId);
   }
 
   // ─── Forms ───────────────────────────────────────────────────
@@ -188,21 +189,18 @@ export class InfirmaryController {
   }
 
   @Post("forms")
-  createForm(@Body() body: Record<string, unknown>) {
-    return this.svc.createForm(body);
+  createForm(@Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.createForm(CreateFormInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Patch("forms/:id")
-  updateForm(
-    @Param("id") id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.svc.updateForm(id, body);
+  updateForm(@Param("id") id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.updateForm(id, UpdateFormInput.parse(body) as Record<string, unknown>, user.personId);
   }
 
   @Delete("forms/:id")
-  deleteForm(@Param("id") id: string) {
-    return this.svc.deleteForm(id);
+  deleteForm(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.deleteForm(id, user.personId);
   }
 
   // ─── Form Responses ──────────────────────────────────────────
@@ -214,14 +212,16 @@ export class InfirmaryController {
   @Post("forms/:formId/responses")
   createFormResponse(
     @Param("formId") formId: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.svc.createFormResponse({ ...body, formId });
+    const parsed = CreateFormResponseInput.parse(body);
+    return this.svc.createFormResponse({ ...parsed, formId } as Record<string, unknown>, user.personId);
   }
 
   @Delete("responses/:id")
-  deleteFormResponse(@Param("id") id: string) {
-    return this.svc.deleteFormResponse(id);
+  deleteFormResponse(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.deleteFormResponse(id, user.personId);
   }
 
   // ─── Analytics ───────────────────────────────────────────────
