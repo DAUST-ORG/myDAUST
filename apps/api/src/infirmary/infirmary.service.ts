@@ -3,7 +3,11 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 /** Safe person select — never expose passwordHash, status, sessionVersion, or suspendedAt. */
-const SAFE_PERSON = { firstName: true, lastName: true, email: true } satisfies Prisma.PersonSelect;
+const SAFE_PERSON = {
+  firstName: true,
+  lastName: true,
+  email: true,
+} satisfies Prisma.PersonSelect;
 
 /** Student + person select used by list endpoints that return nested student info. */
 const STUDENT_WITH_PERSON = {
@@ -17,10 +21,22 @@ const STUDENT_WITH_PERSON = {
 export class InfirmaryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async audit(actorId: string, action: string, entity: string, entityId: string, data?: Record<string, unknown>) {
+  private async audit(
+    actorId: string,
+    action: string,
+    entity: string,
+    entityId: string,
+    data?: Record<string, unknown>,
+  ) {
     try {
       await this.prisma.auditLog.create({
-        data: { actorId, action, entity, entityId, data: (data as any) ?? undefined },
+        data: {
+          actorId,
+          action,
+          entity,
+          entityId,
+          data: (data as any) ?? undefined,
+        },
       });
     } catch {
       // Audit log failure should never crash the parent mutation
@@ -30,7 +46,10 @@ export class InfirmaryService {
   private handleDelete(e: unknown): never {
     const code = (e as any)?.code;
     if (code === "P2025") throw new NotFoundException("Record not found");
-    if (code === "P2003") throw new NotFoundException("Cannot delete: record is referenced by other data");
+    if (code === "P2003")
+      throw new NotFoundException(
+        "Cannot delete: record is referenced by other data",
+      );
     throw e;
   }
 
@@ -89,7 +108,17 @@ export class InfirmaryService {
   }
 
   async createConsultation(data: Record<string, unknown>, actorId: string) {
-    const { studentId, reason, visitType, clinicalNotes, status, followUpRequired, vitalsJson, diagnosis, treatmentPlan } = data as any;
+    const {
+      studentId,
+      reason,
+      visitType,
+      clinicalNotes,
+      status,
+      followUpRequired,
+      vitalsJson,
+      diagnosis,
+      treatmentPlan,
+    } = data as any;
     const created = await this.prisma.consultation.create({
       data: {
         studentId,
@@ -104,14 +133,29 @@ export class InfirmaryService {
         clinicianId: actorId,
       },
     });
-    await this.audit(actorId, "consultation.create", "Consultation", created.id, { studentId, reason });
+    await this.audit(
+      actorId,
+      "consultation.create",
+      "Consultation",
+      created.id,
+      { studentId, reason },
+    );
     return created;
   }
 
-  async updateConsultation(id: string, data: Record<string, unknown>, actorId: string) {
-    const existing = await this.prisma.consultation.findUnique({ where: { id } });
+  async updateConsultation(
+    id: string,
+    data: Record<string, unknown>,
+    actorId: string,
+  ) {
+    const existing = await this.prisma.consultation.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Consultation not found");
-    const updated = await this.prisma.consultation.update({ where: { id }, data: data as any });
+    const updated = await this.prisma.consultation.update({
+      where: { id },
+      data: data as any,
+    });
     await this.audit(actorId, "consultation.update", "Consultation", id, data);
     return updated;
   }
@@ -135,7 +179,16 @@ export class InfirmaryService {
   }
 
   async createPrescription(data: Record<string, unknown>, actorId: string) {
-    const { studentId, medication, dosage, frequency, duration, instructions, status, consultationId } = data as any;
+    const {
+      studentId,
+      medication,
+      dosage,
+      frequency,
+      duration,
+      instructions,
+      status,
+      consultationId,
+    } = data as any;
     const created = await this.prisma.prescription.create({
       data: {
         studentId,
@@ -149,14 +202,29 @@ export class InfirmaryService {
         authorId: actorId,
       },
     });
-    await this.audit(actorId, "prescription.create", "Prescription", created.id, { studentId, medication });
+    await this.audit(
+      actorId,
+      "prescription.create",
+      "Prescription",
+      created.id,
+      { studentId, medication },
+    );
     return created;
   }
 
-  async updatePrescription(id: string, data: Record<string, unknown>, actorId: string) {
-    const existing = await this.prisma.prescription.findUnique({ where: { id } });
+  async updatePrescription(
+    id: string,
+    data: Record<string, unknown>,
+    actorId: string,
+  ) {
+    const existing = await this.prisma.prescription.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Prescription not found");
-    const updated = await this.prisma.prescription.update({ where: { id }, data: data as any });
+    const updated = await this.prisma.prescription.update({
+      where: { id },
+      data: data as any,
+    });
     await this.audit(actorId, "prescription.update", "Prescription", id, data);
     return updated;
   }
@@ -172,24 +240,62 @@ export class InfirmaryService {
   }
 
   // ─── Medications ─────────────────────────────────────────────────────
+  private computeMedicationStatus(stock: number, minStock: number): string {
+    if (stock <= 0) return "Out of Stock";
+    if (stock < minStock) return "Low Stock";
+    return "In Stock";
+  }
+
+  private coerceNumber(value: unknown, fallback: number): number {
+    const n =
+      typeof value === "number"
+        ? value
+        : typeof value === "string"
+          ? Number(value)
+          : NaN;
+    return Number.isFinite(n) ? n : fallback;
+  }
+
   async listMedications() {
     return this.prisma.medication.findMany({ orderBy: { name: "asc" } });
   }
 
   async createMedication(data: Record<string, unknown>, actorId: string) {
-    const created = await this.prisma.medication.create({ data: data as any });
-    await this.audit(actorId, "medication.create", "Medication", created.id, { name: (data as any).name });
+    const stock = this.coerceNumber(data.stock, 0);
+    const minStock = this.coerceNumber(data.minStock, 10);
+    const status = this.computeMedicationStatus(stock, minStock);
+    const created = await this.prisma.medication.create({
+      data: { ...(data as Prisma.MedicationUncheckedCreateInput), status },
+    });
+    await this.audit(actorId, "medication.create", "Medication", created.id, {
+      name: data.name,
+    });
     return created;
   }
 
-  async updateMedication(id: string, data: Record<string, unknown>, actorId: string) {
+  async updateMedication(
+    id: string,
+    data: Record<string, unknown>,
+    actorId: string,
+  ) {
     const existing = await this.prisma.medication.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Medication not found");
-    const updated = await this.prisma.medication.update({ where: { id }, data: data as any });
+    const nextStock =
+      data.stock !== undefined
+        ? this.coerceNumber(data.stock, existing.stock)
+        : existing.stock;
+    const nextMinStock =
+      data.minStock !== undefined
+        ? this.coerceNumber(data.minStock, existing.minStock)
+        : existing.minStock;
+    const status = this.computeMedicationStatus(nextStock, nextMinStock);
+    const updated = await this.prisma.medication.update({
+      where: { id },
+      data: { ...(data as Prisma.MedicationUncheckedUpdateInput), status },
+    });
     await this.audit(actorId, "medication.update", "Medication", id, data);
     return updated;
   }
-
   async deleteMedication(id: string, actorId: string) {
     try {
       await this.prisma.medication.delete({ where: { id } });
@@ -209,16 +315,39 @@ export class InfirmaryService {
   }
 
   async createAppointment(data: Record<string, unknown>, actorId: string) {
-    const created = await this.prisma.infirmaryAppointment.create({ data: data as any });
-    await this.audit(actorId, "appointment.create", "InfirmaryAppointment", created.id, { studentId: (data as any).studentId });
+    const created = await this.prisma.infirmaryAppointment.create({
+      data: data as any,
+    });
+    await this.audit(
+      actorId,
+      "appointment.create",
+      "InfirmaryAppointment",
+      created.id,
+      { studentId: (data as any).studentId },
+    );
     return created;
   }
 
-  async updateAppointment(id: string, data: Record<string, unknown>, actorId: string) {
-    const existing = await this.prisma.infirmaryAppointment.findUnique({ where: { id } });
+  async updateAppointment(
+    id: string,
+    data: Record<string, unknown>,
+    actorId: string,
+  ) {
+    const existing = await this.prisma.infirmaryAppointment.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Appointment not found");
-    const updated = await this.prisma.infirmaryAppointment.update({ where: { id }, data: data as any });
-    await this.audit(actorId, "appointment.update", "InfirmaryAppointment", id, data);
+    const updated = await this.prisma.infirmaryAppointment.update({
+      where: { id },
+      data: data as any,
+    });
+    await this.audit(
+      actorId,
+      "appointment.update",
+      "InfirmaryAppointment",
+      id,
+      data,
+    );
     return updated;
   }
 
@@ -243,16 +372,37 @@ export class InfirmaryService {
   async createDocument(data: Record<string, unknown>, actorId: string) {
     const { studentId, name, type, notes } = data as any;
     const created = await this.prisma.infirmaryDocument.create({
-      data: { studentId, name, type: type ?? "Other", notes: notes ?? "", uploaderId: actorId },
+      data: {
+        studentId,
+        name,
+        type: type ?? "Other",
+        notes: notes ?? "",
+        uploaderId: actorId,
+      },
     });
-    await this.audit(actorId, "document.create", "InfirmaryDocument", created.id, { name });
+    await this.audit(
+      actorId,
+      "document.create",
+      "InfirmaryDocument",
+      created.id,
+      { name },
+    );
     return created;
   }
 
-  async updateDocument(id: string, data: Record<string, unknown>, actorId: string) {
-    const existing = await this.prisma.infirmaryDocument.findUnique({ where: { id } });
+  async updateDocument(
+    id: string,
+    data: Record<string, unknown>,
+    actorId: string,
+  ) {
+    const existing = await this.prisma.infirmaryDocument.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Document not found");
-    const updated = await this.prisma.infirmaryDocument.update({ where: { id }, data: data as any });
+    const updated = await this.prisma.infirmaryDocument.update({
+      where: { id },
+      data: data as any,
+    });
     await this.audit(actorId, "document.update", "InfirmaryDocument", id, data);
     return updated;
   }
@@ -277,14 +427,23 @@ export class InfirmaryService {
 
   async createFollowUp(data: Record<string, unknown>, actorId: string) {
     const created = await this.prisma.followUp.create({ data: data as any });
-    await this.audit(actorId, "followUp.create", "FollowUp", created.id, { studentId: (data as any).studentId });
+    await this.audit(actorId, "followUp.create", "FollowUp", created.id, {
+      studentId: (data as any).studentId,
+    });
     return created;
   }
 
-  async updateFollowUp(id: string, data: Record<string, unknown>, actorId: string) {
+  async updateFollowUp(
+    id: string,
+    data: Record<string, unknown>,
+    actorId: string,
+  ) {
     const existing = await this.prisma.followUp.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Follow-up not found");
-    const updated = await this.prisma.followUp.update({ where: { id }, data: data as any });
+    const updated = await this.prisma.followUp.update({
+      where: { id },
+      data: data as any,
+    });
     await this.audit(actorId, "followUp.update", "FollowUp", id, data);
     return updated;
   }
@@ -321,15 +480,24 @@ export class InfirmaryService {
   }
 
   async createForm(data: Record<string, unknown>, actorId: string) {
-    const created = await this.prisma.infirmaryForm.create({ data: data as any });
-    await this.audit(actorId, "form.create", "InfirmaryForm", created.id, { name: (data as any).name });
+    const created = await this.prisma.infirmaryForm.create({
+      data: data as any,
+    });
+    await this.audit(actorId, "form.create", "InfirmaryForm", created.id, {
+      name: (data as any).name,
+    });
     return created;
   }
 
   async updateForm(id: string, data: Record<string, unknown>, actorId: string) {
-    const existing = await this.prisma.infirmaryForm.findUnique({ where: { id } });
+    const existing = await this.prisma.infirmaryForm.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException("Form not found");
-    const updated = await this.prisma.infirmaryForm.update({ where: { id }, data: data as any });
+    const updated = await this.prisma.infirmaryForm.update({
+      where: { id },
+      data: data as any,
+    });
     await this.audit(actorId, "form.update", "InfirmaryForm", id, data);
     return updated;
   }
@@ -353,8 +521,16 @@ export class InfirmaryService {
   }
 
   async createFormResponse(data: Record<string, unknown>, actorId: string) {
-    const created = await this.prisma.infirmaryFormResponse.create({ data: data as any });
-    await this.audit(actorId, "formResponse.create", "InfirmaryFormResponse", created.id, { formId: (data as any).formId });
+    const created = await this.prisma.infirmaryFormResponse.create({
+      data: data as any,
+    });
+    await this.audit(
+      actorId,
+      "formResponse.create",
+      "InfirmaryFormResponse",
+      created.id,
+      { formId: (data as any).formId },
+    );
     return created;
   }
 
@@ -364,7 +540,12 @@ export class InfirmaryService {
     } catch (e) {
       this.handleDelete(e);
     }
-    await this.audit(actorId, "formResponse.delete", "InfirmaryFormResponse", id);
+    await this.audit(
+      actorId,
+      "formResponse.delete",
+      "InfirmaryFormResponse",
+      id,
+    );
     return { ok: true };
   }
 
@@ -387,18 +568,27 @@ export class InfirmaryService {
       documentsThisMonth,
     ] = await Promise.all([
       this.prisma.student.count({ where: { recordStatus: "active" } }),
-      this.prisma.consultation.count({ where: { visitedAt: { gte: startOfMonth } } }),
+      this.prisma.consultation.count({
+        where: { visitedAt: { gte: startOfMonth } },
+      }),
       this.prisma.consultation.count(),
       this.prisma.prescription.count({ where: { status: "Active" } }),
       this.prisma.medication.count(),
-      this.prisma.medication.count({ where: { status: { in: ["Low Stock", "Out of Stock"] } } }),
+      this.prisma.medication.count({
+        where: { status: { in: ["Low Stock", "Out of Stock"] } },
+      }),
       this.prisma.infirmaryAppointment.count({
-        where: { date: { gte: startOfMonth }, status: { in: ["Scheduled", "Checked In"] } },
+        where: {
+          date: { gte: startOfMonth },
+          status: { in: ["Scheduled", "Checked In"] },
+        },
       }),
       this.prisma.followUp.count({ where: { status: "Pending" } }),
       this.prisma.followUp.count({ where: { status: "Overdue" } }),
       this.prisma.infirmaryFormResponse.count(),
-      this.prisma.infirmaryDocument.count({ where: { createdAt: { gte: startOfMonth } } }),
+      this.prisma.infirmaryDocument.count({
+        where: { createdAt: { gte: startOfMonth } },
+      }),
     ]);
 
     // Monthly consultation trend (last 6 months)
@@ -446,7 +636,12 @@ export class InfirmaryService {
       year: s.yearLevel ? `Year ${s.yearLevel}` : "—",
       status: "Active",
       lastVisit: "Never",
-      allergies: s.allergies ? s.allergies.split(",").map((a: string) => a.trim()).filter(Boolean) : [],
+      allergies: s.allergies
+        ? s.allergies
+            .split(",")
+            .map((a: string) => a.trim())
+            .filter(Boolean)
+        : [],
       concern: "",
       email: s.person.email ?? "",
       phone: s.phone ?? "",
