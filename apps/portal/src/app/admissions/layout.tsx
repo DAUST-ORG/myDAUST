@@ -10,5 +10,5 @@ export default function AdmissionsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <PortalShell portal="admissions">{children}</PortalShell>;
+  return <PortalShell portal="admissions" requiresAnyRole={["admissions", "registrar", "admin"]}>{children}</PortalShell>;
 }
