@@ -77,6 +77,10 @@ function Switch({
 export default function SettingsPage() {
   const { store, updateSettings, loading, error } = useInfirmaryStore();
 
+
+  const [form, setForm] = useState<AppSettings>(() => ({ ...store.settings }));
+  const [saved, setSaved] = useState(false);
+
   if (loading) {
     return <div className="loading-state">Loading…</div>;
   }

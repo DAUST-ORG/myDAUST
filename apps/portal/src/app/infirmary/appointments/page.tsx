@@ -117,6 +117,15 @@ function SectionBlock({ label, children }: { label: string; children: ReactNode 
 export default function AppointmentsPage() {
   const { store, addAppointment, updateAppointment, deleteAppointment, loading, error } = useInfirmaryStore();
 
+
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [form, setForm] = useState<Appointment>(emptyForm);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
   if (loading) {
     return <div className="loading-state">Loading…</div>;
   }
@@ -129,13 +138,6 @@ export default function AppointmentsPage() {
     );
   }
 
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [form, setForm] = useState<Appointment>(emptyForm);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
 
   const appointments = store.appointments;
   const lowerQ = q.toLowerCase();

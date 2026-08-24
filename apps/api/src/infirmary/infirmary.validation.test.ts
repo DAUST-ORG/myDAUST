@@ -42,6 +42,11 @@ describe("Infirmary Zod schemas", () => {
   });
 
   describe("CreatePrescriptionInput", () => {
+    it("rejects a medication with no expiry date, rather than 500ing at the database", () => {
+      const result = CreateMedicationInput.safeParse({ name: "Paracetamol", stock: 100 });
+      expect(result.success).toBe(false);
+    });
+
     it("accepts valid prescription", () => {
       const result = CreatePrescriptionInput.safeParse({
         studentId: "s-1",
@@ -51,6 +56,21 @@ describe("Infirmary Zod schemas", () => {
         duration: "7 days",
       });
       expect(result.success).toBe(true);
+    });
+
+    it("treats an empty consultationId as no linked consultation", () => {
+      // The form sends "" when the prescription is not tied to a consultation; uuid().optional()
+      // rejected it, so every prescription created from the UI 400'd.
+      const result = CreatePrescriptionInput.safeParse({
+        studentId: "stu_1",
+        consultationId: "",
+        medication: "Amoxicillin",
+        dosage: "500mg",
+        frequency: "3x daily",
+        duration: "7 days",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.consultationId).toBeUndefined();
     });
 
     it("strips unknown fields (no mass assignment)", () => {
@@ -78,6 +98,7 @@ describe("Infirmary Zod schemas", () => {
       const result = CreateMedicationInput.safeParse({
         name: "Paracetamol",
         stock: 100,
+        expiryDate: "2027-01-01",
       });
       expect(result.success).toBe(true);
     });

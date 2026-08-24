@@ -107,6 +107,16 @@ function MetaTile({ label, children }: { label: string; children: ReactNode }) {
 export default function DocumentsPage() {
   const { store, addDocument, updateDocument, deleteDocument, loading, error } = useInfirmaryStore();
 
+
+  const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [form, setForm] = useState<MedicalDocument>(emptyForm);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
   if (loading) {
     return <div className="loading-state">Loading…</div>;
   }
@@ -119,14 +129,6 @@ export default function DocumentsPage() {
     );
   }
 
-  const [q, setQ] = useState("");
-  const [typeFilter, setTypeFilter] = useState("All");
-  const [form, setForm] = useState<MedicalDocument>(emptyForm);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
 
   const documents = store.documents;
   const lowerQ = q.toLowerCase();
