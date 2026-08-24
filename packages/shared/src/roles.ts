@@ -38,6 +38,7 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   hr: "HR",
   it_admin: "IT Admin",
   communications: "Communications",
+  infirmary: "Infirmary",
   admin: "Admin",
 };
 

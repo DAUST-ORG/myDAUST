@@ -53,6 +53,7 @@ const VIEW_AS_ALL: (ViewAsOption & { roles: string[] })[] = [
     href: "/admissions",
     roles: ["admissions", "admin"],
   },
+  {
     key: "it",
     label: "IT",
     href: "/director/users",

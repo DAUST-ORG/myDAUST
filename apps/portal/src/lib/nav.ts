@@ -362,6 +362,11 @@ export const ADMISSIONS_NAV: PortalNav = {
         icon: UserPlus,
         badgeKey: "admissions",
       },
+      ]),
+    ],
+};
+
+
 export const INFIRMARY_NAV: PortalNav = {
   label: "Health Center",
   meta: "Infirmary · Staff",
@@ -398,7 +403,7 @@ export const PORTALS = {
   finance: FINANCE_NAV,
   comms: COMMS_NAV,
   it: IT_NAV,
-admissions: ADMISSIONS_NAV,
+  admissions: ADMISSIONS_NAV,
   infirmary: INFIRMARY_NAV,
 } as const;
 export type PortalKey = keyof typeof PORTALS;
