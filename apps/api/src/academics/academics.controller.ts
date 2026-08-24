@@ -305,7 +305,8 @@ export class AcademicsController {
   }
 
   @Get("admin/programs")
-  @Roles("admin", "registrar")
+  // Read-only reference data: the applicant list and modal render programme names.
+  @Roles("admin", "registrar", "admissions")
   adminPrograms() {
     return this.academics.adminPrograms();
   }
@@ -377,7 +378,8 @@ export class AcademicsController {
   }
 
   @Get("admin/applicants")
-  @Roles("admin", "registrar")
+  // The only applicant list; without admissions here the officer's home screen never loads.
+  @Roles("admin", "registrar", "admissions")
   adminApplicants() {
     return this.academics.adminApplicants();
   }

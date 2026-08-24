@@ -58,6 +58,7 @@ export default function AdmissionsPage() {
   const { me } = useAuth();
   const isAdmin = me?.roles.includes("admin") ?? false;
   const [d, setD] = useState<Admissions | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [programOptions, setProgramOptions] = useState<ProgramOption[]>([]);
   const [q, setQ] = useState("");
   const [stageF, setStageF] = useState("all");
@@ -70,7 +71,11 @@ export default function AdmissionsPage() {
   const { sort, toggle, apply } = useSort({ key: "score", dir: "desc" });
 
   function load() {
-    getAdmissions().then(setD).catch(() => {});
+    // A swallowed failure here renders as a permanent "Loading…", which is indistinguishable
+    // from a slow network.
+    getAdmissions()
+      .then(setD)
+      .catch((e: Error) => setLoadErr(e.message));
   }
   useEffect(() => load(), []);
   useEffect(() => {
@@ -157,6 +162,8 @@ export default function AdmissionsPage() {
     });
   }, [d, q, queueF, stageF, apply]);
 
+  if (loadErr)
+    return <p className="card" style={{ color: "var(--danger)" }}>{loadErr}</p>;
   if (!d) return <p className="muted">Loading…</p>;
 
   return (
@@ -217,7 +224,7 @@ export default function AdmissionsPage() {
                 </thead>
                 <tbody>
                   {rows.map((a) => (
-                    <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/admin/admissions/${a.id}`)}>
+                    <tr key={a.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/admissions/${a.id}`)}>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <Avatar name={a.name} size={30} />
@@ -275,7 +282,7 @@ export default function AdmissionsPage() {
           mode="create"
           programs={programOptions}
           onClose={() => setAdding(false)}
-          onSaved={(id) => router.push(`/admin/admissions/${id}`)}
+          onSaved={(id) => router.push(`/admissions/${id}`)}
         />
       )}
       {pendingAcceptance && isAdmin && (

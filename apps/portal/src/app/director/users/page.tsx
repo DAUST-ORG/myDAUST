@@ -13,6 +13,7 @@ import {
   suspendManagedUser,
   updateUserRoles,
 } from "@/lib/api";
+import { APP_ROLES, type AppRole, ROLES_NEEDING_A_RECORD, ROLE_LABELS } from "@mydaust/shared";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   Badge,
@@ -29,32 +30,21 @@ import {
 } from "@/components/ui";
 import { CredentialsModal } from "./CredentialsModal";
 
-const ROLE_LABEL: Record<string, string> = {
-  student: "Student",
-  parent: "Parent",
-  faculty: "Faculty",
-  registrar: "Registrar",
-  bursar: "Bursar",
-  hr: "HR",
-  it_admin: "IT Admin",
-  communications: "Communications",
-  admin: "Admin",
-};
-
 /**
- * Roles this screen assigns. student and parent are absent on purpose: both need a backing
- * record the API refuses to invent, so they are granted by creating the student or linking
- * the guardian, not by ticking a box here.
+ * Derived from APP_ROLES rather than listed here, so a role added to the product cannot ship
+ * invisible to this screen -- which is exactly how hr and it_admin ended up grantable only by
+ * direct database access. ROLE_LABELS is typed Record<AppRole, string>, so a new role fails
+ * typecheck until it is named.
+ *
+ * student and parent are excluded because both need a backing record the API refuses to
+ * invent; that exclusion is the same constant the server enforces.
  */
-const ASSIGNABLE = [
-  "faculty",
-  "registrar",
-  "bursar",
-  "hr",
-  "it_admin",
-  "communications",
-  "admin",
-];
+const ASSIGNABLE: readonly string[] = APP_ROLES.filter(
+  (r) => !(r in ROLES_NEEDING_A_RECORD),
+);
+
+/** Roles arrive from the API as plain strings; fall back to the raw slug if one is unknown. */
+const roleLabel = (role: string): string => ROLE_LABELS[role as AppRole] ?? role;
 
 /**
  * Roles that grant API access but have no portal of their own yet, so the person lands
@@ -156,7 +146,7 @@ export default function UsersPage() {
             onChange={setRole}
             options={[
               { value: "", label: "All roles" },
-              ...Object.entries(ROLE_LABEL).map(([value, label]) => ({ value, label })),
+              ...Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label })),
             ]}
           />
           <Select
@@ -377,7 +367,7 @@ function RoleCell({ roles }: { roles: string[] }) {
     <span style={{ display: "inline-flex", gap: 5, flexWrap: "wrap" }}>
       {roles.map((r) => (
         <Badge key={r} tone="navy">
-          {ROLE_LABEL[r] ?? r}
+          {roleLabel(r)}
         </Badge>
       ))}
     </span>
@@ -447,7 +437,7 @@ function RolesModal({
         <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>{user.email}</p>
         {kept.length > 0 && (
           <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-            Also holds {kept.map((r) => ROLE_LABEL[r] ?? r).join(", ")}, which is granted by
+            Also holds {kept.map(roleLabel).join(", ")}, which is granted by
             their record rather than here.
           </p>
         )}
@@ -498,7 +488,7 @@ function RoleChecklist({
               disabled={locked}
               onChange={() => onToggle(r)}
             />
-            <span style={{ fontSize: 13.5, fontWeight: 600 }}>{ROLE_LABEL[r]}</span>
+            <span style={{ fontSize: 13.5, fontWeight: 600 }}>{roleLabel(r)}</span>
             {ROLE_HINT[r] && (
               <span className="muted" style={{ fontSize: 11.5 }}>{ROLE_HINT[r]}</span>
             )}
