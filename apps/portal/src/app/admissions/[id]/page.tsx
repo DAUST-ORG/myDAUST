@@ -35,6 +35,11 @@ export default function ApplicantDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { me } = useAuth();
   const isAdmin = me?.roles.includes("admin") ?? false;
+  // Rotating a payment link, resending a set-password invite and opening the student record
+  // are registrar work; the API refuses them for an admissions officer, so the buttons must
+  // not be offered either.
+  const canManageOnboarding =
+    (me?.roles.includes("admin") || me?.roles.includes("registrar")) ?? false;
   const [a, setA] = useState<ApplicantDetail | null>(null);
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState(false);
@@ -46,7 +51,12 @@ export default function ApplicantDetailPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    getApplicant(id).then(setA).catch(() => setA(null));
+    getApplicant(id)
+      .then(setA)
+      .catch((e: Error) => {
+        setA(null);
+        setErr(e.message);
+      });
   }, [id]);
   useEffect(() => load(), [load]);
   useEffect(() => {
@@ -120,7 +130,7 @@ export default function ApplicantDetailPage() {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
-        <Link href="/admin/admissions" style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--fg3)", fontWeight: 600, fontSize: 13.5 }}>
+        <Link href="/admissions" style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--fg3)", fontWeight: 600, fontSize: 13.5 }}>
           <ArrowLeft size={16} /> All applicants
         </Link>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -187,7 +197,7 @@ export default function ApplicantDetailPage() {
       </div>
 
       {a.stage === "accepted" && (
-        <EnrollmentPanel applicantId={a.id} onboarding={a.onboarding} issuedStatusUrl={issuedStatusUrl} canAccept={isAdmin} canCancel={isAdmin} onPrepare={() => setConfirmAcceptanceOpen(true)} onUpdated={updateOnboarding} onCancelled={onboardingCancelled} onError={setErr} />
+        <EnrollmentPanel applicantId={a.id} onboarding={a.onboarding} issuedStatusUrl={issuedStatusUrl} canAccept={isAdmin} canCancel={isAdmin} canManageOnboarding={canManageOnboarding} onPrepare={() => setConfirmAcceptanceOpen(true)} onUpdated={updateOnboarding} onCancelled={onboardingCancelled} onError={setErr} />
       )}
 
       <div style={{ marginTop: 22 }}>
@@ -310,6 +320,7 @@ function EnrollmentPanel({
   issuedStatusUrl,
   canAccept,
   canCancel,
+  canManageOnboarding,
   onPrepare,
   onUpdated,
   onCancelled,
@@ -320,6 +331,7 @@ function EnrollmentPanel({
   issuedStatusUrl: string | null;
   canAccept: boolean;
   canCancel: boolean;
+  canManageOnboarding: boolean;
   onPrepare: () => void;
   onUpdated: (next: ApplicantOnboardingView, message: string) => void;
   onCancelled: (next: ApplicantDetail) => void;
@@ -728,7 +740,7 @@ function EnrollmentPanel({
                 {busy === "resend" ? "Sending…" : "Resend acceptance email"}
               </button>
             )}
-            {paymentPending && (
+            {paymentPending && canManageOnboarding && (
               <button
                 type="button"
                 disabled={busy !== null}
@@ -744,7 +756,7 @@ function EnrollmentPanel({
                 <RefreshCw size={14} /> Replace payment and status links
               </button>
             )}
-            {enrolled && (
+            {enrolled && canManageOnboarding && (
               <button
                 type="button"
                 disabled={busy !== null}
@@ -762,7 +774,7 @@ function EnrollmentPanel({
                   : "Resend account setup"}
               </button>
             )}
-            {enrolled && onboarding.studentId && (
+            {enrolled && onboarding.studentId && canManageOnboarding && (
               <Link
                 href={`/admin/students/${onboarding.studentId}`}
                 style={{

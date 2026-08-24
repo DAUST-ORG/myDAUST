@@ -56,7 +56,15 @@ const CancelOnboardingInput = z.object({
 });
 
 @Controller("admissions")
-@Roles("admin", "registrar")
+/**
+ * `admissions` holds the applicant pipeline: intake, edits, and stage moves up to "offer".
+ *
+ * A METHOD-level @Roles REPLACES this list rather than intersecting it, so every narrower
+ * decorator below is deliberate and load-bearing -- accept, cancel, link rotation and invite
+ * resend all create identity, money or a working credential, and stay with admin/registrar.
+ * Adding a route here without thinking grants it to admissions by default.
+ */
+@Roles("admin", "registrar", "admissions")
 export class AdminAdmissionsController {
   constructor(private readonly admissions: AdmissionsService) {}
 
@@ -114,6 +122,8 @@ export class AdminAdmissionsController {
   }
 
   @Post("applicants/:id/onboarding-link/rotate")
+  // Mints a bearer payment link for the outstanding balance and cancels the previous one.
+  @Roles("admin", "registrar")
   rotateOnboardingLinks(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -133,6 +143,9 @@ export class AdminAdmissionsController {
   }
 
   @Post("applicants/:id/student-invite/resend")
+  // Returns a working set-password link to the caller, so it can set a new student's password
+  // before the student does. Same hazard class as the guardian-invite rule.
+  @Roles("admin", "registrar")
   resendStudentInvite(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.admissions.adminResendStudentInvite(user.personId, id);
   }

@@ -184,7 +184,7 @@ export const REGISTRAR_NAV: PortalNav = {
     g("Overview", [
       { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
       {
-        href: "/admin/admissions",
+        href: "/admissions",
         label: "Admissions",
         icon: UserPlus,
         badgeKey: "admissions",
@@ -342,6 +342,26 @@ export const IT_NAV: PortalNav = {
   ],
 };
 
+/**
+ * Admissions office. Deliberately a single entry: this role holds the applicant pipeline and
+ * nothing else, and every other staff endpoint 403s for it, so a second item would be a link
+ * to a permission error.
+ */
+export const ADMISSIONS_NAV: PortalNav = {
+  label: "Admissions Office",
+  meta: "Applicant pipeline · Admissions",
+  groups: [
+    g("Admissions", [
+      {
+        href: "/admissions",
+        label: "Applicants",
+        icon: UserPlus,
+        badgeKey: "admissions",
+      },
+    ]),
+  ],
+};
+
 /** Portal registry, keyed so a server layout can name one without importing icons. */
 export const PORTALS = {
   director: DIRECTOR_NAV,
@@ -352,6 +372,7 @@ export const PORTALS = {
   finance: FINANCE_NAV,
   comms: COMMS_NAV,
   it: IT_NAV,
+  admissions: ADMISSIONS_NAV,
 } as const;
 export type PortalKey = keyof typeof PORTALS;
 
@@ -366,6 +387,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/student/courses/": { title: "My Courses", crumb: "Course detail · {term}" },
   "/faculty/evaluations": { title: "Course evaluations", crumb: "What your students said" },
   "/director/evaluations": { title: "Course evaluations", crumb: "Rounds, results & release" },
+  "/admissions": {
+    title: "Applicants",
+    crumb: "Application pipeline · Admissions",
+  },
   "/director/users": {
     title: "Users",
     crumb: "Accounts, roles & access · Administration",
@@ -398,10 +423,6 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/admin": {
     title: "Dashboard",
     crumb: "Academic overview · {term} · Administration",
-  },
-  "/admin/admissions": {
-    title: "Admissions",
-    crumb: "{term} intake · Administration",
   },
   "/admin/students": {
     title: "Students",
@@ -564,6 +585,7 @@ export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
   [
     { role: "admin", portal: "director", home: "/director" },
     { role: "registrar", portal: "registrar", home: "/admin" },
+    { role: "admissions", portal: "admissions", home: "/admissions" },
     { role: "bursar", portal: "finance", home: "/finance" },
     { role: "faculty", portal: "faculty", home: "/faculty" },
     { role: "communications", portal: "comms", home: "/comms" },

@@ -6,5 +6,5 @@ import { PortalShell } from "@/components/PortalShell";
  * cannot read those endpoints anyway and the old sidebar produced 403s on load.
  */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  return <PortalShell portal="registrar">{children}</PortalShell>;
+  return <PortalShell portal="registrar" requiresAnyRole={["registrar", "admin"]}>{children}</PortalShell>;
 }

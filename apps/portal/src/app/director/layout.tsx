@@ -12,7 +12,7 @@ export default function DirectorLayout({
   children: React.ReactNode;
 }) {
   return (
-    <PortalShell portal="director" requiresRole="admin" fallbackPortal="it">
+    <PortalShell portal="director" requiresAnyRole={["admin"]}>
       {children}
     </PortalShell>
   );
