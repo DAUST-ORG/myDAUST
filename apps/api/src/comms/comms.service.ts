@@ -7,6 +7,14 @@ import {
 import { PrismaService } from "../prisma/prisma.service.js";
 import type { AuthUser } from "../auth/current-user.js";
 
+/**
+ * Roles that may see and message the whole directory. Deliberately an allowlist: the previous
+ * negative test ("not a student, not faculty") granted this to every role added later, and to
+ * parents. `admissions` and `communications` are absent on purpose -- neither has a reason to
+ * reach the student body, and communications is documented as having no SIS data access.
+ */
+const SCHOOL_WIDE_CONTACT_ROLES = ["registrar", "bursar", "hr", "it_admin", "admin"];
+
 @Injectable()
 export class CommsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -16,7 +24,7 @@ export class CommsService {
     const audiences = new Set<string>(["all"]);
     if (user.roles.includes("student")) audiences.add("student");
     if (user.roles.includes("faculty")) audiences.add("faculty");
-    if (user.roles.some((r) => r !== "student" && r !== "faculty"))
+    if (user.roles.some((r) => SCHOOL_WIDE_CONTACT_ROLES.includes(r)))
       audiences.add("staff");
 
     return this.prisma.announcement.findMany({
@@ -391,8 +399,30 @@ export class CommsService {
     });
     for (const s of staff) ids.add(s.id);
 
-    // Staff/admin requesters can reach anyone with a role.
-    if (me.roles.some((r) => !["student", "faculty"].includes(r))) {
+    // A guardian reaches the people teaching their own children, and nothing else.
+    if (me.roles.includes("parent")) {
+      const links = await this.prisma.guardianStudent.findMany({
+        where: { guardianId: personId },
+        select: { studentId: true },
+      });
+      if (links.length > 0) {
+        const enrollments = await this.prisma.enrollment.findMany({
+          where: {
+            studentId: { in: links.map((l) => l.studentId) },
+            status: { in: ["enrolled", "completed"] },
+          },
+          include: { section: { select: { instructorId: true } } },
+        });
+        for (const e of enrollments)
+          if (e.section.instructorId) ids.add(e.section.instructorId);
+      }
+    }
+
+    // School-wide reach is an allowlist. It used to be "anyone who is not a student or a
+    // faculty member", which is a negative test: it enrolled every role added afterwards,
+    // and it gave PARENTS the entire directory -- every student in the school, and
+    // startThread gates on exactly this list, so every one of them was messageable.
+    if (me.roles.some((r) => SCHOOL_WIDE_CONTACT_ROLES.includes(r))) {
       const all = await this.prisma.person.findMany({
         where: { roles: { isEmpty: false } },
         select: { id: true },
