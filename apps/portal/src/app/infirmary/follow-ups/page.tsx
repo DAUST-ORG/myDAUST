@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { Plus, Pencil, Trash2, X, Eye, CheckCircle2, AlarmClock } from "lucide-react";
+import { Plus, Pencil, Trash2, Eye, CheckCircle2, AlarmClock } from "lucide-react";
 import { useInfirmaryStore } from "../store";
 import type { FollowUp } from "../types";
-import { Card, SearchInput, Badge, type BadgeTone } from "@/components/ui";
+import { Card, SearchInput, Badge, type BadgeTone, Modal } from "@/components/ui";
 
 const STATUSES: FollowUp["status"][] = ["Pending", "Completed", "Overdue", "Cancelled"];
 const PRIORITIES: FollowUp["priority"][] = ["High", "Medium", "Low"];
@@ -63,17 +63,6 @@ const boxStyle: CSSProperties = {
   borderRadius: "var(--radius-md)", fontSize: 13.5, lineHeight: 1.6, whiteSpace: "pre-wrap",
 };
 
-const overlayStyle: CSSProperties = {
-  position: "fixed", inset: 0, background: "rgba(15,23,42,.45)", zIndex: 1000,
-  display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-};
-
-const modalStyle: CSSProperties = {
-  background: "var(--surface)", borderRadius: "var(--radius-lg)", width: "100%",
-  maxWidth: "90vw", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,.22)",
-};
-
-const closeBtnStyle: CSSProperties = { border: "none", background: "none", cursor: "pointer", color: "var(--fg3)", padding: 4 };
 
 const primaryBtnStyle: CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 18px",
@@ -310,158 +299,152 @@ export default function FollowUpsPage() {
         </div>
       </Card>
 
-      {detail && (
-        <div onClick={() => setDetailId(null)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...modalStyle, maxWidth: 540 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "20px 22px 16px", borderBottom: "1px solid var(--divider)" }}>
-              <div>
-                <p className="eyebrow" style={{ margin: 0 }}>Follow-up {detail.id}</p>
-                <h2 style={{ margin: "3px 0 0", fontSize: 18, fontWeight: 800 }}>{detail.studentName}</h2>
-                <p className="muted" style={{ margin: "3px 0 0", fontSize: 13 }}>Created {detail.createdAt}</p>
-              </div>
-              <button onClick={() => setDetailId(null)} aria-label="Close" style={closeBtnStyle}><X size={18} /></button>
+      <Modal
+        open={detail !== null}
+        onClose={() => setDetailId(null)}
+        title={
+          detail ? (
+            <>
+              <p className="eyebrow" style={{ margin: 0 }}>Follow-up {detail.id}</p>
+              <span style={{ display: "block", marginTop: 3, fontSize: 18, fontWeight: 800 }}>{detail.studentName}</span>
+              <span className="muted" style={{ display: "block", marginTop: 3, fontSize: 13 }}>Created {detail.createdAt}</span>
+            </>
+          ) : null
+        }
+        width={540}
+        footer={
+          detail ? (
+            <>
+              {detail.status !== "Completed" ? (
+                <button onClick={() => updateFollowUp(detail.id, { status: "Completed" })} style={successBtnStyle}>
+                  <CheckCircle2 size={15} /> Mark Complete
+                </button>
+              ) : (
+                <button onClick={() => updateFollowUp(detail.id, { status: "Pending" })} style={{ ...successBtnStyle, background: "var(--surface)", color: "var(--success-500)", border: "1px solid var(--success-500)" }}>
+                  Reopen Task
+                </button>
+              )}
+              <button onClick={() => openEdit(detail)} style={navyBtnStyle}>Edit</button>
+            </>
+          ) : null
+        }
+      >
+        {detail && (
+          <>
+            <MetaTile label="Reason">{detail.reason}</MetaTile>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginTop: 16 }}>
+              <MetaTile label="Status"><Badge tone={statusTone(detail.status)}>{detail.status}</Badge></MetaTile>
+              <MetaTile label="Priority"><Badge tone={priorityTone(detail.priority)}>{detail.priority}</Badge></MetaTile>
+              <MetaTile label="Due Date">
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: isPastDue(detail) ? "var(--danger-500)" : undefined, fontWeight: isPastDue(detail) ? 700 : undefined }}>
+                  {isPastDue(detail) && <AlarmClock size={13} />}
+                  {detail.dueDate}
+                </span>
+              </MetaTile>
+              <MetaTile label="Student ID">{detail.studentId || "—"}</MetaTile>
             </div>
-
-            <div style={{ padding: "18px 22px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-              <MetaTile label="Reason">{detail.reason}</MetaTile>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                <MetaTile label="Status"><Badge tone={statusTone(detail.status)}>{detail.status}</Badge></MetaTile>
-                <MetaTile label="Priority"><Badge tone={priorityTone(detail.priority)}>{detail.priority}</Badge></MetaTile>
-                <MetaTile label="Due Date">
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: isPastDue(detail) ? "var(--danger-500)" : undefined, fontWeight: isPastDue(detail) ? 700 : undefined }}>
-                    {isPastDue(detail) && <AlarmClock size={13} />}
-                    {detail.dueDate}
-                  </span>
-                </MetaTile>
-                <MetaTile label="Student ID">{detail.studentId || "—"}</MetaTile>
+            <div style={{ marginTop: 16 }}>
+              <div style={sectionLabelStyle}>Notes</div>
+              <div style={boxStyle}>{detail.notes || "No notes recorded."}</div>
+            </div>
+            {isPastDue(detail) && (
+              <div style={{ background: "#fbe6e3", border: "1px solid var(--danger-500)", color: "var(--danger-500)", borderRadius: "var(--radius-md)", padding: "9px 12px", fontSize: 12.5, fontWeight: 600 }}>
+                This task is past its due date — complete it as soon as possible.
               </div>
+            )}
+          </>
+        )}
+      </Modal>
 
-              <div>
-                <div style={sectionLabelStyle}>Notes</div>
-                <div style={boxStyle}>{detail.notes || "No notes recorded."}</div>
-              </div>
-
-              {isPastDue(detail) && (
-                <div style={{ background: "#fbe6e3", border: "1px solid var(--danger-500)", color: "var(--danger-500)", borderRadius: "var(--radius-md)", padding: "9px 12px", fontSize: 12.5, fontWeight: 600 }}>
-                  This task is past its due date — complete it as soon as possible.
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editing ? `Edit Follow-up ${editing}` : "New Follow-up"}
+        width={520}
+        footer={
+          <>
+            <button onClick={() => setShowForm(false)} style={ghostBtnStyle}>Cancel</button>
+            <button
+              onClick={save}
+              disabled={!form.studentName.trim() || !form.reason.trim()}
+              style={{ ...navyBtnStyle, opacity: !form.studentName.trim() || !form.reason.trim() ? 0.5 : 1 }}
+            >
+              {editing ? "Save Changes" : "Create Follow-up"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <label style={labelStyle}>
+            Student Name
+            <div style={{ position: "relative" }}>
+              <input
+                value={form.studentName}
+                placeholder="Start typing a student name..."
+                onChange={(e) => {
+                  setField("studentName", e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
+                style={fieldStyle}
+              />
+              {showSuggestions && suggestions.length > 0 && (
+                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, marginTop: 4, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden", boxShadow: "0 8px 24px rgba(0,0,0,.14)" }}>
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => pickStudent(s.id, s.name)}
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", borderBottom: "1px solid var(--divider)", background: "transparent", fontSize: 13, color: "var(--fg1)", cursor: "pointer" }}
+                    >
+                      <strong style={{ fontWeight: 600 }}>{s.name}</strong>
+                      <span style={{ color: "var(--fg3)", marginLeft: 8, fontSize: 12 }}>{s.program}</span>
+                    </button>
+                  ))}
                 </div>
               )}
-
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
-                {detail.status !== "Completed" ? (
-                  <button onClick={() => updateFollowUp(detail.id, { status: "Completed" })} style={successBtnStyle}>
-                    <CheckCircle2 size={15} /> Mark Complete
-                  </button>
-                ) : (
-                  <button onClick={() => updateFollowUp(detail.id, { status: "Pending" })} style={{ ...successBtnStyle, background: "var(--surface)", color: "var(--success-500)", border: "1px solid var(--success-500)" }}>
-                    Reopen Task
-                  </button>
-                )}
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setDetailId(null)} style={ghostBtnStyle}>Close</button>
-                  <button onClick={() => openEdit(detail)} style={navyBtnStyle}>Edit</button>
-                </div>
-              </div>
             </div>
+          </label>
+
+          <label style={labelStyle}>
+            Reason
+            <input value={form.reason} onChange={(e) => setField("reason", e.target.value)} placeholder="What needs to be followed up?" style={fieldStyle} />
+          </label>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Due Date
+              <input type="date" value={form.dueDate} onChange={(e) => setField("dueDate", e.target.value)} style={fieldStyle} />
+            </label>
+            <label style={labelStyle}>
+              Priority
+              <select value={form.priority} onChange={(e) => setField("priority", e.target.value as FollowUp["priority"])} style={fieldStyle}>
+                {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+              </select>
+            </label>
           </div>
+
+          <label style={labelStyle}>
+            Status
+            <select value={form.status} onChange={(e) => setField("status", e.target.value as FollowUp["status"])} style={fieldStyle}>
+              {STATUSES.map((s) => <option key={s}>{s}</option>)}
+            </select>
+          </label>
+
+          <label style={labelStyle}>
+            Notes
+            <textarea
+              value={form.notes}
+              onChange={(e) => setField("notes", e.target.value)}
+              rows={3}
+              placeholder="Context, expected outcome..."
+              style={{ ...fieldStyle, resize: "vertical" }}
+            />
+          </label>
         </div>
-      )}
-
-      {showForm && (
-        <div onClick={() => setShowForm(false)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...modalStyle, maxWidth: 520 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 22px 16px", borderBottom: "1px solid var(--divider)" }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>
-                {editing ? `Edit Follow-up ${editing}` : "New Follow-up"}
-              </h2>
-              <button onClick={() => setShowForm(false)} aria-label="Close" style={closeBtnStyle}><X size={18} /></button>
-            </div>
-
-            <div style={{ padding: "18px 22px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-              <label style={labelStyle}>
-                Student Name
-                <div style={{ position: "relative" }}>
-                  <input
-                    value={form.studentName}
-                    placeholder="Start typing a student name..."
-                    onChange={(e) => {
-                      setField("studentName", e.target.value);
-                      setShowSuggestions(true);
-                    }}
-                    onFocus={() => setShowSuggestions(true)}
-                    onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
-                    style={fieldStyle}
-                  />
-                  {showSuggestions && suggestions.length > 0 && (
-                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, marginTop: 4, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden", boxShadow: "0 8px 24px rgba(0,0,0,.14)" }}>
-                      {suggestions.map((s) => (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => pickStudent(s.id, s.name)}
-                          style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", borderBottom: "1px solid var(--divider)", background: "transparent", fontSize: 13, color: "var(--fg1)", cursor: "pointer" }}
-                        >
-                          <strong style={{ fontWeight: 600 }}>{s.name}</strong>
-                          <span style={{ color: "var(--fg3)", marginLeft: 8, fontSize: 12 }}>{s.program}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </label>
-
-              <label style={labelStyle}>
-                Reason
-                <input value={form.reason} onChange={(e) => setField("reason", e.target.value)} placeholder="What needs to be followed up?" style={fieldStyle} />
-              </label>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Due Date
-                  <input type="date" value={form.dueDate} onChange={(e) => setField("dueDate", e.target.value)} style={fieldStyle} />
-                </label>
-                <label style={labelStyle}>
-                  Priority
-                  <select value={form.priority} onChange={(e) => setField("priority", e.target.value as FollowUp["priority"])} style={fieldStyle}>
-                    {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
-                  </select>
-                </label>
-              </div>
-
-              <label style={labelStyle}>
-                Status
-                <select value={form.status} onChange={(e) => setField("status", e.target.value as FollowUp["status"])} style={fieldStyle}>
-                  {STATUSES.map((s) => <option key={s}>{s}</option>)}
-                </select>
-              </label>
-
-              <label style={labelStyle}>
-                Notes
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setField("notes", e.target.value)}
-                  rows={3}
-                  placeholder="Context, expected outcome..."
-                  style={{ ...fieldStyle, resize: "vertical" }}
-                />
-              </label>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6, paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
-                <button onClick={() => setShowForm(false)} style={ghostBtnStyle}>Cancel</button>
-                <button
-                  onClick={save}
-                  disabled={!form.studentName.trim() || !form.reason.trim()}
-                  style={{ ...navyBtnStyle, opacity: !form.studentName.trim() || !form.reason.trim() ? 0.5 : 1 }}
-                >
-                  {editing ? "Save Changes" : "Create Follow-up"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </Modal>
     </>
   );
 }

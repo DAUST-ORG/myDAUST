@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { Plus, Pencil, Trash2, X, Eye, Package } from "lucide-react";
+import { Plus, Pencil, Trash2, Eye, Package } from "lucide-react";
 import { useInfirmaryStore } from "../store";
 import type { Medication } from "../types";
-import { Card, SearchInput, Badge, type BadgeTone } from "@/components/ui";
+import { Card, SearchInput, Badge, type BadgeTone, Modal } from "@/components/ui";
 
 function emptyForm(): Medication {
   return {
@@ -64,17 +64,6 @@ const boxStyle: CSSProperties = {
   borderRadius: "var(--radius-md)", fontSize: 13.5, lineHeight: 1.6,
 };
 
-const overlayStyle: CSSProperties = {
-  position: "fixed", inset: 0, background: "rgba(15,23,42,.45)", zIndex: 1000,
-  display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-};
-
-const modalStyle: CSSProperties = {
-  background: "var(--surface)", borderRadius: "var(--radius-lg)", width: "100%",
-  maxWidth: "90vw", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,.22)",
-};
-
-const closeBtnStyle: CSSProperties = { border: "none", background: "none", cursor: "pointer", color: "var(--fg3)", padding: 4 };
 
 const primaryBtnStyle: CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 18px",
@@ -329,134 +318,134 @@ export default function MedicationsPage() {
         </div>
       </Card>
 
-      {detail && (
-        <div onClick={() => setDetailId(null)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...modalStyle, maxWidth: 540 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "20px 22px 16px", borderBottom: "1px solid var(--divider)" }}>
-              <div>
-                <p className="eyebrow" style={{ margin: 0 }}>Medication {detail.id}</p>
-                <h2 style={{ margin: "3px 0 0", fontSize: 18, fontWeight: 800 }}>{detail.name}</h2>
-                <p className="muted" style={{ margin: "3px 0 0", fontSize: 13 }}>{detail.category}</p>
-              </div>
-              <button onClick={() => setDetailId(null)} aria-label="Close" style={closeBtnStyle}><X size={18} /></button>
-            </div>
-
-            <div style={{ padding: "18px 22px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-              <div>
-                <div style={sectionLabelStyle}>Stock Level</div>
-                <div style={boxStyle}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                    <StockBar m={detail} height={10} width={150} />
-                    <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                      {detail.stock} {detail.unit}
-                    </span>
-                    <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--fg3)" }}>Minimum: {detail.minStock} {detail.unit}</span>
-                  </div>
-                  <div style={{ marginTop: 8, fontSize: 12.5, color: statusColor(detail.status), fontWeight: 600 }}>
-                    {detail.status === "In Stock" && "Healthy supply — well above the minimum threshold."}
-                    {detail.status === "Low Stock" && "Running low — consider reordering soon."}
-                    {detail.status === "Out of Stock" && "No units remaining — reorder immediately."}
-                    {detail.status === "Expired" && "Batch expired — remove from inventory and dispose safely."}
-                  </div>
+      <Modal
+        open={detail !== null}
+        onClose={() => setDetailId(null)}
+        title={
+          detail ? (
+            <>
+              <p className="eyebrow" style={{ margin: 0 }}>Medication {detail.id}</p>
+              <span style={{ display: "block", marginTop: 3, fontSize: 18, fontWeight: 800 }}>{detail.name}</span>
+              <span className="muted" style={{ display: "block", marginTop: 3, fontSize: 13 }}>{detail.category}</span>
+            </>
+          ) : null
+        }
+        width={540}
+        footer={
+          detail ? (
+            <>
+              <button onClick={() => setDetailId(null)} style={ghostBtnStyle}>Close</button>
+              <button onClick={() => openEdit(detail)} style={navyBtnStyle}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Pencil size={13} /> Edit</span>
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {detail && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <div style={sectionLabelStyle}>Stock Level</div>
+              <div style={boxStyle}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <StockBar m={detail} height={10} width={150} />
+                  <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                    {detail.stock} {detail.unit}
+                  </span>
+                  <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--fg3)" }}>Minimum: {detail.minStock} {detail.unit}</span>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12.5, color: statusColor(detail.status), fontWeight: 600 }}>
+                  {detail.status === "In Stock" && "Healthy supply — well above the minimum threshold."}
+                  {detail.status === "Low Stock" && "Running low — consider reordering soon."}
+                  {detail.status === "Out of Stock" && "No units remaining — reorder immediately."}
+                  {detail.status === "Expired" && "Batch expired — remove from inventory and dispose safely."}
                 </div>
               </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
-                <MetaTile label="Category">{detail.category}</MetaTile>
-                <MetaTile label="Unit">{detail.unit}</MetaTile>
-                <MetaTile label="Last Restocked">{detail.lastRestocked}</MetaTile>
-                <MetaTile label="Status"><Badge tone={statusTone(detail.status)}>{detail.status}</Badge></MetaTile>
-              </div>
-
-              <SectionBlock label="Supplier">{detail.supplier || "No supplier recorded."}</SectionBlock>
-
-              <SectionBlock label="Expiry" accent={detailDays <= 30}>
-                {detailDays < 0
-                  ? `Expired ${Math.abs(detailDays)} day(s) ago on ${detail.expiryDate}. Remove from shelves and dispose safely.`
-                  : detailDays <= 30
-                    ? `Expires in ${detailDays} day(s) on ${detail.expiryDate}. Plan a reorder and use this batch first.`
-                    : `Expires on ${detail.expiryDate}, ${detailDays} days from now.`}
-              </SectionBlock>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
-                <button onClick={() => setDetailId(null)} style={ghostBtnStyle}>Close</button>
-                <button onClick={() => openEdit(detail)} style={navyBtnStyle}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Pencil size={13} /> Edit</span>
-                </button>
-              </div>
             </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 16 }}>
+              <MetaTile label="Category">{detail.category}</MetaTile>
+              <MetaTile label="Unit">{detail.unit}</MetaTile>
+              <MetaTile label="Last Restocked">{detail.lastRestocked}</MetaTile>
+              <MetaTile label="Status"><Badge tone={statusTone(detail.status)}>{detail.status}</Badge></MetaTile>
+            </div>
+
+            <SectionBlock label="Supplier">{detail.supplier || "No supplier recorded."}</SectionBlock>
+
+            <SectionBlock label="Expiry" accent={detailDays <= 30}>
+              {detailDays < 0
+                ? `Expired ${Math.abs(detailDays)} day(s) ago on ${detail.expiryDate}. Remove from shelves and dispose safely.`
+                : detailDays <= 30
+                  ? `Expires in ${detailDays} day(s) on ${detail.expiryDate}. Plan a reorder and use this batch first.`
+                  : `Expires on ${detail.expiryDate}, ${detailDays} days from now.`}
+            </SectionBlock>
+          </>
+        )}
+      </Modal>
+
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editing ? `Edit Medication ${editing}` : "Add Medication"}
+        width={520}
+        footer={
+          <>
+            <button onClick={() => setShowForm(false)} style={ghostBtnStyle}>Cancel</button>
+            <button onClick={save} disabled={!form.name.trim()} style={{ ...navyBtnStyle, opacity: form.name.trim() ? 1 : 0.5 }}>
+              {editing ? "Save Changes" : "Add Medication"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <label style={labelStyle}>
+            Medication Name
+            <input value={form.name} onChange={(e) => setField("name", e.target.value)} placeholder="e.g. Amoxicillin 500mg" style={fieldStyle} />
+          </label>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Category
+              <input value={form.category} onChange={(e) => setField("category", e.target.value)} placeholder="e.g. Antibiotics" style={fieldStyle} />
+            </label>
+            <label style={labelStyle}>
+              Unit
+              <input value={form.unit} onChange={(e) => setField("unit", e.target.value)} placeholder="tablets, capsules, tubes..." style={fieldStyle} />
+            </label>
           </div>
-        </div>
-      )}
 
-      {showForm && (
-        <div onClick={() => setShowForm(false)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...modalStyle, maxWidth: 520 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 22px 16px", borderBottom: "1px solid var(--divider)" }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>
-                {editing ? `Edit Medication ${editing}` : "Add Medication"}
-              </h2>
-              <button onClick={() => setShowForm(false)} aria-label="Close" style={closeBtnStyle}><X size={18} /></button>
-            </div>
-
-            <div style={{ padding: "18px 22px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-              <label style={labelStyle}>
-                Medication Name
-                <input value={form.name} onChange={(e) => setField("name", e.target.value)} placeholder="e.g. Amoxicillin 500mg" style={fieldStyle} />
-              </label>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Category
-                  <input value={form.category} onChange={(e) => setField("category", e.target.value)} placeholder="e.g. Antibiotics" style={fieldStyle} />
-                </label>
-                <label style={labelStyle}>
-                  Unit
-                  <input value={form.unit} onChange={(e) => setField("unit", e.target.value)} placeholder="tablets, capsules, tubes..." style={fieldStyle} />
-                </label>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Current Stock
-                  <input type="number" min={0} value={form.stock} onChange={(e) => setField("stock", e.target.value === "" ? 0 : Number(e.target.value))} style={fieldStyle} />
-                </label>
-                <label style={labelStyle}>
-                  Minimum Stock
-                  <input type="number" min={0} value={form.minStock} onChange={(e) => setField("minStock", e.target.value === "" ? 0 : Number(e.target.value))} style={fieldStyle} />
-                </label>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Expiry Date
-                  <input type="date" value={form.expiryDate} onChange={(e) => setField("expiryDate", e.target.value)} style={fieldStyle} />
-                </label>
-                <label style={labelStyle}>
-                  Last Restocked
-                  <input type="date" value={form.lastRestocked} onChange={(e) => setField("lastRestocked", e.target.value)} style={fieldStyle} />
-                </label>
-              </div>
-
-              <label style={labelStyle}>
-                Supplier
-                <input value={form.supplier} onChange={(e) => setField("supplier", e.target.value)} placeholder="e.g. PharmaDakar" style={fieldStyle} />
-              </label>
-
-              <p style={{ margin: 0, fontSize: 12, color: "var(--fg3)", background: "var(--bg-subtle)", border: "1px solid var(--divider)", borderRadius: "var(--radius-md)", padding: "8px 12px" }}>
-                Status is calculated automatically from stock level, minimum threshold and expiry date.
-              </p>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6, paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
-                <button onClick={() => setShowForm(false)} style={ghostBtnStyle}>Cancel</button>
-                <button onClick={save} disabled={!form.name.trim()} style={{ ...navyBtnStyle, opacity: form.name.trim() ? 1 : 0.5 }}>
-                  {editing ? "Save Changes" : "Add Medication"}
-                </button>
-              </div>
-            </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Current Stock
+              <input type="number" min={0} value={form.stock} onChange={(e) => setField("stock", e.target.value === "" ? 0 : Number(e.target.value))} style={fieldStyle} />
+            </label>
+            <label style={labelStyle}>
+              Minimum Stock
+              <input type="number" min={0} value={form.minStock} onChange={(e) => setField("minStock", e.target.value === "" ? 0 : Number(e.target.value))} style={fieldStyle} />
+            </label>
           </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Expiry Date
+              <input type="date" value={form.expiryDate} onChange={(e) => setField("expiryDate", e.target.value)} style={fieldStyle} />
+            </label>
+            <label style={labelStyle}>
+              Last Restocked
+              <input type="date" value={form.lastRestocked} onChange={(e) => setField("lastRestocked", e.target.value)} style={fieldStyle} />
+            </label>
+          </div>
+
+          <label style={labelStyle}>
+            Supplier
+            <input value={form.supplier} onChange={(e) => setField("supplier", e.target.value)} placeholder="e.g. PharmaDakar" style={fieldStyle} />
+          </label>
+
+          <p style={{ margin: 0, fontSize: 12, color: "var(--fg3)", background: "var(--bg-subtle)", border: "1px solid var(--divider)", borderRadius: "var(--radius-md)", padding: "8px 12px" }}>
+            Status is calculated automatically from stock level, minimum threshold and expiry date.
+          </p>
         </div>
-      )}
+      </Modal>
     </>
   );
 }
