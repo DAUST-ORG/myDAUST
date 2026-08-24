@@ -127,10 +127,14 @@ function mapConsultation(c: InfirmaryConsultation): Consultation {
     visitType: c.visitType,
     clinicalNotes: c.clinicalNotes ?? "",
     status: c.status as Consultation["status"],
-    date: isoDate(visited ?? c.date),
-    time: visited
-      ? new Date(visited).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
-      : (c.time ?? ""),
+    date: c.date
+      ? new Date(c.date).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "",
+    time: c.time ?? "",
     followUpRequired: c.followUpRequired ?? false,
     vitals: (c as any).vitalsJson as Consultation["vitals"],
     diagnosis: c.diagnosis,
@@ -150,7 +154,13 @@ function mapPrescription(p: InfirmaryPrescription): Prescription {
     duration: p.duration,
     instructions: p.instructions ?? "",
     status: p.status as Prescription["status"],
-    date: isoDate((p as { prescribedAt?: string }).prescribedAt ?? p.date),
+    date: p.date
+      ? new Date(p.date).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "",
     prescribedBy: p.prescribedBy ?? "",
   };
 }
@@ -163,9 +173,21 @@ function mapMedication(m: InfirmaryMedication): Medication {
     stock: m.stock,
     unit: m.unit,
     minStock: m.minStock,
-    expiryDate: isoDate(m.expiryDate),
+    expiryDate: m.expiryDate
+      ? new Date(m.expiryDate).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "",
     supplier: m.supplier,
-    lastRestocked: isoDate(m.lastRestocked),
+    lastRestocked: m.lastRestocked
+      ? new Date(m.lastRestocked).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "",
     status: m.status as Medication["status"],
   };
 }
@@ -174,8 +196,14 @@ function mapAppointment(a: InfirmaryAppointment): Appointment {
   return {
     id: a.id,
     studentId: a.studentId,
-    studentName: joinedStudentName(a) || a.studentName || "",
-    date: isoDate(a.date),
+    studentName: a.studentName,
+    date: a.date
+      ? new Date(a.date).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "",
     time: a.time,
     type: a.type,
     reason: a.reason,
@@ -191,7 +219,13 @@ function mapDocument(d: InfirmaryDocument): MedicalDocument {
     studentName: joinedStudentName(d) || d.studentName || "",
     name: d.name,
     type: d.type as MedicalDocument["type"],
-    date: isoDate((d as { createdAt?: string }).createdAt ?? d.date),
+    date: d.date
+      ? new Date(d.date).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "",
     uploadedBy: d.uploadedBy ?? "",
     notes: d.notes ?? "",
   };
@@ -203,13 +237,17 @@ function mapFollowUp(f: InfirmaryFollowUp): FollowUp {
     studentId: f.studentId,
     studentName: joinedStudentName(f) || f.studentName || "",
     reason: f.reason,
-    dueDate: isoDate(f.dueDate),
+    dueDate: f.dueDate
+      ? new Date(f.dueDate).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "",
     status: f.status as FollowUp["status"],
     priority: f.priority as FollowUp["priority"],
     notes: f.notes ?? "",
-    createdAt: f.createdAt
-      ? new Date(f.createdAt).toISOString()
-      : "",
+    createdAt: f.createdAt ? new Date(f.createdAt).toISOString() : "",
   };
 }
 
@@ -223,7 +261,11 @@ function mapForm(f: InfirmaryForm & { responseCount?: number }): FormRecord {
     completion: f.completion ?? 0,
     status: f.status as FormRecord["status"],
     updated: f.updated
-      ? new Date(f.updated).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      ? new Date(f.updated).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
       : "",
     shareLink: f.shareLink ?? undefined,
   };
@@ -236,9 +278,7 @@ function mapFormResponse(r: ApiFormResponse): FormResponse {
     studentId: r.studentId,
     studentName: r.studentName,
     answers: r.answers as Record<string, string>,
-    submittedAt: r.submittedAt
-      ? new Date(r.submittedAt).toISOString()
-      : "",
+    submittedAt: r.submittedAt ? new Date(r.submittedAt).toISOString() : "",
   };
 }
 
@@ -249,7 +289,8 @@ function mapSettings(s: Record<string, unknown>): AppSettings {
     clinicPhone: String(s.clinic_phone ?? ""),
     clinicEmail: String(s.clinic_email ?? ""),
     darkMode: false,
-    notificationsEnabled: s.notifications_enabled === "true" || s.notifications_enabled === true,
+    notificationsEnabled:
+      s.notifications_enabled === "true" || s.notifications_enabled === true,
     appointmentDuration: Number(s.appointment_duration ?? 30),
     workingHoursStart: String(s.working_hours_start ?? "08:00"),
     workingHoursEnd: String(s.working_hours_end ?? "17:00"),
@@ -262,10 +303,14 @@ function settingsToApi(s: Partial<AppSettings>): Record<string, unknown> {
   if (s.clinicAddress !== undefined) out.clinic_address = s.clinicAddress;
   if (s.clinicPhone !== undefined) out.clinic_phone = s.clinicPhone;
   if (s.clinicEmail !== undefined) out.clinic_email = s.clinicEmail;
-  if (s.notificationsEnabled !== undefined) out.notifications_enabled = String(s.notificationsEnabled);
-  if (s.appointmentDuration !== undefined) out.appointment_duration = String(s.appointmentDuration);
-  if (s.workingHoursStart !== undefined) out.working_hours_start = s.workingHoursStart;
-  if (s.workingHoursEnd !== undefined) out.working_hours_end = s.workingHoursEnd;
+  if (s.notificationsEnabled !== undefined)
+    out.notifications_enabled = String(s.notificationsEnabled);
+  if (s.appointmentDuration !== undefined)
+    out.appointment_duration = String(s.appointmentDuration);
+  if (s.workingHoursStart !== undefined)
+    out.working_hours_start = s.workingHoursStart;
+  if (s.workingHoursEnd !== undefined)
+    out.working_hours_end = s.workingHoursEnd;
   return out;
 }
 
@@ -275,9 +320,6 @@ type StoreContextType = {
   store: AppStore;
   loading: boolean;
   error: string | null;
-  addStudent: (s: Student) => void;
-  updateStudent: (id: string, data: Partial<Student>) => void;
-  deleteStudent: (id: string) => void;
   addForm: (f: FormRecord) => void;
   updateForm: (id: string, data: Partial<FormRecord>) => void;
   deleteForm: (id: string) => void;
@@ -341,18 +383,27 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const [students, consultations, prescriptions, medications, appointments, documents, followUps, forms, settings] =
-        await Promise.all([
-          getInfirmaryStudents(),
-          getInfirmaryConsultations(),
-          getInfirmaryPrescriptions(),
-          getInfirmaryMedications(),
-          getInfirmaryAppointments(),
-          getInfirmaryDocuments(),
-          getInfirmaryFollowUps(),
-          getInfirmaryForms(),
-          getInfirmarySettings().catch(() => ({} as Record<string, unknown>)),
-        ]);
+      const [
+        students,
+        consultations,
+        prescriptions,
+        medications,
+        appointments,
+        documents,
+        followUps,
+        forms,
+        settings,
+      ] = await Promise.all([
+        getInfirmaryStudents(),
+        getInfirmaryConsultations(),
+        getInfirmaryPrescriptions(),
+        getInfirmaryMedications(),
+        getInfirmaryAppointments(),
+        getInfirmaryDocuments(),
+        getInfirmaryFollowUps(),
+        getInfirmaryForms(),
+        getInfirmarySettings().catch(() => ({}) as Record<string, unknown>),
+      ]);
 
       // Fetch form responses for each form
       const allResponses: FormResponse[] = [];
@@ -378,7 +429,9 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
         settings: mapSettings(settings as Record<string, unknown>),
       });
     } catch (e: any) {
-      setError(e?.message ?? "Failed to load infirmary data. Please refresh the page.");
+      setError(
+        e?.message ?? "Failed to load infirmary data. Please refresh the page.",
+      );
     } finally {
       setLoading(false);
     }
@@ -388,216 +441,270 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
     fetchAll();
   }, [fetchAll]);
 
-  // ─── Student stubs (not full CRUD — SIS-owned) ────────────────
-  const addStudent = useCallback((_s: Student) => {
-    // Students are SIS-managed; add is a no-op here
-  }, []);
-
-  const updateStudent = useCallback((_id: string, _data: Partial<Student>) => {
-    // SIS-managed
-  }, []);
-
-  const deleteStudent = useCallback((_id: string) => {
-    // SIS-managed
-  }, []);
-
   // ─── Consultations ────────────────────────────────────────────
-  const addConsultation = useCallback(async (c: Consultation) => {
-    await createInfirmaryConsultation({
-      studentId: c.studentId,
-      reason: c.reason,
-      visitType: c.visitType,
-      clinicalNotes: c.clinicalNotes,
-      status: c.status,
-      followUpRequired: c.followUpRequired,
-      vitalsJson: c.vitals ?? undefined,
-      diagnosis: c.diagnosis,
-      treatmentPlan: c.treatmentPlan,
-    } as any);
-    fetchAll();
-  }, [fetchAll]);
+  const addConsultation = useCallback(
+    async (c: Consultation) => {
+      await createInfirmaryConsultation({
+        studentId: c.studentId,
+        reason: c.reason,
+        visitType: c.visitType,
+        clinicalNotes: c.clinicalNotes,
+        status: c.status,
+        followUpRequired: c.followUpRequired,
+        vitalsJson: c.vitals ?? undefined,
+        diagnosis: c.diagnosis,
+        treatmentPlan: c.treatmentPlan,
+      } as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const updateConsultation = useCallback(async (id: string, data: Partial<Consultation>) => {
-    // The column is vitalsJson. Sending the UI's `vitals` key meant zod stripped it and the
-    // PATCH returned 200 having changed nothing, so vitals edits silently disappeared.
-    const { vitals, ...rest } = data;
-    await updateInfirmaryConsultation(id, {
-      ...rest,
-      ...(vitals !== undefined ? { vitalsJson: vitals } : {}),
-    } as any);
-    fetchAll();
-  }, [fetchAll]);
+  const updateConsultation = useCallback(
+    async (id: string, data: Partial<Consultation>) => {
+      await updateInfirmaryConsultation(id, data as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const deleteConsultation = useCallback(async (id: string) => {
-    await deleteInfirmaryConsultation(id);
-    fetchAll();
-  }, [fetchAll]);
+  const deleteConsultation = useCallback(
+    async (id: string) => {
+      await deleteInfirmaryConsultation(id);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
   // ─── Prescriptions ────────────────────────────────────────────
-  const addPrescription = useCallback(async (p: Prescription) => {
-    await createInfirmaryPrescription({
-      consultationId: p.consultationId,
-      studentId: p.studentId,
-      medication: p.medication,
-      dosage: p.dosage,
-      frequency: p.frequency,
-      duration: p.duration,
-      instructions: p.instructions,
-      status: p.status,
-    } as any);
-    fetchAll();
-  }, [fetchAll]);
+  const addPrescription = useCallback(
+    async (p: Prescription) => {
+      await createInfirmaryPrescription({
+        consultationId: p.consultationId,
+        studentId: p.studentId,
+        medication: p.medication,
+        dosage: p.dosage,
+        frequency: p.frequency,
+        duration: p.duration,
+        instructions: p.instructions,
+        status: p.status,
+      } as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const updatePrescription = useCallback(async (id: string, data: Partial<Prescription>) => {
-    await updateInfirmaryPrescription(id, data as any);
-    fetchAll();
-  }, [fetchAll]);
+  const updatePrescription = useCallback(
+    async (id: string, data: Partial<Prescription>) => {
+      await updateInfirmaryPrescription(id, data as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const deletePrescription = useCallback(async (id: string) => {
-    await deleteInfirmaryPrescription(id);
-    fetchAll();
-  }, [fetchAll]);
+  const deletePrescription = useCallback(
+    async (id: string) => {
+      await deleteInfirmaryPrescription(id);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
   // ─── Medications ──────────────────────────────────────────────
-  const addMedication = useCallback(async (m: Medication) => {
-    await createInfirmaryMedication({
-      name: m.name,
-      category: m.category,
-      stock: m.stock,
-      unit: m.unit,
-      minStock: m.minStock,
-      expiryDate: m.expiryDate,
-      supplier: m.supplier,
-      status: m.status,
-    } as any);
-    fetchAll();
-  }, [fetchAll]);
+  const addMedication = useCallback(
+    async (m: Medication) => {
+      await createInfirmaryMedication({
+        name: m.name,
+        category: m.category,
+        stock: m.stock,
+        unit: m.unit,
+        minStock: m.minStock,
+        expiryDate: m.expiryDate,
+        supplier: m.supplier,
+        status: m.status,
+      } as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const updateMedication = useCallback(async (id: string, data: Partial<Medication>) => {
-    await updateInfirmaryMedication(id, data as any);
-    fetchAll();
-  }, [fetchAll]);
+  const updateMedication = useCallback(
+    async (id: string, data: Partial<Medication>) => {
+      await updateInfirmaryMedication(id, data as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const deleteMedication = useCallback(async (id: string) => {
-    await deleteInfirmaryMedication(id);
-    fetchAll();
-  }, [fetchAll]);
+  const deleteMedication = useCallback(
+    async (id: string) => {
+      await deleteInfirmaryMedication(id);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
   // ─── Appointments ─────────────────────────────────────────────
-  const addAppointment = useCallback(async (a: Appointment) => {
-    await createInfirmaryAppointment({
-      studentId: a.studentId,
-      date: a.date,
-      time: a.time,
-      type: a.type,
-      reason: a.reason,
-      status: a.status,
-      notes: a.notes,
-    } as any);
-    fetchAll();
-  }, [fetchAll]);
+  const addAppointment = useCallback(
+    async (a: Appointment) => {
+      await createInfirmaryAppointment({
+        studentId: a.studentId,
+        date: a.date,
+        time: a.time,
+        type: a.type,
+        reason: a.reason,
+        status: a.status,
+        notes: a.notes,
+      } as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const updateAppointment = useCallback(async (id: string, data: Partial<Appointment>) => {
-    await updateInfirmaryAppointment(id, data as any);
-    fetchAll();
-  }, [fetchAll]);
+  const updateAppointment = useCallback(
+    async (id: string, data: Partial<Appointment>) => {
+      await updateInfirmaryAppointment(id, data as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const deleteAppointment = useCallback(async (id: string) => {
-    await deleteInfirmaryAppointment(id);
-    fetchAll();
-  }, [fetchAll]);
+  const deleteAppointment = useCallback(
+    async (id: string) => {
+      await deleteInfirmaryAppointment(id);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
   // ─── Documents ────────────────────────────────────────────────
-  const addDocument = useCallback(async (d: MedicalDocument) => {
-    await createInfirmaryDocument({
-      studentId: d.studentId,
-      name: d.name,
-      type: d.type,
-      notes: d.notes,
-    } as any);
-    fetchAll();
-  }, [fetchAll]);
+  const addDocument = useCallback(
+    async (d: MedicalDocument) => {
+      await createInfirmaryDocument({
+        studentId: d.studentId,
+        name: d.name,
+        type: d.type,
+        notes: d.notes,
+      } as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const updateDocument = useCallback(async (id: string, data: Partial<MedicalDocument>) => {
-    await updateInfirmaryDocument(id, data as any);
-    fetchAll();
-  }, [fetchAll]);
+  const updateDocument = useCallback(
+    async (id: string, data: Partial<MedicalDocument>) => {
+      await updateInfirmaryDocument(id, data as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const deleteDocument = useCallback(async (id: string) => {
-    await deleteInfirmaryDocument(id);
-    fetchAll();
-  }, [fetchAll]);
+  const deleteDocument = useCallback(
+    async (id: string) => {
+      await deleteInfirmaryDocument(id);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
   // ─── Follow-ups ───────────────────────────────────────────────
-  const addFollowUp = useCallback(async (f: FollowUp) => {
-    await createInfirmaryFollowUp({
-      studentId: f.studentId,
-      reason: f.reason,
-      dueDate: f.dueDate,
-      status: f.status,
-      priority: f.priority,
-      notes: f.notes,
-    } as any);
-    fetchAll();
-  }, [fetchAll]);
+  const addFollowUp = useCallback(
+    async (f: FollowUp) => {
+      await createInfirmaryFollowUp({
+        studentId: f.studentId,
+        reason: f.reason,
+        dueDate: f.dueDate,
+        status: f.status,
+        priority: f.priority,
+        notes: f.notes,
+      } as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const updateFollowUp = useCallback(async (id: string, data: Partial<FollowUp>) => {
-    await updateInfirmaryFollowUp(id, data as any);
-    fetchAll();
-  }, [fetchAll]);
+  const updateFollowUp = useCallback(
+    async (id: string, data: Partial<FollowUp>) => {
+      await updateInfirmaryFollowUp(id, data as any);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const deleteFollowUp = useCallback(async (id: string) => {
-    await deleteInfirmaryFollowUp(id);
-    fetchAll();
-  }, [fetchAll]);
+  const deleteFollowUp = useCallback(
+    async (id: string) => {
+      await deleteInfirmaryFollowUp(id);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
   // ─── Forms ────────────────────────────────────────────────────
-  const addForm = useCallback(async (f: FormRecord) => {
-    await createInfirmaryForm({
-      name: f.name,
-      description: f.description,
-      questions: f.questions as any,
-      status: f.status,
-    });
-    fetchAll();
-  }, [fetchAll]);
+  const addForm = useCallback(
+    async (f: FormRecord) => {
+      await createInfirmaryForm({
+        name: f.name,
+        description: f.description,
+        questions: f.questions as any,
+        status: f.status,
+      });
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const updateForm = useCallback(async (id: string, data: Partial<FormRecord>) => {
-    const payload: Record<string, unknown> = {};
-    if (data.name !== undefined) payload.name = data.name;
-    if (data.description !== undefined) payload.description = data.description;
-    if (data.questions !== undefined) payload.questions = data.questions;
-    if (data.status !== undefined) payload.status = data.status;
-    if (data.shareLink !== undefined) payload.shareLink = data.shareLink;
-    await updateInfirmaryForm(id, payload);
-    fetchAll();
-  }, [fetchAll]);
+  const updateForm = useCallback(
+    async (id: string, data: Partial<FormRecord>) => {
+      const payload: Record<string, unknown> = {};
+      if (data.name !== undefined) payload.name = data.name;
+      if (data.description !== undefined)
+        payload.description = data.description;
+      if (data.questions !== undefined) payload.questions = data.questions;
+      if (data.status !== undefined) payload.status = data.status;
+      if (data.shareLink !== undefined) payload.shareLink = data.shareLink;
+      await updateInfirmaryForm(id, payload);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const deleteForm = useCallback(async (id: string) => {
-    await deleteInfirmaryForm(id);
-    fetchAll();
-  }, [fetchAll]);
+  const deleteForm = useCallback(
+    async (id: string) => {
+      await deleteInfirmaryForm(id);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
   // ─── Form Responses ───────────────────────────────────────────
-  const addFormResponse = useCallback(async (r: FormResponse) => {
-    await createInfirmaryFormResponse(r.formId, {
-      studentId: r.studentId,
-      studentName: r.studentName,
-      answers: r.answers,
-    });
-    fetchAll();
-  }, [fetchAll]);
+  const addFormResponse = useCallback(
+    async (r: FormResponse) => {
+      await createInfirmaryFormResponse(r.formId, {
+        studentId: r.studentId,
+        studentName: r.studentName,
+        answers: r.answers,
+      });
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
-  const deleteFormResponse = useCallback(async (id: string) => {
-    await deleteInfirmaryFormResponse(id);
-    fetchAll();
-  }, [fetchAll]);
+  const deleteFormResponse = useCallback(
+    async (id: string) => {
+      await deleteInfirmaryFormResponse(id);
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
   // ─── Settings ─────────────────────────────────────────────────
-  const updateSettings = useCallback(async (data: Partial<AppSettings>) => {
-    await updateInfirmarySettings(settingsToApi(data));
-    fetchAll();
-  }, [fetchAll]);
+  const updateSettings = useCallback(
+    async (data: Partial<AppSettings>) => {
+      await updateInfirmarySettings(settingsToApi(data));
+      fetchAll();
+    },
+    [fetchAll],
+  );
 
   return (
     <StoreContext.Provider
@@ -605,9 +712,6 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
         store,
         loading,
         error,
-        addStudent,
-        updateStudent,
-        deleteStudent,
         addForm,
         updateForm,
         deleteForm,
@@ -641,6 +745,9 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
 
 export function useInfirmaryStore(): StoreContextType {
   const ctx = useContext(StoreContext);
-  if (!ctx) throw new Error("useInfirmaryStore must be used within InfirmaryStoreProvider");
+  if (!ctx)
+    throw new Error(
+      "useInfirmaryStore must be used within InfirmaryStoreProvider",
+    );
   return ctx;
 }
