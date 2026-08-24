@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Plus, Pencil, Trash2, X, Eye, Pill, Clock, AlertTriangle, CheckCircle } from "lucide-react";
 import { useInfirmaryStore } from "../store";
 import type { Prescription } from "../types";
-import { Card, SearchInput, Badge } from "@/components/ui";
+import { Card, SearchInput, Badge, Modal } from "@/components/ui";
 
 const EMPTY: Prescription = {
   id: "",
@@ -63,27 +63,6 @@ const sectionLabelStyle: CSSProperties = {
   marginBottom: 6,
 };
 
-const overlayStyle: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,.4)",
-  zIndex: 1000,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: 16,
-};
-
-const modalStyle: CSSProperties = {
-  background: "var(--surface)",
-  borderRadius: "var(--radius-lg)",
-  padding: 24,
-  width: 520,
-  maxWidth: "90vw",
-  maxHeight: "85vh",
-  overflowY: "auto",
-  boxShadow: "0 8px 30px rgba(0,0,0,.18)",
-};
 
 function StatCard({ icon, color, value, label }: { icon: ReactNode; color: string; value: number; label: string }) {
   return (
@@ -264,14 +243,14 @@ export default function PrescriptionsPage() {
         </div>
       </Card>
 
-      {detail && (
-        <div onClick={() => setDetailId(null)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={modalStyle}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Prescription {detail.id}</h2>
-              <button onClick={() => setDetailId(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--fg3)" }}><X size={18} /></button>
-            </div>
-
+      <Modal
+        open={detail !== undefined}
+        onClose={() => setDetailId(null)}
+        title={`Prescription ${detail?.id ?? ""}`}
+        width={560}
+      >
+        {detail && (
+          <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, fontSize: 13.5, marginBottom: 16 }}>
               {([["Student", detail.studentName], ["Prescribed By", detail.prescribedBy], ["Date", detail.date]] as [string, string][]).map(([k, v]) => (
                 <div key={k}>
@@ -318,76 +297,74 @@ export default function PrescriptionsPage() {
                 </Link>
               )}
             </div>
+          </>
+        )}
+      </Modal>
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editing ? `Edit Prescription ${editing}` : "New Prescription"}
+        width={520}
+        footer={
+          <>
+            <button onClick={() => setShowForm(false)} style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", border: "1px solid var(--border)", background: "transparent", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            <button
+              onClick={save}
+              disabled={!canSave}
+              style={{ padding: "8px 18px", borderRadius: "var(--radius-pill)", border: "none", background: canSave ? "var(--daust-navy)" : "var(--border)", color: canSave ? "#fff" : "var(--fg3)", fontSize: 13, fontWeight: 600, cursor: canSave ? "pointer" : "not-allowed" }}
+            >
+              {editing ? "Save Changes" : "Create Prescription"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Student Name *
+              <input value={form.studentName} onChange={(e) => setForm({ ...form, studentName: e.target.value })} placeholder="e.g. Amina Diallo" style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              Medication *
+              <input value={form.medication} onChange={(e) => setForm({ ...form, medication: e.target.value })} placeholder="e.g. Amoxicillin 500mg" style={inputStyle} />
+            </label>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Dosage
+              <input value={form.dosage} onChange={(e) => setForm({ ...form, dosage: e.target.value })} placeholder="1 tablet" style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              Frequency
+              <input value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })} placeholder="3x daily" style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              Duration
+              <input value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} placeholder="7 days" style={inputStyle} />
+            </label>
+          </div>
+          <label style={labelStyle}>
+            Prescribed By
+            <input value={form.prescribedBy} onChange={(e) => setForm({ ...form, prescribedBy: e.target.value })} placeholder="e.g. Dr. Ndiaye" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            Instructions
+            <textarea value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="Take after meals with plenty of water..." rows={3} style={{ ...inputStyle, resize: "vertical" }} />
+          </label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Status
+              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as Prescription["status"] })} style={inputStyle}>
+                {["Active", "Completed", "Cancelled"].map((v) => <option key={v}>{v}</option>)}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Date
+              <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} style={inputStyle} />
+            </label>
           </div>
         </div>
-      )}
-
-      {showForm && (
-        <div onClick={() => setShowForm(false)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={modalStyle}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{editing ? "Edit Prescription" : "New Prescription"}</h2>
-              <button onClick={() => setShowForm(false)} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--fg3)" }}><X size={18} /></button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Student Name *
-                  <input value={form.studentName} onChange={(e) => setForm({ ...form, studentName: e.target.value })} placeholder="e.g. Amina Diallo" style={inputStyle} />
-                </label>
-                <label style={labelStyle}>
-                  Medication *
-                  <input value={form.medication} onChange={(e) => setForm({ ...form, medication: e.target.value })} placeholder="e.g. Amoxicillin 500mg" style={inputStyle} />
-                </label>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Dosage
-                  <input value={form.dosage} onChange={(e) => setForm({ ...form, dosage: e.target.value })} placeholder="1 tablet" style={inputStyle} />
-                </label>
-                <label style={labelStyle}>
-                  Frequency
-                  <input value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })} placeholder="3x daily" style={inputStyle} />
-                </label>
-                <label style={labelStyle}>
-                  Duration
-                  <input value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} placeholder="7 days" style={inputStyle} />
-                </label>
-              </div>
-              <label style={labelStyle}>
-                Prescribed By
-                <input value={form.prescribedBy} onChange={(e) => setForm({ ...form, prescribedBy: e.target.value })} placeholder="e.g. Dr. Ndiaye" style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                Instructions
-                <textarea value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="Take after meals with plenty of water..." rows={3} style={{ ...inputStyle, resize: "vertical" }} />
-              </label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Status
-                  <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as Prescription["status"] })} style={inputStyle}>
-                    {["Active", "Completed", "Cancelled"].map((v) => <option key={v}>{v}</option>)}
-                  </select>
-                </label>
-                <label style={labelStyle}>
-                  Date
-                  <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} style={inputStyle} />
-                </label>
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
-                <button onClick={() => setShowForm(false)} style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", border: "1px solid var(--border)", background: "transparent", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-                <button
-                  onClick={save}
-                  disabled={!canSave}
-                  style={{ padding: "8px 18px", borderRadius: "var(--radius-pill)", border: "none", background: canSave ? "var(--daust-navy)" : "var(--border)", color: canSave ? "#fff" : "var(--fg3)", fontSize: 13, fontWeight: 600, cursor: canSave ? "pointer" : "not-allowed" }}
-                >
-                  {editing ? "Save Changes" : "Create Prescription"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </Modal>
     </>
   );
 }

@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { Plus, Pencil, Trash2, X, Eye, CalendarDays, Clock } from "lucide-react";
+import { Plus, Pencil, Trash2, Eye, CalendarDays, Clock } from "lucide-react";
 import { useInfirmaryStore } from "../store";
 import type { Appointment } from "../types";
-import { Card, SearchInput, Badge, type BadgeTone } from "@/components/ui";
+import { Card, SearchInput, Badge, type BadgeTone, Modal } from "@/components/ui";
 
 const STATUSES: Appointment["status"][] = ["Scheduled", "Checked In", "Completed", "No Show", "Cancelled"];
 const TYPES = ["Routine", "Follow-up", "Consultation", "Walk-in", "Emergency"];
@@ -45,17 +45,6 @@ const boxStyle: CSSProperties = {
   borderRadius: "var(--radius-md)", fontSize: 13.5, lineHeight: 1.6, whiteSpace: "pre-wrap",
 };
 
-const overlayStyle: CSSProperties = {
-  position: "fixed", inset: 0, background: "rgba(15,23,42,.45)", zIndex: 1000,
-  display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-};
-
-const modalStyle: CSSProperties = {
-  background: "var(--surface)", borderRadius: "var(--radius-lg)", width: "100%",
-  maxWidth: "90vw", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,.22)",
-};
-
-const closeBtnStyle: CSSProperties = { border: "none", background: "none", cursor: "pointer", color: "var(--fg3)", padding: 4 };
 
 const primaryBtnStyle: CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 18px",
@@ -285,169 +274,164 @@ export default function AppointmentsPage() {
           </table>
         </div>
       </Card>
-
-      {detail && (
-        <div onClick={() => setDetailId(null)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...modalStyle, maxWidth: 560 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "20px 22px 16px", borderBottom: "1px solid var(--divider)" }}>
-              <div>
-                <p className="eyebrow" style={{ margin: 0 }}>Appointment {detail.id}</p>
-                <h2 style={{ margin: "3px 0 0", fontSize: 18, fontWeight: 800 }}>{detail.studentName}</h2>
-                <p className="muted" style={{ margin: "3px 0 0", fontSize: 13, display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarDays size={13} /> {detail.date}</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Clock size={13} /> {detail.time}</span>
-                </p>
-              </div>
-              <Badge tone={statusTone(detail.status)}>{detail.status}</Badge>
-              <button onClick={() => setDetailId(null)} aria-label="Close" style={{ ...closeBtnStyle, marginLeft: 4 }}><X size={18} /></button>
+      <Modal
+        open={detail !== null}
+        onClose={() => setDetailId(null)}
+        title={
+          detail ? (
+            <>
+              <p className="eyebrow" style={{ margin: 0 }}>Appointment {detail.id}</p>
+              <span style={{ display: "block", marginTop: 3, fontSize: 18, fontWeight: 800 }}>{detail.studentName}</span>
+              <span className="muted" style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 3, fontSize: 13 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><CalendarDays size={13} /> {detail.date}</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Clock size={13} /> {detail.time}</span>
+                <Badge tone={statusTone(detail.status)}>{detail.status}</Badge>
+              </span>
+            </>
+          ) : null
+        }
+        width={560}
+        footer={
+          detail ? (
+            <>
+              <button onClick={() => setDetailId(null)} style={ghostBtnStyle}>Close</button>
+              <button onClick={() => openEdit(detail)} style={navyBtnStyle}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Pencil size={13} /> Edit</span>
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {detail && (
+          <>
+            <MetaTile label="Reason">{detail.reason}</MetaTile>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginTop: 16 }}>
+              <MetaTile label="Visit Type">{detail.type}</MetaTile>
+              <MetaTile label="Student ID">{detail.studentId || "—"}</MetaTile>
+              <MetaTile label="Status"><Badge tone={statusTone(detail.status)}>{detail.status}</Badge></MetaTile>
             </div>
-
-            <div style={{ padding: "18px 22px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-              <MetaTile label="Reason">{detail.reason}</MetaTile>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-                <MetaTile label="Visit Type">{detail.type}</MetaTile>
-                <MetaTile label="Student ID">{detail.studentId || "—"}</MetaTile>
-                <MetaTile label="Status"><Badge tone={statusTone(detail.status)}>{detail.status}</Badge></MetaTile>
-              </div>
-
-              <SectionBlock label="Notes">{detail.notes || "No notes for this appointment."}</SectionBlock>
-
-              <div>
-                <div style={sectionLabelStyle}>Quick Actions</div>
-                {isOpen ? (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {detail.status === "Scheduled" && (
-                      <button onClick={() => updateAppointment(detail.id, { status: "Checked In" })} style={quickBtn("var(--success-500)")}>
-                        Check In
-                      </button>
-                    )}
-                    <button onClick={() => updateAppointment(detail.id, { status: "Completed" })} style={quickBtn("var(--daust-navy)")}>
-                      Complete
+            <SectionBlock label="Notes">{detail.notes || "No notes for this appointment."}</SectionBlock>
+            <div style={{ marginTop: 16 }}>
+              <div style={sectionLabelStyle}>Quick Actions</div>
+              {isOpen ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {detail.status === "Scheduled" && (
+                    <button onClick={() => updateAppointment(detail.id, { status: "Checked In" })} style={quickBtn("var(--success-500)")}>
+                      Check In
                     </button>
-                    <button onClick={() => updateAppointment(detail.id, { status: "No Show" })} style={quickBtn("var(--daust-orange)")}>
-                      No Show
-                    </button>
-                    <button onClick={() => updateAppointment(detail.id, { status: "Cancelled" })} style={{ ...quickBtn("var(--surface)", "var(--danger-500)"), border: "1px solid var(--danger-500)" }}>
-                      Cancel Visit
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ ...boxStyle, color: "var(--fg3)" }}>This appointment is closed — no further actions available.</div>
-                )}
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
-                <button onClick={() => setDetailId(null)} style={ghostBtnStyle}>Close</button>
-                <button onClick={() => openEdit(detail)} style={navyBtnStyle}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Pencil size={13} /> Edit</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showForm && (
-        <div onClick={() => setShowForm(false)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...modalStyle, maxWidth: 520 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 22px 16px", borderBottom: "1px solid var(--divider)" }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>
-                {editing ? `Edit Appointment ${editing}` : "New Appointment"}
-              </h2>
-              <button onClick={() => setShowForm(false)} aria-label="Close" style={closeBtnStyle}><X size={18} /></button>
-            </div>
-
-            <div style={{ padding: "18px 22px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-              <label style={labelStyle}>
-                Student Name
-                <div style={{ position: "relative" }}>
-                  <input
-                    value={form.studentName}
-                    placeholder="Start typing a student name..."
-                    onChange={(e) => {
-                      setField("studentName", e.target.value);
-                      setShowSuggestions(true);
-                    }}
-                    onFocus={() => setShowSuggestions(true)}
-                    onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
-                    style={fieldStyle}
-                  />
-                  {showSuggestions && suggestions.length > 0 && (
-                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, marginTop: 4, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden", boxShadow: "0 8px 24px rgba(0,0,0,.14)" }}>
-                      {suggestions.map((s) => (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => pickStudent(s.id, s.name)}
-                          style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", borderBottom: "1px solid var(--divider)", background: "transparent", fontSize: 13, color: "var(--fg1)", cursor: "pointer" }}
-                        >
-                          <strong style={{ fontWeight: 600 }}>{s.name}</strong>
-                          <span style={{ color: "var(--fg3)", marginLeft: 8, fontSize: 12 }}>{s.program}</span>
-                        </button>
-                      ))}
-                    </div>
                   )}
+                  <button onClick={() => updateAppointment(detail.id, { status: "Completed" })} style={quickBtn("var(--daust-navy)")}>
+                    Complete
+                  </button>
+                  <button onClick={() => updateAppointment(detail.id, { status: "No Show" })} style={quickBtn("var(--daust-orange)")}>
+                    No Show
+                  </button>
+                  <button onClick={() => updateAppointment(detail.id, { status: "Cancelled" })} style={{ ...quickBtn("var(--surface)", "var(--danger-500)"), border: "1px solid var(--danger-500)" }}>
+                    Cancel Visit
+                  </button>
                 </div>
-              </label>
-
-              <label style={labelStyle}>
-                Reason
-                <input value={form.reason} onChange={(e) => setField("reason", e.target.value)} placeholder="Reason for the visit" style={fieldStyle} />
-              </label>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Date
-                  <input type="date" value={form.date} onChange={(e) => setField("date", e.target.value)} style={fieldStyle} />
-                </label>
-                <label style={labelStyle}>
-                  Time
-                  <input type="time" value={form.time} onChange={(e) => setField("time", e.target.value)} style={fieldStyle} />
-                </label>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Type
-                  <select value={form.type} onChange={(e) => setField("type", e.target.value)} style={fieldStyle}>
-                    {TYPES.map((t) => <option key={t}>{t}</option>)}
-                  </select>
-                </label>
-                <label style={labelStyle}>
-                  Status
-                  <select value={form.status} onChange={(e) => setField("status", e.target.value as Appointment["status"])} style={fieldStyle}>
-                    {STATUSES.map((s) => <option key={s}>{s}</option>)}
-                  </select>
-                </label>
-              </div>
-
-              <label style={labelStyle}>
-                Notes
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setField("notes", e.target.value)}
-                  rows={3}
-                  placeholder="Preparation instructions, reminders..."
-                  style={{ ...fieldStyle, resize: "vertical" }}
-                />
-              </label>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6, paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
-                <button onClick={() => setShowForm(false)} style={ghostBtnStyle}>Cancel</button>
-                <button
-                  onClick={save}
-                  disabled={!form.studentName.trim() || !form.reason.trim()}
-                  style={{ ...navyBtnStyle, opacity: !form.studentName.trim() || !form.reason.trim() ? 0.5 : 1 }}
-                >
-                  {editing ? "Save Changes" : "Create Appointment"}
-                </button>
-              </div>
+              ) : (
+                <div style={{ ...boxStyle, color: "var(--fg3)" }}>This appointment is closed — no further actions available.</div>
+              )}
             </div>
+          </>
+        )}
+      </Modal>
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editing ? `Edit Appointment ${editing}` : "New Appointment"}
+        width={520}
+        footer={
+          <>
+            <button onClick={() => setShowForm(false)} style={ghostBtnStyle}>Cancel</button>
+            <button
+              onClick={save}
+              disabled={!form.studentName.trim() || !form.reason.trim()}
+              style={{ ...navyBtnStyle, opacity: !form.studentName.trim() || !form.reason.trim() ? 0.5 : 1 }}
+            >
+              {editing ? "Save Changes" : "Create Appointment"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <label style={labelStyle}>
+            Student Name
+            <div style={{ position: "relative" }}>
+              <input
+                value={form.studentName}
+                placeholder="Start typing a student name..."
+                onChange={(e) => {
+                  setField("studentName", e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
+                style={fieldStyle}
+              />
+              {showSuggestions && suggestions.length > 0 && (
+                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, marginTop: 4, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden", boxShadow: "0 8px 24px rgba(0,0,0,.14)" }}>
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => pickStudent(s.id, s.name)}
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", borderBottom: "1px solid var(--divider)", background: "transparent", fontSize: 13, color: "var(--fg1)", cursor: "pointer" }}
+                    >
+                      <strong style={{ fontWeight: 600 }}>{s.name}</strong>
+                      <span style={{ color: "var(--fg3)", marginLeft: 8, fontSize: 12 }}>{s.program}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </label>
+
+          <label style={labelStyle}>
+            Reason
+            <input value={form.reason} onChange={(e) => setField("reason", e.target.value)} placeholder="Reason for the visit" style={fieldStyle} />
+          </label>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Date
+              <input type="date" value={form.date} onChange={(e) => setField("date", e.target.value)} style={fieldStyle} />
+            </label>
+            <label style={labelStyle}>
+              Time
+              <input type="time" value={form.time} onChange={(e) => setField("time", e.target.value)} style={fieldStyle} />
+            </label>
           </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Type
+              <select value={form.type} onChange={(e) => setField("type", e.target.value)} style={fieldStyle}>
+                {TYPES.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Status
+              <select value={form.status} onChange={(e) => setField("status", e.target.value as Appointment["status"])} style={fieldStyle}>
+                {STATUSES.map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <label style={labelStyle}>
+            Notes
+            <textarea
+              value={form.notes}
+              onChange={(e) => setField("notes", e.target.value)}
+              rows={3}
+              placeholder="Preparation instructions, reminders..."
+              style={{ ...fieldStyle, resize: "vertical" }}
+            />
+          </label>
         </div>
-      )}
+      </Modal>
     </>
   );
 }

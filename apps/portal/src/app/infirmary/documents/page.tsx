@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { Plus, Pencil, Trash2, X, Eye, FileText, Download, Share2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Eye, FileText, Download, Share2 } from "lucide-react";
 import { useInfirmaryStore } from "../store";
 import type { MedicalDocument } from "../types";
-import { Card, SearchInput, Badge, type BadgeTone } from "@/components/ui";
+import { Card, SearchInput, Badge, type BadgeTone, Modal } from "@/components/ui";
 
 const TYPES: MedicalDocument["type"][] = ["Medical Record", "Lab Result", "Prescription", "Consent Form", "Insurance", "Vaccination", "Other"];
 const FILTERS = ["All", ...TYPES];
@@ -50,17 +50,6 @@ const boxStyle: CSSProperties = {
   borderRadius: "var(--radius-md)", fontSize: 13.5, lineHeight: 1.6,
 };
 
-const overlayStyle: CSSProperties = {
-  position: "fixed", inset: 0, background: "rgba(15,23,42,.45)", zIndex: 1000,
-  display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-};
-
-const modalStyle: CSSProperties = {
-  background: "var(--surface)", borderRadius: "var(--radius-lg)", width: "100%",
-  maxWidth: "90vw", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 12px 40px rgba(0,0,0,.22)",
-};
-
-const closeBtnStyle: CSSProperties = { border: "none", background: "none", cursor: "pointer", color: "var(--fg3)", padding: 4 };
 
 const primaryBtnStyle: CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 18px",
@@ -284,151 +273,151 @@ export default function DocumentsPage() {
         </div>
       </Card>
 
-      {detail && (
-        <div onClick={() => setDetailId(null)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...modalStyle, maxWidth: 540 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "20px 22px 16px", borderBottom: "1px solid var(--divider)" }}>
-              <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-                <span style={{ width: 42, height: 42, borderRadius: "var(--radius-md)", background: "var(--bg-tint)", color: "var(--daust-navy)", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <FileText size={20} />
-                </span>
-                <div style={{ minWidth: 0 }}>
-                  <p className="eyebrow" style={{ margin: 0 }}>Document {detail.id}</p>
-                  <h2 style={{ margin: "3px 0 0", fontSize: 17, fontWeight: 800 }}>{detail.name}</h2>
-                  <p className="muted" style={{ margin: "3px 0 0", fontSize: 13 }}>{detail.studentName}</p>
-                </div>
-              </div>
-              <button onClick={() => setDetailId(null)} aria-label="Close" style={closeBtnStyle}><X size={18} /></button>
+      <Modal
+        open={detail !== null}
+        onClose={() => setDetailId(null)}
+        title={
+          detail ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 12 }}>
+              <span style={{ width: 42, height: 42, borderRadius: "var(--radius-md)", background: "var(--bg-tint)", color: "var(--daust-navy)", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <FileText size={20} />
+              </span>
+              <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+                <span className="eyebrow" style={{ margin: 0 }}>Document {detail.id}</span>
+                <span style={{ fontSize: 17, fontWeight: 800 }}>{detail.name}</span>
+                <span className="muted" style={{ fontSize: 13 }}>{detail.studentName}</span>
+              </span>
+            </span>
+          ) : null
+        }
+        width={540}
+        footer={
+          detail ? (
+            <>
+              <button onClick={() => openEdit(detail)} style={ghostBtnStyle}>Edit</button>
+              <button onClick={() => simulate("Share", detail.name)} style={{ ...navyBtnStyle, background: "transparent", color: "var(--daust-navy)", border: "1px solid var(--daust-navy)" }}>
+                <Share2 size={14} /> Share
+              </button>
+              <button onClick={() => simulate("Download", detail.name)} style={navyBtnStyle}>
+                <Download size={14} /> Download
+              </button>
+            </>
+          ) : null
+        }
+      >
+        {detail && (
+          <>
+            <MetaTile label="Document Type">
+              <Badge tone={TYPE_TONES[detail.type]}>{detail.type}</Badge>
+            </MetaTile>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginTop: 16 }}>
+              <MetaTile label="Date">{detail.date}</MetaTile>
+              <MetaTile label="Uploaded By">{detail.uploadedBy || "—"}</MetaTile>
+              <MetaTile label="Student ID">{detail.studentId || "—"}</MetaTile>
             </div>
 
-            <div style={{ padding: "18px 22px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-              <MetaTile label="Document Type">
-                <Badge tone={TYPE_TONES[detail.type]}>{detail.type}</Badge>
-              </MetaTile>
+            <div style={{ marginTop: 16 }}>
+              <div style={sectionLabelStyle}>Notes</div>
+              <div style={boxStyle}>{detail.notes || "No notes recorded for this document."}</div>
+            </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-                <MetaTile label="Date">{detail.date}</MetaTile>
-                <MetaTile label="Uploaded By">{detail.uploadedBy || "—"}</MetaTile>
-                <MetaTile label="Student ID">{detail.studentId || "—"}</MetaTile>
+            {toast && (
+              <div style={{ background: "#e3f5ec", border: "1px solid var(--success-500)", color: "var(--success-500)", borderRadius: "var(--radius-md)", padding: "9px 12px", fontSize: 12.5, fontWeight: 600 }}>
+                {toast}
               </div>
+            )}
+          </>
+        )}
+      </Modal>
 
-              <div>
-                <div style={sectionLabelStyle}>Notes</div>
-                <div style={boxStyle}>{detail.notes || "No notes recorded for this document."}</div>
-              </div>
-
-              {toast && (
-                <div style={{ background: "#e3f5ec", border: "1px solid var(--success-500)", color: "var(--success-500)", borderRadius: "var(--radius-md)", padding: "9px 12px", fontSize: 12.5, fontWeight: 600 }}>
-                  {toast}
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title={editing ? `Edit Document ${editing}` : "Add Document"}
+        width={520}
+        footer={
+          <>
+            <button onClick={() => setShowForm(false)} style={ghostBtnStyle}>Cancel</button>
+            <button
+              onClick={save}
+              disabled={!form.studentName.trim() || !form.name.trim()}
+              style={{ ...navyBtnStyle, opacity: !form.studentName.trim() || !form.name.trim() ? 0.5 : 1 }}
+            >
+              {editing ? "Save Changes" : "Add Document"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <label style={labelStyle}>
+            Student Name
+            <div style={{ position: "relative" }}>
+              <input
+                value={form.studentName}
+                placeholder="Start typing a student name..."
+                onChange={(e) => {
+                  setField("studentName", e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
+                style={fieldStyle}
+              />
+              {showSuggestions && suggestions.length > 0 && (
+                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, marginTop: 4, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden", boxShadow: "0 8px 24px rgba(0,0,0,.14)" }}>
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => pickStudent(s.id, s.name)}
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", borderBottom: "1px solid var(--divider)", background: "transparent", fontSize: 13, color: "var(--fg1)", cursor: "pointer" }}
+                    >
+                      <strong style={{ fontWeight: 600 }}>{s.name}</strong>
+                      <span style={{ color: "var(--fg3)", marginLeft: 8, fontSize: 12 }}>{s.program}</span>
+                    </button>
+                  ))}
                 </div>
               )}
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
-                <button onClick={() => openEdit(detail)} style={ghostBtnStyle}>Edit</button>
-                <button onClick={() => simulate("Share", detail.name)} style={{ ...navyBtnStyle, background: "transparent", color: "var(--daust-navy)", border: "1px solid var(--daust-navy)" }}>
-                  <Share2 size={14} /> Share
-                </button>
-                <button onClick={() => simulate("Download", detail.name)} style={navyBtnStyle}>
-                  <Download size={14} /> Download
-                </button>
-              </div>
             </div>
+          </label>
+
+          <label style={labelStyle}>
+            Document Name
+            <input value={form.name} onChange={(e) => setField("name", e.target.value)} placeholder="e.g. Annual Blood Panel" style={fieldStyle} />
+          </label>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={labelStyle}>
+              Type
+              <select value={form.type} onChange={(e) => setField("type", e.target.value as MedicalDocument["type"])} style={fieldStyle}>
+                {TYPES.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Date
+              <input type="date" value={form.date} onChange={(e) => setField("date", e.target.value)} style={fieldStyle} />
+            </label>
           </div>
+
+          <label style={labelStyle}>
+            Uploaded By
+            <input value={form.uploadedBy} onChange={(e) => setField("uploadedBy", e.target.value)} placeholder="e.g. Dr. S. Diop" style={fieldStyle} />
+          </label>
+
+          <label style={labelStyle}>
+            Notes
+            <textarea
+              value={form.notes}
+              onChange={(e) => setField("notes", e.target.value)}
+              rows={3}
+              placeholder="Description or context for this document..."
+              style={{ ...fieldStyle, resize: "vertical" }}
+            />
+          </label>
         </div>
-      )}
-
-      {showForm && (
-        <div onClick={() => setShowForm(false)} style={overlayStyle}>
-          <div onClick={(e) => e.stopPropagation()} style={{ ...modalStyle, maxWidth: 520 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 22px 16px", borderBottom: "1px solid var(--divider)" }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>
-                {editing ? `Edit Document ${editing}` : "Add Document"}
-              </h2>
-              <button onClick={() => setShowForm(false)} aria-label="Close" style={closeBtnStyle}><X size={18} /></button>
-            </div>
-
-            <div style={{ padding: "18px 22px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-              <label style={labelStyle}>
-                Student Name
-                <div style={{ position: "relative" }}>
-                  <input
-                    value={form.studentName}
-                    placeholder="Start typing a student name..."
-                    onChange={(e) => {
-                      setField("studentName", e.target.value);
-                      setShowSuggestions(true);
-                    }}
-                    onFocus={() => setShowSuggestions(true)}
-                    onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
-                    style={fieldStyle}
-                  />
-                  {showSuggestions && suggestions.length > 0 && (
-                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, marginTop: 4, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden", boxShadow: "0 8px 24px rgba(0,0,0,.14)" }}>
-                      {suggestions.map((s) => (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => pickStudent(s.id, s.name)}
-                          style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", borderBottom: "1px solid var(--divider)", background: "transparent", fontSize: 13, color: "var(--fg1)", cursor: "pointer" }}
-                        >
-                          <strong style={{ fontWeight: 600 }}>{s.name}</strong>
-                          <span style={{ color: "var(--fg3)", marginLeft: 8, fontSize: 12 }}>{s.program}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </label>
-
-              <label style={labelStyle}>
-                Document Name
-                <input value={form.name} onChange={(e) => setField("name", e.target.value)} placeholder="e.g. Annual Blood Panel" style={fieldStyle} />
-              </label>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <label style={labelStyle}>
-                  Type
-                  <select value={form.type} onChange={(e) => setField("type", e.target.value as MedicalDocument["type"])} style={fieldStyle}>
-                    {TYPES.map((t) => <option key={t}>{t}</option>)}
-                  </select>
-                </label>
-                <label style={labelStyle}>
-                  Date
-                  <input type="date" value={form.date} onChange={(e) => setField("date", e.target.value)} style={fieldStyle} />
-                </label>
-              </div>
-
-              <label style={labelStyle}>
-                Uploaded By
-                <input value={form.uploadedBy} onChange={(e) => setField("uploadedBy", e.target.value)} placeholder="e.g. Dr. S. Diop" style={fieldStyle} />
-              </label>
-
-              <label style={labelStyle}>
-                Notes
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setField("notes", e.target.value)}
-                  rows={3}
-                  placeholder="Description or context for this document..."
-                  style={{ ...fieldStyle, resize: "vertical" }}
-                />
-              </label>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6, paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
-                <button onClick={() => setShowForm(false)} style={ghostBtnStyle}>Cancel</button>
-                <button
-                  onClick={save}
-                  disabled={!form.studentName.trim() || !form.name.trim()}
-                  style={{ ...navyBtnStyle, opacity: !form.studentName.trim() || !form.name.trim() ? 0.5 : 1 }}
-                >
-                  {editing ? "Save Changes" : "Add Document"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </Modal>
     </>
   );
 }
