@@ -41,6 +41,10 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 export default function SettingsPage() {
   const { store, updateSettings, loading, error } = useInfirmaryStore();
 
+
+  const [form, setForm] = useState<AppSettings>(() => ({ ...store.settings }));
+  const [saved, setSaved] = useState(false);
+
   if (loading) {
     return <div className="loading-state">Loading…</div>;
   }
@@ -53,8 +57,6 @@ export default function SettingsPage() {
     );
   }
 
-  const [form, setForm] = useState<AppSettings>(() => ({ ...store.settings }));
-  const [saved, setSaved] = useState(false);
 
   function set<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setForm((f) => ({ ...f, [key]: value }));

@@ -125,6 +125,16 @@ function MetaTile({ label, children }: { label: string; children: ReactNode }) {
 export default function FollowUpsPage() {
   const { store, addFollowUp, updateFollowUp, deleteFollowUp, loading, error } = useInfirmaryStore();
 
+
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [priorityFilter, setPriorityFilter] = useState("All");
+  const [form, setForm] = useState<FollowUp>(emptyForm);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
   if (loading) {
     return <div className="loading-state">Loading…</div>;
   }
@@ -137,14 +147,6 @@ export default function FollowUpsPage() {
     );
   }
 
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [priorityFilter, setPriorityFilter] = useState("All");
-  const [form, setForm] = useState<FollowUp>(emptyForm);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
 
   const followUps = store.followUps;
   const lowerQ = q.toLowerCase();

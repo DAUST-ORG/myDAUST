@@ -126,6 +126,14 @@ function StatCard({ icon, color, value, label }: { icon: ReactNode; color: strin
 export default function PrescriptionsPage() {
   const { store, addPrescription, updatePrescription, deletePrescription, loading, error } = useInfirmaryStore();
 
+
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [form, setForm] = useState<Prescription>(EMPTY);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
   if (loading) {
     return <div className="loading-state">Loading…</div>;
   }
@@ -138,12 +146,6 @@ export default function PrescriptionsPage() {
     );
   }
 
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [form, setForm] = useState<Prescription>(EMPTY);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
 
   const activeCount = store.prescriptions.filter((p) => p.status === "Active").length;
   const completedCount = store.prescriptions.filter((p) => p.status === "Completed").length;

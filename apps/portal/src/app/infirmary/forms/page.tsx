@@ -388,17 +388,6 @@ function QuestionComposer({
 export default function FormsPage() {
   const { store, addForm, updateForm, deleteForm, deleteFormResponse, loading, error } = useInfirmaryStore();
 
-  if (loading) {
-    return <div className="loading-state">Loading…</div>;
-  }
-  if (error) {
-    return (
-      <div className="error-state">
-        <p>Failed to load data.</p>
-        <p>{error}</p>
-      </div>
-    );
-  }
 
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
@@ -438,6 +427,18 @@ export default function FormsPage() {
     () => store.formResponses.filter((r) => r.formId === detailId),
     [store.formResponses, detailId],
   );
+
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
+  }
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
 
   function showToast(message: string) {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);

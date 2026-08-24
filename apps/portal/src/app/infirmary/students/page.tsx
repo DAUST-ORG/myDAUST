@@ -6,39 +6,16 @@ import { useInfirmaryStore } from "../store";
 import type { Student } from "../types";
 import { Card, SearchInput, Badge } from "@/components/ui";
 
-const EMPTY: Student = {
-  id: "", name: "", initials: "", program: "", year: "Year 1", status: "Active",
-  lastVisit: "Never", allergies: [], concern: "", email: "", phone: "",
-  dateOfBirth: "", gender: "", bloodType: "", emergencyContact: "", emergencyPhone: "",
-  medicalHistory: [], height: "", weight: "",
-};
-
 const INPUT = { padding: "8px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border)", fontSize: 13, color: "var(--fg1)", width: "100%" as const };
 const LABEL = { display: "flex" as const, flexDirection: "column" as const, gap: 4, fontSize: 12.5, fontWeight: 600, color: "var(--fg2)" };
 
 export default function StudentsPage() {
-  const { store, addStudent, updateStudent, deleteStudent, loading, error } = useInfirmaryStore();
+  // Student records are owned by the registrar; this screen is read-only over them.
+  const { store, loading, error } = useInfirmaryStore();
 
-  if (loading) {
-    return <div className="loading-state">Loading…</div>;
-  }
-  if (error) {
-    return (
-      <div className="error-state">
-        <p>Failed to load data.</p>
-        <p>{error}</p>
-      </div>
-    );
-  }
 
   const [q, setQ] = useState("");
-  const [form, setForm] = useState<Student>(EMPTY);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [allergyInput, setAllergyInput] = useState("");
-  const [historyInput, setHistoryInput] = useState("");
 
   const filtered = store.students.filter(
     (s) => s.name.toLowerCase().includes(q.toLowerCase()) ||
@@ -58,23 +35,18 @@ export default function StudentsPage() {
     return { consultations: consultations.length, prescriptions: prescriptions.length, documents: documents.length, followUps: followUps.length, recentConsultations };
   }, [detail, store.consultations, store.prescriptions, store.documents, store.followUps]);
 
-  function openAdd() { setForm(EMPTY); setEditing(null); setAllergyInput(""); setHistoryInput(""); setShowForm(true); }
-  function openEdit(s: Student) {
-    setForm({ ...s }); setEditing(s.id);
-    setAllergyInput(s.allergies.join(", "));
-    setHistoryInput((s.medicalHistory || []).join(", "));
-    setShowForm(true);
+  if (loading) {
+    return <div className="loading-state">Loading…</div>;
   }
-  function save() {
-    const data = {
-      ...form,
-      allergies: allergyInput.split(",").map((a) => a.trim()).filter(Boolean),
-      medicalHistory: historyInput.split(",").map((a) => a.trim()).filter(Boolean),
-    };
-    if (editing) updateStudent(editing, data);
-    else addStudent(data);
-    setShowForm(false);
+  if (error) {
+    return (
+      <div className="error-state">
+        <p>Failed to load data.</p>
+        <p>{error}</p>
+      </div>
+    );
   }
+
 
   const badge = (status: string) => <Badge tone={status === "Active" ? "success" : status === "Follow-up" ? "warning" : "neutral"}>{status}</Badge>;
 
@@ -86,9 +58,6 @@ export default function StudentsPage() {
           <h1 className="page-title">Students</h1>
           <p className="muted" style={{ margin: "2px 0 0", fontSize: 14 }}>Student health records and profiles</p>
         </div>
-        <button onClick={openAdd} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 18px", borderRadius: "var(--radius-pill)", border: "none", background: "var(--daust-orange)", color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
-          <Plus size={15} /> Add Student
-        </button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 18 }}>
@@ -145,8 +114,6 @@ export default function StudentsPage() {
                   <td style={{ padding: "10px 14px" }}>
                     <div style={{ display: "flex", gap: 4 }}>
                       <button onClick={() => setDetailId(s.id)} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--daust-navy)", padding: 4 }} title="View profile"><Eye size={14} /></button>
-                      <button onClick={() => openEdit(s)} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--fg3)", padding: 4 }} title="Edit"><Pencil size={14} /></button>
-                      <button onClick={() => setDeleteId(s.id)} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--danger-500, #c0392b)", padding: 4 }} title="Delete"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
@@ -271,69 +238,6 @@ export default function StudentsPage() {
         </div>
       )}
 
-      {deleteId && (
-        <div onClick={() => setDeleteId(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: "var(--radius-lg)", padding: 24, width: 400, maxWidth: "90vw", boxShadow: "0 8px 30px rgba(0,0,0,.18)" }}>
-            <h3 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 700 }}>Delete Student</h3>
-            <p style={{ margin: 0, fontSize: 13.5, color: "var(--fg2)" }}>
-              Are you sure you want to delete <strong>{store.students.find((s) => s.id === deleteId)?.name}</strong>? This action cannot be undone.
-            </p>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
-              <button onClick={() => setDeleteId(null)} style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", border: "1px solid var(--border)", background: "transparent", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => { deleteStudent(deleteId); setDeleteId(null); }} style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", border: "none", background: "#c0392b", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showForm && (
-        <div onClick={() => setShowForm(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: "var(--radius-lg)", padding: 24, width: 540, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 8px 30px rgba(0,0,0,.18)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{editing ? "Edit Student" : "Add Student"}</h2>
-              <button onClick={() => setShowForm(false)} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--fg3)" }}><X size={18} /></button>
-            </div>
-
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--daust-orange)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>Personal Information</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-              <label style={LABEL}>Name<input style={INPUT} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-              <label style={LABEL}>Email<input style={INPUT} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
-              <label style={LABEL}>Phone<input style={INPUT} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
-              <label style={LABEL}>Date of Birth<input type="date" style={INPUT} value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })} /></label>
-              <label style={LABEL}>Gender<select style={INPUT} value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}><option>Male</option><option>Female</option><option>Other</option></select></label>
-              <label style={LABEL}>Blood Type<select style={INPUT} value={form.bloodType || ""} onChange={(e) => setForm({ ...form, bloodType: e.target.value })}><option value="">Select</option>{["A+","A-","B+","B-","AB+","AB-","O+","O-"].map((t) => <option key={t}>{t}</option>)}</select></label>
-            </div>
-
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--daust-orange)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>Academic</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-              <label style={LABEL}>Program<input style={INPUT} value={form.program} onChange={(e) => setForm({ ...form, program: e.target.value })} /></label>
-              <label style={LABEL}>Year<select style={INPUT} value={form.year} onChange={(e) => setForm({ ...form, year: e.target.value })}>{["Year 1","Year 2","Year 3","Year 4"].map((y) => <option key={y}>{y}</option>)}</select></label>
-            </div>
-
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--daust-orange)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>Medical</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-              <label style={LABEL}>Height<input style={INPUT} placeholder="e.g. 170cm" value={form.height || ""} onChange={(e) => setForm({ ...form, height: e.target.value })} /></label>
-              <label style={LABEL}>Weight<input style={INPUT} placeholder="e.g. 65kg" value={form.weight || ""} onChange={(e) => setForm({ ...form, weight: e.target.value })} /></label>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
-              <label style={LABEL}>Allergies (comma separated)<input style={INPUT} placeholder="e.g. Penicillin, Peanuts" value={allergyInput} onChange={(e) => setAllergyInput(e.target.value)} /></label>
-              <label style={LABEL}>Medical History (comma separated)<input style={INPUT} placeholder="e.g. Asthma, Migraines" value={historyInput} onChange={(e) => setHistoryInput(e.target.value)} /></label>
-              <label style={LABEL}>Current Concern<input style={INPUT} value={form.concern} onChange={(e) => setForm({ ...form, concern: e.target.value })} /></label>
-            </div>
-
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--daust-orange)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>Emergency Contact</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
-              <label style={LABEL}>Contact Name<input style={INPUT} value={form.emergencyContact || ""} onChange={(e) => setForm({ ...form, emergencyContact: e.target.value })} /></label>
-              <label style={LABEL}>Contact Phone<input style={INPUT} value={form.emergencyPhone || ""} onChange={(e) => setForm({ ...form, emergencyPhone: e.target.value })} /></label>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button onClick={() => setShowForm(false)} style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", border: "1px solid var(--border)", background: "transparent", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-              <button onClick={save} disabled={!form.name} style={{ padding: "8px 16px", borderRadius: "var(--radius-pill)", border: "none", background: form.name ? "var(--daust-navy)" : "var(--gray-300)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: form.name ? "pointer" : "not-allowed" }}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

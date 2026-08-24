@@ -28,7 +28,12 @@ export const UpdateConsultationInput = CreateConsultationInput.partial();
 // ─── Prescriptions ───────────────────────────────────────────────────────
 
 export const CreatePrescriptionInput = z.object({
-  consultationId: z.string().uuid().optional(),
+  // The form leaves this empty for a prescription not tied to a consultation, so ""
+  // has to mean "none" rather than "invalid uuid".
+  consultationId: z
+    .union([z.string().uuid(), z.literal("")])
+    .optional()
+    .transform((v) => v || undefined),
   studentId: z.string().min(1),
   medication: z.string().min(1).max(200),
   dosage: z.string().min(1).max(100),
@@ -48,7 +53,8 @@ export const CreateMedicationInput = z.object({
   stock: z.number().int().min(0).optional(),
   unit: z.string().max(50).optional(),
   minStock: z.number().int().min(0).optional(),
-  expiryDate: z.coerce.date().optional(),
+  // NOT NULL in the database; optional here turned a missing value into a 500.
+  expiryDate: z.coerce.date(),
   supplier: z.string().max(200).optional(),
   status: z.enum(["In Stock", "Low Stock", "Out of Stock", "Expired"]).optional(),
 });

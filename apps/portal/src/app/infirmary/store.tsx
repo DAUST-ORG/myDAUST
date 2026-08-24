@@ -93,20 +93,44 @@ function mapStudent(s: InfirmaryStudent): Student {
   };
 }
 
+/**
+ * The list endpoints return the joined student, not a flattened name, and their date columns
+ * are visitedAt / prescribedAt / createdAt rather than a generic `date`. Reading the fields
+ * the mappers previously assumed produced undefined everywhere: blank names, blank dates, and
+ * a crash in the search filters, which call .toLowerCase() on the name.
+ */
+function joinedStudentName(row: unknown): string {
+  const person = (row as { student?: { person?: { firstName?: string; lastName?: string } } })
+    ?.student?.person;
+  if (!person) return "";
+  return `${person.firstName ?? ""} ${person.lastName ?? ""}`.trim();
+}
+
+/**
+ * Dates are kept as yyyy-mm-dd rather than a localised display string. The pages do arithmetic
+ * on these values (days-until-expiry, overdue follow-ups), and `new Date("Aug 22, 2027")`
+ * parsed back from a display string yielded NaN, so expiry warnings never fired.
+ */
+function isoDate(value: unknown): string {
+  if (!value) return "";
+  const d = new Date(value as string);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
+
 function mapConsultation(c: InfirmaryConsultation): Consultation {
-  const d = new Date(c.date ?? c.time ?? "");
+  const visited = (c as { visitedAt?: string }).visitedAt;
   return {
     id: c.id,
     studentId: c.studentId,
-    studentName: c.studentName,
+    studentName: joinedStudentName(c) || c.studentName || "",
     reason: c.reason,
     visitType: c.visitType,
     clinicalNotes: c.clinicalNotes ?? "",
     status: c.status as Consultation["status"],
-    date: c.date
-      ? new Date(c.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      : "",
-    time: c.time ?? "",
+    date: isoDate(visited ?? c.date),
+    time: visited
+      ? new Date(visited).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+      : (c.time ?? ""),
     followUpRequired: c.followUpRequired ?? false,
     vitals: (c as any).vitalsJson as Consultation["vitals"],
     diagnosis: c.diagnosis,
@@ -119,16 +143,14 @@ function mapPrescription(p: InfirmaryPrescription): Prescription {
     id: p.id,
     consultationId: p.consultationId ?? "",
     studentId: p.studentId,
-    studentName: p.studentName,
+    studentName: joinedStudentName(p) || p.studentName || "",
     medication: p.medication,
     dosage: p.dosage,
     frequency: p.frequency,
     duration: p.duration,
     instructions: p.instructions ?? "",
     status: p.status as Prescription["status"],
-    date: p.date
-      ? new Date(p.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      : "",
+    date: isoDate((p as { prescribedAt?: string }).prescribedAt ?? p.date),
     prescribedBy: p.prescribedBy ?? "",
   };
 }
@@ -141,13 +163,9 @@ function mapMedication(m: InfirmaryMedication): Medication {
     stock: m.stock,
     unit: m.unit,
     minStock: m.minStock,
-    expiryDate: m.expiryDate
-      ? new Date(m.expiryDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      : "",
+    expiryDate: isoDate(m.expiryDate),
     supplier: m.supplier,
-    lastRestocked: m.lastRestocked
-      ? new Date(m.lastRestocked).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      : "",
+    lastRestocked: isoDate(m.lastRestocked),
     status: m.status as Medication["status"],
   };
 }
@@ -156,10 +174,8 @@ function mapAppointment(a: InfirmaryAppointment): Appointment {
   return {
     id: a.id,
     studentId: a.studentId,
-    studentName: a.studentName,
-    date: a.date
-      ? new Date(a.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      : "",
+    studentName: joinedStudentName(a) || a.studentName || "",
+    date: isoDate(a.date),
     time: a.time,
     type: a.type,
     reason: a.reason,
@@ -172,12 +188,10 @@ function mapDocument(d: InfirmaryDocument): MedicalDocument {
   return {
     id: d.id,
     studentId: d.studentId,
-    studentName: d.studentName,
+    studentName: joinedStudentName(d) || d.studentName || "",
     name: d.name,
     type: d.type as MedicalDocument["type"],
-    date: d.date
-      ? new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      : "",
+    date: isoDate((d as { createdAt?: string }).createdAt ?? d.date),
     uploadedBy: d.uploadedBy ?? "",
     notes: d.notes ?? "",
   };
@@ -187,11 +201,9 @@ function mapFollowUp(f: InfirmaryFollowUp): FollowUp {
   return {
     id: f.id,
     studentId: f.studentId,
-    studentName: f.studentName,
+    studentName: joinedStudentName(f) || f.studentName || "",
     reason: f.reason,
-    dueDate: f.dueDate
-      ? new Date(f.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      : "",
+    dueDate: isoDate(f.dueDate),
     status: f.status as FollowUp["status"],
     priority: f.priority as FollowUp["priority"],
     notes: f.notes ?? "",
@@ -406,7 +418,13 @@ export function InfirmaryStoreProvider({ children }: { children: ReactNode }) {
   }, [fetchAll]);
 
   const updateConsultation = useCallback(async (id: string, data: Partial<Consultation>) => {
-    await updateInfirmaryConsultation(id, data as any);
+    // The column is vitalsJson. Sending the UI's `vitals` key meant zod stripped it and the
+    // PATCH returned 200 having changed nothing, so vitals edits silently disappeared.
+    const { vitals, ...rest } = data;
+    await updateInfirmaryConsultation(id, {
+      ...rest,
+      ...(vitals !== undefined ? { vitalsJson: vitals } : {}),
+    } as any);
     fetchAll();
   }, [fetchAll]);
 

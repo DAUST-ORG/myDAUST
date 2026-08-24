@@ -155,6 +155,14 @@ function ExpiryCell({ m }: { m: Medication }) {
 export default function MedicationsPage() {
   const { store, addMedication, updateMedication, deleteMedication, loading, error } = useInfirmaryStore();
 
+
+  const [q, setQ] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [form, setForm] = useState<Medication>(emptyForm);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
   if (loading) {
     return <div className="loading-state">Loading…</div>;
   }
@@ -167,12 +175,6 @@ export default function MedicationsPage() {
     );
   }
 
-  const [q, setQ] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("All");
-  const [form, setForm] = useState<Medication>(emptyForm);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
 
   const medications = store.medications;
   const categories = Array.from(new Set(medications.map((m) => m.category))).sort();

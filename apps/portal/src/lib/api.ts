@@ -68,14 +68,26 @@ async function toApiError(res: Response): Promise<ApiError> {
   let serverMsg = "";
   try {
     const body = JSON.parse(text);
+    // ZodExceptionFilter answers {message:"Validation failed", issues:[{path,message}]}. Using
+    // only `message` told the user something failed but never which field, which made a
+    // validation error indistinguishable from a bug.
+    const issues = Array.isArray(body?.issues)
+      ? body.issues
+          .map((i: { path?: string; message?: string }) =>
+            i?.path ? `${i.path}: ${i.message ?? "invalid"}` : i?.message,
+          )
+          .filter(Boolean)
+          .join("; ")
+      : "";
     serverMsg =
-      typeof body?.message === "string"
+      issues ||
+      (typeof body?.message === "string"
         ? body.message
         : Array.isArray(body?.message)
           ? body.message.join(", ")
           : typeof body?.error === "string"
             ? body.error
-            : "";
+            : "");
   } catch {
     serverMsg = text;
   }
