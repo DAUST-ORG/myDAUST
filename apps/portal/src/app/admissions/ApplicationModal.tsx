@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 import { Check } from "lucide-react";
-import { type ApplicantInput, createApplicant, updateApplicant } from "@/lib/api";
+import {
+  type ApplicantInput,
+  createApplicant,
+  updateApplicant,
+} from "@/lib/api";
 import { Field, Modal, Select } from "@/components/ui";
 
 export interface ProgramOption {
@@ -131,14 +135,50 @@ function buildInput(f: FormState): ApplicantInput {
   };
 }
 
-export function ApplicationModal({ mode, applicantId, initial, programs, onClose, onSaved }: Props) {
+/**
+ * Only the fields the operator actually changed. The API treats an absent key as "leave
+ * it alone" and an explicit null as "clear it", so sending the whole form made every
+ * unseeded field a deliberate-looking wipe.
+ */
+function changedOnly<T extends Record<string, unknown>>(
+  next: T,
+  before: T,
+): Partial<T> {
+  const out: Partial<T> = {};
+  for (const key of Object.keys(next) as (keyof T)[]) {
+    if (next[key] !== before[key]) out[key] = next[key];
+  }
+  return out;
+}
+
+export function ApplicationModal({
+  mode,
+  applicantId,
+  initial,
+  programs,
+  onClose,
+  onSaved,
+}: Props) {
   const [f, setF] = useState<FormState>(() => initialForm(initial));
+  // What the record looked like when the modal opened. Edits are sent as a diff against
+  // this, so a field the caller forgot to seed is simply not sent rather than nulled.
+  const [baseline] = useState(() => {
+    const form = initialForm(initial);
+    return {
+      ...buildInput(form),
+      firstName: form.firstName.trim(),
+      lastName: form.lastName.trim(),
+      email: form.email.trim(),
+    };
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setF((p) => ({ ...p, [key]: value }));
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+    setF((p) => ({ ...p, [key]: value }));
 
-  const schoolLabel = f.origin === "transfer" ? "Previous university" : "High school name";
+  const schoolLabel =
+    f.origin === "transfer" ? "Previous university" : "High school name";
   const submitLabel = mode === "edit" ? "Save changes" : "Submit application";
 
   async function submit() {
@@ -149,15 +189,21 @@ export function ApplicationModal({ mode, applicantId, initial, programs, onClose
     }
     setBusy(true);
     try {
-      const base = { firstName: f.firstName.trim(), lastName: f.lastName.trim(), email: f.email.trim() };
+      const base = {
+        firstName: f.firstName.trim(),
+        lastName: f.lastName.trim(),
+        email: f.email.trim(),
+      };
       const input = { ...buildInput(f), ...base };
       const res =
         mode === "edit" && applicantId
-          ? await updateApplicant(applicantId, input)
+          ? await updateApplicant(applicantId, changedOnly(input, baseline))
           : await createApplicant(input);
       onSaved(res.id);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not save the application.");
+      setErr(
+        e instanceof Error ? e.message : "Could not save the application.",
+      );
       setBusy(false);
     }
   }
@@ -176,7 +222,12 @@ export function ApplicationModal({ mode, applicantId, initial, programs, onClose
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <button
+            className="primary"
+            onClick={submit}
+            disabled={busy}
+            style={{ display: "flex", alignItems: "center", gap: 7 }}
+          >
             <Check size={15} /> {busy ? "Saving…" : submitLabel}
           </button>
         </>
@@ -184,41 +235,106 @@ export function ApplicationModal({ mode, applicantId, initial, programs, onClose
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
         <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
-          DAUST undergraduate application · only name and email are required to open an entry.
+          DAUST undergraduate application · only name and email are required to
+          open an entry.
         </p>
-        {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
+        {err && (
+          <div className="badge overdue" style={{ padding: "8px 12px" }}>
+            {err}
+          </div>
+        )}
 
         <Section label="Admission">
           <Grid cols={2}>
             <Field label="Admission term">
-              <Select value={f.term} onChange={(v) => set("term", v)} options={[{ value: "", label: "—" }, ...TERM_OPTIONS.map((t) => ({ value: t, label: t }))]} />
+              <Select
+                value={f.term}
+                onChange={(v) => set("term", v)}
+                options={[
+                  { value: "", label: "—" },
+                  ...TERM_OPTIONS.map((t) => ({ value: t, label: t })),
+                ]}
+              />
             </Field>
             <Field label="Program of choice">
-              <Select value={f.programCode} onChange={(v) => set("programCode", v)} options={programOptions} />
+              <Select
+                value={f.programCode}
+                onChange={(v) => set("programCode", v)}
+                options={programOptions}
+              />
             </Field>
           </Grid>
         </Section>
 
         <Section label="Personal information">
           <Grid cols={2}>
-            <Field label="First name*"><input value={f.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field>
-            <Field label="Last name*"><input value={f.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
-          </Grid>
-          <Grid cols={2}>
-            <Field label="Email*"><input type="email" value={f.email} onChange={(e) => set("email", e.target.value)} /></Field>
-            <Field label="Phone"><input value={f.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
-          </Grid>
-          <Grid cols={2}>
-            <Field label="Date of birth"><input type="date" value={f.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
-            <Field label="Gender">
-              <Select value={f.gender} onChange={(v) => set("gender", v)} options={[{ value: "", label: "—" }, ...GENDER_OPTIONS.map((g) => ({ value: g, label: g }))]} />
+            <Field label="First name*">
+              <input
+                value={f.firstName}
+                onChange={(e) => set("firstName", e.target.value)}
+              />
+            </Field>
+            <Field label="Last name*">
+              <input
+                value={f.lastName}
+                onChange={(e) => set("lastName", e.target.value)}
+              />
             </Field>
           </Grid>
           <Grid cols={2}>
-            <Field label="Nationality"><input value={f.nationality} onChange={(e) => set("nationality", e.target.value)} /></Field>
-            <Field label="City of residence"><input value={f.city} onChange={(e) => set("city", e.target.value)} /></Field>
+            <Field label="Email*">
+              <input
+                type="email"
+                value={f.email}
+                onChange={(e) => set("email", e.target.value)}
+              />
+            </Field>
+            <Field label="Phone">
+              <input
+                value={f.phone}
+                onChange={(e) => set("phone", e.target.value)}
+              />
+            </Field>
           </Grid>
-          <Field label="Country"><input value={f.country} onChange={(e) => set("country", e.target.value)} /></Field>
+          <Grid cols={2}>
+            <Field label="Date of birth">
+              <input
+                type="date"
+                value={f.dateOfBirth}
+                onChange={(e) => set("dateOfBirth", e.target.value)}
+              />
+            </Field>
+            <Field label="Gender">
+              <Select
+                value={f.gender}
+                onChange={(v) => set("gender", v)}
+                options={[
+                  { value: "", label: "—" },
+                  ...GENDER_OPTIONS.map((g) => ({ value: g, label: g })),
+                ]}
+              />
+            </Field>
+          </Grid>
+          <Grid cols={2}>
+            <Field label="Nationality">
+              <input
+                value={f.nationality}
+                onChange={(e) => set("nationality", e.target.value)}
+              />
+            </Field>
+            <Field label="City of residence">
+              <input
+                value={f.city}
+                onChange={(e) => set("city", e.target.value)}
+              />
+            </Field>
+          </Grid>
+          <Field label="Country">
+            <input
+              value={f.country}
+              onChange={(e) => set("country", e.target.value)}
+            />
+          </Field>
         </Section>
 
         <Section label="Academic background">
@@ -235,32 +351,82 @@ export function ApplicationModal({ mode, applicantId, initial, programs, onClose
               />
             </Field>
             <Field label="Entrance score" hint="0–20, optional">
-              <input type="number" min={0} max={20} step="0.01" value={f.score} onChange={(e) => set("score", e.target.value)} />
+              <input
+                type="number"
+                min={0}
+                max={20}
+                step="0.01"
+                value={f.score}
+                onChange={(e) => set("score", e.target.value)}
+              />
             </Field>
           </Grid>
           <Grid cols={2}>
-            <Field label="GPA / average" hint="e.g. 17/20 or 3.6/4"><input value={f.priorGpa} onChange={(e) => set("priorGpa", e.target.value)} /></Field>
-            <Field label={schoolLabel}><input value={f.school} onChange={(e) => set("school", e.target.value)} /></Field>
+            <Field label="GPA / average" hint="e.g. 17/20 or 3.6/4">
+              <input
+                value={f.priorGpa}
+                onChange={(e) => set("priorGpa", e.target.value)}
+              />
+            </Field>
+            <Field label={schoolLabel}>
+              <input
+                value={f.school}
+                onChange={(e) => set("school", e.target.value)}
+              />
+            </Field>
           </Grid>
         </Section>
 
         <Section label="Parent / guardian">
           <Grid cols={2}>
-            <Field label="Name"><input value={f.parentName} onChange={(e) => set("parentName", e.target.value)} /></Field>
-            <Field label="Phone"><input value={f.parentPhone} onChange={(e) => set("parentPhone", e.target.value)} /></Field>
+            <Field label="Name">
+              <input
+                value={f.parentName}
+                onChange={(e) => set("parentName", e.target.value)}
+              />
+            </Field>
+            <Field label="Phone">
+              <input
+                value={f.parentPhone}
+                onChange={(e) => set("parentPhone", e.target.value)}
+              />
+            </Field>
           </Grid>
-          <Field label="Email"><input type="email" value={f.parentEmail} onChange={(e) => set("parentEmail", e.target.value)} /></Field>
+          <Field label="Email">
+            <input
+              type="email"
+              value={f.parentEmail}
+              onChange={(e) => set("parentEmail", e.target.value)}
+            />
+          </Field>
         </Section>
 
         <Section label="Additional">
           <Grid cols={2}>
-            <Field label="Allergies / medical"><input value={f.allergies} onChange={(e) => set("allergies", e.target.value)} /></Field>
+            <Field label="Allergies / medical">
+              <input
+                value={f.allergies}
+                onChange={(e) => set("allergies", e.target.value)}
+              />
+            </Field>
             <Field label="How did you learn about DAUST?">
-              <Select value={f.source} onChange={(v) => set("source", v)} options={[{ value: "", label: "—" }, ...SOURCE_OPTIONS.map((o) => ({ value: o, label: o }))]} />
+              <Select
+                value={f.source}
+                onChange={(v) => set("source", v)}
+                options={[
+                  { value: "", label: "—" },
+                  ...SOURCE_OPTIONS.map((o) => ({ value: o, label: o })),
+                ]}
+              />
             </Field>
           </Grid>
           <Field label="Statement of purpose">
-            <textarea rows={4} value={f.essay} onChange={(e) => set("essay", e.target.value)} style={{ resize: "vertical" }} />
+            <textarea
+              rows={4}
+              value={f.essay}
+              onChange={(e) => set("essay", e.target.value)}
+              style={{ resize: "vertical" }}
+            />
           </Field>
         </Section>
       </div>
@@ -268,15 +434,41 @@ export function ApplicationModal({ mode, applicantId, initial, programs, onClose
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Section({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--daust-orange)" }}>{label}</span>
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: ".08em",
+          textTransform: "uppercase",
+          color: "var(--daust-orange)",
+        }}
+      >
+        {label}
+      </span>
       {children}
     </section>
   );
 }
 
 function Grid({ cols, children }: { cols: number; children: React.ReactNode }) {
-  return <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 12 }}>{children}</div>;
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+        gap: 12,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
