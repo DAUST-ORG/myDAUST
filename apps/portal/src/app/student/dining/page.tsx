@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { QrCode } from "@/components/QrCode";
 import {
   type DiningOrder,
+  type DiningEligibility,
+  type DiningToday,
   type DiningPass,
   type MenuItem,
   type PaymentSubmissionSummary,
@@ -13,13 +15,14 @@ import {
   createDiningOrder,
   fileUrl,
   getDiningPass,
+  getDiningEligibility,
+  getDiningToday,
   getMenu,
   getMyDiningOrders,
   listMyPaymentAttempts,
   payDiningOrder,
   submitResumablePaymentProof,
 } from "@/lib/api";
-import { type DiningToday, getDiningToday } from "@/lib/api-dining";
 import { PageHeader, Segmented } from "@/components/ui";
 import { ProofPaymentPanel } from "@/components/ProofPaymentPanel";
 
@@ -27,23 +30,64 @@ const TABS = ["Home", "Pass", "Weekend orders", "My plan"] as const;
 type Tab = (typeof TABS)[number];
 const xof = (n: number) => `${n.toLocaleString("en-US")} XOF`;
 
-const MEALS = [
-  {
-    key: "breakfast",
-    label: "Breakfast",
-    window: "07:00 – 09:00",
-    startHour: 7,
-  },
-  { key: "lunch", label: "Lunch", window: "12:00 – 14:00", startHour: 12 },
-  { key: "dinner", label: "Dinner", window: "19:00 – 21:00", startHour: 19 },
-] as const;
+const PERIODS = ["breakfast", "lunch", "dinner"] as const;
+type Period = (typeof PERIODS)[number];
+const PERIOD_LABELS: Record<Period, string> = {
+  breakfast: "Breakfast",
+  lunch: "Lunch",
+  dinner: "Dinner",
+};
 
-/** The next meal from now: first period whose start hour is still ahead, else tomorrow's breakfast. */
-function nextMeal(now = new Date()) {
-  const upcoming = MEALS.find((m) => now.getHours() < m.startHour);
-  return upcoming
-    ? { ...upcoming, tomorrow: false }
-    : { ...MEALS[0], tomorrow: true };
+/** Shipped defaults; replaced by the dining office's configured windows once loaded. */
+const FALLBACK_WINDOWS: Record<Period, { start: string; end: string }> = {
+  breakfast: { start: "07:00", end: "09:00" },
+  lunch: { start: "12:00", end: "14:00" },
+  dinner: { start: "19:00", end: "21:00" },
+};
+
+const minutes = (hhmm: string) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+};
+
+function buildMeals(
+  windows: Record<Period, { start: string; end: string }> = FALLBACK_WINDOWS,
+) {
+  return PERIODS.map((key) => {
+    const w = windows[key] ?? FALLBACK_WINDOWS[key];
+    return {
+      key,
+      label: PERIOD_LABELS[key],
+      window: `${w.start} \u2013 ${w.end}`,
+      startMin: minutes(w.start),
+      endMin: minutes(w.end),
+    };
+  });
+}
+
+type Meal = ReturnType<typeof buildMeals>[number];
+
+/**
+ * The meal to lead with: the one being served right now, else the next one to open.
+ * Picking purely on start time — as this did before — makes a lunch being served at 12:30
+ * read "Upcoming", which is the opposite of what the student needs at 12:30.
+ */
+function nextMeal(meals: Meal[], now = new Date()) {
+  const t = now.getHours() * 60 + now.getMinutes();
+  const open = meals.find((m) => t >= m.startMin && t < m.endMin);
+  if (open) return { ...open, tomorrow: false, openNow: true };
+  const ahead = meals.find((m) => t < m.startMin);
+  return ahead
+    ? { ...ahead, tomorrow: false, openNow: false }
+    : { ...meals[0]!, tomorrow: true, openNow: false };
+}
+
+/** Which period the entrance would check for right now. */
+function currentPeriod(now = new Date()) {
+  const h = now.getHours();
+  if (h < 11) return "breakfast";
+  if (h < 17) return "lunch";
+  return "dinner";
 }
 const PLANS = [
   {
@@ -73,6 +117,9 @@ export default function StudentDiningPage() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<DiningOrder[]>([]);
   const [today, setToday] = useState<DiningToday | null>(null);
+  const [eligibility, setEligibility] = useState<DiningEligibility | null>(
+    null,
+  );
   const [cart, setCart] = useState<Record<string, number>>({});
   const [attempts, setAttempts] = useState<PaymentSubmissionSummary[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -90,6 +137,9 @@ export default function StudentDiningPage() {
       .catch(() => {});
     getDiningToday()
       .then(setToday)
+      .catch(() => {});
+    getDiningEligibility(currentPeriod())
+      .then(setEligibility)
       .catch(() => {});
     listMyPaymentAttempts()
       .then(setAttempts)
@@ -177,7 +227,8 @@ export default function StudentDiningPage() {
 
       {tab === "Home" &&
         (() => {
-          const next = nextMeal();
+          const meals = buildMeals(today?.mealWindows);
+          const next = nextMeal(meals);
           const served = new Set(today?.scannedPeriods ?? []);
           return (
             <>
@@ -193,7 +244,9 @@ export default function StudentDiningPage() {
                   }}
                 >
                   <p className="eyebrow" style={{ marginBottom: 4 }}>
-                    Next meal{next.tomorrow ? " · tomorrow" : ""}
+                    {next.openNow
+                      ? "Serving now"
+                      : `Next meal${next.tomorrow ? " · tomorrow" : ""}`}
                   </p>
                   <div
                     style={{
@@ -207,7 +260,17 @@ export default function StudentDiningPage() {
                   <p className="muted" style={{ marginTop: 4 }}>
                     {next.window}
                   </p>
-                  <div style={{ marginTop: 12 }}>
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {next.openNow && (
+                      <span className="badge partial">Open now</span>
+                    )}
                     {pass?.active ? (
                       <span className="badge completed">
                         {pass.plan} plan · active
@@ -216,13 +279,32 @@ export default function StudentDiningPage() {
                       <span className="badge overdue">No active plan</span>
                     )}
                   </div>
+                  {/* The same verdict the entrance will produce, so nobody is
+                      surprised at the door. */}
+                  {eligibility && (
+                    <p
+                      className="muted"
+                      style={{
+                        fontSize: 12,
+                        marginTop: 10,
+                        color: eligibility.serve
+                          ? "var(--success)"
+                          : "var(--danger)",
+                      }}
+                    >
+                      At the entrance: {eligibility.reason}
+                    </p>
+                  )}
                 </div>
                 <div className="card" style={{ flex: 3 }}>
                   <p className="h1" style={{ fontSize: 15, marginBottom: 8 }}>
                     Today&rsquo;s meals
                   </p>
-                  {MEALS.map((m) => {
+                  {meals.map((m) => {
                     const done = served.has(m.key);
+                    const nowMin =
+                      new Date().getHours() * 60 + new Date().getMinutes();
+                    const openNow = nowMin >= m.startMin && nowMin < m.endMin;
                     const isNext =
                       m.key === next.key && !next.tomorrow && !done;
                     return (
@@ -252,8 +334,14 @@ export default function StudentDiningPage() {
                         </div>
                         {done ? (
                           <span className="badge completed">Served</span>
+                        ) : openNow ? (
+                          <span className="badge partial">Open now</span>
                         ) : isNext ? (
                           <span className="badge partial">Up next</span>
+                        ) : nowMin >= m.endMin ? (
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            Closed
+                          </span>
                         ) : (
                           <span className="muted" style={{ fontSize: 12 }}>
                             Upcoming
@@ -498,42 +586,49 @@ export default function StudentDiningPage() {
       )}
 
       {tab === "My plan" && (
-        <div className="row">
-          {PLANS.map((p) => (
-            <div
-              key={p.type}
-              className="card"
-              style={{
-                flex: 1,
-                borderTop:
-                  pass?.plan === p.type
-                    ? "3px solid var(--daust-orange)"
-                    : undefined,
-              }}
-            >
+        <>
+          <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+            Choosing a plan sets which meals your pass covers. Billing is
+            handled by the Finance office — cafeteria is charged with tuition
+            and housing.
+          </p>
+          <div className="row">
+            {PLANS.map((p) => (
               <div
+                key={p.type}
+                className="card"
                 style={{
-                  fontFamily: "var(--font-display)",
-                  fontWeight: 700,
-                  fontSize: 18,
+                  flex: 1,
+                  borderTop:
+                    pass?.plan === p.type
+                      ? "3px solid var(--daust-orange)"
+                      : undefined,
                 }}
               >
-                {p.label}
+                <div
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    fontWeight: 700,
+                    fontSize: 18,
+                  }}
+                >
+                  {p.label}
+                </div>
+                <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+                  {p.note}
+                </p>
+                <button
+                  className={pass?.plan === p.type ? "" : "primary"}
+                  disabled={pass?.plan === p.type}
+                  onClick={() => chooseMealPlan(p.type).then(load)}
+                  style={{ marginTop: 12 }}
+                >
+                  {pass?.plan === p.type ? "Current plan" : "Choose"}
+                </button>
               </div>
-              <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-                {p.note}
-              </p>
-              <button
-                className={pass?.plan === p.type ? "" : "primary"}
-                disabled={pass?.plan === p.type}
-                onClick={() => chooseMealPlan(p.type).then(load)}
-                style={{ marginTop: 12 }}
-              >
-                {pass?.plan === p.type ? "Current plan" : "Choose"}
-              </button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
     </>
   );

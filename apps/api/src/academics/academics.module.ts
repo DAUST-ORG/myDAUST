@@ -5,5 +5,6 @@ import { AcademicsService } from "./academics.service.js";
 @Module({
   controllers: [AcademicsController],
   providers: [AcademicsService],
+  exports: [AcademicsService],
 })
 export class AcademicsModule {}
