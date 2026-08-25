@@ -963,6 +963,10 @@ export interface AdminStudent {
   status: string;
   hasLogin: boolean;
   mustChangePassword: boolean;
+  // Free-text profile fields used by the roster's filter Selects. Null when
+  // the registrar has not yet filled the Edit form.
+  gender: string | null;
+  nationality: string | null;
 }
 export interface AdminStudentDirectoryRow {
   id: string;
@@ -983,12 +987,25 @@ export interface AdminStudentRosterPage {
   totalPages: number;
   missingLoginCount: number;
   programs: { code: string; name: string }[];
+  // Distinct values currently present in the dataset, used to populate the
+  // filter Selects. The server returns the list global to the roster
+  // (intersected with other active filters' base WHERE), so each Select can
+  // only contain values that can actually be selected.
+  genders: string[];
+  nationalities: string[];
 }
 export interface AdminStudentRosterParams {
   page?: number;
   pageSize?: 25 | 50 | 100;
   search?: string;
   program?: string;
+  // `level` is a derived catalog code (S1, S2, …) — handled server-side by
+  // fetching the full filtered set, deriving per-row, then filtering. The API
+  // is uniform with the SQL-pushdown filters even though this one can't go
+  // into WHERE.
+  level?: string;
+  gender?: string;
+  nationality?: string;
   sort?: AdminStudentRosterSort;
   direction?: "asc" | "desc";
 }
@@ -1212,6 +1229,18 @@ export const getAdminStudentRoster = (
   if (params.search) query.set("search", params.search);
   if (params.program && params.program !== "all") {
     query.set("program", params.program);
+  }
+  // `level` is a free-text catalog code (S1, S2, …). It is the registrar's
+  // intent for a *single* level; passing "all" or an empty string clears it
+  // on the server the same way the program filter does.
+  if (params.level && params.level !== "all") {
+    query.set("level", params.level);
+  }
+  if (params.gender && params.gender !== "all") {
+    query.set("gender", params.gender);
+  }
+  if (params.nationality && params.nationality !== "all") {
+    query.set("nationality", params.nationality);
   }
   if (params.sort) query.set("sort", params.sort);
   if (params.direction) query.set("direction", params.direction);
