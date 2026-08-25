@@ -17,6 +17,22 @@ export function formatDate(iso: string): string {
   });
 }
 
+/** Dakar-calendar date and time, for anything where the hour matters — e.g. two
+ *  applications submitted on the same day. */
+export function formatDateTime(iso: string): string {
+  const at = new Date(iso);
+  return `${at.toLocaleDateString("fr-SN", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "Africa/Dakar",
+  })} · ${at.toLocaleTimeString("fr-SN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Africa/Dakar",
+  })}`;
+}
+
 /** Compact Dakar-calendar date for due-date and schedule labels. */
 export function formatDateShort(iso: string): string {
   return new Date(iso).toLocaleDateString("fr-SN", {

@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppShell, type ViewAsOption } from "./AppShell";
 import { getMe, type Me } from "@/lib/api";
-import { PORTALS, type PortalKey, ROLE_PORTALS, portalForRoles } from "@/lib/nav";
+import {
+  PORTALS,
+  type PortalKey,
+  ROLE_PORTALS,
+  portalForRoles,
+} from "@/lib/nav";
 
 /**
  * Client boundary between a portal's server layout and AppShell.
@@ -52,6 +57,12 @@ const VIEW_AS_ALL: (ViewAsOption & { roles: string[] })[] = [
     label: "admissions",
     href: "/admissions",
     roles: ["admissions", "admin"],
+  },
+  {
+    key: "dining",
+    label: "dining",
+    href: "/dining",
+    roles: ["dining", "admin"],
   },
   {
     key: "it",
