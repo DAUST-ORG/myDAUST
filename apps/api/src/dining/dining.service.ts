@@ -1,32 +1,130 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
-import type { ProofPaymentMethod } from "@mydaust/shared";
+import {
+  type AdvanceOrderInput,
+  DiningSettingsInput,
+  diningEligibility,
+  type DiningVerdict,
+  type ProofPaymentMethod,
+  toDakarDateKey,
+} from "@mydaust/shared";
+import { deriveApiAccountPosition } from "../finance/account-position.js";
+import { AcademicsService } from "../academics/academics.service.js";
+import { ENV } from "../config/config.module.js";
+import type { Env } from "../config/env.js";
 import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
 import { signPass, verifyPass } from "./pass-token.js";
 
 const PERIODS = ["breakfast", "lunch", "dinner"] as const;
 type Period = (typeof PERIODS)[number];
 
+const DINING_SETTINGS_KEY = "dining.settings";
+
+/**
+ * `enforcePayment` ships off. Turning it on refuses every student carrying an overdue
+ * installment at the door, so it is an announced operational change, not a deploy.
+ */
+const DEFAULT_DINING_SETTINGS: DiningSettingsInput = {
+  mealWindows: {
+    breakfast: { start: "07:00", end: "09:00" },
+    lunch: { start: "12:00", end: "14:00" },
+    dinner: { start: "19:00", end: "21:00" },
+  },
+  costPerMealXof: 720,
+  weekendOrdering: true,
+  orderCutoff: "11:00",
+  enforcePayment: false,
+  blockSecondScan: true,
+};
+
 @Injectable()
 export class DiningService {
   constructor(
+    @Inject(ENV) private readonly env: Env,
     private readonly prisma: PrismaService,
     private readonly paymentSubmissions: PaymentSubmissionsService,
+    private readonly academics: AcademicsService,
   ) {}
 
   private secret() {
-    return process.env.SESSION_SECRET ?? "dev-only-session-secret-change-me";
+    return this.env.SESSION_SECRET;
   }
 
+  /**
+   * The Dakar calendar date, stored as midnight UTC. This is the third component of
+   * `DiningScan @@unique([studentId, period, date])`, so it decides when a student's
+   * "already served" window rolls over. Dakar is UTC+0 year-round, so the stored value
+   * is identical to the previous UTC-derived one — but it now says what it means, and
+   * it agrees with every other date on the money surface.
+   */
   private dayOnly(d = new Date()) {
-    return new Date(
-      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
-    );
+    return new Date(`${toDakarDateKey(d)}T00:00:00.000Z`);
+  }
+
+  /**
+   * Service rules, with the shipped defaults. `enforcePayment` is the one that turns
+   * students away at the door, so it is the one an operator can flip without a deploy.
+   */
+  async settings(): Promise<DiningSettingsInput> {
+    const row = await this.prisma.appSetting.findUnique({
+      where: { key: DINING_SETTINGS_KEY },
+    });
+    const parsed = DiningSettingsInput.safeParse(row?.valueJson);
+    return parsed.success ? parsed.data : DEFAULT_DINING_SETTINGS;
+  }
+
+  async updateSettings(input: DiningSettingsInput, actorPersonId: string) {
+    const [saved] = await this.prisma.$transaction([
+      this.prisma.appSetting.upsert({
+        where: { key: DINING_SETTINGS_KEY },
+        update: { valueJson: input },
+        create: { key: DINING_SETTINGS_KEY, valueJson: input },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "AppSetting",
+          entityId: DINING_SETTINGS_KEY,
+          action: "update",
+          actorId: actorPersonId,
+          data: input,
+        },
+      }),
+    ]);
+    return DiningSettingsInput.parse(saved.valueJson);
+  }
+
+  /** Total overdue across the student's account — the figure the door refuses on. */
+  private async overdueXof(studentId: string) {
+    const invoices = await this.prisma.invoice.findMany({
+      where: { studentId },
+      select: {
+        id: true,
+        status: true,
+        totalAmount: true,
+        amountPaid: true,
+        createdAt: true,
+        plan: {
+          select: {
+            installments: {
+              select: {
+                id: true,
+                sequence: true,
+                dueDate: true,
+                amountDue: true,
+                amountPaid: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    return deriveApiAccountPosition(invoices).summary.overdueXof;
   }
 
   private async requireActiveStudent(studentId: string) {
@@ -63,7 +161,12 @@ export class DiningService {
     return this.prisma.mealPlan.upsert({
       where: { studentId },
       update: { type, active: type !== "none" },
-      create: { studentId, type, term: "Fall 2026", active: type !== "none" },
+      create: {
+        studentId,
+        type,
+        term: (await this.academics.currentTerm())?.name ?? "Unassigned",
+        active: type !== "none",
+      },
     });
   }
 
@@ -75,13 +178,26 @@ export class DiningService {
   }
 
   /** Which meal periods the student has already been served today (for the home hub). */
+  /**
+   * Today's served periods plus the configured service windows. The windows ride along
+   * because the student's "next meal" card is one of the two things the dining Settings
+   * screen claims to drive — and a setting nothing reads is a decorative switch.
+   */
   async myToday(studentId: string) {
     await this.requireActiveStudent(studentId);
-    const scans = await this.prisma.diningScan.findMany({
-      where: { studentId, date: this.dayOnly(), result: "served" },
-      select: { period: true },
-    });
-    return { scannedPeriods: scans.map((s) => s.period) };
+    const [scans, settings] = await Promise.all([
+      this.prisma.diningScan.findMany({
+        where: { studentId, date: this.dayOnly(), result: "served" },
+        select: { period: true },
+      }),
+      this.settings(),
+    ]);
+    return {
+      scannedPeriods: scans.map((s) => s.period),
+      mealWindows: settings.mealWindows,
+      weekendOrdering: settings.weekendOrdering,
+      orderCutoff: settings.orderCutoff,
+    };
   }
 
   async myOrders(studentId: string) {
@@ -162,113 +278,209 @@ export class DiningService {
 
   // --- Scanner station ---
 
+  /**
+   * The door. Every refusal is decided by `diningEligibility` in @mydaust/shared, so the
+   * student's own screen can show the same verdict before they walk over. The response
+   * carries the student's photo because that, not the token, is what stops pass sharing.
+   */
   async scan(token: string, period: Period) {
     const studentId = verifyPass(token, this.secret());
-    if (!studentId)
-      return {
-        result: "turned_away" as const,
-        reason: "Invalid pass",
-        name: null,
-        studentNo: null,
-      };
+    if (!studentId) return this.refuseUnknown("INVALID", "Invalid pass");
 
     const student = await this.prisma.student.findUnique({
       where: { id: studentId },
-      include: { person: true, mealPlan: true },
+      include: { person: true, mealPlan: true, program: true },
     });
-    if (!student || student.recordStatus !== "active")
-      return {
-        result: "turned_away" as const,
-        reason: "Unknown student",
-        name: null,
-        studentNo: null,
-      };
+    if (!student || student.recordStatus !== "active") {
+      return this.refuseUnknown("UNKNOWN", "Unknown student");
+    }
 
-    const name = `${student.person.firstName} ${student.person.lastName}`;
-    const base = { name, studentNo: student.studentNo };
+    const settings = await this.settings();
     const date = this.dayOnly();
+    const [existing, overdueXof] = await Promise.all([
+      this.prisma.diningScan.findUnique({
+        where: { studentId_period_date: { studentId, period, date } },
+      }),
+      settings.enforcePayment ? this.overdueXof(studentId) : Promise.resolve(0),
+    ]);
 
-    if (!student.mealPlan?.active) {
-      await this.recordScan(
-        studentId,
-        period,
-        date,
-        "turned_away",
-        "No active meal plan",
-      );
-      return {
-        result: "turned_away" as const,
-        reason: "No active meal plan",
-        ...base,
-      };
-    }
-    if (student.mealPlan.type === "half" && period === "dinner") {
-      await this.recordScan(
-        studentId,
-        period,
-        date,
-        "turned_away",
-        "Half plan — dinner not covered",
-      );
-      return {
-        result: "turned_away" as const,
-        reason: "Half plan — dinner not covered",
-        ...base,
-      };
-    }
-
-    const existing = await this.prisma.diningScan.findUnique({
-      where: { studentId_period_date: { studentId, period, date } },
+    const verdict = diningEligibility({
+      planType: student.mealPlan?.type ?? null,
+      planActive: student.mealPlan?.active ?? false,
+      period,
+      overdueXof,
+      alreadyServed: existing?.result === "served",
+      enforcePayment: settings.enforcePayment,
+      blockSecondScan: settings.blockSecondScan,
     });
-    if (existing?.result === "served") {
-      return {
-        result: "turned_away" as const,
-        reason: "Already served",
-        ...base,
-      };
+
+    // A repeat scan must not overwrite the row that already served them.
+    if (verdict.code !== "SERVED") {
+      await this.recordScan(
+        studentId,
+        period,
+        date,
+        verdict.serve ? "served" : "turned_away",
+        verdict.serve ? null : verdict.reason,
+      );
     }
 
-    await this.recordScan(studentId, period, date, "served", null);
-    return { result: "served" as const, reason: null, ...base };
+    return this.describe(verdict, student, period);
   }
 
-  /** Staff-approved manual serve when the pass can't be scanned (or a turn-away is overridden). */
+  private refuseUnknown(code: DiningVerdict["code"], reason: string) {
+    return {
+      result: "turned_away" as const,
+      code,
+      reason,
+      overridable: false,
+      name: null,
+      studentNo: null,
+      photoUrl: null,
+      plan: null,
+      program: null,
+      period: null as Period | null,
+    };
+  }
+
+  private describe(
+    verdict: DiningVerdict,
+    student: {
+      studentNo: string;
+      photoUrl: string | null;
+      person: { firstName: string; lastName: string };
+      mealPlan: { type: string } | null;
+      program?: { code: string } | null;
+    },
+    period: Period,
+  ) {
+    return {
+      result: verdict.serve ? ("served" as const) : ("turned_away" as const),
+      code: verdict.code,
+      reason: verdict.reason,
+      overridable: verdict.overridable,
+      name: `${student.person.firstName} ${student.person.lastName}`,
+      studentNo: student.studentNo,
+      photoUrl: student.photoUrl,
+      plan: student.mealPlan?.type ?? "none",
+      program: student.program?.code ?? null,
+      period,
+    };
+  }
+
+  /** What the door would say right now, for the student's own screen. */
+  async myEligibility(studentId: string, period: Period) {
+    await this.requireActiveStudent(studentId);
+    const [student, settings, date] = await Promise.all([
+      this.prisma.student.findUniqueOrThrow({
+        where: { id: studentId },
+        include: { mealPlan: true },
+      }),
+      this.settings(),
+      Promise.resolve(this.dayOnly()),
+    ]);
+    const [existing, overdueXof] = await Promise.all([
+      this.prisma.diningScan.findUnique({
+        where: { studentId_period_date: { studentId, period, date } },
+      }),
+      settings.enforcePayment ? this.overdueXof(studentId) : Promise.resolve(0),
+    ]);
+    return {
+      period,
+      ...diningEligibility({
+        planType: student.mealPlan?.type ?? null,
+        planActive: student.mealPlan?.active ?? false,
+        period,
+        overdueXof,
+        alreadyServed: existing?.result === "served",
+        enforcePayment: settings.enforcePayment,
+        blockSecondScan: settings.blockSecondScan,
+      }),
+    };
+  }
+
+  /**
+   * Staff-approved manual serve when the pass will not scan, or a waiver of an overridable
+   * refusal. Which refusals may be waived is decided here, not by the station: the roles
+   * guard is fail-open and the client is never a control. A student with no meal plan is
+   * not a scanning problem, so that one cannot be waived.
+   */
   async scanOverride(studentNo: string, period: Period, actorPersonId: string) {
     const student = await this.prisma.student.findUnique({
       where: { studentNo },
-      include: { person: true },
+      include: { person: true, mealPlan: true, program: true },
     });
     if (!student || student.recordStatus !== "active") {
-      return {
-        result: "turned_away" as const,
-        reason: "Unknown or inactive student number",
-        name: null,
-        studentNo: null,
-      };
+      return this.refuseUnknown(
+        "UNKNOWN",
+        "Unknown or inactive student number",
+      );
     }
+
+    const settings = await this.settings();
     const date = this.dayOnly();
-    await this.recordScan(
-      student.id,
+    const [existing, overdueXof] = await Promise.all([
+      this.prisma.diningScan.findUnique({
+        where: {
+          studentId_period_date: { studentId: student.id, period, date },
+        },
+      }),
+      settings.enforcePayment
+        ? this.overdueXof(student.id)
+        : Promise.resolve(0),
+    ]);
+
+    const current = diningEligibility({
+      planType: student.mealPlan?.type ?? null,
+      planActive: student.mealPlan?.active ?? false,
       period,
-      date,
-      "served",
-      "Manual override",
-    );
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "DiningScan",
-        entityId: student.id,
-        action: "override",
-        actorId: actorPersonId,
-        data: { studentNo, period, date: date.toISOString() },
-      },
+      overdueXof,
+      alreadyServed: existing?.result === "served",
+      enforcePayment: settings.enforcePayment,
+      blockSecondScan: settings.blockSecondScan,
     });
-    return {
-      result: "served" as const,
-      reason: "Manual override",
-      name: `${student.person.firstName} ${student.person.lastName}`,
-      studentNo: student.studentNo,
-    };
+
+    if (!current.serve && !current.overridable) {
+      return this.describe(current, student, period);
+    }
+
+    const waived = current.serve ? null : current.code;
+    const reason = waived ? `Override · ${waived}` : "Manual override";
+    await this.prisma.$transaction([
+      this.prisma.diningScan.upsert({
+        where: {
+          studentId_period_date: { studentId: student.id, period, date },
+        },
+        update: { result: "served", reason },
+        create: {
+          studentId: student.id,
+          period,
+          date,
+          result: "served",
+          reason,
+        },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "DiningScan",
+          entityId: student.id,
+          action: "override",
+          actorId: actorPersonId,
+          data: {
+            studentNo,
+            period,
+            date: date.toISOString(),
+            waivedCode: waived,
+          },
+        },
+      }),
+    ]);
+
+    return this.describe(
+      { code: "OK", reason, serve: true, overridable: false },
+      student,
+      period,
+    );
   }
 
   private async recordScan(
@@ -379,13 +591,169 @@ export class DiningService {
     }));
   }
 
-  async advanceOrder(orderId: string, status: string) {
-    const flow = ["paid", "preparing", "ready", "collected"];
-    if (!flow.includes(status)) throw new BadRequestException("Invalid status");
-    return this.prisma.diningOrder.update({
+  /** Fulfilment state on an order that has already been paid, so it is audited. */
+  async advanceOrder(
+    orderId: string,
+    status: AdvanceOrderInput["status"],
+    actorPersonId: string,
+  ) {
+    const order = await this.prisma.diningOrder.findUnique({
       where: { id: orderId },
-      data: { status: status as never },
+      select: { id: true, status: true },
     });
+    if (!order) throw new NotFoundException("Order not found");
+    if (order.status === "cart") {
+      throw new BadRequestException("Order is not paid yet");
+    }
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.diningOrder.update({
+        where: { id: orderId },
+        data: { status },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "DiningOrder",
+          entityId: orderId,
+          action: "advance",
+          actorId: actorPersonId,
+          data: { from: order.status, to: status },
+        },
+      }),
+    ]);
+    return updated;
+  }
+
+  /**
+   * The Finances screen. Plan revenue is read the same way the director cockpit reads it
+   * (`finance.service.ts` revenueByCc) — net component allocations on cost center 3600 —
+   * so the two surfaces cannot disagree. There is no settlement or payout here: the money
+   * is already in the university's account by the time Finance verifies a proof.
+   */
+  async diningFinances() {
+    const settings = await this.settings();
+    const [allocations, orders, servedMeals, cafeteriaComponents] =
+      await Promise.all([
+        this.prisma.paymentComponentAllocation.findMany({
+          where: {
+            invoiceComponent: { costCenterCode: "3600" },
+            payment: { status: "success" },
+          },
+          select: {
+            amountXof: true,
+            refundedAmountXof: true,
+            payment: { select: { createdAt: true } },
+          },
+        }),
+        this.prisma.diningOrder.findMany({
+          where: {
+            status: { in: ["paid", "preparing", "ready", "collected"] },
+          },
+          select: { totalXof: true, createdAt: true },
+        }),
+        this.prisma.diningScan.count({ where: { result: "served" } }),
+        this.prisma.invoiceComponent.findMany({
+          where: {
+            costCenterCode: "3600",
+            invoice: { status: { not: "void" } },
+          },
+          select: {
+            amountXof: true,
+            allocations: { select: { amountXof: true } },
+          },
+        }),
+      ]);
+
+    const planRevenue = allocations.reduce(
+      (sum, a) => sum + a.amountXof - a.refundedAmountXof,
+      0,
+    );
+    const weekendRevenue = orders.reduce((sum, o) => sum + o.totalXof, 0);
+    const outstanding = cafeteriaComponents.reduce((sum, c) => {
+      const allocated = c.allocations.reduce((a, x) => a + x.amountXof, 0);
+      return sum + Math.max(0, c.amountXof - allocated);
+    }, 0);
+
+    const revenue = planRevenue + weekendRevenue;
+    const foodCost = servedMeals * settings.costPerMealXof;
+
+    const byMonth = new Map<string, { plan: number; weekend: number }>();
+    const bucket = (at: Date) => {
+      const key = toDakarDateKey(at).slice(0, 7);
+      const row = byMonth.get(key) ?? { plan: 0, weekend: 0 };
+      byMonth.set(key, row);
+      return row;
+    };
+    for (const a of allocations) {
+      bucket(a.payment.createdAt).plan += a.amountXof - a.refundedAmountXof;
+    }
+    for (const o of orders) bucket(o.createdAt).weekend += o.totalXof;
+
+    return {
+      planRevenue,
+      weekendRevenue,
+      revenue,
+      outstanding,
+      servedMeals,
+      costPerMealXof: settings.costPerMealXof,
+      foodCost,
+      margin: revenue - foodCost,
+      marginPct:
+        revenue > 0 ? Math.round(((revenue - foodCost) / revenue) * 100) : 0,
+      byMonth: [...byMonth.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, v]) => ({ month, ...v })),
+      settledTo: "Cost center 3600 — Dining / Auxiliary Services",
+    };
+  }
+
+  /** Recent dining money movements, newest first, for the Finances ledger. */
+  async diningTransactions() {
+    const [orders, allocations] = await Promise.all([
+      this.prisma.diningOrder.findMany({
+        where: { status: { not: "cart" } },
+        orderBy: { createdAt: "desc" },
+        take: 25,
+        include: { student: { include: { person: true } } },
+      }),
+      this.prisma.paymentComponentAllocation.findMany({
+        where: {
+          invoiceComponent: { costCenterCode: "3600" },
+          payment: { status: "success" },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 25,
+        include: {
+          payment: {
+            include: { student: { include: { person: true } } },
+          },
+        },
+      }),
+    ]);
+
+    const rows = [
+      ...orders.map((o) => ({
+        id: o.id,
+        kind: "weekend" as const,
+        student: `${o.student.person.firstName} ${o.student.person.lastName}`,
+        amountXof: o.totalXof,
+        status: o.status,
+        when: o.createdAt,
+      })),
+      ...allocations.map((a) => ({
+        id: a.id,
+        kind: a.refundedAmountXof > 0 ? ("refund" as const) : ("plan" as const),
+        student: a.payment.student
+          ? `${a.payment.student.person.firstName} ${a.payment.student.person.lastName}`
+          : "—",
+        amountXof: a.amountXof - a.refundedAmountXof,
+        status: a.payment.status,
+        when: a.createdAt,
+      })),
+    ];
+    return rows
+      .sort((l, r) => r.when.getTime() - l.when.getTime())
+      .slice(0, 40);
   }
 
   async settlement() {
@@ -427,7 +795,12 @@ export class DiningService {
     }));
   }
 
-  /** Derived reporting: 7-day service trend, plan mix, weekend revenue, top-selling items. */
+  /**
+   * Derived reporting: 7-day service trend, plan mix, weekend revenue, top-selling items.
+   * The day arithmetic below stays in UTC deliberately: `dayOnly()` anchors on midnight UTC
+   * of the Dakar date, so adding whole days and slicing the ISO string yields Dakar
+   * calendar keys. Change that anchor and every key here shifts with it.
+   */
   async adminReports() {
     const today = this.dayOnly();
     const start = new Date(today);

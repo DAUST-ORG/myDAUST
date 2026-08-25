@@ -37,7 +37,7 @@ endpoint or field. Each names what is required.
 - [ ] 🟡 **Student record + documents** — the design's ~35-field record and 6 PDF document slots are unbacked. There is also **no student invite flow** (only `GuardianInvite`), so any "password-setup email sent" copy on the students screen would be untrue today.
 - [ ] 🟡 **Invoices have no human-readable number** — the finance Billings tab shows a truncated uuid where the design shows `BILL-2026-001`. Needs a nullable `Invoice.number` plus a generator.
 - [ ] 🟡 Smaller CRUD gaps: department delete, parent edit/delete (and expose guardian `id`), calendar event `PATCH`/`DELETE` + term status.
-- [ ] 🟡 **Unbacked student screens** — dining swipe balance/history, housing move-in checklist, and profile documents tab. Each needs a model or endpoint that does not exist. Weekly student/faculty schedules and `.ics` export are production-deployed; the student feed is active-term scoped as of 2026-08-10.
+- [ ] 🟡 **Unbacked student screens** — housing move-in checklist and profile documents tab. (Dining is backed as of 2026-08-24: the console returned and the student screen shows a derived entrance verdict.) Each needs a model or endpoint that does not exist. Weekly student/faculty schedules and `.ics` export are production-deployed; the student feed is active-term scoped as of 2026-08-10.
 - [ ] ⚪ **"View as" is portal-scoped, not impersonation** — it lists only the portals the admin's own roles grant, because student/faculty/parent endpoints are scoped to _your own_ record. A true "view as this student" needs a session subject + audit trail. Decide whether to build it.
 - [ ] ⚪ **Kept but unreachable from the new nav:** `student/documents` (transcript + enrollment verification — the only working transcript output), `student/assignments` (linked from the dashboard To-do), `student/id` (signed QR campus pass). Decide whether to relocate them into the design's screens or retire them.
 - [ ] 🔴 **Staging carries no demo parent** until one is provisioned through the registrar flow; the seeded `parent@daust.edu` exists locally only.
@@ -50,7 +50,7 @@ endpoint or field. Each names what is required.
 - [x] ~~No add/drop window~~ → `Term.addDeadline`/`dropDeadline` added, enforced in enroll/drop (verified 400s past deadline); registrar `admin-drop` bypasses with audit.
 - [x] ~~No test suite~~ → **Vitest stood up: 31 tests** (shared: scholarship tiers, XOF splits, zod input refines · api: PayTech HMAC verify incl. forged/tampered, campus pass sign/verify, computeGpa, zod filter 400+delegation). Integration tests (seat-lock, IPN idempotency vs DB) still open — next tier.
 - [x] ~~Dining settlement display-only~~ → director overview now aggregates paid dining orders into **3600** and paid application fees into **4200** (verified live: 3600=1,000 / 4200=30,000 after signed IPNs).
-- [x] ~~Dining payOrder skips the rail~~ → routes through `PaymentProvider` checkout (ref `DINE-<orderId>`); the verified IPN marks the order paid (proven end-to-end with a real-signed webhook; forged IPN → 403). Direct settle only when no gateway keys (dev).
+- [x] ~~Dining payOrder skips the rail~~ → **superseded.** PayTech was removed 2026-08-14; dining weekend orders now use the proof-based `PaymentSubmission` rail (`source: "dining_order"`). The order stays `cart` until Finance verifies evidence.
 - [x] ~~Expenses create+list only~~ → PATCH/DELETE endpoints + edit/delete UI, audit-logged.
 
 ## 2 · Missing write-paths & role surfaces — ✅ FIXED 2026-06-28 (all verified live)
@@ -77,7 +77,7 @@ endpoint or field. Each names what is required.
 
 ## 3 · Track P platform services (remaining)
 
-- [ ] 🟠 **Real-time layer** — no polling/WebSocket anywhere; dining live feed and inbox only update on manual interaction. Cheapest: `setInterval` polling on scanner feed + inbox; proper: WS gateway (needs sticky sessions at deploy).
+- [ ] 🟠 **Real-time layer** — polling shipped on the dining surfaces (station feed 4s, `/dining/live` 10s, both suspended while the tab is hidden); the inbox still only updates on manual interaction. A WS gateway still needs sticky sessions at the ALB. Cheapest: `setInterval` polling on scanner feed + inbox; proper: WS gateway (needs sticky sessions at deploy).
 - [ ] 🟠 **Notifications** — topbar bell + panel now exists (announcements-fed, localStorage unread); still no Notification model/endpoint for per-user events (grades posted, payment received, order ready).
 - [ ] 🟠 **Transactional emails not yet wired:** order-ready (dining) and submission-alert (innovation advisor). Email templates are inline strings — extract a branded layout when convenient.
 - [ ] 🟠 **QR remaining scopes:** order-pickup QR (kanban is manual) and QR seals on printable transcript/enrollment docs.
@@ -110,7 +110,7 @@ endpoint or field. Each names what is required.
 - [x] Admin: housing (read-only director mirror → manage in SA) + library (add/toggle via new campus endpoints) — placeholders gone
 - [ ] 🟡 Student: settings page (EN/FR), profile/notification preferences
 - [ ] 🟡 Vitrine: applicant status page
-- [ ] 🟡 Dining console settings tab
+- [x] Dining console settings tab (2026-08-24) — service windows, cost per meal, weekend ordering + cutoff, and the two entrance rules, all on `AppSetting["dining.settings"]` and all read by something.
 - [ ] 🟡 Full mobile pixel-parity pass across pages (only shell-level responsive done)
 - [x] Deployed to staging 2026-07-04 — images db1b1f1-0151, track_d migration + seeds applied to RDS, smoke-verified over ALB (branded login, SA international, faculty materials)
 
@@ -155,6 +155,38 @@ endpoint or field. Each names what is required.
 
 **Done & verified (for reference):** payments/IPN/plans/reconciliation/receipts/refunds/aging/reports/director-cockpit · seat-locked academics with gradebook→GPA loop, assignments, insights, advising · messaging, events, library, uploads, email seam, printable documents · vitrine + anonymous Apply + BAC scholarships · dining pass/QR/scanner/kanban/menus · housing/roommate/conduct/clubs/budget · innovation 7-phase tracker + review queue · HR payslips (personId-joined)/leave/booking · student ID + QR · security fixes (Zod 400 filter, payslip IDOR).
 
+## Dining console — rebuilt 2026-08-24 (local, not yet deployed)
+
+The three-surface DAUST-dining prototype implemented into the monorepo. **No migration** — every
+model, enum and index already existed; the 2026-07-20 retirement removed the HTTP routes and the
+pages, not the logic, so 13 unreachable `DiningService` methods were re-exposed rather than
+rewritten.
+
+- New `dining` role + `/dining` area (8 pages) + `/station` kiosk outside `PortalShell`.
+- One entrance rule in `packages/shared/src/dining-eligibility.ts`, called by both the scanner and
+  the student's own screen. `enforcePayment` ships **off**.
+- Fixed while in here: `dayOnly()` now uses the Dakar calendar date (byte-identical to the old UTC
+  value, no backfill); `secret()` injects `ENV` instead of reading `process.env` with a public
+  fallback; `advanceOrder()` is typed and audited; `choosePlan()` reads the current term instead of
+  a hardcoded "Fall 2026"; the student screen no longer says "Upcoming" for a meal being served.
+- `api-dining.ts` deleted, its survivors folded into `api.ts`; ~15 dead client wrappers made live.
+- Verified locally against a throwaway `mydaust_e2e` database: full verdict matrix, double-serve
+  guard, override + audit, the payment gate both ways, cross-role probe (student → dining staff
+  routes all 403; dining → academics/finance/registrar/comms all 401/403/404), and dining
+  `planRevenue` reconciling to the franc against a direct SQL sum of cost-center-3600 allocations.
+
+Open:
+
+- [ ] Deploy to staging, then prod. `enforcePayment` must stay **off** until Finance has counted
+      active students with `overdueXof > 0`.
+- [ ] `signPass` is still a non-expiring, unscoped HMAC over `studentId`, and its only revocation
+      is rotating `SESSION_SECRET` — which signs every JWT. The result overlay renders
+      `Student.photoUrl` as the real anti-sharing control. A rotating token needs a separate
+      `DINING_PASS_SECRET`; note any printed QR would stop working.
+- [ ] Two pre-existing undecorated routes reach every authenticated session (fail-open):
+      `GET /academics/current-term` and `GET /comms/contacts`. Not introduced by this work —
+      students already reach both — but they should carry `@Roles`.
+
 ## SIS redesign — shipped 2026-07-20
 
 Five portals (student, parent, faculty, registrar, finance) built to
@@ -165,11 +197,13 @@ Open items left by that work:
 
 - **Drop the retired tables.** `ConductCase`, `Club`, `CoCurricularLine`,
   `RoommateProfile`, `AbroadProgram`, `OnboardingCase`, `MaintenanceTicket`,
-  `Project*`, `GlobalTask*`, `DiningOrder*`, `MenuItem`. Nothing reads them now.
+  `Project*`, `GlobalTask*`. Nothing reads them now. **`DiningOrder*` and `MenuItem` were wrong
+  on this list** — the student weekend-order tab has read and written them since the redesign,
+  and the dining console now does too.
   Deliberately not done: dropping tables is irreversible and needs confirmation
-  they are empty in prod first. `MealPlan`, `DiningScan`, `Hall` and
-  `HousingAssignment` must be **kept** — the student Dining and Housing screens
-  read them.
+  they are empty in prod first. `MealPlan`, `DiningScan`, `MenuItem`, `DiningOrder`,
+  `DiningOrderItem`, `Hall` and `HousingAssignment` must be **kept** — the student Dining and
+  Housing screens and the dining console read them.
 - **Curriculum editor.** `Curriculum`/`CurriculumEntry` are modelled, migrated
   and seeded but have no UI yet; the design's Programs & Curriculum screen shows
   a per-year/semester course map.
