@@ -48,9 +48,19 @@ export default function AdminStudentsPage() {
   const router = useRouter();
   const [rows, setRows] = useState<AdminStudent[]>([]);
   const [programs, setPrograms] = useState<AdminStudentRosterPage["programs"]>([]);
+  const [genders, setGenders] = useState<string[]>([]);
+  const [nationalities, setNationalities] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [prog, setProg] = useState("all");
+  // Academic level filter. Levels are derived per-row from the student's catalog
+  // (S1, S2, …), so the server returns the *result of derivation* across all
+  // students — we only need to know which codes are possible. We seed the
+  // Select from the static range; the API will simply return zero rows when a
+  // code is selected that no student is currently in.
+  const [level, setLevel] = useState("all");
+  const [gender, setGender] = useState("all");
+  const [country, setCountry] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<25 | 50 | 100>(50);
   const [total, setTotal] = useState(0);
@@ -68,7 +78,6 @@ export default function AdminStudentsPage() {
   const sortDirection = sort?.dir ?? "asc";
 
   async function provisionOne(id: string) {
-    setProvisioning(id);
     setError(null);
     try {
       const c = await provisionStudentLogin(id);
@@ -97,19 +106,23 @@ export default function AdminStudentsPage() {
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
-    setError(null);
     try {
       const result = await getAdminStudentRoster({
         page,
         pageSize,
         search: debouncedQ || undefined,
         program: prog,
+        level,
+        gender,
+        nationality: country,
         sort: sortKey,
         direction: sortDirection,
       }, signal);
       if (signal?.aborted) return;
       setRows(result.items);
       setPrograms(result.programs);
+      setGenders(result.genders);
+      setNationalities(result.nationalities);
       setTotal(result.total);
       setAllTotal(result.allTotal);
       setTotalPages(result.totalPages);
@@ -121,7 +134,7 @@ export default function AdminStudentsPage() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [debouncedQ, page, pageSize, prog, sortDirection, sortKey]);
+  }, [debouncedQ, page, pageSize, prog, level, gender, country, sortDirection, sortKey]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -143,6 +156,33 @@ export default function AdminStudentsPage() {
   }
 
   const programOptions = [{ value: "all", label: "All programs" }, ...programs.map((p) => ({ value: p.code, label: p.name }))];
+  // Level options cover all known catalog progression codes (the engineering
+  // catalog reaches S10 per the shared test fixtures). The API will simply
+  // return zero rows for codes no student is currently in.
+  const levelOptions = [
+    { value: "all", label: "All levels" },
+    ...Array.from({ length: 10 }, (_, index) => ({
+      value: `S${index + 1}`,
+      label: `S${index + 1}`,
+    })),
+  ];
+  const genderOptions = [
+    { value: "all", label: "All genders" },
+    ...genders.map((value) => ({ value, label: value })),
+  ];
+  const nationalityOptions = [
+    { value: "all", label: "All nationalities" },
+    ...nationalities.map((value) => ({ value, label: value })),
+  ];
+  const hasActiveFilter =
+    prog !== "all" || level !== "all" || gender !== "all" || country !== "all";
+  function clearFilters() {
+    setProg("all");
+    setLevel("all");
+    setGender("all");
+    setCountry("all");
+    setPage(1);
+  }
 
   return (
     <>
@@ -180,8 +220,33 @@ export default function AdminStudentsPage() {
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
         <SearchInput value={q} onChange={setQ} placeholder="Search by name or ID…" width={280} />
-        <Select value={prog} onChange={(value) => { setProg(value); setPage(1); }} options={programOptions} />
-        <span style={{ flex: 1 }} />
+        <Select
+          value={prog}
+          onChange={(value) => { setProg(value); setPage(1); }}
+          options={programOptions}
+          ariaLabel="Filter by program"
+        />
+        <Select
+          value={level}
+          onChange={(value) => { setLevel(value); setPage(1); }}
+          options={levelOptions}
+          ariaLabel="Filter by academic level"
+        />
+        <Select
+          value={gender}
+          onChange={(value) => { setGender(value); setPage(1); }}
+          options={genderOptions}
+          ariaLabel="Filter by gender"
+        />
+        <Select
+          value={country}
+          onChange={(value) => { setCountry(value); setPage(1); }}
+          options={nationalityOptions}
+          ariaLabel="Filter by nationality"
+        />
+        {hasActiveFilter && (
+          <Button variant="secondary" onClick={clearFilters}>Clear filters</Button>
+        )}
         <span className="muted" style={{ fontSize: 13 }}>
           {loading ? "Loading…" : total === 0 ? "0 students" : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}`}
         </span>
