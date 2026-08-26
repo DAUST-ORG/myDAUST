@@ -130,6 +130,7 @@ enum ApprovalRequestKind {
   scholarship
   operating_budget
   management_actual
+  student_enrollment_override
 }
 
 enum OperatingBudgetStatus {

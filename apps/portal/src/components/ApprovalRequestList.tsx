@@ -5,6 +5,7 @@ import { Check, Eye, Search, X } from "lucide-react";
 import {
   type ApprovalRequestRow,
   approveApprovalRequest,
+  approveEnrollmentOverride,
   cancelApprovalRequest,
   listApprovalRequests,
   rejectApprovalRequest,
@@ -30,6 +31,7 @@ const KIND_LABEL: Record<ApprovalRequestRow["kind"], string> = {
   scholarship: "Scholarship",
   operating_budget: "Operating budget",
   management_actual: "Management actual",
+  student_enrollment_override: "Enrollment override",
 };
 
 const STATUS_TONE = {
@@ -340,7 +342,7 @@ export function ApprovalRequestList({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
+  const [waivedGates, setWaivedGates] = useState<string[]>([]);
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -369,6 +371,13 @@ export function ApprovalRequestList({
   function start(next: "approve" | "reject" | "cancel") {
     setNote("");
     setError(null);
+    if (next === "approve" && selected?.kind === "student_enrollment_override") {
+      const failures = (selected.afterJson as { failures?: { gate: string }[] } | null)
+        ?.failures;
+      setWaivedGates(Array.isArray(failures) ? failures.map((f) => f.gate) : []);
+    } else {
+      setWaivedGates([]);
+    }
     setDecision(next);
   }
 
@@ -381,15 +390,30 @@ export function ApprovalRequestList({
     setBusy(true);
     setError(null);
     try {
-      const result =
-        decision === "approve"
-          ? await approveApprovalRequest(selected.id, note.trim() || undefined)
-          : decision === "reject"
-            ? await rejectApprovalRequest(selected.id, note.trim())
-            : await cancelApprovalRequest(
-                selected.id,
-                note.trim() || undefined,
-              );
+      let result;
+      if (
+        decision === "approve" &&
+        selected.kind === "student_enrollment_override"
+      ) {
+        if (waivedGates.length === 0) {
+          setError("Pick at least one gate to waive, or reject the request.");
+          return;
+        }
+        result = await approveEnrollmentOverride(selected.id, {
+          waivedGates,
+          note: note.trim() || undefined,
+        });
+      } else {
+        result =
+          decision === "approve"
+            ? await approveApprovalRequest(selected.id, note.trim() || undefined)
+            : decision === "reject"
+              ? await rejectApprovalRequest(selected.id, note.trim())
+              : await cancelApprovalRequest(
+                  selected.id,
+                  note.trim() || undefined,
+                );
+      }
       const staleReason =
         "reason" in result && typeof result.reason === "string"
           ? result.reason

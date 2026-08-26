@@ -178,7 +178,7 @@ export function isExactMaterialOrder(
 const OPEN_APPLICANT_STAGES = ["submitted", "review", "interview", "offer"];
 
 /** Class-standing ladder, used to evaluate a course rule's `standingRequired`. */
-const STANDING_RANK: Record<string, number> = {
+export const STANDING_RANK: Record<string, number> = {
   freshman: 1,
   sophomore: 2,
   junior: 3,
@@ -1948,6 +1948,17 @@ export class AcademicsService {
       },
       include: { student: { include: { person: true } } },
     });
+    // Check which enrollments were created via an override approval.
+    const enrollmentIds = enrollments.map((e) => e.id);
+    const overrideActions = await this.prisma.auditLog.findMany({
+      where: {
+        entity: "Enrollment",
+        entityId: { in: enrollmentIds },
+        action: "enrolled-via-override",
+      },
+      select: { entityId: true },
+    });
+    const viaOverrideSet = new Set(overrideActions.map((a) => a.entityId));
     return {
       course: `${section.course.code} — ${section.course.title}`,
       sectionCode: section.sectionCode,
@@ -1955,6 +1966,7 @@ export class AcademicsService {
         studentNo: e.student.studentNo,
         name: `${e.student.person.firstName} ${e.student.person.lastName}`,
         grade: e.grade,
+        viaOverride: viaOverrideSet.has(e.id),
       })),
     };
   }

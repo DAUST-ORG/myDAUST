@@ -28,11 +28,12 @@ import {
   MessageSquare,
   Network,
   Newspaper,
+  Radio,
   Receipt,
   Rocket,
   Scale,
   Settings,
-  Radio,
+  ShieldAlert,
   ScanLine,
   ShoppingBag,
   Table2,
@@ -95,6 +96,8 @@ export const STUDENT_NAV: PortalNav = {
         icon: ClipboardList,
         badgeKey: "register",
       },
+      { href: "/student/overrides", label: "Overrides", icon: ShieldAlert },
+
       { href: "/student/courses", label: "My Courses", icon: BookOpen },
       { href: "/student/assignments", label: "Assignments", icon: ListChecks },
       { href: "/student/schedule", label: "Schedule", icon: CalendarDays },
@@ -173,6 +176,12 @@ export const FACULTY_NAV: PortalNav = {
         href: "/faculty/materials",
         label: "Course Materials",
         icon: FolderOpen,
+      },
+      {
+        href: "/faculty/overrides",
+        label: "Override Requests",
+        icon: ShieldAlert,
+        badgeKey: "approvalRequests",
       },
       {
         href: "/faculty/messages",
@@ -454,6 +463,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Course Registration",
     crumb: "{term} · Add / drop",
   },
+  "/student/overrides": {
+    title: "Enrollment overrides",
+    crumb: "Submitted override requests",
+  },
   "/student/courses": { title: "My Courses", crumb: "{term} & past terms" },
   "/student/schedule": { title: "Weekly Schedule", crumb: "{term}" },
   "/student/grades": {
@@ -603,6 +616,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/faculty/materials": {
     title: "Course Materials",
     crumb: "Upload course documents",
+  },
+  "/faculty/overrides": {
+    title: "Override Requests",
+    crumb: "Student enrollment override requests",
   },
   "/faculty/messages": { title: "Messages", crumb: "Message students" },
   // parent
