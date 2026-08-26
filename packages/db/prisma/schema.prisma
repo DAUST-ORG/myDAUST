@@ -452,6 +452,7 @@ model Person {
   expensesVoided             Expense[]                 @relation("ExpenseVoider")
   directorWidgetPreference   DirectorWidgetPreference?
   notifications Notification[]
+  createdForms                CustomForm[]
 
   @@index([status])
 }
@@ -2563,4 +2564,106 @@ model CourseEvaluationReceipt {
   submittedAt  DateTime               @default(now())
 
   @@unique([windowId, enrollmentId])
+}
+
+// ─── Custom Forms ─────────────────────────────────────────────────────────────
+
+enum CustomFormStatus {
+  draft
+  published
+  closed
+}
+
+enum FormFieldType {
+  text
+  textarea
+  select
+  checkbox
+  date
+}
+
+model CustomForm {
+  id            String           @id @default(uuid())
+  title         String
+  description   String?
+  createdById   String
+  createdBy     Person           @relation(fields: [createdById], references: [id])
+  status        CustomFormStatus @default(draft)
+  requiresAuth  Boolean          @default(true)
+  publishedAt   DateTime?
+  closesAt      DateTime?
+  maxResponses  Int?
+  responseCount Int              @default(0)
+  publicToken   String?          @unique
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  sections  FormSection[]
+  responses FormResponse[]
+
+  @@index([status])
+  @@index([createdById])
+}
+
+model FormSection {
+  id            String    @id @default(uuid())
+  formId        String
+  title         String
+  sortOrder     Int       @default(0)
+  conditionJson Json?
+  createdAt     DateTime  @default(now())
+
+  form   CustomForm    @relation(fields: [formId], references: [id])
+  fields FormField[]
+
+  @@index([formId, sortOrder])
+}
+
+model FormField {
+  id            String        @id @default(uuid())
+  sectionId     String
+  type          FormFieldType
+  label         String
+  required      Boolean       @default(false)
+  sortOrder     Int           @default(0)
+  optionsJson   Json?
+  conditionJson Json?
+  createdAt     DateTime      @default(now())
+
+  section FormSection          @relation(fields: [sectionId], references: [id])
+  answers FormResponseAnswer[]
+
+  @@index([sectionId, sortOrder])
+}
+
+model FormResponse {
+  id              String   @id @default(uuid())
+  formId          String
+  personId        String?
+  respondentName  String?
+  respondentEmail String?
+  submittedAt     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  form    CustomForm          @relation(fields: [formId], references: [id])
+  answers FormResponseAnswer[]
+
+  @@unique([formId, personId])
+  @@index([formId])
+  @@index([personId])
+}
+
+model FormResponseAnswer {
+  id         String   @id @default(uuid())
+  responseId String
+  fieldId    String
+  value      Json
+  createdAt  DateTime @default(now())
+
+  response FormResponse @relation(fields: [responseId], references: [id])
+  field    FormField    @relation(fields: [fieldId], references: [id])
+
+  @@unique([responseId, fieldId])
+  @@index([responseId])
+  @@index([fieldId])
 }
