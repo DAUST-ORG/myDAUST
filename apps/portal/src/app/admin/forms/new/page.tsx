@@ -3,31 +3,29 @@
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Button } from "@/components/ui";
-import { createForm, updateForm, publishForm, type FormInputSection, type FormInputField } from "@/lib/api";
+import {
+  createForm,
+  type FormInputSection,
+  type FormInputField,
+} from "@/lib/api";
 import FormBuilder from "@/components/forms/FormBuilder";
 
-interface Props {
-  initialData?: {
-    id: string;
-    title: string;
-    description: string | null;
-    requiresAuth: boolean;
-    closesAt: string | null;
-    maxResponses: number | null;
-    sections: FormInputSection[];
-  };
-}
-
-export default function NewFormPage({ initialData }: Props) {
+/**
+ * A Next.js App Router page may only receive { params, searchParams }; a custom prop type
+ * makes `next build` reject the default export, which is what broke the staging image.
+ * This page took an `initialData` prop that nothing ever passed -- the edit screen at
+ * admin/forms/[id] has its own implementation -- so every branch guarded by it was dead.
+ * Removed rather than plumbed through, which keeps behaviour identical.
+ */
+export default function NewFormPage() {
   const router = useRouter();
-  const [title, setTitle] = useState(initialData?.title ?? "");
-  const [description, setDescription] = useState(initialData?.description ?? "");
-  const [requiresAuth, setRequiresAuth] = useState(initialData?.requiresAuth ?? true);
-  const [closesAt, setClosesAt] = useState(initialData?.closesAt?.slice(0, 16) ?? "");
-  const [maxResponses, setMaxResponses] = useState(initialData?.maxResponses?.toString() ?? "");
-  const [sections, setSections] = useState<FormInputSection[]>(initialData?.sections ?? []);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [requiresAuth, setRequiresAuth] = useState(true);
+  const [closesAt, setClosesAt] = useState("");
+  const [maxResponses, setMaxResponses] = useState("");
+  const [sections, setSections] = useState<FormInputSection[]>([]);
   const [saving, setSaving] = useState(false);
-  const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -47,55 +45,25 @@ export default function NewFormPage({ initialData }: Props) {
     setSaving(true);
     setError(null);
     try {
-      if (initialData?.id) {
-        await updateForm(initialData.id, buildPayload());
-      } else {
-        const created = await createForm(buildPayload());
-        router.replace(`/admin/forms/${created.id}`);
-      }
+      const created = await createForm(buildPayload());
+      router.replace(`/admin/forms/${created.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(false);
     }
-  }, [initialData, buildPayload, router]);
-
-  const handlePublish = useCallback(async () => {
-    if (!initialData?.id) {
-      setError("Save the form first before publishing");
-      return;
-    }
-    setPublishing(true);
-    setError(null);
-    try {
-      await publishForm(initialData.id);
-      router.push("/admin/forms");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Publish failed");
-    } finally {
-      setPublishing(false);
-    }
-  }, [initialData, router]);
+  }, [buildPayload, router]);
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 16" }}>
       <PageHeader
-        title={initialData?.id ? "Edit Form" : "New Form"}
+        title="New Form"
         subtitle="Build your form with sections and fields"
         actions={
           <div style={{ display: "flex", gap: 8 }}>
             <Button onClick={handleSave} disabled={saving || !title.trim()}>
               {saving ? "Saving..." : "Save Draft"}
             </Button>
-            {initialData?.id && (
-              <Button
-                onClick={handlePublish}
-                disabled={publishing}
-                variant="primary"
-              >
-                {publishing ? "Publishing..." : "Publish"}
-              </Button>
-            )}
           </div>
         }
       />
