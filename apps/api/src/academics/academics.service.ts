@@ -2263,6 +2263,7 @@ export class AcademicsService {
         academicStandings[index],
       ),
     );
+    type Row = (typeof items)[number];
     const requestedLevel = query.level?.trim();
     if (requestedLevel) {
       // Exclude rows with no derived level (catalog missing or no credits) when
@@ -2272,9 +2273,16 @@ export class AcademicsService {
         !!code && code.toUpperCase() === requestedLevel.toUpperCase();
       items = items.filter((row) => matchesLevel(row.academicLevel?.code));
     }
+    // Counted BEFORE paginating. Reading items.length after the slice caps the total at
+    // pageSize, which collapses totalPages to 1 and strands every student past page one.
+    const filteredTotal = requestedLevel ? items.length : total;
     if (fetchAll) {
       const direction = query.direction === "asc" ? 1 : -1;
-      items.sort((left, right) => {
+      // Only a derived sort belongs in the comparator below: its fallback branch orders by
+      // academic standing, so running a `name`/`program` request through it would sort by
+      // something the registrar never asked for. A level *filter* also lands here, and it
+      // must not change what the sort header says it is doing.
+      const sortDerived = (left: Row, right: Row) => {
         if (query.sort === "level") {
           if (!left.academicLevel && right.academicLevel) return 1;
           if (left.academicLevel && !right.academicLevel) return -1;
@@ -2302,14 +2310,24 @@ export class AcademicsService {
         return (
           compared * direction || left.studentNo.localeCompare(right.studentNo)
         );
-      });
+      };
+      // Mirrors adminStudentRosterOrderBy: program by code, otherwise the person's name.
+      // `name` is "first last", so comparing it orders by first then last as the SQL does.
+      const sortPlain = (left: Row, right: Row) => {
+        const key = (row: Row) =>
+          query.sort === "program" ? row.program : row.name;
+        return (
+          key(left).localeCompare(key(right)) * direction ||
+          left.studentNo.localeCompare(right.studentNo)
+        );
+      };
+      items.sort(derivedSort ? sortDerived : sortPlain);
       items = items.slice(
         (query.page - 1) * query.pageSize,
         query.page * query.pageSize,
       );
     }
 
-    const filteredTotal = requestedLevel ? items.length : total;
     return {
       items,
       page: query.page,

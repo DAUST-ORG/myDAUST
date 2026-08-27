@@ -672,6 +672,11 @@ export default function ApplicantDetailPage() {
           mode="edit"
           applicantId={a.id}
           programs={programOptions}
+          /**
+           * Every field the form can write must be seeded here. The modal sends the whole
+           * form back and turns blanks into nulls, so any field left out of `initial`
+           * starts empty and is wiped on save — even when the operator changed nothing.
+           */
           initial={{
             firstName: a.firstName,
             lastName: a.lastName,
@@ -679,6 +684,24 @@ export default function ApplicantDetailPage() {
             programCode: a.programCode,
             score: a.score,
             country: a.country,
+            term: a.term,
+            phone: a.phone,
+            dateOfBirth: a.dateOfBirth,
+            gender: a.gender,
+            nationality: a.nationality,
+            city: a.city,
+            origin:
+              a.origin === "high-school" || a.origin === "transfer"
+                ? a.origin
+                : null,
+            school: a.school,
+            priorGpa: a.priorGpa,
+            parentName: a.parentName,
+            parentPhone: a.parentPhone,
+            parentEmail: a.parentEmail,
+            allergies: a.allergies,
+            source: a.source,
+            essay: a.essay,
           }}
           onClose={() => setEditing(false)}
           onSaved={() => {

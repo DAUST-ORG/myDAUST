@@ -14,6 +14,7 @@ import {
   CheckCheck,
   ClipboardCheck,
   ClipboardList,
+  FileText,
   FolderOpen,
   GitBranch,
   GraduationCap,
@@ -28,6 +29,7 @@ import {
   MessageSquare,
   Network,
   Newspaper,
+  Pill,
   Radio,
   Receipt,
   Rocket,
@@ -35,7 +37,9 @@ import {
   Settings,
   ShieldAlert,
   ScanLine,
+  ShieldCheck,
   ShoppingBag,
+  Stethoscope,
   Table2,
   Target,
   UserPlus,
@@ -379,6 +383,33 @@ export const ADMISSIONS_NAV: PortalNav = {
         icon: UserPlus,
         badgeKey: "admissions",
       },
+      ]),
+    ],
+};
+
+
+export const INFIRMARY_NAV: PortalNav = {
+  label: "Health Center",
+  meta: "Infirmary · Staff",
+  groups: [
+    g("Overview", [
+      { href: "/infirmary", label: "Dashboard", icon: LayoutDashboard },
+    ]),
+    g("Clinical", [
+      { href: "/infirmary/consultations", label: "Consultations", icon: Stethoscope },
+      { href: "/infirmary/prescriptions", label: "Prescriptions", icon: Pill },
+      { href: "/infirmary/medications", label: "Medications", icon: Pill },
+      { href: "/infirmary/appointments", label: "Appointments", icon: CalendarDays },
+    ]),
+    g("Records", [
+      { href: "/infirmary/students", label: "Students", icon: Users },
+      { href: "/infirmary/follow-ups", label: "Follow-ups", icon: ClipboardList },
+      { href: "/infirmary/documents", label: "Documents", icon: FileText },
+    ]),
+    g("Administration", [
+      { href: "/infirmary/forms", label: "Forms", icon: ClipboardList },
+      { href: "/infirmary/analytics", label: "Analytics", icon: ChartNoAxesCombined },
+      { href: "/infirmary/settings", label: "Settings", icon: Settings },
     ]),
   ],
 };
@@ -422,6 +453,7 @@ export const PORTALS = {
   it: IT_NAV,
   admissions: ADMISSIONS_NAV,
   dining: DINING_NAV,
+  infirmary: INFIRMARY_NAV,
 } as const;
 export type PortalKey = keyof typeof PORTALS;
 
@@ -654,6 +686,51 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/dining/finances": { title: "Finances", crumb: "Cost center 3600 · Dining" },
   "/dining/reports": { title: "Reports", crumb: "Service trends · Dining" },
   "/dining/settings": { title: "Settings", crumb: "Service rules · Dining" },
+  // infirmary
+  "/infirmary": {
+    title: "Dashboard",
+    crumb: "Health center overview",
+  },
+  "/infirmary/consultations": {
+    title: "Consultations",
+    crumb: "Clinical visits · Infirmary",
+  },
+  "/infirmary/prescriptions": {
+    title: "Prescriptions",
+    crumb: "Medication orders · Infirmary",
+  },
+  "/infirmary/medications": {
+    title: "Medications",
+    crumb: "Inventory management · Infirmary",
+  },
+  "/infirmary/appointments": {
+    title: "Appointments",
+    crumb: "Scheduled visits · Infirmary",
+  },
+  "/infirmary/students": {
+    title: "Students",
+    crumb: "Student health records · Infirmary",
+  },
+  "/infirmary/follow-ups": {
+    title: "Follow-ups",
+    crumb: "Pending follow-up tasks · Infirmary",
+  },
+  "/infirmary/documents": {
+    title: "Documents",
+    crumb: "Medical documents · Infirmary",
+  },
+  "/infirmary/forms": {
+    title: "Forms",
+    crumb: "Health forms & questionnaires · Infirmary",
+  },
+  "/infirmary/analytics": {
+    title: "Analytics",
+    crumb: "Health center metrics · Infirmary",
+  },
+  "/infirmary/settings": {
+    title: "Settings",
+    crumb: "Clinic configuration · Infirmary",
+  },
 };
 
 /**
@@ -669,7 +746,8 @@ export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
     { role: "dining", portal: "dining", home: "/dining" },
     { role: "faculty", portal: "faculty", home: "/faculty" },
     { role: "communications", portal: "comms", home: "/comms" },
-    { role: "it_admin", portal: "it", home: "/director/users" },
+{ role: "it_admin", portal: "it", home: "/director/users" },
+    { role: "infirmary", portal: "infirmary", home: "/infirmary" },
     { role: "student", portal: "student", home: "/student" },
     { role: "parent", portal: "parent", home: "/parent" },
   ];
