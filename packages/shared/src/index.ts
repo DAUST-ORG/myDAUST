@@ -9,6 +9,7 @@ export * from "./academic-catalog.js";
 export * from "./comms.js";
 export * from "./admissions.js";
 export * from "./dining.js";
+export * from "./dining-eligibility.js";
 export * from "./site-content.js";
 export * from "./contact.js";
 export * from "./news.js";

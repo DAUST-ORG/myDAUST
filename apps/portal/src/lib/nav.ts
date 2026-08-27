@@ -10,6 +10,7 @@ import {
   CalendarDays,
   CalendarRange,
   ChartNoAxesCombined,
+  ChefHat,
   CheckCheck,
   ClipboardCheck,
   ClipboardList,
@@ -33,7 +34,10 @@ import {
   Rocket,
   Scale,
   Settings,
-ShieldCheck,
+  Radio,
+  ScanLine,
+  ShieldCheck,
+  ShoppingBag,
   Stethoscope,
   Table2,
   Target,
@@ -124,7 +128,11 @@ export const STUDENT_NAV: PortalNav = {
         icon: Mail,
         badgeKey: "messages",
       },
-      { href: "/student/evaluations", label: "Evaluations", icon: ClipboardCheck },
+      {
+        href: "/student/evaluations",
+        label: "Evaluations",
+        icon: ClipboardCheck,
+      },
     ]),
     g("Account", [
       { href: "/student/profile", label: "My Profile", icon: UserRound },
@@ -176,7 +184,11 @@ export const FACULTY_NAV: PortalNav = {
         icon: Mail,
         badgeKey: "messages",
       },
-      { href: "/faculty/evaluations", label: "Evaluations", icon: ClipboardCheck },
+      {
+        href: "/faculty/evaluations",
+        label: "Evaluations",
+        icon: ClipboardCheck,
+      },
     ]),
   ],
 };
@@ -393,6 +405,33 @@ export const INFIRMARY_NAV: PortalNav = {
   ],
 };
 
+/**
+ * Dining console. Mirrors the DAUST-dining prototype's eight back-office entries. The
+ * scanner is listed here but lives at /station: it is a full-bleed kiosk surface, not a
+ * page inside this shell.
+ */
+export const DINING_NAV: PortalNav = {
+  label: "Dining Admin",
+  meta: "Cafeteria service · Dining",
+  groups: [
+    g("Service", [
+      { href: "/dining", label: "Overview", icon: LayoutDashboard },
+      { href: "/dining/live", label: "Live Service", icon: Radio },
+      { href: "/dining/scanner", label: "Scanner Station", icon: ScanLine },
+    ]),
+    g("Manage", [
+      { href: "/dining/students", label: "Students", icon: Users },
+      { href: "/dining/orders", label: "Weekend Orders", icon: ShoppingBag },
+      { href: "/dining/menus", label: "Menus", icon: ChefHat },
+    ]),
+    g("Business", [
+      { href: "/dining/finances", label: "Finances", icon: Wallet },
+      { href: "/dining/reports", label: "Reports", icon: ChartNoAxesCombined },
+      { href: "/dining/settings", label: "Settings", icon: Settings },
+    ]),
+  ],
+};
+
 /** Portal registry, keyed so a server layout can name one without importing icons. */
 export const PORTALS = {
   director: DIRECTOR_NAV,
@@ -404,6 +443,7 @@ export const PORTALS = {
   comms: COMMS_NAV,
   it: IT_NAV,
   admissions: ADMISSIONS_NAV,
+  dining: DINING_NAV,
   infirmary: INFIRMARY_NAV,
 } as const;
 export type PortalKey = keyof typeof PORTALS;
@@ -413,12 +453,24 @@ export type PortalKey = keyof typeof PORTALS;
  * maps. `{term}` is substituted with the active term name at render time.
  */
 export const PAGE_META: Record<string, { title: string; crumb: string }> = {
-  "/student/assignments": { title: "Assignments", crumb: "Coursework · {term}" },
-  "/student/evaluations": { title: "Course evaluations", crumb: "Anonymous feedback" },
+  "/student/assignments": {
+    title: "Assignments",
+    crumb: "Coursework · {term}",
+  },
+  "/student/evaluations": {
+    title: "Course evaluations",
+    crumb: "Anonymous feedback",
+  },
   "/student/documents": { title: "Documents", crumb: "Letters & records" },
   "/student/courses/": { title: "My Courses", crumb: "Course detail · {term}" },
-  "/faculty/evaluations": { title: "Course evaluations", crumb: "What your students said" },
-  "/director/evaluations": { title: "Course evaluations", crumb: "Rounds, results & release" },
+  "/faculty/evaluations": {
+    title: "Course evaluations",
+    crumb: "What your students said",
+  },
+  "/director/evaluations": {
+    title: "Course evaluations",
+    crumb: "Rounds, results & release",
+  },
   "/admissions": {
     title: "Applicants",
     crumb: "Application pipeline · Admissions",
@@ -607,6 +659,16 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "My Requests",
     crumb: "Submitted changes · Finance",
   },
+  // dining
+  "/dining": { title: "Overview", crumb: "Cafeteria service · Dining" },
+  "/dining/live": { title: "Live Service", crumb: "Now serving · Dining" },
+  "/dining/scanner": { title: "Scanner Station", crumb: "Entrance · Dining" },
+  "/dining/students": { title: "Students", crumb: "Meal plans · Dining" },
+  "/dining/orders": { title: "Weekend Orders", crumb: "Fulfilment · Dining" },
+  "/dining/menus": { title: "Menus", crumb: "Weekend menu · Dining" },
+  "/dining/finances": { title: "Finances", crumb: "Cost center 3600 · Dining" },
+  "/dining/reports": { title: "Reports", crumb: "Service trends · Dining" },
+  "/dining/settings": { title: "Settings", crumb: "Service rules · Dining" },
   // infirmary
   "/infirmary": {
     title: "Dashboard",
@@ -664,6 +726,7 @@ export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
     { role: "registrar", portal: "registrar", home: "/admin" },
     { role: "admissions", portal: "admissions", home: "/admissions" },
     { role: "bursar", portal: "finance", home: "/finance" },
+    { role: "dining", portal: "dining", home: "/dining" },
     { role: "faculty", portal: "faculty", home: "/faculty" },
     { role: "communications", portal: "comms", home: "/comms" },
 { role: "it_admin", portal: "it", home: "/director/users" },

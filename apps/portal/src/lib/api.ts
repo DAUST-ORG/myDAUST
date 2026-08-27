@@ -678,7 +678,6 @@ export interface FacultyScheduleItem {
 export const getFacultySchedule = () =>
   request<FacultyScheduleItem[]>("/academics/teaching/schedule");
 
-
 export interface SectionInsights {
   course: string;
   sectionCode: string;
@@ -976,6 +975,10 @@ export interface AdminStudent {
   status: string;
   hasLogin: boolean;
   mustChangePassword: boolean;
+  // Free-text profile fields used by the roster's filter Selects. Null when
+  // the registrar has not yet filled the Edit form.
+  gender: string | null;
+  nationality: string | null;
 }
 export interface AdminStudentDirectoryRow {
   id: string;
@@ -996,12 +999,25 @@ export interface AdminStudentRosterPage {
   totalPages: number;
   missingLoginCount: number;
   programs: { code: string; name: string }[];
+  // Distinct values currently present in the dataset, used to populate the
+  // filter Selects. The server returns the list global to the roster
+  // (intersected with other active filters' base WHERE), so each Select can
+  // only contain values that can actually be selected.
+  genders: string[];
+  nationalities: string[];
 }
 export interface AdminStudentRosterParams {
   page?: number;
   pageSize?: 25 | 50 | 100;
   search?: string;
   program?: string;
+  // `level` is a derived catalog code (S1, S2, …) — handled server-side by
+  // fetching the full filtered set, deriving per-row, then filtering. The API
+  // is uniform with the SQL-pushdown filters even though this one can't go
+  // into WHERE.
+  level?: string;
+  gender?: string;
+  nationality?: string;
   sort?: AdminStudentRosterSort;
   direction?: "asc" | "desc";
 }
@@ -1225,6 +1241,18 @@ export const getAdminStudentRoster = (
   if (params.search) query.set("search", params.search);
   if (params.program && params.program !== "all") {
     query.set("program", params.program);
+  }
+  // `level` is a free-text catalog code (S1, S2, …). It is the registrar's
+  // intent for a *single* level; passing "all" or an empty string clears it
+  // on the server the same way the program filter does.
+  if (params.level && params.level !== "all") {
+    query.set("level", params.level);
+  }
+  if (params.gender && params.gender !== "all") {
+    query.set("gender", params.gender);
+  }
+  if (params.nationality && params.nationality !== "all") {
+    query.set("nationality", params.nationality);
   }
   if (params.sort) query.set("sort", params.sort);
   if (params.direction) query.set("direction", params.direction);
@@ -1563,7 +1591,6 @@ export const broadcastToSection = (
 
 // --- Campus: events + library ---
 
-
 // --- Dining ---
 export interface DiningPass {
   token: string;
@@ -1612,17 +1639,60 @@ export const payDiningOrder = (id: string, method: ProofPaymentMethod) =>
     body: JSON.stringify({ method }),
   });
 
+export type DiningVerdictCode =
+  | "OK"
+  | "INVALID"
+  | "UNKNOWN"
+  | "NO_PLAN"
+  | "UNPAID"
+  | "NOT_COVERED"
+  | "SERVED";
+
+/** The station's result overlay. `photoUrl` is the actual anti-sharing control. */
 export interface ScanResult {
-  result: string;
+  result: "served" | "turned_away";
+  code: DiningVerdictCode;
   reason: string | null;
+  overridable: boolean;
   name: string | null;
   studentNo: string | null;
+  photoUrl: string | null;
+  plan: string | null;
+  program: string | null;
+  period: string | null;
 }
 export const diningScan = (token: string, period: string) =>
   request<ScanResult>("/dining/scan", {
     method: "POST",
     body: JSON.stringify({ token, period }),
   });
+export const diningScanOverride = (studentNo: string, period: string) =>
+  request<ScanResult>("/dining/scan/override", {
+    method: "POST",
+    body: JSON.stringify({ studentNo, period }),
+  });
+
+export interface DiningToday {
+  scannedPeriods: string[];
+  mealWindows: {
+    breakfast: MealWindow;
+    lunch: MealWindow;
+    dinner: MealWindow;
+  };
+  weekendOrdering: boolean;
+  orderCutoff: string;
+}
+export const getDiningToday = () => request<DiningToday>("/dining/my/today");
+
+export interface DiningEligibility {
+  period: string;
+  code: DiningVerdictCode;
+  reason: string;
+  serve: boolean;
+  overridable: boolean;
+}
+export const getDiningEligibility = (period: string) =>
+  request<DiningEligibility>(`/dining/my/eligibility?period=${period}`);
 export interface LiveScans {
   period: string;
   served: number;
@@ -1672,10 +1742,84 @@ export const createMenuItem = (body: {
   description?: string;
   category: string;
   priceXof: number;
+  imageUrl?: string;
 }) =>
   request("/dining/admin/menu", { method: "POST", body: JSON.stringify(body) });
 export const toggleMenuItem = (id: string) =>
   request(`/dining/admin/menu/${id}/toggle`, { method: "POST" });
+export const setMenuItemImage = (id: string, imageUrl: string) =>
+  request(`/dining/admin/menu/${id}/image`, {
+    method: "POST",
+    body: JSON.stringify({ imageUrl }),
+  });
+
+export interface DiningStudent {
+  studentId: string;
+  name: string;
+  studentNo: string;
+  plan: string;
+  active: boolean;
+  term: string;
+  scansToday: number;
+}
+export const getDiningStudents = () =>
+  request<DiningStudent[]>("/dining/admin/students");
+
+export interface DiningReports {
+  last7days: { date: string; served: number; turnedAway: number }[];
+  planMix: { type: string; count: number }[];
+  weekendRevenue: number;
+  topItems: { name: string; qty: number }[];
+}
+export const getDiningReports = () =>
+  request<DiningReports>("/dining/admin/reports");
+
+export interface DiningFinances {
+  planRevenue: number;
+  weekendRevenue: number;
+  revenue: number;
+  outstanding: number;
+  servedMeals: number;
+  costPerMealXof: number;
+  foodCost: number;
+  margin: number;
+  marginPct: number;
+  byMonth: { month: string; plan: number; weekend: number }[];
+  settledTo: string;
+}
+export const getDiningFinances = () =>
+  request<DiningFinances>("/dining/admin/finances");
+
+export interface DiningTransaction {
+  id: string;
+  kind: "plan" | "weekend" | "refund";
+  student: string;
+  amountXof: number;
+  status: string;
+  when: string;
+}
+export const getDiningTransactions = () =>
+  request<DiningTransaction[]>("/dining/admin/transactions");
+
+export interface MealWindow {
+  start: string;
+  end: string;
+}
+export interface DiningSettings {
+  mealWindows: { breakfast: MealWindow; lunch: MealWindow; dinner: MealWindow };
+  costPerMealXof: number;
+  weekendOrdering: boolean;
+  orderCutoff: string;
+  enforcePayment: boolean;
+  blockSecondScan: boolean;
+}
+export const getDiningSettings = () =>
+  request<DiningSettings>("/dining/admin/settings");
+export const updateDiningSettings = (body: DiningSettings) =>
+  request<DiningSettings>("/dining/admin/settings", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 
 // --- Student Affairs ---
 export interface AffairsDashboard {
@@ -3545,7 +3689,9 @@ export const updateUserRoles = (personId: string, roles: string[]) =>
   });
 
 // --- Directory administration (director: admin / it_admin) ---
-export const listManagedUsers = (query: Record<string, string | number | undefined>) => {
+export const listManagedUsers = (
+  query: Record<string, string | number | undefined>,
+) => {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(query)) {
     if (v !== undefined && v !== "") qs.set(k, String(v));
@@ -3553,10 +3699,13 @@ export const listManagedUsers = (query: Record<string, string | number | undefin
   return request<ManagedUserPage>(`/users?${qs.toString()}`);
 };
 export const createManagedUser = (body: unknown) =>
-  request<{ id: string; email: string; tempPassword: string | null }>("/users", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  request<{ id: string; email: string; tempPassword: string | null }>(
+    "/users",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 export const updateManagedUser = (id: string, body: unknown) =>
   request<{ id: string; email: string | null }>(`/users/${id}`, {
     method: "PATCH",
@@ -3573,7 +3722,9 @@ export const suspendManagedUser = (id: string, reason?: string) =>
     body: JSON.stringify({ reason }),
   });
 export const restoreManagedUser = (id: string) =>
-  request<{ id: string; status: string }>(`/users/${id}/restore`, { method: "POST" });
+  request<{ id: string; status: string }>(`/users/${id}/restore`, {
+    method: "POST",
+  });
 export const getUsers = () => request<AppUser[]>("/academics/admin/users");
 
 // --- Payment links (bursar-generated; public pay page at /pay/[token]) ---

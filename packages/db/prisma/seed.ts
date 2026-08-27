@@ -47,6 +47,8 @@ const STAFF: StaffSpec[] = [
   { id: "usr_registrar", email: "registrar@daust.edu", firstName: "Fatou", lastName: "Sow", roles: ["registrar"] },
   { id: "usr_bursar", email: "bursar@daust.edu", firstName: "Mariama", lastName: "Ndiaye", roles: ["bursar"] },
   { id: "usr_hr", email: "hr@daust.edu", firstName: "Ousmane", lastName: "Fall", roles: ["hr"] },
+  { id: "usr_dining", email: "dining@daust.edu", firstName: "Ibrahima", lastName: "Sarr", roles: ["dining"] },
+  { id: "usr_comms", email: "comms@daust.edu", firstName: "Awa", lastName: "Diagne", roles: ["communications"] },
   { id: "usr_it", email: "it@daust.edu", firstName: "Modou", lastName: "Cissé", roles: ["it_admin"] },
   { id: "usr_admin", email: "admin@daust.edu", firstName: "Director", lastName: "DAUST", roles: ["admin", "bursar"] },
   { id: "usr_nurse", email: "nurse@daust.edu", firstName: "Adama", lastName: "Diagne", roles: ["infirmary"] },

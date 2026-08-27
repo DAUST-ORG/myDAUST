@@ -9,6 +9,10 @@ export const APP_ROLES = [
   // admin. No student records, no money, no other portal.
   "admissions",
   "bursar",
+  // Cafeteria service: the entrance scanner and the dining back office. Reads meal plans
+  // and a student's overdue total to decide entry; writes scans, menus and order state.
+  // No student records, no fee schedule, no other portal.
+  "dining",
   "hr",
   "it_admin",
   // Manages the public marketing site content (the site CMS). No SIS data access.
@@ -35,6 +39,7 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   registrar: "Registrar",
   admissions: "Admissions",
   bursar: "Bursar",
+  dining: "Dining",
   hr: "HR",
   it_admin: "IT Admin",
   communications: "Communications",

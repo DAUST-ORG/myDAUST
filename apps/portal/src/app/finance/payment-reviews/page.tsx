@@ -488,6 +488,11 @@ function PaymentSettings() {
             />
             Enable {label}
           </label>
+          <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            A phone number{key === "orangeMoney" ? ", a merchant number," : ""}{" "}
+            or a QR code — whichever you have. One is enough; add both if you
+            want them both shown.
+          </p>
           <div
             style={{
               display: "grid",

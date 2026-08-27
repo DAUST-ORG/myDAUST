@@ -159,26 +159,24 @@ export class PaymentSubmissionsService {
         "Add at least one Finance notification recipient",
       );
     }
-    if (
-      config.wave.enabled &&
-      (!config.wave.phoneNumber ||
-        !config.wave.instructions ||
-        !config.wave.qrAsset)
-    ) {
-      throw new BadRequestException(
-        "Enabled Wave payments require a phone number, instructions, and QR code",
-      );
-    }
-    if (
-      config.orangeMoney.enabled &&
-      (!config.orangeMoney.phoneNumber ||
-        !config.orangeMoney.merchantNumber ||
-        !config.orangeMoney.instructions ||
-        !config.orangeMoney.qrAsset)
-    ) {
-      throw new BadRequestException(
-        "Enabled Orange Money payments require a phone number, merchant number, instructions, and QR code",
-      );
+    // A mobile-money method only has to tell the payer where to send the money. A number
+    // and a QR are two ways of saying the same thing, so either alone is enough and both is
+    // fine — requiring all of them meant a real, usable configuration was rejected.
+    for (const [key, label] of [
+      ["wave", "Wave"],
+      ["orangeMoney", "Orange Money"],
+    ] as const) {
+      const method = config[key];
+      if (!method.enabled) continue;
+      const hasDestination =
+        Boolean(method.phoneNumber) ||
+        Boolean(method.merchantNumber) ||
+        Boolean(method.qrAsset);
+      if (!hasDestination) {
+        throw new BadRequestException(
+          `Enabled ${label} payments need somewhere to send the money: a phone number, a merchant number, or a QR code`,
+        );
+      }
     }
     if (
       config.bank.enabled &&

@@ -3,19 +3,72 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, BadgeCheck, Check, CheckCircle2, Clock, Copy, ExternalLink, Flag, Gift, GraduationCap, Mail, MapPin, Pencil, RefreshCw, Target, UserCheck, X } from "lucide-react";
-import { acceptApplicant, cancelApplicantOnboarding, type ApplicantDetail, type ApplicantOnboardingView, getApplicant, getAdminPrograms, resendApplicantAcceptanceEmail, resendApplicantStudentInvite, rotateApplicantOnboardingLink, setApplicantStage } from "@/lib/api";
-import { formatDate, formatXof } from "@/lib/format";
+import {
+  ArrowLeft,
+  BadgeCheck,
+  Check,
+  CheckCircle2,
+  Clock,
+  Copy,
+  ExternalLink,
+  Flag,
+  Gift,
+  GraduationCap,
+  Mail,
+  MapPin,
+  Pencil,
+  RefreshCw,
+  Target,
+  UserCheck,
+  X,
+} from "lucide-react";
+import {
+  acceptApplicant,
+  cancelApplicantOnboarding,
+  type ApplicantDetail,
+  type ApplicantOnboardingView,
+  getApplicant,
+  getAdminPrograms,
+  resendApplicantAcceptanceEmail,
+  resendApplicantStudentInvite,
+  rotateApplicantOnboardingLink,
+  setApplicantStage,
+} from "@/lib/api";
+import { formatDate, formatDateTime, formatXof } from "@/lib/format";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Avatar, Badge, type BadgeTone, Modal, Tabs } from "@/components/ui";
 import { useAuth } from "@/lib/use-auth";
 import { ApplicationModal, type ProgramOption } from "../ApplicationModal";
 
 const STAGES = ["submitted", "review", "interview", "offer", "accepted"];
-const STAGE_TONE: Record<string, BadgeTone> = { submitted: "neutral", review: "info", interview: "warning", offer: "teal", accepted: "success", rejected: "error" };
-const STAGE_LABEL: Record<string, string> = { submitted: "Submitted", review: "Under review", interview: "Interview", offer: "Offer", accepted: "Accepted", rejected: "Rejected" };
-const ONBOARDING_LABEL: Record<string, string> = { not_started: "Accepted", payment_pending: "Payment pending", enrolled: "Enrolled", cancelled: "Onboarding cancelled" };
-const ONBOARDING_TONE: Record<string, BadgeTone> = { not_started: "success", payment_pending: "warning", enrolled: "success", cancelled: "error" };
+const STAGE_TONE: Record<string, BadgeTone> = {
+  submitted: "neutral",
+  review: "info",
+  interview: "warning",
+  offer: "teal",
+  accepted: "success",
+  rejected: "error",
+};
+const STAGE_LABEL: Record<string, string> = {
+  submitted: "Submitted",
+  review: "Under review",
+  interview: "Interview",
+  offer: "Offer",
+  accepted: "Accepted",
+  rejected: "Rejected",
+};
+const ONBOARDING_LABEL: Record<string, string> = {
+  not_started: "Accepted",
+  payment_pending: "Payment pending",
+  enrolled: "Enrolled",
+  cancelled: "Onboarding cancelled",
+};
+const ONBOARDING_TONE: Record<string, BadgeTone> = {
+  not_started: "success",
+  payment_pending: "warning",
+  enrolled: "success",
+  cancelled: "error",
+};
 
 function nextStage(stage: string): string | null {
   const i = STAGES.indexOf(stage);
@@ -61,7 +114,11 @@ export default function ApplicantDetailPage() {
   useEffect(() => load(), [load]);
   useEffect(() => {
     getAdminPrograms()
-      .then((p) => setProgramOptions(p.programs.map((x) => ({ code: x.code, name: x.name }))))
+      .then((p) =>
+        setProgramOptions(
+          p.programs.map((x) => ({ code: x.code, name: x.name })),
+        ),
+      )
       .catch(() => {});
   }, []);
 
@@ -75,14 +132,23 @@ export default function ApplicantDetailPage() {
       else await setApplicantStage(id, stage);
       load();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not update the application stage.");
+      setErr(
+        e instanceof Error
+          ? e.message
+          : "Could not update the application stage.",
+      );
     } finally {
       setBusyAction(null);
     }
   }
 
-  function updateOnboarding(onboarding: ApplicantOnboardingView, message: string) {
-    setA((current) => current ? { ...current, stage: "accepted", onboarding } : current);
+  function updateOnboarding(
+    onboarding: ApplicantOnboardingView,
+    message: string,
+  ) {
+    setA((current) =>
+      current ? { ...current, stage: "accepted", onboarding } : current,
+    );
     setNotice(message);
   }
 
@@ -90,7 +156,9 @@ export default function ApplicantDetailPage() {
     setA(next);
     setErr(null);
     setIssuedStatusUrl(null);
-    setNotice(`Onboarding cancelled. Student ID ${next.onboarding?.studentNo ?? "—"} remains permanently reserved; the applicant is now in Admissions history.`);
+    setNotice(
+      `Onboarding cancelled. Student ID ${next.onboarding?.studentNo ?? "—"} remains permanently reserved; the applicant is now in Admissions history.`,
+    );
   }
 
   async function confirmAcceptance() {
@@ -101,15 +169,22 @@ export default function ApplicantDetailPage() {
     try {
       const { onboarding } = await acceptApplicant(id);
       setIssuedStatusUrl(onboarding.statusUrl ?? null);
-      updateOnboarding(onboarding, onboardingEmailNotice(
+      updateOnboarding(
         onboarding,
-        "Applicant accepted; the payment instructions were emailed.",
-        "Applicant accepted, but email delivery failed. Copy the private status link below.",
-        "Enrollment payment was already prepared.",
-      ));
+        onboardingEmailNotice(
+          onboarding,
+          "Applicant accepted; the payment instructions were emailed.",
+          "Applicant accepted, but email delivery failed. Copy the private status link below.",
+          "Enrollment payment was already prepared.",
+        ),
+      );
       setConfirmAcceptanceOpen(false);
     } catch (cause) {
-      setErr(cause instanceof Error ? cause.message : "Could not accept this applicant.");
+      setErr(
+        cause instanceof Error
+          ? cause.message
+          : "Could not accept this applicant.",
+      );
       throw cause;
     } finally {
       setBusyAction(null);
@@ -124,46 +199,165 @@ export default function ApplicantDetailPage() {
     ["Under academic review", reachedIdx >= 1],
     ["Interview", reachedIdx >= 2],
     ["Offer extended", reachedIdx >= 3],
-    [a.stage === "rejected" ? "Application rejected" : "Application accepted", reachedIdx >= 4 || a.stage === "rejected"],
+    [
+      a.stage === "rejected" ? "Application rejected" : "Application accepted",
+      reachedIdx >= 4 || a.stage === "rejected",
+    ],
   ];
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
-        <Link href="/admissions" style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--fg3)", fontWeight: 600, fontSize: 13.5 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+          marginBottom: 18,
+        }}
+      >
+        <Link
+          href="/admissions"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            color: "var(--fg3)",
+            fontWeight: 600,
+            fontSize: 13.5,
+          }}
+        >
           <ArrowLeft size={16} /> All applicants
         </Link>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {(!a.onboarding || a.onboarding.status === "not_started") && <button onClick={() => setEditing(true)} style={{ display: "flex", alignItems: "center", gap: 6 }}><Pencil size={15} /> Edit</button>}
+          {(!a.onboarding || a.onboarding.status === "not_started") && (
+            <button
+              onClick={() => setEditing(true)}
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <Pencil size={15} /> Edit
+            </button>
+          )}
           {a.stage !== "rejected" && a.stage !== "accepted" && (
             <>
-              <button onClick={() => move("rejected")} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--danger)" }}><X size={15} /> Reject</button>
-              {nextStage(a.stage) && (nextStage(a.stage) !== "accepted" || isAdmin) && (
-                <button className="primary" disabled={busyAction !== null} onClick={() => nextStage(a.stage) === "accepted" ? setConfirmAcceptanceOpen(true) : move(nextStage(a.stage)!)} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <Check size={15} /> {busyAction ? "Saving…" : ADVANCE_LABEL[a.stage] ?? "Advance"}
-                </button>
-              )}
+              <button
+                onClick={() => move("rejected")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  color: "var(--danger)",
+                }}
+              >
+                <X size={15} /> Reject
+              </button>
+              {nextStage(a.stage) &&
+                (nextStage(a.stage) !== "accepted" || isAdmin) && (
+                  <button
+                    className="primary"
+                    disabled={busyAction !== null}
+                    onClick={() =>
+                      nextStage(a.stage) === "accepted"
+                        ? setConfirmAcceptanceOpen(true)
+                        : move(nextStage(a.stage)!)
+                    }
+                    style={{ display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    <Check size={15} />{" "}
+                    {busyAction
+                      ? "Saving…"
+                      : (ADVANCE_LABEL[a.stage] ?? "Advance")}
+                  </button>
+                )}
             </>
           )}
-          {isAdmin && a.stage === "accepted" && (!a.onboarding || a.onboarding.status === "not_started") && (
-            <button className="primary" disabled={busyAction !== null} onClick={() => setConfirmAcceptanceOpen(true)} style={{ display: "flex", alignItems: "center", gap: 6 }}><UserCheck size={15} /> {busyAction ? "Preparing…" : "Prepare enrollment payment"}</button>
-          )}
+          {isAdmin &&
+            a.stage === "accepted" &&
+            (!a.onboarding || a.onboarding.status === "not_started") && (
+              <button
+                className="primary"
+                disabled={busyAction !== null}
+                onClick={() => setConfirmAcceptanceOpen(true)}
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <UserCheck size={15} />{" "}
+                {busyAction ? "Preparing…" : "Prepare enrollment payment"}
+              </button>
+            )}
         </div>
       </div>
 
-      {err && <div className="card" style={{ marginBottom: 16, color: "var(--danger)" }}>{err}</div>}
-      {notice && <div className="card" role="status" style={{ marginBottom: 16, color: "var(--success)", display: "flex", alignItems: "center", gap: 8 }}><CheckCircle2 size={16} /> {notice}</div>}
+      {err && (
+        <div
+          className="card"
+          style={{ marginBottom: 16, color: "var(--danger)" }}
+        >
+          {err}
+        </div>
+      )}
+      {notice && (
+        <div
+          className="card"
+          role="status"
+          style={{
+            marginBottom: 16,
+            color: "var(--success)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <CheckCircle2 size={16} /> {notice}
+        </div>
+      )}
 
       {/* Hero */}
-      <div style={{ background: "linear-gradient(120deg, var(--daust-navy), var(--daust-navy-deep))", borderRadius: "var(--radius-xl)", padding: "26px 28px", color: "#fff", display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+      <div
+        style={{
+          background:
+            "linear-gradient(120deg, var(--daust-navy), var(--daust-navy-deep))",
+          borderRadius: "var(--radius-xl)",
+          padding: "26px 28px",
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          gap: 20,
+          flexWrap: "wrap",
+        }}
+      >
         <Avatar name={a.name} size={72} />
         <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 800 }}>{a.name}</div>
-          <div style={{ fontSize: 13.5, color: "rgba(255,255,255,0.65)", marginTop: 3 }}>{a.id.slice(0, 8)} · {a.email}</div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-            <HeroPill icon={GraduationCap}>{a.program ?? a.programCode ?? "Undeclared"}</HeroPill>
+          <div
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 26,
+              fontWeight: 800,
+            }}
+          >
+            {a.name}
+          </div>
+          <div
+            style={{
+              fontSize: 13.5,
+              color: "rgba(255,255,255,0.65)",
+              marginTop: 3,
+            }}
+          >
+            {a.id.slice(0, 8)} · {a.email}
+          </div>
+          <div
+            style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}
+          >
+            <HeroPill icon={GraduationCap}>
+              {a.program ?? a.programCode ?? "Undeclared"}
+            </HeroPill>
             {a.country && <HeroPill icon={MapPin}>{a.country}</HeroPill>}
-            <HeroPill icon={Flag}>{a.stage === "accepted" && a.onboarding ? ONBOARDING_LABEL[a.onboarding.status] ?? a.onboarding.status : STAGE_LABEL[a.stage] ?? a.stage}</HeroPill>
+            <HeroPill icon={Flag}>
+              {a.stage === "accepted" && a.onboarding
+                ? (ONBOARDING_LABEL[a.onboarding.status] ?? a.onboarding.status)
+                : (STAGE_LABEL[a.stage] ?? a.stage)}
+            </HeroPill>
           </div>
         </div>
       </div>
@@ -174,14 +368,76 @@ export default function ApplicantDetailPage() {
           {STAGES.map((st, i) => {
             const done = reachedIdx >= i;
             return (
-              <div key={st} style={{ flex: i < STAGES.length - 1 ? 1 : "0 0 auto", display: "flex", alignItems: "center", minWidth: 0 }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                  <span style={{ width: 30, height: 30, borderRadius: "50%", background: done ? "var(--daust-navy)" : "var(--bg-subtle)", border: done ? "none" : "1px solid var(--border)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    {done ? <Check size={15} /> : <span style={{ color: "var(--fg3)", fontSize: 12, fontWeight: 700 }}>{i + 1}</span>}
+              <div
+                key={st}
+                style={{
+                  flex: i < STAGES.length - 1 ? 1 : "0 0 auto",
+                  display: "flex",
+                  alignItems: "center",
+                  minWidth: 0,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: "50%",
+                      background: done
+                        ? "var(--daust-navy)"
+                        : "var(--bg-subtle)",
+                      border: done ? "none" : "1px solid var(--border)",
+                      color: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {done ? (
+                      <Check size={15} />
+                    ) : (
+                      <span
+                        style={{
+                          color: "var(--fg3)",
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {i + 1}
+                      </span>
+                    )}
                   </span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: done ? "var(--fg1)" : "var(--fg3)", whiteSpace: "nowrap" }}>{STAGE_LABEL[st]}</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: done ? "var(--fg1)" : "var(--fg3)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {STAGE_LABEL[st]}
+                  </span>
                 </div>
-                {i < STAGES.length - 1 && <div style={{ flex: 1, height: 2, background: reachedIdx > i ? "var(--daust-navy)" : "var(--border)", margin: "0 6px", marginBottom: 20 }} />}
+                {i < STAGES.length - 1 && (
+                  <div
+                    style={{
+                      flex: 1,
+                      height: 2,
+                      background:
+                        reachedIdx > i ? "var(--daust-navy)" : "var(--border)",
+                      margin: "0 6px",
+                      marginBottom: 20,
+                    }}
+                  />
+                )}
               </div>
             );
           })}
@@ -189,30 +445,102 @@ export default function ApplicantDetailPage() {
       </div>
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 14, marginTop: 16 }}>
-        <Stat icon={Target} label="BAC score" value={a.score != null ? `${a.score} / 20` : "—"} color="var(--daust-navy)" />
-        <Stat icon={BadgeCheck} label="Application fee" value={a.feePaid ? "Paid" : "Due"} color={a.feePaid ? "var(--success)" : "var(--warning)"} />
-        <Stat icon={Gift} label="Merit scholarship" value={a.scholarship.pct > 0 ? `${a.scholarship.pct}%` : "None"} color={a.scholarship.pct > 0 ? "var(--success)" : "var(--fg1)"} />
-        {a.onboarding?.firstInstallment && <Stat icon={UserCheck} label="First installment" value={a.onboarding.status === "enrolled" ? "Verified" : a.onboarding.status === "cancelled" ? "Cancelled" : formatXof(a.onboarding.firstInstallment.remainingAmount)} color={a.onboarding.status === "enrolled" ? "var(--success)" : a.onboarding.status === "cancelled" ? "var(--danger)" : "var(--daust-orange)"} />}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: 14,
+          marginTop: 16,
+        }}
+      >
+        <Stat
+          icon={Target}
+          label="BAC score"
+          value={a.score != null ? `${a.score} / 20` : "—"}
+          color="var(--daust-navy)"
+        />
+        <Stat
+          icon={BadgeCheck}
+          label="Application fee"
+          value={a.feePaid ? "Paid" : "Due"}
+          color={a.feePaid ? "var(--success)" : "var(--warning)"}
+        />
+        <Stat
+          icon={Gift}
+          label="Merit scholarship"
+          value={a.scholarship.pct > 0 ? `${a.scholarship.pct}%` : "None"}
+          color={a.scholarship.pct > 0 ? "var(--success)" : "var(--fg1)"}
+        />
+        {a.onboarding?.firstInstallment && (
+          <Stat
+            icon={UserCheck}
+            label="First installment"
+            value={
+              a.onboarding.status === "enrolled"
+                ? "Verified"
+                : a.onboarding.status === "cancelled"
+                  ? "Cancelled"
+                  : formatXof(a.onboarding.firstInstallment.remainingAmount)
+            }
+            color={
+              a.onboarding.status === "enrolled"
+                ? "var(--success)"
+                : a.onboarding.status === "cancelled"
+                  ? "var(--danger)"
+                  : "var(--daust-orange)"
+            }
+          />
+        )}
       </div>
 
       {a.stage === "accepted" && (
-        <EnrollmentPanel applicantId={a.id} onboarding={a.onboarding} issuedStatusUrl={issuedStatusUrl} canAccept={isAdmin} canCancel={isAdmin} canManageOnboarding={canManageOnboarding} onPrepare={() => setConfirmAcceptanceOpen(true)} onUpdated={updateOnboarding} onCancelled={onboardingCancelled} onError={setErr} />
+        <EnrollmentPanel
+          applicantId={a.id}
+          onboarding={a.onboarding}
+          issuedStatusUrl={issuedStatusUrl}
+          canAccept={isAdmin}
+          canCancel={isAdmin}
+          canManageOnboarding={canManageOnboarding}
+          onPrepare={() => setConfirmAcceptanceOpen(true)}
+          onUpdated={updateOnboarding}
+          onCancelled={onboardingCancelled}
+          onError={setErr}
+        />
       )}
 
       <div style={{ marginTop: 22 }}>
-        <Tabs tabs={[{ value: "overview", label: "Overview" }, { value: "timeline", label: "Timeline" }]} active={tab} onChange={setTab} />
+        <Tabs
+          tabs={[
+            { value: "overview", label: "Overview" },
+            { value: "timeline", label: "Timeline" },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
       </div>
 
       {tab === "overview" && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, alignItems: "start" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: 16,
+              alignItems: "start",
+            }}
+          >
             <Card title="Application">
               <KV k="Application ID" v={a.id.slice(0, 8)} />
               <KV k="Admission term" v={a.term ?? "—"} />
-              <KV k="Program of choice" v={a.program ?? a.programCode ?? "Undeclared"} />
-              <KV k="Applied on" v={a.submittedAt.slice(0, 10)} />
-              <KV k="Entrance score" v={a.score != null ? `${a.score} / 20` : "—"} />
+              <KV
+                k="Program of choice"
+                v={a.program ?? a.programCode ?? "Undeclared"}
+              />
+              <KV k="Applied on" v={formatDateTime(a.submittedAt)} />
+              <KV
+                k="Entrance score"
+                v={a.score != null ? `${a.score} / 20` : "—"}
+              />
             </Card>
             <Card title="Personal">
               <KV k="Full name" v={a.name} />
@@ -225,7 +553,14 @@ export default function ApplicantDetailPage() {
             </Card>
             <Card title="Academic background">
               <KV k="Applying from" v={a.origin ?? "—"} />
-              <KV k={a.origin === "University transfer" ? "Previous university" : "High school"} v={a.school ?? "—"} />
+              <KV
+                k={
+                  a.origin === "University transfer"
+                    ? "Previous university"
+                    : "High school"
+                }
+                v={a.school ?? "—"}
+              />
               <KV k="GPA / average" v={a.priorGpa ?? "—"} />
             </Card>
             <Card title="Parent / guardian">
@@ -238,15 +573,33 @@ export default function ApplicantDetailPage() {
               <KV k="Heard about DAUST via" v={a.source ?? "—"} />
             </Card>
             <Card title="Scholarship (est.)">
-              <KV k="Merit award" v={a.scholarship.pct > 0 ? `${a.scholarship.pct}%` : "No award"} />
+              <KV
+                k="Merit award"
+                v={a.scholarship.pct > 0 ? `${a.scholarship.pct}%` : "No award"}
+              />
               <KV k="Band" v={a.scholarship.band ?? "—"} />
-              <p className="muted" style={{ fontSize: 11.5, marginTop: 10, marginBottom: 0 }}>Computed from the current BAC scholarship tiers; confirmed at enrolment.</p>
+              <p
+                className="muted"
+                style={{ fontSize: 11.5, marginTop: 10, marginBottom: 0 }}
+              >
+                Computed from the current BAC scholarship tiers; confirmed at
+                enrolment.
+              </p>
             </Card>
           </div>
           {a.essay && (
             <div style={{ marginTop: 16 }}>
               <Card title="Statement of purpose">
-                <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{a.essay}</p>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 13.5,
+                    lineHeight: 1.6,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {a.essay}
+                </p>
               </Card>
             </div>
           )}
@@ -256,14 +609,59 @@ export default function ApplicantDetailPage() {
       {tab === "timeline" && (
         <Card title="Application timeline">
           {timeline.map(([label, done], i) => (
-            <div key={i} style={{ display: "flex", gap: 14, paddingBottom: i < timeline.length - 1 ? 16 : 0 }}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <span style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--bg-subtle)", border: "1px solid var(--border)", color: done ? "var(--success)" : "var(--fg3)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                gap: 14,
+                paddingBottom: i < timeline.length - 1 ? 16 : 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                }}
+              >
+                <span
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: "50%",
+                    background: "var(--bg-subtle)",
+                    border: "1px solid var(--border)",
+                    color: done ? "var(--success)" : "var(--fg3)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
                   {done ? <CheckCircle2 size={15} /> : <Clock size={15} />}
                 </span>
-                {i < timeline.length - 1 && <span style={{ width: 1, flex: 1, minHeight: 16, background: "var(--border)", marginTop: 2 }} />}
+                {i < timeline.length - 1 && (
+                  <span
+                    style={{
+                      width: 1,
+                      flex: 1,
+                      minHeight: 16,
+                      background: "var(--border)",
+                      marginTop: 2,
+                    }}
+                  />
+                )}
               </div>
-              <div style={{ paddingTop: 5, fontSize: 13.5, fontWeight: 600, color: done ? "var(--fg1)" : "var(--fg3)" }}>{label}</div>
+              <div
+                style={{
+                  paddingTop: 5,
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  color: done ? "var(--fg1)" : "var(--fg3)",
+                }}
+              >
+                {label}
+              </div>
             </div>
           ))}
         </Card>
@@ -274,6 +672,11 @@ export default function ApplicantDetailPage() {
           mode="edit"
           applicantId={a.id}
           programs={programOptions}
+          /**
+           * Every field the form can write must be seeded here. The modal sends the whole
+           * form back and turns blanks into nulls, so any field left out of `initial`
+           * starts empty and is wiped on save — even when the operator changed nothing.
+           */
           initial={{
             firstName: a.firstName,
             lastName: a.lastName,
@@ -281,6 +684,24 @@ export default function ApplicantDetailPage() {
             programCode: a.programCode,
             score: a.score,
             country: a.country,
+            term: a.term,
+            phone: a.phone,
+            dateOfBirth: a.dateOfBirth,
+            gender: a.gender,
+            nationality: a.nationality,
+            city: a.city,
+            origin:
+              a.origin === "high-school" || a.origin === "transfer"
+                ? a.origin
+                : null,
+            school: a.school,
+            priorGpa: a.priorGpa,
+            parentName: a.parentName,
+            parentPhone: a.parentPhone,
+            parentEmail: a.parentEmail,
+            allergies: a.allergies,
+            source: a.source,
+            essay: a.essay,
           }}
           onClose={() => setEditing(false)}
           onSaved={() => {
@@ -292,7 +713,14 @@ export default function ApplicantDetailPage() {
       {confirmAcceptanceOpen && isAdmin && (
         <ConfirmDialog
           title="Accept applicant and prepare payment?"
-          message={<><strong>{a.name}</strong> will receive a permanent Student ID and first-installment invoice. They will remain payment pending, without student access, until Finance verifies the full installment.</>}
+          message={
+            <>
+              <strong>{a.name}</strong> will receive a permanent Student ID and
+              first-installment invoice. They will remain payment pending,
+              without student access, until Finance verifies the full
+              installment.
+            </>
+          }
           confirmLabel="Accept and prepare payment"
           danger={false}
           onClose={() => setConfirmAcceptanceOpen(false)}
@@ -339,7 +767,9 @@ function EnrollmentPanel({
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  const [latestStatusUrl, setLatestStatusUrl] = useState<string | null>(issuedStatusUrl);
+  const [latestStatusUrl, setLatestStatusUrl] = useState<string | null>(
+    issuedStatusUrl,
+  );
   const [latestInviteUrl, setLatestInviteUrl] = useState<string | null>(null);
   const [confirmRotate, setConfirmRotate] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -352,13 +782,17 @@ function EnrollmentPanel({
     setBusy("resend");
     onError(null);
     try {
-      const { onboarding: next } = await resendApplicantAcceptanceEmail(applicantId);
+      const { onboarding: next } =
+        await resendApplicantAcceptanceEmail(applicantId);
       setLatestStatusUrl(next.statusUrl ?? null);
-      onUpdated(next, onboardingEmailNotice(
+      onUpdated(
         next,
-        "Acceptance email resent with a new private status link.",
-        "A new private status link was created, but email delivery failed. Copy it below.",
-      ));
+        onboardingEmailNotice(
+          next,
+          "Acceptance email resent with a new private status link.",
+          "A new private status link was created, but email delivery failed. Copy it below.",
+        ),
+      );
     } catch (cause) {
       onError(
         cause instanceof Error
@@ -374,16 +808,24 @@ function EnrollmentPanel({
     setBusy("rotate");
     onError(null);
     try {
-      const { onboarding: next } = await rotateApplicantOnboardingLink(applicantId);
+      const { onboarding: next } =
+        await rotateApplicantOnboardingLink(applicantId);
       setLatestStatusUrl(next.statusUrl ?? null);
       setConfirmRotate(false);
-      onUpdated(next, onboardingEmailNotice(
+      onUpdated(
         next,
-        "Old links cancelled; replacement links were emailed.",
-        "Old links were cancelled and replacements created, but email delivery failed. Copy the new link below.",
-      ));
+        onboardingEmailNotice(
+          next,
+          "Old links cancelled; replacement links were emailed.",
+          "Old links were cancelled and replacements created, but email delivery failed. Copy the new link below.",
+        ),
+      );
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Could not replace the enrollment links.");
+      onError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not replace the enrollment links.",
+      );
       throw cause;
     } finally {
       setBusy(null);
@@ -650,7 +1092,9 @@ function EnrollmentPanel({
                 }}
               >
                 <Copy size={14} />{" "}
-                {copied === "student-id" ? "Student ID copied" : "Copy Student ID"}
+                {copied === "student-id"
+                  ? "Student ID copied"
+                  : "Copy Student ID"}
               </button>
             )}
             {onboarding.paymentLink?.url && paymentPending && (
@@ -809,7 +1253,10 @@ function EnrollmentPanel({
               </button>
             )}
             {canCancel && paymentPending && paid > 0 && (
-              <p className="muted" style={{ margin: "4px 0 0", fontSize: 10.5, lineHeight: 1.45 }}>
+              <p
+                className="muted"
+                style={{ margin: "4px 0 0", fontSize: 10.5, lineHeight: 1.45 }}
+              >
                 Cancellation is unavailable after verified cash. Contact Finance
                 for a reviewed correction.
               </p>
@@ -871,7 +1318,9 @@ function CancelOnboardingDialog({
       const next = await cancelApplicantOnboarding(applicantId, trimmedReason);
       onCancelled(next);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not cancel onboarding.");
+      setError(
+        cause instanceof Error ? cause.message : "Could not cancel onboarding.",
+      );
       setBusy(false);
     }
   }
@@ -884,28 +1333,56 @@ function CancelOnboardingDialog({
       width={500}
       footer={
         <>
-          <button type="button" onClick={onClose} disabled={busy}>Keep onboarding</button>
+          <button type="button" onClick={onClose} disabled={busy}>
+            Keep onboarding
+          </button>
           <button
             type="submit"
             form="cancel-onboarding-form"
             disabled={!valid || busy}
-            style={{ background: "var(--danger)", color: "#fff", borderColor: "var(--danger)" }}
+            style={{
+              background: "var(--danger)",
+              color: "#fff",
+              borderColor: "var(--danger)",
+            }}
           >
             {busy ? "Cancelling…" : "Cancel onboarding"}
           </button>
         </>
       }
     >
-      <form id="cancel-onboarding-form" onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ padding: 12, borderRadius: 10, border: "1px solid color-mix(in srgb, var(--danger) 35%, var(--border))", background: "color-mix(in srgb, var(--danger) 7%, var(--surface))", fontSize: 12.5, lineHeight: 1.55 }}>
-          <strong>Student ID {studentNo ?? "—"} is permanent and will remain reserved.</strong>{" "}
+      <form
+        id="cancel-onboarding-form"
+        onSubmit={submit}
+        style={{ display: "flex", flexDirection: "column", gap: 16 }}
+      >
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 10,
+            border:
+              "1px solid color-mix(in srgb, var(--danger) 35%, var(--border))",
+            background: "color-mix(in srgb, var(--danger) 7%, var(--surface))",
+            fontSize: 12.5,
+            lineHeight: 1.55,
+          }}
+        >
+          <strong>
+            Student ID {studentNo ?? "—"} is permanent and will remain reserved.
+          </strong>{" "}
           Enrollment billing and open payment attempts will be voided, and no
           student access will be issued. This action is allowed only before any
           verified cash is received.
         </div>
-        {error && <div role="alert" style={{ color: "var(--danger)", fontSize: 12.5 }}>{error}</div>}
+        {error && (
+          <div role="alert" style={{ color: "var(--danger)", fontSize: 12.5 }}>
+            {error}
+          </div>
+        )}
         <label style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 650 }}>Cancellation reason</span>
+          <span style={{ fontSize: 12.5, fontWeight: 650 }}>
+            Cancellation reason
+          </span>
           <textarea
             value={reason}
             onChange={(event) => setReason(event.target.value)}
@@ -916,8 +1393,19 @@ function CancelOnboardingDialog({
             aria-describedby="cancel-onboarding-reason-help"
             placeholder="Explain why this accepted applicant should not continue to payment."
           />
-          <span id="cancel-onboarding-reason-help" className="muted" style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 10.5 }}>
-            <span>Enter 10–500 characters. The reason is kept in the audit history.</span>
+          <span
+            id="cancel-onboarding-reason-help"
+            className="muted"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              fontSize: 10.5,
+            }}
+          >
+            <span>
+              Enter 10–500 characters. The reason is kept in the audit history.
+            </span>
             <span>{reason.length}/500</span>
           </span>
         </label>
@@ -957,29 +1445,92 @@ function PaymentFigure({
   );
 }
 
-function HeroPill({ icon: Icon, children }: { icon: typeof Target; children: React.ReactNode }) {
+function HeroPill({
+  icon: Icon,
+  children,
+}: {
+  icon: typeof Target;
+  children: React.ReactNode;
+}) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.12)", borderRadius: 999, padding: "5px 12px", fontSize: 11.5, fontWeight: 600, color: "#fff" }}>
-      <Icon size={13} color="#a9c4ec" />{children}
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        background: "rgba(255,255,255,0.12)",
+        borderRadius: 999,
+        padding: "5px 12px",
+        fontSize: 11.5,
+        fontWeight: 600,
+        color: "#fff",
+      }}
+    >
+      <Icon size={13} color="#a9c4ec" />
+      {children}
     </span>
   );
 }
 
-function Stat({ icon: Icon, label, value, color }: { icon: typeof Target; label: string; value: string; color: string }) {
+function Stat({
+  icon: Icon,
+  label,
+  value,
+  color,
+}: {
+  icon: typeof Target;
+  label: string;
+  value: string;
+  color: string;
+}) {
   return (
     <div className="card" style={{ margin: 0, padding: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 600, color: "var(--fg3)" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          fontSize: 12,
+          fontWeight: 600,
+          color: "var(--fg3)",
+        }}
+      >
         <Icon size={14} color="var(--daust-navy)" /> {label}
       </div>
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 800, marginTop: 8, color }}>{value}</div>
+      <div
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 22,
+          fontWeight: 800,
+          marginTop: 8,
+          color,
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="card" style={{ margin: 0 }}>
-      <h4 style={{ margin: "0 0 12px", fontFamily: "var(--font-display)", fontSize: 14.5, fontWeight: 700 }}>{title}</h4>
+      <h4
+        style={{
+          margin: "0 0 12px",
+          fontFamily: "var(--font-display)",
+          fontSize: 14.5,
+          fontWeight: 700,
+        }}
+      >
+        {title}
+      </h4>
       {children}
     </div>
   );
@@ -987,7 +1538,16 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 14, padding: "9px 0", borderBottom: "1px solid var(--divider)", fontSize: 13 }}>
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 14,
+        padding: "9px 0",
+        borderBottom: "1px solid var(--divider)",
+        fontSize: 13,
+      }}
+    >
       <span className="muted">{k}</span>
       <span style={{ fontWeight: 600, textAlign: "right" }}>{v}</span>
     </div>
