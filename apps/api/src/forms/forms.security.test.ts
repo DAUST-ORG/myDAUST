@@ -52,7 +52,7 @@ describe("CSV injection prevention (escapeCsvCell)", () => {
 import {
   PublicRespondInput,
   AuthRespondInput,
-  CreateFormInput,
+  CreateCustomFormInput,
 } from "@mydaust/shared";
 
 describe("input validation (FIX 3 — answer type constraints)", () => {
@@ -109,7 +109,7 @@ describe("input validation (FIX 5 — structural limits)", () => {
       sortOrder: i,
       fields: [validField],
     }));
-    const result = CreateFormInput.safeParse({
+    const result = CreateCustomFormInput.safeParse({
       title: "Test",
       requiresAuth: true,
       sections,
@@ -123,7 +123,7 @@ describe("input validation (FIX 5 — structural limits)", () => {
       label: `Field ${i}`,
       sortOrder: i,
     }));
-    const result = CreateFormInput.safeParse({
+    const result = CreateCustomFormInput.safeParse({
       title: "Test",
       requiresAuth: true,
       sections: [{ title: "S1", sortOrder: 0, fields }],
@@ -141,7 +141,7 @@ describe("input validation (FIX 5 — structural limits)", () => {
         sortOrder: j,
       })),
     }));
-    const result = CreateFormInput.safeParse({
+    const result = CreateCustomFormInput.safeParse({
       title: "Test",
       requiresAuth: true,
       sections,
@@ -150,7 +150,7 @@ describe("input validation (FIX 5 — structural limits)", () => {
   });
 
   it("rejects empty sections array", () => {
-    const result = CreateFormInput.safeParse({
+    const result = CreateCustomFormInput.safeParse({
       title: "Test",
       requiresAuth: true,
       sections: [],
@@ -159,7 +159,7 @@ describe("input validation (FIX 5 — structural limits)", () => {
   });
 
   it("rejects section with zero fields", () => {
-    const result = CreateFormInput.safeParse({
+    const result = CreateCustomFormInput.safeParse({
       title: "Test",
       requiresAuth: true,
       sections: [{ title: "Empty", sortOrder: 0, fields: [] }],

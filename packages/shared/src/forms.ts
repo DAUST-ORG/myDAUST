@@ -85,7 +85,7 @@ export type FormSectionInput = z.infer<typeof FormSectionInput>;
 
 // ─── Create / update form ─────────────────────────────────────────────────────
 
-export const CreateFormInput = z.object({
+export const CreateCustomFormInput = z.object({
   title: z.string().trim().min(1).max(200),
   description: z
     .string()
@@ -101,10 +101,10 @@ export const CreateFormInput = z.object({
   maxResponses: z.number().int().positive().optional(),
   sections: z.array(FormSectionInput).min(1).max(20),
 });
-export type CreateFormInput = z.infer<typeof CreateFormInput>;
+export type CreateCustomFormInput = z.infer<typeof CreateCustomFormInput>;
 
-export const UpdateFormInput = CreateFormInput;
-export type UpdateFormInput = z.infer<typeof UpdateFormInput>;
+export const UpdateCustomFormInput = CreateCustomFormInput;
+export type UpdateCustomFormInput = z.infer<typeof UpdateCustomFormInput>;
 
 // ─── Respondent identity (public forms) ───────────────────────────────────────
 

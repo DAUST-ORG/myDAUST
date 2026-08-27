@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common";
 import { Prisma, type CustomFormStatus } from "@mydaust/db";
 import type {
-  CreateFormInput,
+  CreateCustomFormInput,
   FormCondition,
   AuthRespondInput,
   PublicRespondInput,
@@ -39,7 +39,7 @@ export class FormsService {
 
   // ─── Registrar CRUD ───────────────────────────────────────────────────────
 
-  async create(actor: AuthUser, input: CreateFormInput) {
+  async create(actor: AuthUser, input: CreateCustomFormInput) {
     if (!actor.personId) throw new ForbiddenException("Sign in required");
     const form = await this.prisma.customForm.create({
       data: {
@@ -122,7 +122,7 @@ export class FormsService {
     return form;
   }
 
-  async update(id: string, actor: AuthUser, input: CreateFormInput) {
+  async update(id: string, actor: AuthUser, input: CreateCustomFormInput) {
     if (!actor.personId) throw new ForbiddenException("Sign in required");
     const existing = await this.prisma.customForm.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Form not found");

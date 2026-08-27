@@ -67,4 +67,118 @@ export const GradeSubmissionInput = z.object({
   // distinction every score correction would silently wipe the instructor's feedback.
   feedback: z.string().max(5000).optional(),
 });
+
 export type GradeSubmissionInput = z.infer<typeof GradeSubmissionInput>;
+
+/**
+ * Gates that block student self-registration in enroll(). The set is mirrored exactly by
+ * the order checks appear in AcademicsService.enroll(); keep this in sync when adding a new
+ * gate there. Duplicate enrollment, closed section and term-ended are intentionally NOT
+ * waivable -- they reflect hard invariants, not policy.
+ */
+export const EnrollmentGate = z.enum([
+  "prerequisite",
+  "corequisite",
+  "capacity",
+  "holds",
+  "credit_cap",
+  "standing",
+  "major_restriction",
+  "record_status",
+  "add_deadline",
+]);
+export type EnrollmentGate = z.infer<typeof EnrollmentGate>;
+
+/** Per-gate data the request stores alongside the failure code so the registrar can act on
+ * a specific reason instead of a generic 'gates failed' label. */
+export const EnrollmentGateFailure = z.discriminatedUnion("gate", [
+  z.object({
+    gate: z.literal("prerequisite"),
+    courses: z.array(z.object({ code: z.string(), minGrade: z.string().nullable() })),
+  }),
+  z.object({
+    gate: z.literal("corequisite"),
+    courses: z.array(z.string()),
+  }),
+  z.object({
+    gate: z.literal("capacity"),
+    taken: z.number().int().min(0),
+    capacity: z.number().int().min(1),
+  }),
+  z.object({
+    gate: z.literal("holds"),
+    kinds: z.array(z.string()),
+  }),
+  z.object({
+    gate: z.literal("credit_cap"),
+    currentCredits: z.number().int().min(0),
+    afterAdd: z.number().int().min(0),
+    ceiling: z.number().int().min(1),
+  }),
+  z.object({
+    gate: z.literal("standing"),
+    required: z.string(),
+    actual: z.number().int(),
+  }),
+  z.object({
+    gate: z.literal("major_restriction"),
+    required: z.string(),
+  }),
+  z.object({
+    gate: z.literal("record_status"),
+    status: z.string(),
+  }),
+  z.object({
+    gate: z.literal("add_deadline"),
+    closedOn: z.string().date(),
+  }),
+]);
+export type EnrollmentGateFailure = z.infer<typeof EnrollmentGateFailure>;
+
+/** Faculty members may only waive academic gates. Institutional gates (holds, standing,
+ * record_status) require admin/registrar authority. */
+export const FACULTY_WAIVABLE_GATES: ReadonlySet<EnrollmentGate> = new Set([
+  "prerequisite",
+  "corequisite",
+  "capacity",
+  "credit_cap",
+  "major_restriction",
+  "add_deadline",
+]);
+
+/** Student submits when enroll() rejected them. Stored on ApprovalRequest.afterJson. */
+export const EnrollmentOverrideRequestInput = z.object({
+  sectionId: z.string().uuid(),
+  reason: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (v) => v.split(/\s+/).filter(Boolean).length <= 50,
+      { message: "Maximum 50 words" },
+    )
+    .refine(
+      (v) => v.split(/\s+/).filter(Boolean).length >= 1,
+      { message: "At least 1 word" },
+    ),
+  /** Gates the student is asking the registrar to waive. The registrar still picks
+   * independently on approval; this is a hint, not a constraint. */
+  requestedWaivers: z.array(EnrollmentGate).min(1),
+});
+export type EnrollmentOverrideRequestInput = z.infer<typeof EnrollmentOverrideRequestInput>;
+
+/** Admin approves by ticking each gate to waive. Capacity waiver auto-bumps section
+ * capacity on apply. */
+export const EnrollmentOverrideApproveInput = z.object({
+  waivedGates: z.array(EnrollmentGate).min(1),
+  note: z.string().trim().max(1000).optional(),
+});
+export type EnrollmentOverrideApproveInput = z.infer<typeof EnrollmentOverrideApproveInput>;
+
+/** Faculty approve — same as admin but restricted to FACULTY_WAIVABLE_GATES. */
+export const FacultyOverrideDecideInput = z.object({
+  waive: z.boolean(),
+  waivedGates: z.array(EnrollmentGate).min(1).optional(),
+  note: z.string().trim().max(1000).optional(),
+});
+export type FacultyOverrideDecideInput = z.infer<typeof FacultyOverrideDecideInput>;

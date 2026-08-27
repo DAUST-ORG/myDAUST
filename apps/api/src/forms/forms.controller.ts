@@ -13,7 +13,7 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import type { Response } from "express";
-import { CreateFormInput, AuthRespondInput, PublicRespondInput } from "@mydaust/shared";
+import { CreateCustomFormInput, AuthRespondInput, PublicRespondInput } from "@mydaust/shared";
 import { Public } from "../auth/decorators.js";
 import { CurrentUser, type AuthUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
@@ -33,7 +33,7 @@ export class FormsController {
   @Post()
   @Roles("registrar", "admin")
   create(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    const input = CreateFormInput.parse(body);
+    const input = CreateCustomFormInput.parse(body);
     return this.forms.create(user, input);
   }
 
@@ -54,7 +54,7 @@ export class FormsController {
   @Roles("registrar", "admin")
   update(@Param() params: unknown, @CurrentUser() user: AuthUser, @Body() body: unknown) {
     const { id } = IdParam.parse(params);
-    const input = CreateFormInput.parse(body);
+    const input = CreateCustomFormInput.parse(body);
     return this.forms.update(id, user, input);
   }
 

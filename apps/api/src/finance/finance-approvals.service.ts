@@ -541,13 +541,12 @@ export class FinanceApprovalsService {
     const outcome = await this.transaction(async (tx) => {
       const request = await tx.approvalRequest.findUnique({ where: { id } });
       if (!request) throw new NotFoundException("Approval request not found");
-      if (request.status === "approved") {
-        return {
-          response: { ok: true, id: request.id, status: request.status },
-          activations: [] as EnrollmentActivation[],
-        };
+      if (request.kind === "student_enrollment_override") {
+        throw new BadRequestException(
+          "Enrollment override requests are approved through /academics/enrollment-overrides/:id/approve with explicit gate waivers",
+        );
       }
-      if (request.status !== "pending") {
+      if (request.status === "approved") {
         throw new BadRequestException(`Request is already ${request.status}`);
       }
       const staleReason = await this.staleReason(tx, request);

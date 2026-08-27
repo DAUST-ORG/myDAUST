@@ -17,6 +17,7 @@ export const APP_ROLES = [
   "it_admin",
   // Manages the public marketing site content (the site CMS). No SIS data access.
   "communications",
+  "infirmary",
   "admin",
 ] as const;
 
@@ -42,6 +43,7 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   hr: "HR",
   it_admin: "IT Admin",
   communications: "Communications",
+  infirmary: "Infirmary",
   admin: "Admin",
 };
 

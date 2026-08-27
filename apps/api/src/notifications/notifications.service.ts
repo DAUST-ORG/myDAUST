@@ -6,6 +6,8 @@ export type NotificationKind =
   | "assignment_created"
   | "work_graded"
   | "material_published"
+  | "override_approved"
+  | "override_rejected"
   | "form_response_received";
 
 interface NewNotification {
