@@ -617,7 +617,7 @@ export interface TeachingSection {
 export interface Roster {
   course: string;
   sectionCode: string;
-  students: { studentNo: string; name: string; grade: string | null }[];
+  students: { studentNo: string; name: string; grade: string | null; viaOverride: boolean }[];
 }
 export const getTeaching = () =>
   request<TeachingSection[]>("/academics/teaching");
@@ -2701,7 +2701,8 @@ export type ApprovalRequestKind =
   | "discount"
   | "scholarship"
   | "operating_budget"
-  | "management_actual";
+  | "management_actual"
+  | "student_enrollment_override";
 export type ApprovalRequestStatus =
   "pending" | "approved" | "rejected" | "cancelled" | "stale";
 
@@ -2756,6 +2757,22 @@ export const cancelApprovalRequest = (id: string, note?: string) =>
     `/approvals/${id}/cancel`,
     { method: "POST", body: JSON.stringify({ note }) },
   );
+
+// Director-side approval for an enrollment override. Distinct from approveApprovalRequest
+// because the registrar must pick which gates to waive -- there is no single "approve"
+// without that choice.
+export const approveEnrollmentOverride = (
+  id: string,
+  body: { waivedGates: string[]; note?: string },
+) =>
+  request<{
+    id: string;
+    status: string;
+    enrollmentId?: string;
+  }>(`/academics/enrollment-overrides/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
 export type DirectorWidgetKey =
   | "people"
@@ -5120,3 +5137,128 @@ export const deleteInfirmaryFormResponse = (id: string) =>
 // Analytics
 export const getInfirmaryAnalytics = () =>
   request<InfirmaryAnalytics>("/infirmary/analytics");
+// Enrollment override: student-initiated request after enroll() rejected them.
+export type EnrollmentOverrideGate =
+  | "prerequisite"
+  | "corequisite"
+  | "capacity"
+  | "holds"
+  | "credit_cap"
+  | "standing"
+  | "major_restriction"
+  | "record_status"
+  | "add_deadline";
+
+export type EnrollmentOverrideFailure =
+  | { gate: "prerequisite"; courses: { code: string; minGrade: string | null }[] }
+  | { gate: "corequisite"; courses: string[] }
+  | { gate: "capacity"; taken: number; capacity: number }
+  | { gate: "holds"; kinds: string[] }
+  | { gate: "credit_cap"; currentCredits: number; afterAdd: number; ceiling: number }
+  | { gate: "standing"; required: string; actual: number }
+  | { gate: "major_restriction"; required: string }
+  | { gate: "record_status"; status: string }
+  | { gate: "add_deadline"; closedOn: string };
+
+export interface EnrollmentOverrideRequestResponse {
+  id: string;
+  status: string;
+  failures: EnrollmentOverrideFailure[];
+}
+
+export const submitEnrollmentOverride = (body: {
+  sectionId: string;
+  reason: string;
+  requestedWaivers: EnrollmentOverrideGate[];
+}) =>
+  request<EnrollmentOverrideRequestResponse>(
+    "/academics/enrollment-overrides",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+
+export interface MyOverrideRequest {
+  id: string;
+  status: string;
+  reason: string;
+  targetId: string | null;
+  decisionNote: string | null;
+  reviewedAt: string | null;
+  appliedAt: string | null;
+  createdAt: string;
+  afterJson: {
+    sectionId: string;
+    studentId: string;
+    requestedWaivers: EnrollmentOverrideGate[];
+    failures: EnrollmentOverrideFailure[];
+  } | null;
+}
+
+export const myOverrideRequests = () =>
+  request<MyOverrideRequest[]>("/academics/enrollment-overrides/mine");
+
+export const cancelOverrideRequest = (id: string) =>
+  request<{ id: string; status: string }>(
+    `/academics/enrollment-overrides/${id}/cancel`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+
+export type FacultyWaivableGate =
+  | "prerequisite"
+  | "corequisite"
+  | "capacity"
+  | "credit_cap"
+  | "major_restriction"
+  | "add_deadline";
+
+export const FACULTY_WAIVABLE_GATES: FacultyWaivableGate[] = [
+  "prerequisite",
+  "corequisite",
+  "capacity",
+  "credit_cap",
+  "major_restriction",
+  "add_deadline",
+];
+
+export interface FacultyOverrideRequest {
+  id: string;
+  status: string;
+  reason: string;
+  targetId: string | null;
+  decisionNote: string | null;
+  reviewedAt: string | null;
+  appliedAt: string | null;
+  createdAt: string;
+  requestedBy: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    student: { studentNo: string } | null;
+  } | null;
+  afterJson: {
+    sectionId: string;
+    studentId: string;
+    requestedWaivers: EnrollmentOverrideGate[];
+    failures: EnrollmentOverrideFailure[];
+  } | null;
+}
+
+export const facultyOverrideRequests = () =>
+  request<FacultyOverrideRequest[]>(
+    "/academics/enrollment-overrides/faculty",
+  );
+
+export const facultyDecideOverride = (
+  id: string,
+  body: {
+    waive: boolean;
+    waivedGates?: EnrollmentOverrideGate[];
+    note?: string;
+  },
+) =>
+  request<{ id: string; status: string; enrollmentId?: string }>(
+    `/academics/enrollment-overrides/${id}/faculty-decide`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
