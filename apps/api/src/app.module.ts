@@ -25,6 +25,7 @@ import { RegistrarModule } from "./registrar/registrar.module.js";
 import { UploadsModule } from "./uploads/uploads.module.js";
 import { TranscriptModule } from "./transcript/transcript.module.js";
 import { AcademicCatalogModule } from "./academic-catalog/academic-catalog.module.js";
+import { InfirmaryModule } from "./infirmary/infirmary.module.js";
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { AcademicCatalogModule } from "./academic-catalog/academic-catalog.modul
     HrModule,
     UploadsModule,
     TranscriptModule,
+    InfirmaryModule,
   ],
   controllers: [HealthController],
 })

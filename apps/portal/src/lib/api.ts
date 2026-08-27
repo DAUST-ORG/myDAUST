@@ -68,14 +68,26 @@ async function toApiError(res: Response): Promise<ApiError> {
   let serverMsg = "";
   try {
     const body = JSON.parse(text);
+    // ZodExceptionFilter answers {message:"Validation failed", issues:[{path,message}]}. Using
+    // only `message` told the user something failed but never which field, which made a
+    // validation error indistinguishable from a bug.
+    const issues = Array.isArray(body?.issues)
+      ? body.issues
+          .map((i: { path?: string; message?: string }) =>
+            i?.path ? `${i.path}: ${i.message ?? "invalid"}` : i?.message,
+          )
+          .filter(Boolean)
+          .join("; ")
+      : "";
     serverMsg =
-      typeof body?.message === "string"
+      issues ||
+      (typeof body?.message === "string"
         ? body.message
         : Array.isArray(body?.message)
           ? body.message.join(", ")
           : typeof body?.error === "string"
             ? body.error
-            : "";
+            : "");
   } catch {
     serverMsg = text;
   }
@@ -4808,3 +4820,303 @@ export const releaseEvaluationWindow = (windowId: string, released: boolean) =>
     method: "POST",
     body: JSON.stringify({ released }),
   });
+
+// ─── Infirmary ──────────────────────────────────────────────────────────────
+
+export interface InfirmarySettings {
+  clinic_name: string;
+  clinic_address: string;
+  clinic_phone: string;
+  clinic_email: string;
+  notifications_enabled: string;
+  appointment_duration: string;
+  working_hours_start: string;
+  working_hours_end: string;
+}
+
+export interface InfirmaryStudent {
+  id: string;
+  name: string;
+  initials: string;
+  program: string;
+  year: string;
+  status: string;
+  lastVisit: string;
+  allergies: string[];
+  concern: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;
+  gender: string;
+  bloodType?: string;
+  emergencyContact?: string;
+  emergencyPhone?: string;
+  medicalHistory?: string[];
+  height?: string;
+  weight?: string;
+}
+
+export interface InfirmaryConsultation {
+  id: string;
+  studentId: string;
+  studentName: string;
+  reason: string;
+  visitType: string;
+  clinicalNotes: string;
+  status: string;
+  date: string;
+  time: string;
+  followUpRequired: boolean;
+  vitals?: { temperature?: string; bloodPressure?: string; heartRate?: string; weight?: string };
+  diagnosis?: string;
+  treatmentPlan?: string;
+}
+
+export interface InfirmaryPrescription {
+  id: string;
+  consultationId?: string;
+  studentId: string;
+  studentName: string;
+  medication: string;
+  dosage: string;
+  frequency: string;
+  duration: string;
+  instructions: string;
+  status: string;
+  date: string;
+  prescribedBy: string;
+}
+
+export interface InfirmaryMedication {
+  id: string;
+  name: string;
+  category: string;
+  stock: number;
+  unit: string;
+  minStock: number;
+  expiryDate: string;
+  supplier: string;
+  lastRestocked: string;
+  status: string;
+}
+
+export interface InfirmaryAppointment {
+  id: string;
+  studentId: string;
+  studentName: string;
+  date: string;
+  time: string;
+  type: string;
+  reason: string;
+  status: string;
+  notes: string;
+}
+
+export interface InfirmaryDocument {
+  id: string;
+  studentId: string;
+  studentName: string;
+  name: string;
+  type: string;
+  date: string;
+  uploadedBy: string;
+  notes: string;
+}
+
+export interface InfirmaryFollowUp {
+  id: string;
+  studentId: string;
+  studentName: string;
+  reason: string;
+  dueDate: string;
+  status: string;
+  priority: string;
+  notes: string;
+  createdAt: string;
+}
+
+export interface InfirmaryFormQ {
+  id: string;
+  text: string;
+  type: "text" | "multiple_choice" | "yes_no" | "rating";
+  options?: string[];
+  required: boolean;
+}
+
+export interface InfirmaryForm {
+  id: string;
+  name: string;
+  description: string;
+  questions: InfirmaryFormQ[];
+  responses: number;
+  completion: number;
+  status: string;
+  updated: string;
+  shareLink?: string;
+}
+
+export interface InfirmaryFormResponse {
+  id: string;
+  formId: string;
+  studentId: string;
+  studentName: string;
+  answers: Record<string, string>;
+  submittedAt: string;
+}
+
+export interface InfirmaryAnalytics {
+  totalStudents: number;
+  consultationsThisMonth: number;
+  totalConsultations: number;
+  activePrescriptions: number;
+  totalMedications: number;
+  lowStockMedications: number;
+  upcomingAppointments: number;
+  pendingFollowUps: number;
+  overdueFollowUps: number;
+  totalFormResponses: number;
+  documentsThisMonth: number;
+  monthlyConsultations: { label: string; count: number }[];
+}
+
+// Settings
+export const getInfirmarySettings = () =>
+  request<InfirmarySettings>("/infirmary/settings");
+export const updateInfirmarySettings = (data: Partial<InfirmarySettings>) =>
+  request<InfirmarySettings>("/infirmary/settings", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+
+// Students
+export const getInfirmaryStudents = () =>
+  request<InfirmaryStudent[]>("/infirmary/students");
+
+// Consultations
+export const getInfirmaryConsultations = () =>
+  request<InfirmaryConsultation[]>("/infirmary/consultations");
+export const createInfirmaryConsultation = (data: Partial<InfirmaryConsultation>) =>
+  request<InfirmaryConsultation>("/infirmary/consultations", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryConsultation = (id: string, data: Partial<InfirmaryConsultation>) =>
+  request<InfirmaryConsultation>(`/infirmary/consultations/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryConsultation = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/consultations/${id}`, { method: "DELETE" });
+
+// Prescriptions
+export const getInfirmaryPrescriptions = () =>
+  request<InfirmaryPrescription[]>("/infirmary/prescriptions");
+export const createInfirmaryPrescription = (data: Partial<InfirmaryPrescription>) =>
+  request<InfirmaryPrescription>("/infirmary/prescriptions", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryPrescription = (id: string, data: Partial<InfirmaryPrescription>) =>
+  request<InfirmaryPrescription>(`/infirmary/prescriptions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryPrescription = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/prescriptions/${id}`, { method: "DELETE" });
+
+// Medications
+export const getInfirmaryMedications = () =>
+  request<InfirmaryMedication[]>("/infirmary/medications");
+export const createInfirmaryMedication = (data: Partial<InfirmaryMedication>) =>
+  request<InfirmaryMedication>("/infirmary/medications", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryMedication = (id: string, data: Partial<InfirmaryMedication>) =>
+  request<InfirmaryMedication>(`/infirmary/medications/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryMedication = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/medications/${id}`, { method: "DELETE" });
+
+// Appointments
+export const getInfirmaryAppointments = () =>
+  request<InfirmaryAppointment[]>("/infirmary/appointments");
+export const createInfirmaryAppointment = (data: Partial<InfirmaryAppointment>) =>
+  request<InfirmaryAppointment>("/infirmary/appointments", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryAppointment = (id: string, data: Partial<InfirmaryAppointment>) =>
+  request<InfirmaryAppointment>(`/infirmary/appointments/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryAppointment = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/appointments/${id}`, { method: "DELETE" });
+
+// Documents
+export const getInfirmaryDocuments = () =>
+  request<InfirmaryDocument[]>("/infirmary/documents");
+export const createInfirmaryDocument = (data: Partial<InfirmaryDocument>) =>
+  request<InfirmaryDocument>("/infirmary/documents", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryDocument = (id: string, data: Partial<InfirmaryDocument>) =>
+  request<InfirmaryDocument>(`/infirmary/documents/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryDocument = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/documents/${id}`, { method: "DELETE" });
+
+// Follow-ups
+export const getInfirmaryFollowUps = () =>
+  request<InfirmaryFollowUp[]>("/infirmary/follow-ups");
+export const createInfirmaryFollowUp = (data: Partial<InfirmaryFollowUp>) =>
+  request<InfirmaryFollowUp>("/infirmary/follow-ups", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryFollowUp = (id: string, data: Partial<InfirmaryFollowUp>) =>
+  request<InfirmaryFollowUp>(`/infirmary/follow-ups/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryFollowUp = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/follow-ups/${id}`, { method: "DELETE" });
+
+// Forms
+export const getInfirmaryForms = () =>
+  request<InfirmaryForm[]>("/infirmary/forms");
+export const getInfirmaryForm = (id: string) =>
+  request<InfirmaryForm & { responses: InfirmaryFormResponse[] }>(`/infirmary/forms/${id}`);
+export const createInfirmaryForm = (data: Partial<InfirmaryForm>) =>
+  request<InfirmaryForm>("/infirmary/forms", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryForm = (id: string, data: Partial<InfirmaryForm>) =>
+  request<InfirmaryForm>(`/infirmary/forms/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryForm = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/forms/${id}`, { method: "DELETE" });
+
+// Form Responses
+export const getInfirmaryFormResponses = (formId: string) =>
+  request<InfirmaryFormResponse[]>(`/infirmary/forms/${formId}/responses`);
+export const createInfirmaryFormResponse = (formId: string, data: { studentId: string; studentName: string; answers: Record<string, string> }) =>
+  request<InfirmaryFormResponse>(`/infirmary/forms/${formId}/responses`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryFormResponse = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/responses/${id}`, { method: "DELETE" });
+
+// Analytics
+export const getInfirmaryAnalytics = () =>
+  request<InfirmaryAnalytics>("/infirmary/analytics");
