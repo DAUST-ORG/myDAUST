@@ -5262,3 +5262,153 @@ export const facultyDecideOverride = (
     `/academics/enrollment-overrides/${id}/faculty-decide`,
     { method: "POST", body: JSON.stringify(body) },
   );
+// --- Custom Forms (registrar + respondent) ---
+
+export interface FormListItem {
+  id: string;
+  title: string;
+  description: string | null;
+  status: "draft" | "published" | "closed";
+  requiresAuth: boolean;
+  publishedAt: string | null;
+  closesAt: string | null;
+  maxResponses: number | null;
+  responseCount: number;
+  createdAt: string;
+}
+
+export interface FormFieldDef {
+  id: string;
+  type: string;
+  label: string;
+  required: boolean;
+  sortOrder: number;
+  optionsJson: { label: string; value: string }[] | null;
+  conditionJson: unknown;
+}
+
+export interface FormSectionDef {
+  id: string;
+  title: string;
+  sortOrder: number;
+  conditionJson: unknown;
+  fields: FormFieldDef[];
+}
+
+export interface FormDetail {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  requiresAuth: boolean;
+  publishedAt: string | null;
+  closesAt: string | null;
+  maxResponses: number | null;
+  responseCount: number;
+  publicToken: string | null;
+  createdAt: string;
+  sections: FormSectionDef[];
+}
+
+export interface FormResponseRow {
+  id: string;
+  formId: string;
+  personId: string | null;
+  respondentName: string | null;
+  respondentEmail: string | null;
+  submittedAt: string;
+  updatedAt: string;
+  answers: { fieldId: string; value: unknown }[];
+}
+
+export interface FormInputSection {
+  title: string;
+  sortOrder: number;
+  conditionJson?: unknown;
+  fields: FormInputField[];
+}
+
+export interface FormInputField {
+  type: string;
+  label: string;
+  required: boolean;
+  sortOrder: number;
+  optionsJson?: { label: string; value: string }[];
+  conditionJson?: unknown;
+}
+
+export const listForms = () => request<FormListItem[]>("/forms");
+
+export const getFormDetail = (id: string) =>
+  request<FormDetail>(`/forms/${id}`);
+
+export const createForm = (body: {
+  title: string;
+  description?: string;
+  requiresAuth?: boolean;
+  closesAt?: string;
+  maxResponses?: number;
+  sections: FormInputSection[];
+}) => request<FormDetail>("/forms", { method: "POST", body: JSON.stringify(body) });
+
+export const updateForm = (
+  id: string,
+  body: {
+    title: string;
+    description?: string;
+    requiresAuth?: boolean;
+    closesAt?: string;
+    maxResponses?: number;
+    sections: FormInputSection[];
+  },
+) => request<FormDetail>(`/forms/${id}`, { method: "PUT", body: JSON.stringify(body) });
+
+export const publishForm = (id: string) =>
+  request<FormDetail>(`/forms/${id}/publish`, { method: "POST" });
+
+export const closeForm = (id: string) =>
+  request<FormDetail>(`/forms/${id}/close`, { method: "POST" });
+
+export const deleteForm = (id: string) =>
+  request<{ deleted: boolean }>(`/forms/${id}`, { method: "DELETE" });
+
+export const listFormResponses = (formId: string) =>
+  request<FormResponseRow[]>(`/forms/${formId}/responses`);
+
+export const getFormResponse = (formId: string, responseId: string) =>
+  request<FormResponseRow>(`/forms/${formId}/responses/${responseId}`);
+
+export const exportFormCsv = (formId: string) =>
+  `${API_URL}/api/forms/${formId}/export`;
+
+export const getPublicForm = (token: string) =>
+  request<FormDetail>(`/forms/public/${token}`);
+
+export const submitPublicForm = (
+  token: string,
+  body: {
+    respondentName: string;
+    respondentEmail: string;
+    answers: { fieldId: string; value: unknown }[];
+  },
+) =>
+  request<FormResponseRow>(`/forms/public/${token}/respond`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const getFormForRespondent = (formId: string) =>
+  request<{ form: FormDetail; existingResponse: FormResponseRow | null }>(
+    `/forms/${formId}/respond`,
+  );
+
+export const submitAuthForm = (
+  formId: string,
+  body: {
+    answers: { fieldId: string; value: unknown }[];
+  },
+) =>
+  request<FormResponseRow>(`/forms/${formId}/respond`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });

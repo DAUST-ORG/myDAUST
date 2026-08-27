@@ -18,3 +18,4 @@ export * from "./transcript.js";
 export * from "./guardian-import.js";
 export * from "./student-number.js";
 export * from "./infirmary.js";
+export * from "./forms.js";

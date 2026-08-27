@@ -267,6 +267,9 @@ export const REGISTRAR_NAV: PortalNav = {
     g("Communication", [
       { href: "/admin/messages", label: "Messages", icon: Mail },
     ]),
+    g("Custom Forms", [
+      { href: "/admin/forms", label: "Forms", icon: FileText },
+    ]),
   ],
 };
 
@@ -580,6 +583,14 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/admin/messages": {
     title: "Messages",
     crumb: "Broadcast & direct messaging · Administration",
+  },
+  "/admin/forms": {
+    title: "Custom Forms",
+    crumb: "Custom forms · Administration",
+  },
+  "/admin/forms/new": {
+    title: "New Form",
+    crumb: "Create form · Custom Forms",
   },
   // finance
   "/finance": {

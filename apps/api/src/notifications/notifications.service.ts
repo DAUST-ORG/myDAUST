@@ -7,7 +7,8 @@ export type NotificationKind =
   | "work_graded"
   | "material_published"
   | "override_approved"
-  | "override_rejected";
+  | "override_rejected"
+  | "form_response_received";
 
 interface NewNotification {
   personId: string;
