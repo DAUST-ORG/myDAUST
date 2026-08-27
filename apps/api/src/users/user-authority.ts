@@ -52,12 +52,6 @@ export function normalizeRoles(roles: readonly AppRole[]): AppRole[] {
 }
 
 /**
- * Roles that require a backing record to mean anything. Granting one without it produces an
- * account that authenticates and then breaks: Prisma drops undefined filter keys, so a
- * `student` with no Student row reaches queries that silently widen to every enrollment in
- * the system rather than erroring.
+ * Re-exported so the API guard and the portal role picker read the same list.
  */
-export const ROLES_NEEDING_A_RECORD: Record<string, string> = {
-  student: "an active student record — create them from the Registrar screens",
-  parent: "a linked student — add them from the Parents screen",
-};
+export { ROLES_NEEDING_A_RECORD } from "@mydaust/shared";

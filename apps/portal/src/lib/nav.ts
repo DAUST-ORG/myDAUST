@@ -10,9 +10,11 @@ import {
   CalendarDays,
   CalendarRange,
   ChartNoAxesCombined,
+  ChefHat,
   CheckCheck,
   ClipboardCheck,
   ClipboardList,
+  FileText,
   FolderOpen,
   GitBranch,
   GraduationCap,
@@ -27,10 +29,17 @@ import {
   MessageSquare,
   Network,
   Newspaper,
+  Pill,
+  Radio,
   Receipt,
   Rocket,
   Scale,
   Settings,
+  ShieldAlert,
+  ScanLine,
+  ShieldCheck,
+  ShoppingBag,
+  Stethoscope,
   Table2,
   Target,
   UserPlus,
@@ -91,6 +100,8 @@ export const STUDENT_NAV: PortalNav = {
         icon: ClipboardList,
         badgeKey: "register",
       },
+      { href: "/student/overrides", label: "Overrides", icon: ShieldAlert },
+
       { href: "/student/courses", label: "My Courses", icon: BookOpen },
       { href: "/student/assignments", label: "Assignments", icon: ListChecks },
       { href: "/student/schedule", label: "Schedule", icon: CalendarDays },
@@ -120,7 +131,11 @@ export const STUDENT_NAV: PortalNav = {
         icon: Mail,
         badgeKey: "messages",
       },
-      { href: "/student/evaluations", label: "Evaluations", icon: ClipboardCheck },
+      {
+        href: "/student/evaluations",
+        label: "Evaluations",
+        icon: ClipboardCheck,
+      },
     ]),
     g("Account", [
       { href: "/student/profile", label: "My Profile", icon: UserRound },
@@ -167,12 +182,22 @@ export const FACULTY_NAV: PortalNav = {
         icon: FolderOpen,
       },
       {
+        href: "/faculty/overrides",
+        label: "Override Requests",
+        icon: ShieldAlert,
+        badgeKey: "approvalRequests",
+      },
+      {
         href: "/faculty/messages",
         label: "Messages",
         icon: Mail,
         badgeKey: "messages",
       },
-      { href: "/faculty/evaluations", label: "Evaluations", icon: ClipboardCheck },
+      {
+        href: "/faculty/evaluations",
+        label: "Evaluations",
+        icon: ClipboardCheck,
+      },
     ]),
   ],
 };
@@ -184,7 +209,7 @@ export const REGISTRAR_NAV: PortalNav = {
     g("Overview", [
       { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
       {
-        href: "/admin/admissions",
+        href: "/admissions",
         label: "Admissions",
         icon: UserPlus,
         badgeKey: "admissions",
@@ -241,6 +266,9 @@ export const REGISTRAR_NAV: PortalNav = {
     ]),
     g("Communication", [
       { href: "/admin/messages", label: "Messages", icon: Mail },
+    ]),
+    g("Custom Forms", [
+      { href: "/admin/forms", label: "Forms", icon: FileText },
     ]),
   ],
 };
@@ -342,6 +370,80 @@ export const IT_NAV: PortalNav = {
   ],
 };
 
+/**
+ * Admissions office. Deliberately a single entry: this role holds the applicant pipeline and
+ * nothing else, and every other staff endpoint 403s for it, so a second item would be a link
+ * to a permission error.
+ */
+export const ADMISSIONS_NAV: PortalNav = {
+  label: "Admissions Office",
+  meta: "Applicant pipeline · Admissions",
+  groups: [
+    g("Admissions", [
+      {
+        href: "/admissions",
+        label: "Applicants",
+        icon: UserPlus,
+        badgeKey: "admissions",
+      },
+      ]),
+    ],
+};
+
+
+export const INFIRMARY_NAV: PortalNav = {
+  label: "Health Center",
+  meta: "Infirmary · Staff",
+  groups: [
+    g("Overview", [
+      { href: "/infirmary", label: "Dashboard", icon: LayoutDashboard },
+    ]),
+    g("Clinical", [
+      { href: "/infirmary/consultations", label: "Consultations", icon: Stethoscope },
+      { href: "/infirmary/prescriptions", label: "Prescriptions", icon: Pill },
+      { href: "/infirmary/medications", label: "Medications", icon: Pill },
+      { href: "/infirmary/appointments", label: "Appointments", icon: CalendarDays },
+    ]),
+    g("Records", [
+      { href: "/infirmary/students", label: "Students", icon: Users },
+      { href: "/infirmary/follow-ups", label: "Follow-ups", icon: ClipboardList },
+      { href: "/infirmary/documents", label: "Documents", icon: FileText },
+    ]),
+    g("Administration", [
+      { href: "/infirmary/forms", label: "Forms", icon: ClipboardList },
+      { href: "/infirmary/analytics", label: "Analytics", icon: ChartNoAxesCombined },
+      { href: "/infirmary/settings", label: "Settings", icon: Settings },
+    ]),
+  ],
+};
+
+/**
+ * Dining console. Mirrors the DAUST-dining prototype's eight back-office entries. The
+ * scanner is listed here but lives at /station: it is a full-bleed kiosk surface, not a
+ * page inside this shell.
+ */
+export const DINING_NAV: PortalNav = {
+  label: "Dining Admin",
+  meta: "Cafeteria service · Dining",
+  groups: [
+    g("Service", [
+      { href: "/dining", label: "Overview", icon: LayoutDashboard },
+      { href: "/dining/live", label: "Live Service", icon: Radio },
+      { href: "/dining/scanner", label: "Scanner Station", icon: ScanLine },
+    ]),
+    g("Manage", [
+      { href: "/dining/students", label: "Students", icon: Users },
+      { href: "/dining/orders", label: "Weekend Orders", icon: ShoppingBag },
+      { href: "/dining/menus", label: "Menus", icon: ChefHat },
+    ]),
+    g("Business", [
+      { href: "/dining/finances", label: "Finances", icon: Wallet },
+      { href: "/dining/reports", label: "Reports", icon: ChartNoAxesCombined },
+      { href: "/dining/settings", label: "Settings", icon: Settings },
+    ]),
+  ],
+};
+
 /** Portal registry, keyed so a server layout can name one without importing icons. */
 export const PORTALS = {
   director: DIRECTOR_NAV,
@@ -352,6 +454,9 @@ export const PORTALS = {
   finance: FINANCE_NAV,
   comms: COMMS_NAV,
   it: IT_NAV,
+  admissions: ADMISSIONS_NAV,
+  dining: DINING_NAV,
+  infirmary: INFIRMARY_NAV,
 } as const;
 export type PortalKey = keyof typeof PORTALS;
 
@@ -360,12 +465,28 @@ export type PortalKey = keyof typeof PORTALS;
  * maps. `{term}` is substituted with the active term name at render time.
  */
 export const PAGE_META: Record<string, { title: string; crumb: string }> = {
-  "/student/assignments": { title: "Assignments", crumb: "Coursework · {term}" },
-  "/student/evaluations": { title: "Course evaluations", crumb: "Anonymous feedback" },
+  "/student/assignments": {
+    title: "Assignments",
+    crumb: "Coursework · {term}",
+  },
+  "/student/evaluations": {
+    title: "Course evaluations",
+    crumb: "Anonymous feedback",
+  },
   "/student/documents": { title: "Documents", crumb: "Letters & records" },
   "/student/courses/": { title: "My Courses", crumb: "Course detail · {term}" },
-  "/faculty/evaluations": { title: "Course evaluations", crumb: "What your students said" },
-  "/director/evaluations": { title: "Course evaluations", crumb: "Rounds, results & release" },
+  "/faculty/evaluations": {
+    title: "Course evaluations",
+    crumb: "What your students said",
+  },
+  "/director/evaluations": {
+    title: "Course evaluations",
+    crumb: "Rounds, results & release",
+  },
+  "/admissions": {
+    title: "Applicants",
+    crumb: "Application pipeline · Admissions",
+  },
   "/director/users": {
     title: "Users",
     crumb: "Accounts, roles & access · Administration",
@@ -376,6 +497,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/student/registration": {
     title: "Course Registration",
     crumb: "{term} · Add / drop",
+  },
+  "/student/overrides": {
+    title: "Enrollment overrides",
+    crumb: "Submitted override requests",
   },
   "/student/courses": { title: "My Courses", crumb: "{term} & past terms" },
   "/student/schedule": { title: "Weekly Schedule", crumb: "{term}" },
@@ -398,10 +523,6 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/admin": {
     title: "Dashboard",
     crumb: "Academic overview · {term} · Administration",
-  },
-  "/admin/admissions": {
-    title: "Admissions",
-    crumb: "{term} intake · Administration",
   },
   "/admin/students": {
     title: "Students",
@@ -462,6 +583,14 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/admin/messages": {
     title: "Messages",
     crumb: "Broadcast & direct messaging · Administration",
+  },
+  "/admin/forms": {
+    title: "Custom Forms",
+    crumb: "Custom forms · Administration",
+  },
+  "/admin/forms/new": {
+    title: "New Form",
+    crumb: "Create form · Custom Forms",
   },
   // finance
   "/finance": {
@@ -531,6 +660,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Course Materials",
     crumb: "Upload course documents",
   },
+  "/faculty/overrides": {
+    title: "Override Requests",
+    crumb: "Student enrollment override requests",
+  },
   "/faculty/messages": { title: "Messages", crumb: "Message students" },
   // parent
   "/parent": { title: "Dashboard", crumb: "Academic overview · {term}" },
@@ -554,6 +687,61 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "My Requests",
     crumb: "Submitted changes · Finance",
   },
+  // dining
+  "/dining": { title: "Overview", crumb: "Cafeteria service · Dining" },
+  "/dining/live": { title: "Live Service", crumb: "Now serving · Dining" },
+  "/dining/scanner": { title: "Scanner Station", crumb: "Entrance · Dining" },
+  "/dining/students": { title: "Students", crumb: "Meal plans · Dining" },
+  "/dining/orders": { title: "Weekend Orders", crumb: "Fulfilment · Dining" },
+  "/dining/menus": { title: "Menus", crumb: "Weekend menu · Dining" },
+  "/dining/finances": { title: "Finances", crumb: "Cost center 3600 · Dining" },
+  "/dining/reports": { title: "Reports", crumb: "Service trends · Dining" },
+  "/dining/settings": { title: "Settings", crumb: "Service rules · Dining" },
+  // infirmary
+  "/infirmary": {
+    title: "Dashboard",
+    crumb: "Health center overview",
+  },
+  "/infirmary/consultations": {
+    title: "Consultations",
+    crumb: "Clinical visits · Infirmary",
+  },
+  "/infirmary/prescriptions": {
+    title: "Prescriptions",
+    crumb: "Medication orders · Infirmary",
+  },
+  "/infirmary/medications": {
+    title: "Medications",
+    crumb: "Inventory management · Infirmary",
+  },
+  "/infirmary/appointments": {
+    title: "Appointments",
+    crumb: "Scheduled visits · Infirmary",
+  },
+  "/infirmary/students": {
+    title: "Students",
+    crumb: "Student health records · Infirmary",
+  },
+  "/infirmary/follow-ups": {
+    title: "Follow-ups",
+    crumb: "Pending follow-up tasks · Infirmary",
+  },
+  "/infirmary/documents": {
+    title: "Documents",
+    crumb: "Medical documents · Infirmary",
+  },
+  "/infirmary/forms": {
+    title: "Forms",
+    crumb: "Health forms & questionnaires · Infirmary",
+  },
+  "/infirmary/analytics": {
+    title: "Analytics",
+    crumb: "Health center metrics · Infirmary",
+  },
+  "/infirmary/settings": {
+    title: "Settings",
+    crumb: "Clinic configuration · Infirmary",
+  },
 };
 
 /**
@@ -564,10 +752,13 @@ export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
   [
     { role: "admin", portal: "director", home: "/director" },
     { role: "registrar", portal: "registrar", home: "/admin" },
+    { role: "admissions", portal: "admissions", home: "/admissions" },
     { role: "bursar", portal: "finance", home: "/finance" },
+    { role: "dining", portal: "dining", home: "/dining" },
     { role: "faculty", portal: "faculty", home: "/faculty" },
     { role: "communications", portal: "comms", home: "/comms" },
-    { role: "it_admin", portal: "it", home: "/director/users" },
+{ role: "it_admin", portal: "it", home: "/director/users" },
+    { role: "infirmary", portal: "infirmary", home: "/infirmary" },
     { role: "student", portal: "student", home: "/student" },
     { role: "parent", portal: "parent", home: "/parent" },
   ];

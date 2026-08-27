@@ -47,8 +47,11 @@ const STAFF: StaffSpec[] = [
   { id: "usr_registrar", email: "registrar@daust.edu", firstName: "Fatou", lastName: "Sow", roles: ["registrar"] },
   { id: "usr_bursar", email: "bursar@daust.edu", firstName: "Mariama", lastName: "Ndiaye", roles: ["bursar"] },
   { id: "usr_hr", email: "hr@daust.edu", firstName: "Ousmane", lastName: "Fall", roles: ["hr"] },
+  { id: "usr_dining", email: "dining@daust.edu", firstName: "Ibrahima", lastName: "Sarr", roles: ["dining"] },
+  { id: "usr_comms", email: "comms@daust.edu", firstName: "Awa", lastName: "Diagne", roles: ["communications"] },
   { id: "usr_it", email: "it@daust.edu", firstName: "Modou", lastName: "Cissé", roles: ["it_admin"] },
   { id: "usr_admin", email: "admin@daust.edu", firstName: "Director", lastName: "DAUST", roles: ["admin", "bursar"] },
+  { id: "usr_nurse", email: "nurse@daust.edu", firstName: "Adama", lastName: "Diagne", roles: ["infirmary"] },
 ];
 
 interface StudentSpec {
@@ -844,6 +847,167 @@ async function seedGuardians(passwordHash: string) {
   console.log(`Guardians: parent@daust.edu linked to ${children.length} student(s).`);
 }
 
+async function seedInfirmary() {
+  const studentIds = STUDENTS.map((s) => s.id);
+  const nurse = await prisma.person.findUnique({ where: { id: "usr_nurse" } });
+
+  // Ensure at least one student exists
+  if (studentIds.length === 0) {
+    console.log("Skipping infirmary seed: no students found.");
+    return;
+  }
+
+  // Check if already seeded (idempotent)
+  const existingMeds = await prisma.medication.count();
+  if (existingMeds > 0) {
+    console.log("Infirmary seed already present, skipping.");
+    return;
+  }
+
+  // Medications
+  const meds = [
+    { name: "Paracetamol", category: "Analgesic", stock: 200, unit: "tablets", minStock: 50, expiryDate: new Date("2027-06-01"), supplier: "PharmaSen", status: "In Stock" },
+    { name: "Amoxicillin", category: "Antibiotic", stock: 80, unit: "capsules", minStock: 30, expiryDate: new Date("2027-03-15"), supplier: "PharmaSen", status: "In Stock" },
+    { name: "Ibuprofen", category: "Anti-inflammatory", stock: 15, unit: "tablets", minStock: 20, expiryDate: new Date("2027-09-01"), supplier: "MediWest", status: "Low Stock" },
+    { name: "Cetirizine", category: "Antihistamine", stock: 100, unit: "tablets", minStock: 25, expiryDate: new Date("2027-12-01"), supplier: "PharmaSen", status: "In Stock" },
+    { name: "Omeprazole", category: "Gastrointestinal", stock: 50, unit: "capsules", minStock: 20, expiryDate: new Date("2026-11-01"), supplier: "MediWest", status: "In Stock" },
+    { name: "Metformin", category: "Antidiabetic", stock: 0, unit: "tablets", minStock: 15, expiryDate: new Date("2025-12-01"), supplier: "PharmaSen", status: "Out of Stock" },
+    { name: "Salbutamol Inhaler", category: "Respiratory", stock: 8, unit: "inhalers", minStock: 5, expiryDate: new Date("2027-08-01"), supplier: "AeroMed", status: "In Stock" },
+    { name: "Voltaren Gel", category: "Topical", stock: 12, unit: "tubes", minStock: 5, expiryDate: new Date("2027-05-01"), supplier: "MediWest", status: "In Stock" },
+    { name: "ORS Powder", category: "Rehydration", stock: 200, unit: "sachets", minStock: 50, expiryDate: new Date("2028-01-01"), supplier: "PharmaSen", status: "In Stock" },
+    { name: "Bandages", category: "First Aid", stock: 300, unit: "pieces", minStock: 100, expiryDate: new Date("2030-01-01"), supplier: "MediWest", status: "In Stock" },
+  ];
+
+  for (const m of meds) {
+    await prisma.medication.create({ data: m });
+  }
+  console.log(`Seeded ${meds.length} medications.`);
+
+  // Consultations
+  const consultations = [
+    { studentId: studentIds[0], clinicianId: nurse?.id, reason: "Recurring migraines", visitType: "Walk-in", clinicalNotes: "Student reports frequent headaches during exam periods. Prescription updated.", status: "Completed", vitalsJson: { temperature: "36.8", bloodPressure: "120/78", heartRate: "72", weight: "58" }, diagnosis: "Tension-type headaches", treatmentPlan: "Increase water intake, reduce screen time, take Paracetamol as needed", followUpRequired: true, visitedAt: new Date("2026-08-21T09:42:00Z") },
+    { studentId: studentIds[1], clinicianId: nurse?.id, reason: "Annual wellness check", visitType: "Scheduled", clinicalNotes: "Routine check-up. All vitals normal.", status: "Completed", vitalsJson: { temperature: "36.6", bloodPressure: "118/72", heartRate: "68", weight: "72" }, diagnosis: "Healthy", treatmentPlan: "No treatment needed", followUpRequired: false, visitedAt: new Date("2026-08-20T14:10:00Z") },
+    { studentId: studentIds[2], clinicianId: nurse?.id, reason: "Asthma review", visitType: "Follow-up", clinicalNotes: "Reviewing current inhaler usage. Symptoms well-controlled.", status: "Completed", vitalsJson: { temperature: "36.7", bloodPressure: "115/70", heartRate: "74", weight: "55" }, diagnosis: "Mild persistent asthma", treatmentPlan: "Continue Salbutamol as needed. Avoid known triggers.", followUpRequired: true, visitedAt: new Date("2026-08-13T11:25:00Z") },
+  ];
+
+  for (const c of consultations) {
+    const row = await prisma.consultation.create({ data: c });
+    // Prescriptions linked to consultations
+    if (c.studentId === studentIds[0]) {
+      await prisma.prescription.create({
+        data: { consultationId: row.id, studentId: c.studentId, authorId: nurse?.id, medication: "Paracetamol", dosage: "500mg", frequency: "As needed", duration: "30 days", instructions: "Take 1-2 tablets every 6 hours. Max 4g/day.", status: "Active", prescribedAt: new Date("2026-08-21T10:00:00Z") },
+      });
+    }
+    if (c.studentId === studentIds[2]) {
+      await prisma.prescription.create({
+        data: { consultationId: row.id, studentId: c.studentId, authorId: nurse?.id, medication: "Salbutamol Inhaler", dosage: "100mcg", frequency: "As needed", duration: "90 days", instructions: "2 puffs every 4-6 hours as needed for wheezing.", status: "Active", prescribedAt: new Date("2026-08-13T12:00:00Z") },
+      });
+    }
+  }
+  console.log(`Seeded ${consultations.length} consultations with prescriptions.`);
+
+  // Appointments
+  const appointments = [
+    { studentId: studentIds[0], date: new Date("2026-08-25"), time: "09:00", type: "Follow-up", reason: "Migraine follow-up", status: "Scheduled", notes: "Check if new medication regimen is working" },
+    { studentId: studentIds[1], date: new Date("2026-08-26"), time: "10:30", type: "Routine", reason: "Blood test results", status: "Scheduled", notes: "" },
+    { studentId: studentIds[2], date: new Date("2026-08-28"), time: "14:00", type: "Follow-up", reason: "Asthma medication review", status: "Scheduled", notes: "Bring current inhaler" },
+  ];
+
+  for (const a of appointments) {
+    await prisma.infirmaryAppointment.create({ data: a });
+  }
+  console.log(`Seeded ${appointments.length} appointments.`);
+
+  // Follow-ups
+  const followUps = [
+    { studentId: studentIds[0], reason: "Migraine treatment review", dueDate: new Date("2026-08-25"), status: "Pending", priority: "High", notes: "Check if Paracetamol is effective" },
+    { studentId: studentIds[2], reason: "Asthma inhaler refill check", dueDate: new Date("2026-09-01"), status: "Pending", priority: "Medium", notes: "Verify inhaler stock" },
+  ];
+
+  for (const f of followUps) {
+    await prisma.followUp.create({ data: f });
+  }
+  console.log(`Seeded ${followUps.length} follow-ups.`);
+
+  // Documents
+  const docs = [
+    { studentId: studentIds[0], uploaderId: nurse?.id, name: "Migraine Treatment Plan", type: "Medical Record", notes: "Updated treatment plan for recurring migraines", createdAt: new Date("2026-08-21T10:30:00Z") },
+    { studentId: studentIds[2], uploaderId: nurse?.id, name: "Asthma Action Plan", type: "Medical Record", notes: "Annual asthma management plan", createdAt: new Date("2026-08-13T13:00:00Z") },
+  ];
+
+  for (const d of docs) {
+    await prisma.infirmaryDocument.create({ data: d });
+  }
+  console.log(`Seeded ${docs.length} medical documents.`);
+
+  // Forms
+  const form1 = await prisma.infirmaryForm.create({
+    data: {
+      name: "Pre-arrival wellness questionnaire",
+      description: "Collect essential health information before students arrive on campus.",
+      questions: [
+        { id: "Q1", text: "Do you have any known allergies?", type: "yes_no", required: true },
+        { id: "Q2", text: "If yes, please list your allergies", type: "text", required: false },
+        { id: "Q3", text: "Do you have any chronic medical conditions?", type: "yes_no", required: true },
+        { id: "Q4", text: "List any current medications", type: "text", required: false },
+        { id: "Q5", text: "Rate your overall health (1-5)", type: "rating", required: true },
+        { id: "Q6", text: "Have you had any surgeries in the past 2 years?", type: "yes_no", required: true },
+      ],
+      status: "Published",
+      updatedAt: new Date("2026-08-20T12:00:00Z"),
+    },
+  });
+
+  const form2 = await prisma.infirmaryForm.create({
+    data: {
+      name: "Sports clearance 2026",
+      description: "Screening form for students joining an athletic program.",
+      questions: [
+        { id: "Q1", text: "Which sport do you participate in?", type: "text", required: true },
+        { id: "Q2", text: "Have you had any sports injuries?", type: "yes_no", required: true },
+        { id: "Q3", text: "Do you have a heart condition?", type: "yes_no", required: true },
+        { id: "Q4", text: "Rate your fitness level (1-5)", type: "rating", required: true },
+        { id: "Q5", text: "Do you carry an EpiPen?", type: "yes_no", required: true },
+      ],
+      status: "Published",
+      updatedAt: new Date("2026-08-15T10:00:00Z"),
+    },
+  });
+
+  // Form responses
+  const responses = [
+    { formId: form1.id, studentId: studentIds[0], studentName: "Aïssatou Diallo", answers: { Q1: "Yes", Q2: "Penicillin", Q3: "No", Q4: "", Q5: "4", Q6: "No" }, submittedAt: new Date("2026-08-18T10:30:00Z") },
+    { formId: form1.id, studentId: studentIds[1], studentName: "Mamadou Ndiaye", answers: { Q1: "No", Q2: "", Q3: "No", Q4: "", Q5: "5", Q6: "No" }, submittedAt: new Date("2026-08-17T14:15:00Z") },
+    { formId: form2.id, studentId: studentIds[2], studentName: "Binata Sow", answers: { Q1: "Basketball", Q2: "No", Q3: "No", Q4: "4", Q5: "No" }, submittedAt: new Date("2026-08-16T09:00:00Z") },
+  ];
+
+  for (const r of responses) {
+    await prisma.infirmaryFormResponse.create({ data: r });
+  }
+  console.log(`Seeded ${responses.length} form responses.`);
+
+  // Settings
+  const settingsData: [string, unknown][] = [
+    ["infirmary:clinic_name", "DAUST Health Center"],
+    ["infirmary:clinic_address", "Dakar, Senegal"],
+    ["infirmary:clinic_phone", "+221 33 000 0000"],
+    ["infirmary:clinic_email", "health@daust.sn"],
+    ["infirmary:notifications_enabled", "true"],
+    ["infirmary:appointment_duration", "30"],
+    ["infirmary:working_hours_start", "08:00"],
+    ["infirmary:working_hours_end", "17:00"],
+  ];
+
+  for (const [key, value] of settingsData) {
+    await prisma.appSetting.upsert({
+      where: { key },
+      update: { valueJson: value },
+      create: { key, valueJson: value },
+    });
+  }
+  console.log("Seeded infirmary settings.");
+}
+
 async function main() {
   const passwordHash = await bcrypt.hash(DEV_PASSWORD, 10);
   await seedCostCenters();
@@ -863,6 +1027,7 @@ async function main() {
   await seedHousing();
   await seedTrackD();
   await seedGuardians(passwordHash);
+  await seedInfirmary();
   console.log(`All seeded users share dev password: "${DEV_PASSWORD}"`);
 }
 

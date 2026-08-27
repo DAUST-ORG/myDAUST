@@ -81,6 +81,12 @@ export interface AdminStudentRosterQuery {
   pageSize: number;
   search?: string;
   program?: string;
+  // Academic level is a derived value (see adminStudentRoster). When set, the
+  // service fetches the full filtered set, derives level per row, then filters.
+  level?: string;
+  // Free-text on Student.gender / Student.nationality. Case-insensitive contains.
+  gender?: string;
+  nationality?: string;
   sort: "name" | "program" | "level" | "gpa" | "balance" | "status";
   direction: "asc" | "desc";
 }
@@ -108,6 +114,10 @@ const ADMIN_STUDENT_ROSTER_SELECT = {
       mustChangePassword: true,
     },
   },
+  // Free-text registrar entries on Student; surfaced on the row so the filter
+  // Selects can read the actual values present without a separate round trip.
+  gender: true,
+  nationality: true,
   program: { select: { code: true, name: true } },
   _count: { select: { holds: { where: { active: true } } } },
   invoices: {
@@ -168,7 +178,7 @@ export function isExactMaterialOrder(
 const OPEN_APPLICANT_STAGES = ["submitted", "review", "interview", "offer"];
 
 /** Class-standing ladder, used to evaluate a course rule's `standingRequired`. */
-const STANDING_RANK: Record<string, number> = {
+export const STANDING_RANK: Record<string, number> = {
   freshman: 1,
   sophomore: 2,
   junior: 3,
@@ -1938,6 +1948,17 @@ export class AcademicsService {
       },
       include: { student: { include: { person: true } } },
     });
+    // Check which enrollments were created via an override approval.
+    const enrollmentIds = enrollments.map((e) => e.id);
+    const overrideActions = await this.prisma.auditLog.findMany({
+      where: {
+        entity: "Enrollment",
+        entityId: { in: enrollmentIds },
+        action: "enrolled-via-override",
+      },
+      select: { entityId: true },
+    });
+    const viaOverrideSet = new Set(overrideActions.map((a) => a.entityId));
     return {
       course: `${section.course.code} — ${section.course.title}`,
       sectionCode: section.sectionCode,
@@ -1945,6 +1966,7 @@ export class AcademicsService {
         studentNo: e.student.studentNo,
         name: `${e.student.person.firstName} ${e.student.person.lastName}`,
         grade: e.grade,
+        viaOverride: viaOverrideSet.has(e.id),
       })),
     };
   }
@@ -2058,17 +2080,34 @@ export class AcademicsService {
       recordStatus: s.recordStatus,
       hasLogin: !!s.person.passwordHash,
       mustChangePassword: s.person.mustChangePassword,
+      // Free-text profile fields used by the roster's filter Selects. The Edit
+      // modal already exposes them; surfacing them here keeps the filter list
+      // honest to what the table actually contains.
+      gender: s.gender ?? null,
+      nationality: s.nationality ?? null,
     };
   }
 
   private adminStudentRosterWhere(
-    query: Pick<AdminStudentRosterQuery, "search" | "program">,
+    query: Pick<AdminStudentRosterQuery, "search" | "program" | "gender" | "nationality">,
   ): Prisma.StudentWhereInput {
     const searchTokens =
       query.search?.trim().split(/\s+/).filter(Boolean) ?? [];
+    const trimmedGender = query.gender?.trim();
+    const trimmedNationality = query.nationality?.trim();
     return {
       recordStatus: { not: "pending_payment" },
       ...(query.program ? { program: { is: { code: query.program } } } : {}),
+      // `gender` and `nationality` both live on Student (schema.prisma lines
+      // 471 and 475). `contains` is case-insensitive thanks to
+      // `mode: "insensitive"`. Trim is applied at the zod boundary; this is
+      // defence in depth.
+      ...(trimmedGender
+        ? { gender: { contains: trimmedGender, mode: "insensitive" } }
+        : {}),
+      ...(trimmedNationality
+        ? { nationality: { contains: trimmedNationality, mode: "insensitive" } }
+        : {}),
       ...(searchTokens.length > 0
         ? {
             AND: searchTokens.map((token) => ({
@@ -2120,10 +2159,15 @@ export class AcademicsService {
    */
   async adminStudentRoster(query: AdminStudentRosterQuery) {
     const where = this.adminStudentRosterWhere(query);
+    // Level is derived per row from the student's catalog + transcript summary;
+    // we cannot push it into the SQL WHERE, so any request that asks for it
+    // (filter OR sort) falls into the fetch-all-then-derive branch that the
+    // existing "level" sort already uses.
     const derivedSort = ["level", "gpa", "balance", "status"].includes(
       query.sort,
     );
-    const recordsPromise = derivedSort
+    const fetchAll = derivedSort || Boolean(query.level?.trim());
+    const recordsPromise = fetchAll
       ? this.prisma.student.findMany({
           where,
           select: ADMIN_STUDENT_ROSTER_SELECT,
@@ -2136,24 +2180,53 @@ export class AcademicsService {
           skip: (query.page - 1) * query.pageSize,
           take: query.pageSize,
         });
-    const [records, total, allTotal, missingLoginCount, programs] =
-      await Promise.all([
-        recordsPromise,
-        this.prisma.student.count({ where }),
-        this.prisma.student.count({
-          where: { recordStatus: { not: "pending_payment" } },
-        }),
-        this.prisma.student.count({
-          where: {
-            recordStatus: "active",
-            person: { is: { passwordHash: null } },
-          },
-        }),
-        this.prisma.program.findMany({
-          select: { code: true, name: true },
-          orderBy: { code: "asc" },
-        }),
-      ]);
+    // Option-list queries intentionally use the *same* base WHERE as the roster
+    // (minus the gender/nationality filters themselves) so each Select reflects
+    // the values that can actually co-exist with the other active filters. We do
+    // not, however, gate each option list on the others — selecting a value
+    // requires that value to be visible.
+    const baseOptionWhere = this.adminStudentRosterWhere({
+      ...query,
+      gender: undefined,
+      nationality: undefined,
+    });
+    const [
+      records,
+      total,
+      allTotal,
+      missingLoginCount,
+      programs,
+      distinctGenders,
+      distinctNationalities,
+    ] = await Promise.all([
+      recordsPromise,
+      this.prisma.student.count({ where }),
+      this.prisma.student.count({
+        where: { recordStatus: { not: "pending_payment" } },
+      }),
+      this.prisma.student.count({
+        where: {
+          recordStatus: "active",
+          person: { is: { passwordHash: null } },
+        },
+      }),
+      this.prisma.program.findMany({
+        select: { code: true, name: true },
+        orderBy: { code: "asc" },
+      }),
+      this.prisma.student.findMany({
+        where: { ...baseOptionWhere, gender: { not: null } },
+        select: { gender: true },
+        distinct: ["gender"],
+        orderBy: { gender: "asc" },
+      }),
+      this.prisma.student.findMany({
+        where: { ...baseOptionWhere, nationality: { not: null } },
+        select: { nationality: true },
+        distinct: ["nationality"],
+        orderBy: { nationality: "asc" },
+      }),
+    ]);
 
     const transcriptSummaries = records.map((student) =>
       summarizeTranscriptRows(student.transcriptEntries),
@@ -2190,9 +2263,26 @@ export class AcademicsService {
         academicStandings[index],
       ),
     );
-    if (derivedSort) {
+    type Row = (typeof items)[number];
+    const requestedLevel = query.level?.trim();
+    if (requestedLevel) {
+      // Exclude rows with no derived level (catalog missing or no credits) when
+      // the registrar is filtering for one. An empty result is the correct
+      // outcome when no student is in that band.
+      const matchesLevel = (code: string | null | undefined) =>
+        !!code && code.toUpperCase() === requestedLevel.toUpperCase();
+      items = items.filter((row) => matchesLevel(row.academicLevel?.code));
+    }
+    // Counted BEFORE paginating. Reading items.length after the slice caps the total at
+    // pageSize, which collapses totalPages to 1 and strands every student past page one.
+    const filteredTotal = requestedLevel ? items.length : total;
+    if (fetchAll) {
       const direction = query.direction === "asc" ? 1 : -1;
-      items.sort((left, right) => {
+      // Only a derived sort belongs in the comparator below: its fallback branch orders by
+      // academic standing, so running a `name`/`program` request through it would sort by
+      // something the registrar never asked for. A level *filter* also lands here, and it
+      // must not change what the sort header says it is doing.
+      const sortDerived = (left: Row, right: Row) => {
         if (query.sort === "level") {
           if (!left.academicLevel && right.academicLevel) return 1;
           if (left.academicLevel && !right.academicLevel) return -1;
@@ -2220,7 +2310,18 @@ export class AcademicsService {
         return (
           compared * direction || left.studentNo.localeCompare(right.studentNo)
         );
-      });
+      };
+      // Mirrors adminStudentRosterOrderBy: program by code, otherwise the person's name.
+      // `name` is "first last", so comparing it orders by first then last as the SQL does.
+      const sortPlain = (left: Row, right: Row) => {
+        const key = (row: Row) =>
+          query.sort === "program" ? row.program : row.name;
+        return (
+          key(left).localeCompare(key(right)) * direction ||
+          left.studentNo.localeCompare(right.studentNo)
+        );
+      };
+      items.sort(derivedSort ? sortDerived : sortPlain);
       items = items.slice(
         (query.page - 1) * query.pageSize,
         query.page * query.pageSize,
@@ -2231,11 +2332,21 @@ export class AcademicsService {
       items,
       page: query.page,
       pageSize: query.pageSize,
-      total,
+      total: filteredTotal,
       allTotal,
-      totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
+      totalPages: Math.max(1, Math.ceil(filteredTotal / query.pageSize)),
       missingLoginCount,
       programs,
+      // Distinct option lists for the filter Selects. Whitespace-only strings are
+      // stripped; the "Unknown" sentinel rows (gender/nationality null) are
+      // surfaced separately so the UI can render them as a distinct option
+      // without inventing a fake value.
+      genders: distinctGenders
+        .map((row) => row.gender?.trim())
+        .filter((value): value is string => !!value),
+      nationalities: distinctNationalities
+        .map((row) => row.nationality?.trim())
+        .filter((value): value is string => !!value),
     };
   }
 

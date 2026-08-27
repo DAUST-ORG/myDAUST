@@ -57,23 +57,64 @@ function service() {
 }
 
 describe("payment method configuration", () => {
-  it("requires complete Wave instructions and a QR before enabling", async () => {
+  // A number and a QR are two ways of telling the payer the same thing, so either alone
+  // is a usable configuration. Requiring all of them rejected real setups.
+  it("enables Wave with only a phone number", async () => {
     const { value } = service();
     const input = config();
     input.wave.enabled = true;
+    input.wave.qrAsset = null;
     input.wave.instructions = "";
-    await expect(value.updateConfig(input, "actor")).rejects.toThrow(
-      "Wave payments require",
-    );
+    await expect(value.updateConfig(input, "actor")).resolves.toMatchObject({
+      wave: { enabled: true },
+    });
   });
 
-  it("requires the Orange Money merchant number", async () => {
+  it("enables Wave with only a QR code", async () => {
+    const { value } = service();
+    const input = config();
+    input.wave.enabled = true;
+    input.wave.phoneNumber = "";
+    input.wave.instructions = "";
+    await expect(value.updateConfig(input, "actor")).resolves.toMatchObject({
+      wave: { enabled: true },
+    });
+  });
+
+  it("enables Orange Money with only a merchant number", async () => {
     const { value } = service();
     const input = config();
     input.orangeMoney.enabled = true;
-    input.orangeMoney.merchantNumber = "";
+    input.orangeMoney.phoneNumber = "";
+    input.orangeMoney.qrAsset = null;
+    input.orangeMoney.instructions = "";
+    await expect(value.updateConfig(input, "actor")).resolves.toMatchObject({
+      orangeMoney: { enabled: true },
+    });
+  });
+
+  it("still refuses a method with nowhere to send the money", async () => {
+    for (const key of ["wave", "orangeMoney"] as const) {
+      const { value } = service();
+      const input = config();
+      input[key].enabled = true;
+      input[key].phoneNumber = "";
+      input[key].merchantNumber = "";
+      input[key].qrAsset = null;
+      await expect(value.updateConfig(input, "actor")).rejects.toThrow(
+        "somewhere to send the money",
+      );
+    }
+  });
+
+  it("leaves the bank rule alone — it still needs a beneficiary and an account", async () => {
+    const { value } = service();
+    const input = config();
+    input.bank.enabled = true;
+    input.bank.accountNumber = "";
+    input.bank.iban = "";
     await expect(value.updateConfig(input, "actor")).rejects.toThrow(
-      "merchant number",
+      "account number or IBAN",
     );
   });
 

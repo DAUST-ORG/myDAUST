@@ -12,19 +12,28 @@ import {
   SearchX,
   User,
   Users,
-  X,
 } from "lucide-react";
+import {
+  Button,
+  Card,
+  Modal,
+  PageHeader,
+  SearchInput,
+} from "@/components/ui";
 import {
   type RegistrationCatalog,
   type RegistrationSection,
+  type EnrollmentOverrideGate,
   enrollSection,
   getCurrentTerm,
   getRegistrationCatalog,
+  submitEnrollmentOverride,
 } from "@/lib/api";
-import { Card, PageHeader, SearchInput } from "@/components/ui";
 import { COURSE_COLORS, hourFloat, parseDayIndexes } from "@/lib/student-schedule";
 
 const isConflict = (reason: string) => /conflict|clash|overlap/i.test(reason);
+
+type OverrideResult = { kind: "ok" | "err"; text: string };
 
 export default function StudentRegistration() {
   const [termId, setTermId] = useState<string | null>(null);
@@ -35,6 +44,10 @@ export default function StudentRegistration() {
   const [busy, setBusy] = useState(false);
   const [justEnrolled, setJustEnrolled] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [overrideTarget, setOverrideTarget] = useState<RegistrationSection | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideSubmitting, setOverrideSubmitting] = useState(false);
+  const [overrideResult, setOverrideResult] = useState<OverrideResult | null>(null);
 
   const load = useCallback((id: string) => {
     getRegistrationCatalog(id)
@@ -94,8 +107,6 @@ export default function StudentRegistration() {
     setError(null);
     setJustEnrolled(false);
     const failures: string[] = [];
-    // Enrol one at a time: each call re-runs the server-side rules under the
-    // section seat-lock, so a section that filled up mid-session fails alone.
     for (const sectionId of cart) {
       try {
         await enrollSection(sectionId);
@@ -110,6 +121,34 @@ export default function StudentRegistration() {
     setBusy(false);
     if (failures.length === 0) setJustEnrolled(true);
     else setError(`Some sections could not be added — ${failures.join(" · ")}`);
+  }
+
+  async function submitOverride() {
+    if (!overrideTarget || overrideReason.trim().length < 1) return;
+    const wordCount = overrideReason.trim().split(/\s+/).filter(Boolean).length;
+    if (wordCount > 50) return;
+    setOverrideSubmitting(true);
+    setOverrideResult(null);
+    try {
+      const gates = extractFailedGates(overrideTarget.blockedReason ?? "");
+      await submitEnrollmentOverride({
+        sectionId: overrideTarget.sectionId,
+        reason: overrideReason,
+        requestedWaivers: gates,
+      });
+      setOverrideResult({
+        kind: "ok",
+        text: "Override request submitted. Your instructor will review it.",
+      });
+      setOverrideReason("");
+    } catch (e) {
+      setOverrideResult({
+        kind: "err",
+        text: e instanceof Error ? e.message : "Could not submit request.",
+      });
+    } finally {
+      setOverrideSubmitting(false);
+    }
   }
 
   return (
@@ -145,21 +184,42 @@ export default function StudentRegistration() {
       )}
 
       {blockedByHold && (
-        <div className="card" style={{ display: "flex", gap: 10, alignItems: "flex-start", borderColor: "var(--error-500)" }}>
+        <div
+          className="card"
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-start",
+            borderColor: "var(--error-500)",
+          }}
+        >
           <Lock size={17} color="var(--error-500)" />
           <div>
             <strong>Registration is blocked by an active hold.</strong>
             <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
-              {data?.holds.map((h) => h.reason ?? h.type).join(" · ")} — contact the registrar to clear it.
+              {data?.holds.map((h) => h.reason ?? h.type).join(" · ")} — contact the
+              registrar to clear it.
             </p>
           </div>
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 340px", gap: 18, alignItems: "start" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0,1fr) 340px",
+          gap: 18,
+          alignItems: "start",
+        }}
+      >
         <div>
           <div style={{ marginBottom: 14 }}>
-            <SearchInput value={q} onChange={setQ} placeholder="Search by course code, title or instructor…" width="100%" />
+            <SearchInput
+              value={q}
+              onChange={setQ}
+              placeholder="Search by course code, title or instructor…"
+              width="100%"
+            />
           </div>
 
           {!data && <p className="muted">Loading catalogue…</p>}
@@ -177,7 +237,8 @@ export default function StudentRegistration() {
             {filtered.map((s, i) => {
               const inCart = cart.includes(s.sectionId);
               const planClash = inCart ? null : clashesWithPlan(s);
-              const reason = s.blockedReason ?? (planClash ? `Time conflict with ${planClash}` : null);
+              const reason =
+                s.blockedReason ?? (planClash ? `Time conflict with ${planClash}` : null);
               const conflict = !!reason && isConflict(reason);
               const border = inCart
                 ? "rgba(46,125,82,.35)"
@@ -200,8 +261,23 @@ export default function StudentRegistration() {
                   }}
                 >
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 700 }}>{s.courseCode}</span>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "var(--font-display)",
+                          fontSize: 16,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {s.courseCode}
+                      </span>
                       <span
                         style={{
                           padding: "2px 9px",
@@ -214,7 +290,9 @@ export default function StudentRegistration() {
                       >
                         {s.credits} cr
                       </span>
-                      <span className="muted" style={{ fontSize: 11.5 }}>§{s.sectionCode}</span>
+                      <span className="muted" style={{ fontSize: 11.5 }}>
+                        §{s.sectionCode}
+                      </span>
                       {conflict && (
                         <span
                           style={{
@@ -233,18 +311,33 @@ export default function StudentRegistration() {
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 14.5, fontWeight: 600, marginTop: 3 }}>{s.title}</div>
+                    <div style={{ fontSize: 14.5, fontWeight: 600, marginTop: 3 }}>
+                      {s.title}
+                    </div>
                     <div
                       className="muted"
-                      style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12.5, marginTop: 6 }}
+                      style={{
+                        display: "flex",
+                        gap: 14,
+                        flexWrap: "wrap",
+                        fontSize: 12.5,
+                        marginTop: 6,
+                      }}
                     >
                       <Meta icon={<User size={12} />} text={s.instructor ?? "Staff"} />
                       <Meta icon={<Clock size={12} />} text={s.schedule} />
                       <Meta icon={<MapPin size={12} />} text={s.room ?? "Room TBA"} />
-                      <Meta icon={<Users size={12} />} text={`${s.seatsTaken}/${s.capacity} seats`} />
+                      <Meta
+                        icon={<Users size={12} />}
+                        text={`${s.seatsTaken}/${s.capacity} seats`}
+                      />
                     </div>
                     {reason && !conflict && (
-                      <div style={{ fontSize: 12, color: "var(--error-500)", marginTop: 6 }}>{reason}</div>
+                      <div
+                        style={{ fontSize: 12, color: "var(--error-500)", marginTop: 6 }}
+                      >
+                        {reason}
+                      </div>
                     )}
                   </div>
 
@@ -261,13 +354,31 @@ export default function StudentRegistration() {
                       ✓ Added
                     </button>
                   ) : reason || blockedByHold ? (
-                    <span style={{ ...PILL, background: "var(--bg-subtle)", color: "var(--fg-faint)", cursor: "not-allowed" }}>
-                      {conflict ? "Conflict" : "Unavailable"}
-                    </span>
+                    <button
+                      onClick={() => {
+                        setOverrideTarget(s);
+                        setOverrideReason("");
+                        setOverrideResult(null);
+                      }}
+                      style={{
+                        ...PILL,
+                        background: "var(--bg-subtle)",
+                        color: "var(--daust-navy)",
+                        border: "1px solid var(--daust-navy)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Request override
+                    </button>
                   ) : (
                     <button
                       onClick={() => setCart((c) => [...c, s.sectionId])}
-                      style={{ ...PILL, background: "var(--daust-orange)", color: "#fff", border: "1px solid transparent" }}
+                      style={{
+                        ...PILL,
+                        background: "var(--daust-orange)",
+                        color: "#fff",
+                        border: "1px solid transparent",
+                      }}
                     >
                       + Add
                     </button>
@@ -283,7 +394,14 @@ export default function StudentRegistration() {
             title={
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <ClipboardList size={17} color="var(--daust-orange)" />
-                <h3 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 15.5, fontWeight: 700 }}>
+                <h3
+                  style={{
+                    margin: 0,
+                    fontFamily: "var(--font-display)",
+                    fontSize: 15.5,
+                    fontWeight: 700,
+                  }}
+                >
                   Registration plan
                 </h3>
               </div>
@@ -294,105 +412,116 @@ export default function StudentRegistration() {
             </p>
 
             {planned.length === 0 ? (
-              <p style={{ textAlign: "center", color: "var(--fg-faint)", fontSize: 13, margin: "18px 0" }}>
+              <p
+                style={{
+                  textAlign: "center",
+                  color: "var(--fg-faint)",
+                  fontSize: 13,
+                  margin: "18px 0",
+                }}
+              >
                 No sections added yet
               </p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {planned.map((s) => (
-                  <div key={s.sectionId} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  <div
+                    key={s.sectionId}
+                    style={{ display: "flex", alignItems: "center", gap: 9 }}
+                  >
                     <span
                       style={{
-                        width: 4,
-                        alignSelf: "stretch",
-                        minHeight: 30,
-                        borderRadius: 2,
-                        background: COURSE_COLORS[cart.indexOf(s.sectionId) % COURSE_COLORS.length] ?? "var(--daust-navy)",
+                        fontFamily: "var(--font-display)",
+                        fontSize: 13,
+                        fontWeight: 700,
                       }}
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>{s.courseCode}</div>
-                      <div className="muted" style={{ fontSize: 11.5 }}>
-                        {s.days} {s.startTime} · {s.credits}cr
-                      </div>
-                    </div>
-                    <button
-                      aria-label={`Remove ${s.courseCode}`}
-                      onClick={() => setCart((c) => c.filter((x) => x !== s.sectionId))}
-                      style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--fg3)", padding: 4 }}
                     >
-                      <X size={14} />
-                    </button>
+                      {s.courseCode}
+                    </span>
+                    <span className="muted" style={{ fontSize: 11.5 }}>
+                      §{s.sectionCode} · {s.schedule}
+                    </span>
                   </div>
                 ))}
               </div>
             )}
 
-            <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 12, fontSize: 13 }}>
-              <Row label="Currently enrolled" value={`${currentCredits} cr`} />
-              <Row label="In this plan" value={`+${plannedCredits} cr`} />
-              <div style={{ borderTop: "1px solid var(--divider)", margin: "8px 0" }} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
+              <Row label="Current credits" value={`${currentCredits} cr`} />
+              <Row label="Planned" value={`${plannedCredits} cr`} />
               <Row
-                label="Total load"
+                label="Total"
                 value={`${totalCredits} cr`}
-                tone={overload ? "var(--error-500)" : "var(--daust-navy)"}
+                tone={overload ? "var(--error-500)" : undefined}
                 bold
               />
             </div>
 
-            <div style={{ marginTop: 14 }}>
-              <button
-                disabled={busy || cart.length === 0 || overload || blockedByHold}
+            <div
+              style={{
+                marginTop: 14,
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                fontSize: 12,
+              }}
+            >
+              <Button
+                variant="primary"
                 onClick={confirm}
-                style={{
-                  ...PILL,
-                  width: "100%",
-                  padding: "11px 18px",
-                  fontSize: 13.5,
-                  border: "1px solid transparent",
-                  background: cart.length === 0 || overload || blockedByHold ? "var(--bg-subtle)" : "var(--daust-navy)",
-                  color: cart.length === 0 || overload || blockedByHold ? "var(--fg-faint)" : "#fff",
-                  cursor: cart.length === 0 || overload || blockedByHold ? "not-allowed" : "pointer",
-                }}
+                disabled={
+                  busy ||
+                  cart.length === 0 ||
+                  overload ||
+                  blockedByHold
+                }
               >
                 {busy
                   ? "Enrolling…"
-                  : blockedByHold
-                    ? "Blocked by a hold"
-                    : overload
-                      ? `Over ${maxCredits} credit limit`
-                      : cart.length === 0
-                        ? "Add sections to enroll"
-                        : `Confirm enrollment (${plannedCredits} cr)`}
-              </button>
+                  : `Enroll in ${cart.length} section${cart.length === 1 ? "" : "s"}`}
+              </Button>
+              {overload && (
+                <p
+                  className="muted"
+                  style={{ color: "var(--error-500)", fontSize: 11.5 }}
+                >
+                  <Info size={11} /> Over the {maxCredits}-credit ceiling.
+                </p>
+              )}
+              {blockedByHold && (
+                <p
+                  className="muted"
+                  style={{ color: "var(--error-500)", fontSize: 11.5 }}
+                >
+                  <Lock size={11} /> Resolve holds before enrolling.
+                </p>
+              )}
             </div>
-
-            {overload && (
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "flex-start",
-                  marginTop: 12,
-                  padding: "10px 12px",
-                  borderRadius: "var(--radius-md)",
-                  background: "rgba(192,57,43,.08)",
-                  color: "var(--error-500)",
-                  fontSize: 12.5,
-                }}
-              >
-                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                Over the {maxCredits}-credit semester limit. Remove sections to enroll.
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: 7, alignItems: "center", marginTop: 12, fontSize: 11.5, color: "var(--fg3)" }}>
-              <Info size={13} />
-              Maximum load: {maxCredits} credits per semester
+            <div
+              style={{
+                display: "flex",
+                gap: 7,
+                alignItems: "center",
+                marginTop: 12,
+                fontSize: 11.5,
+                color: "var(--fg3)",
+              }}
+            >
+              <Info size={12} /> Maximum load: {maxCredits} credits per semester
             </div>
           </Card>
         </div>
       </div>
+
+      <OverrideRequestModal
+        target={overrideTarget}
+        reason={overrideReason}
+        onReasonChange={setOverrideReason}
+        submitting={overrideSubmitting}
+        result={overrideResult}
+        onClose={() => setOverrideTarget(null)}
+        onSubmit={submitOverride}
+      />
     </>
   );
 }
@@ -421,11 +550,29 @@ function Meta({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-function Row({ label, value, tone, bold }: { label: string; value: string; tone?: string; bold?: boolean }) {
+function Row({
+  label,
+  value,
+  tone,
+  bold,
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+  bold?: boolean;
+}) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
       <span className="muted">{label}</span>
-      <span style={{ fontWeight: bold ? 700 : 500, color: tone, fontVariantNumeric: "tabular-nums" }}>{value}</span>
+      <span
+        style={{
+          fontWeight: bold ? 700 : 500,
+          color: tone,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -435,7 +582,138 @@ function overlaps(a: RegistrationSection, b: RegistrationSection): boolean {
   const da = parseDayIndexes(a.days);
   const db = parseDayIndexes(b.days);
   if (!da.some((d) => db.includes(d))) return false;
-  const [as, ae, bs, be] = [hourFloat(a.startTime), hourFloat(a.endTime), hourFloat(b.startTime), hourFloat(b.endTime)];
+  const [as, ae, bs, be] = [
+    hourFloat(a.startTime),
+    hourFloat(a.endTime),
+    hourFloat(b.startTime),
+    hourFloat(b.endTime),
+  ];
   if ([as, ae, bs, be].some(Number.isNaN)) return false;
   return as < be && bs < ae;
+}
+
+/**
+ * Translate the free-text blockedReason from registrationCatalog into the structured
+ * gate set we ask the registrar to waive. This is intentionally a hint -- the registrar
+ * still picks the gates to approve on the review screen.
+ */
+function extractFailedGates(reason: string): EnrollmentOverrideGate[] {
+  const out: EnrollmentOverrideGate[] = [];
+  const r = reason.toLowerCase();
+  if (/prereq|prerequisite/.test(r)) out.push("prerequisite");
+  if (/coreq|corequisite/.test(r)) out.push("corequisite");
+  if (/full|capacity|seat/.test(r)) out.push("capacity");
+  if (/hold/.test(r)) out.push("holds");
+  if (/\bcredit\b/.test(r)) out.push("credit_cap");
+  if (/standing|level/.test(r)) out.push("standing");
+  if (/major|program|restricted/.test(r)) out.push("major_restriction");
+  if (/installment|verified|payment|record.?status/.test(r)) out.push("record_status");
+  if (/deadline|window|closed/.test(r)) out.push("add_deadline");
+  return out;
+}
+
+function OverrideRequestModal({
+  target,
+  reason,
+  onReasonChange,
+  submitting,
+  result,
+  onClose,
+  onSubmit,
+}: {
+  target: RegistrationSection | null;
+  reason: string;
+  onReasonChange: (v: string) => void;
+  submitting: boolean;
+  result: OverrideResult | null;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal open={!!target} onClose={onClose} title="Request enrollment override">
+      {target && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <strong style={{ fontFamily: "var(--font-display)" }}>
+              {target.courseCode} — {target.title}
+            </strong>
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>
+              §{target.sectionCode} · {target.schedule}
+            </div>
+            {target.blockedReason && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: "8px 12px",
+                  background: "rgba(192,57,43,.07)",
+                  borderLeft: "3px solid var(--error-500)",
+                  fontSize: 13,
+                }}
+              >
+                <strong>Why you were blocked:</strong> {target.blockedReason}
+              </div>
+            )}
+          </div>
+          <label style={{ fontSize: 12.5, color: "var(--fg3)" }}>
+            Reason for your instructor (max 50 words)
+            <textarea
+              value={reason}
+              onChange={(e) => onReasonChange(e.target.value)}
+              rows={4}
+              maxLength={500}
+              style={{
+                width: "100%",
+                marginTop: 4,
+                padding: "9px 11px",
+                fontFamily: "var(--font-body)",
+                fontSize: 13.5,
+                borderRadius: "var(--radius-md)",
+                border: "1px solid var(--border)",
+              }}
+            />
+            <div
+              className="muted"
+              style={{
+                fontSize: 11.5,
+                marginTop: 3,
+                color:
+                  reason.trim().split(/\s+/).filter(Boolean).length > 50
+                    ? "var(--error-500)"
+                    : undefined,
+              }}
+            >
+              {reason.trim().split(/\s+/).filter(Boolean).length} / 50 words
+            </div>
+          </label>
+          {result && (
+            <div
+              style={{
+                fontSize: 12.5,
+                color: result.kind === "ok" ? "#1f6b42" : "var(--error-500)",
+                fontWeight: 600,
+              }}
+            >
+              {result.text}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" onClick={onClose} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button
+              variant="navy"
+              onClick={onSubmit}
+              disabled={
+                submitting ||
+                reason.trim().split(/\s+/).filter(Boolean).length === 0 ||
+                reason.trim().split(/\s+/).filter(Boolean).length > 50
+              }
+            >
+              {submitting ? "Submitting…" : "Submit request"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
 }

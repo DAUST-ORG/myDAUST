@@ -108,11 +108,6 @@ export function AppShell({
       <aside className={`sidebar ${variant} ${navOpen ? "open" : ""}`}>
         <div className="brand">
           <img src="/logo-daust.png" alt="DAUST" className="wordmark" style={{ height: 22, width: "auto", display: "block", filter: "brightness(0) invert(1)" }} />
-          <div className="tri-dash">
-            <span />
-            <span />
-            <span />
-          </div>
           <div className="portal-sub">{portalName}</div>
         </div>
 

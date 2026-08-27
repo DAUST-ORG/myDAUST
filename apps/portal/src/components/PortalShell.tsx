@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppShell, type ViewAsOption } from "./AppShell";
 import { getMe, type Me } from "@/lib/api";
-import { PORTALS, type PortalKey } from "@/lib/nav";
+import {
+  PORTALS,
+  type PortalKey,
+  ROLE_PORTALS,
+  portalForRoles,
+} from "@/lib/nav";
 
 /**
  * Client boundary between a portal's server layout and AppShell.
@@ -47,41 +52,62 @@ const VIEW_AS_ALL: (ViewAsOption & { roles: string[] })[] = [
     roles: ["communications", "admin"],
   },
   { key: "parent", label: "parent", href: "/parent", roles: ["parent"] },
+{
+    key: "admissions",
+    label: "admissions",
+    href: "/admissions",
+    roles: ["admissions", "admin"],
+  },
+  {
+    key: "dining",
+    label: "dining",
+    href: "/dining",
+    roles: ["dining", "admin"],
+  },
   {
     key: "it",
     label: "IT",
     href: "/director/users",
     roles: ["it_admin", "admin"],
   },
+  { key: "infirmary", label: "infirmary", href: "/infirmary", roles: ["infirmary", "admin"] },
 ];
 
 /** Only the student portal has a profile screen behind the sidebar identity block. */
+/** The registry key of the portal this person actually belongs to. */
+function viewAsKeyFor(roles: string[]): PortalKey {
+  return ROLE_PORTALS.find((p) => roles.includes(p.role))?.portal ?? "student";
+}
+
 const PROFILE_HREF: Partial<Record<PortalKey, string>> = {
   student: "/student/profile",
 };
 
 export function PortalShell({
   portal,
-  requiresRole,
-  fallbackPortal,
+  requiresAnyRole,
   children,
 }: {
   portal: PortalKey;
   /**
-   * Role the primary portal's sidebar assumes. A route shared by two audiences names it
-   * here with a fallback, so someone who can use the page but not the rest of the area
-   * gets their own sidebar instead of one whose every other entry 403s.
+   * Roles this area's sidebar assumes. A viewer holding none of them gets the sidebar for
+   * whichever portal they do belong to, rather than a list of links that 403 -- an admissions
+   * officer who lands on /admin should not be shown the seventeen registrar screens.
+   *
+   * The fallback is resolved from the viewer's own roles rather than named here, so it stays
+   * correct as roles are added, and so an area shared by two audiences (say /director/users,
+   * which admin and it_admin both use) needs no per-area pairing.
    */
-  requiresRole?: string;
-  fallbackPortal?: PortalKey;
+  requiresAnyRole?: string[];
   children: React.ReactNode;
 }) {
   const [me, setMe] = useState<Me | null>(null);
-  const effective =
-    requiresRole && fallbackPortal && me && !me.roles.includes(requiresRole)
-      ? fallbackPortal
-      : portal;
-  const nav = PORTALS[effective];
+  const mismatch =
+    requiresAnyRole !== undefined &&
+    me !== null &&
+    !requiresAnyRole.some((r) => me.roles.includes(r));
+  const nav = mismatch ? portalForRoles(me.roles).nav : PORTALS[portal];
+  const effective = mismatch ? viewAsKeyFor(me.roles) : portal;
   const router = useRouter();
   const pathname = usePathname();
 

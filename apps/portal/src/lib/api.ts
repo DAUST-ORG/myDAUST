@@ -68,14 +68,26 @@ async function toApiError(res: Response): Promise<ApiError> {
   let serverMsg = "";
   try {
     const body = JSON.parse(text);
+    // ZodExceptionFilter answers {message:"Validation failed", issues:[{path,message}]}. Using
+    // only `message` told the user something failed but never which field, which made a
+    // validation error indistinguishable from a bug.
+    const issues = Array.isArray(body?.issues)
+      ? body.issues
+          .map((i: { path?: string; message?: string }) =>
+            i?.path ? `${i.path}: ${i.message ?? "invalid"}` : i?.message,
+          )
+          .filter(Boolean)
+          .join("; ")
+      : "";
     serverMsg =
-      typeof body?.message === "string"
+      issues ||
+      (typeof body?.message === "string"
         ? body.message
         : Array.isArray(body?.message)
           ? body.message.join(", ")
           : typeof body?.error === "string"
             ? body.error
-            : "";
+            : "");
   } catch {
     serverMsg = text;
   }
@@ -605,7 +617,7 @@ export interface TeachingSection {
 export interface Roster {
   course: string;
   sectionCode: string;
-  students: { studentNo: string; name: string; grade: string | null }[];
+  students: { studentNo: string; name: string; grade: string | null; viaOverride: boolean }[];
 }
 export const getTeaching = () =>
   request<TeachingSection[]>("/academics/teaching");
@@ -665,7 +677,6 @@ export interface FacultyScheduleItem {
 }
 export const getFacultySchedule = () =>
   request<FacultyScheduleItem[]>("/academics/teaching/schedule");
-
 
 export interface SectionInsights {
   course: string;
@@ -964,6 +975,10 @@ export interface AdminStudent {
   status: string;
   hasLogin: boolean;
   mustChangePassword: boolean;
+  // Free-text profile fields used by the roster's filter Selects. Null when
+  // the registrar has not yet filled the Edit form.
+  gender: string | null;
+  nationality: string | null;
 }
 export interface AdminStudentDirectoryRow {
   id: string;
@@ -984,12 +999,25 @@ export interface AdminStudentRosterPage {
   totalPages: number;
   missingLoginCount: number;
   programs: { code: string; name: string }[];
+  // Distinct values currently present in the dataset, used to populate the
+  // filter Selects. The server returns the list global to the roster
+  // (intersected with other active filters' base WHERE), so each Select can
+  // only contain values that can actually be selected.
+  genders: string[];
+  nationalities: string[];
 }
 export interface AdminStudentRosterParams {
   page?: number;
   pageSize?: 25 | 50 | 100;
   search?: string;
   program?: string;
+  // `level` is a derived catalog code (S1, S2, …) — handled server-side by
+  // fetching the full filtered set, deriving per-row, then filtering. The API
+  // is uniform with the SQL-pushdown filters even though this one can't go
+  // into WHERE.
+  level?: string;
+  gender?: string;
+  nationality?: string;
   sort?: AdminStudentRosterSort;
   direction?: "asc" | "desc";
 }
@@ -1213,6 +1241,18 @@ export const getAdminStudentRoster = (
   if (params.search) query.set("search", params.search);
   if (params.program && params.program !== "all") {
     query.set("program", params.program);
+  }
+  // `level` is a free-text catalog code (S1, S2, …). It is the registrar's
+  // intent for a *single* level; passing "all" or an empty string clears it
+  // on the server the same way the program filter does.
+  if (params.level && params.level !== "all") {
+    query.set("level", params.level);
+  }
+  if (params.gender && params.gender !== "all") {
+    query.set("gender", params.gender);
+  }
+  if (params.nationality && params.nationality !== "all") {
+    query.set("nationality", params.nationality);
   }
   if (params.sort) query.set("sort", params.sort);
   if (params.direction) query.set("direction", params.direction);
@@ -1551,7 +1591,6 @@ export const broadcastToSection = (
 
 // --- Campus: events + library ---
 
-
 // --- Dining ---
 export interface DiningPass {
   token: string;
@@ -1600,17 +1639,60 @@ export const payDiningOrder = (id: string, method: ProofPaymentMethod) =>
     body: JSON.stringify({ method }),
   });
 
+export type DiningVerdictCode =
+  | "OK"
+  | "INVALID"
+  | "UNKNOWN"
+  | "NO_PLAN"
+  | "UNPAID"
+  | "NOT_COVERED"
+  | "SERVED";
+
+/** The station's result overlay. `photoUrl` is the actual anti-sharing control. */
 export interface ScanResult {
-  result: string;
+  result: "served" | "turned_away";
+  code: DiningVerdictCode;
   reason: string | null;
+  overridable: boolean;
   name: string | null;
   studentNo: string | null;
+  photoUrl: string | null;
+  plan: string | null;
+  program: string | null;
+  period: string | null;
 }
 export const diningScan = (token: string, period: string) =>
   request<ScanResult>("/dining/scan", {
     method: "POST",
     body: JSON.stringify({ token, period }),
   });
+export const diningScanOverride = (studentNo: string, period: string) =>
+  request<ScanResult>("/dining/scan/override", {
+    method: "POST",
+    body: JSON.stringify({ studentNo, period }),
+  });
+
+export interface DiningToday {
+  scannedPeriods: string[];
+  mealWindows: {
+    breakfast: MealWindow;
+    lunch: MealWindow;
+    dinner: MealWindow;
+  };
+  weekendOrdering: boolean;
+  orderCutoff: string;
+}
+export const getDiningToday = () => request<DiningToday>("/dining/my/today");
+
+export interface DiningEligibility {
+  period: string;
+  code: DiningVerdictCode;
+  reason: string;
+  serve: boolean;
+  overridable: boolean;
+}
+export const getDiningEligibility = (period: string) =>
+  request<DiningEligibility>(`/dining/my/eligibility?period=${period}`);
 export interface LiveScans {
   period: string;
   served: number;
@@ -1660,10 +1742,84 @@ export const createMenuItem = (body: {
   description?: string;
   category: string;
   priceXof: number;
+  imageUrl?: string;
 }) =>
   request("/dining/admin/menu", { method: "POST", body: JSON.stringify(body) });
 export const toggleMenuItem = (id: string) =>
   request(`/dining/admin/menu/${id}/toggle`, { method: "POST" });
+export const setMenuItemImage = (id: string, imageUrl: string) =>
+  request(`/dining/admin/menu/${id}/image`, {
+    method: "POST",
+    body: JSON.stringify({ imageUrl }),
+  });
+
+export interface DiningStudent {
+  studentId: string;
+  name: string;
+  studentNo: string;
+  plan: string;
+  active: boolean;
+  term: string;
+  scansToday: number;
+}
+export const getDiningStudents = () =>
+  request<DiningStudent[]>("/dining/admin/students");
+
+export interface DiningReports {
+  last7days: { date: string; served: number; turnedAway: number }[];
+  planMix: { type: string; count: number }[];
+  weekendRevenue: number;
+  topItems: { name: string; qty: number }[];
+}
+export const getDiningReports = () =>
+  request<DiningReports>("/dining/admin/reports");
+
+export interface DiningFinances {
+  planRevenue: number;
+  weekendRevenue: number;
+  revenue: number;
+  outstanding: number;
+  servedMeals: number;
+  costPerMealXof: number;
+  foodCost: number;
+  margin: number;
+  marginPct: number;
+  byMonth: { month: string; plan: number; weekend: number }[];
+  settledTo: string;
+}
+export const getDiningFinances = () =>
+  request<DiningFinances>("/dining/admin/finances");
+
+export interface DiningTransaction {
+  id: string;
+  kind: "plan" | "weekend" | "refund";
+  student: string;
+  amountXof: number;
+  status: string;
+  when: string;
+}
+export const getDiningTransactions = () =>
+  request<DiningTransaction[]>("/dining/admin/transactions");
+
+export interface MealWindow {
+  start: string;
+  end: string;
+}
+export interface DiningSettings {
+  mealWindows: { breakfast: MealWindow; lunch: MealWindow; dinner: MealWindow };
+  costPerMealXof: number;
+  weekendOrdering: boolean;
+  orderCutoff: string;
+  enforcePayment: boolean;
+  blockSecondScan: boolean;
+}
+export const getDiningSettings = () =>
+  request<DiningSettings>("/dining/admin/settings");
+export const updateDiningSettings = (body: DiningSettings) =>
+  request<DiningSettings>("/dining/admin/settings", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 
 // --- Student Affairs ---
 export interface AffairsDashboard {
@@ -2545,7 +2701,8 @@ export type ApprovalRequestKind =
   | "discount"
   | "scholarship"
   | "operating_budget"
-  | "management_actual";
+  | "management_actual"
+  | "student_enrollment_override";
 export type ApprovalRequestStatus =
   "pending" | "approved" | "rejected" | "cancelled" | "stale";
 
@@ -2600,6 +2757,22 @@ export const cancelApprovalRequest = (id: string, note?: string) =>
     `/approvals/${id}/cancel`,
     { method: "POST", body: JSON.stringify({ note }) },
   );
+
+// Director-side approval for an enrollment override. Distinct from approveApprovalRequest
+// because the registrar must pick which gates to waive -- there is no single "approve"
+// without that choice.
+export const approveEnrollmentOverride = (
+  id: string,
+  body: { waivedGates: string[]; note?: string },
+) =>
+  request<{
+    id: string;
+    status: string;
+    enrollmentId?: string;
+  }>(`/academics/enrollment-overrides/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
 export type DirectorWidgetKey =
   | "people"
@@ -3533,7 +3706,9 @@ export const updateUserRoles = (personId: string, roles: string[]) =>
   });
 
 // --- Directory administration (director: admin / it_admin) ---
-export const listManagedUsers = (query: Record<string, string | number | undefined>) => {
+export const listManagedUsers = (
+  query: Record<string, string | number | undefined>,
+) => {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(query)) {
     if (v !== undefined && v !== "") qs.set(k, String(v));
@@ -3541,10 +3716,13 @@ export const listManagedUsers = (query: Record<string, string | number | undefin
   return request<ManagedUserPage>(`/users?${qs.toString()}`);
 };
 export const createManagedUser = (body: unknown) =>
-  request<{ id: string; email: string; tempPassword: string | null }>("/users", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  request<{ id: string; email: string; tempPassword: string | null }>(
+    "/users",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 export const updateManagedUser = (id: string, body: unknown) =>
   request<{ id: string; email: string | null }>(`/users/${id}`, {
     method: "PATCH",
@@ -3561,7 +3739,9 @@ export const suspendManagedUser = (id: string, reason?: string) =>
     body: JSON.stringify({ reason }),
   });
 export const restoreManagedUser = (id: string) =>
-  request<{ id: string; status: string }>(`/users/${id}/restore`, { method: "POST" });
+  request<{ id: string; status: string }>(`/users/${id}/restore`, {
+    method: "POST",
+  });
 export const getUsers = () => request<AppUser[]>("/academics/admin/users");
 
 // --- Payment links (bursar-generated; public pay page at /pay/[token]) ---
@@ -4656,4 +4836,579 @@ export const releaseEvaluationWindow = (windowId: string, released: boolean) =>
   request<EvaluationWindow>(`/evaluations/windows/${windowId}/release`, {
     method: "POST",
     body: JSON.stringify({ released }),
+  });
+
+// ─── Infirmary ──────────────────────────────────────────────────────────────
+
+export interface InfirmarySettings {
+  clinic_name: string;
+  clinic_address: string;
+  clinic_phone: string;
+  clinic_email: string;
+  notifications_enabled: string;
+  appointment_duration: string;
+  working_hours_start: string;
+  working_hours_end: string;
+}
+
+export interface InfirmaryStudent {
+  id: string;
+  name: string;
+  initials: string;
+  program: string;
+  year: string;
+  status: string;
+  lastVisit: string;
+  allergies: string[];
+  concern: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;
+  gender: string;
+  bloodType?: string;
+  emergencyContact?: string;
+  emergencyPhone?: string;
+  medicalHistory?: string[];
+  height?: string;
+  weight?: string;
+}
+
+export interface InfirmaryConsultation {
+  id: string;
+  studentId: string;
+  studentName: string;
+  reason: string;
+  visitType: string;
+  clinicalNotes: string;
+  status: string;
+  date: string;
+  time: string;
+  followUpRequired: boolean;
+  vitals?: { temperature?: string; bloodPressure?: string; heartRate?: string; weight?: string };
+  diagnosis?: string;
+  treatmentPlan?: string;
+}
+
+export interface InfirmaryPrescription {
+  id: string;
+  consultationId?: string;
+  studentId: string;
+  studentName: string;
+  medication: string;
+  dosage: string;
+  frequency: string;
+  duration: string;
+  instructions: string;
+  status: string;
+  date: string;
+  prescribedBy: string;
+}
+
+export interface InfirmaryMedication {
+  id: string;
+  name: string;
+  category: string;
+  stock: number;
+  unit: string;
+  minStock: number;
+  expiryDate: string;
+  supplier: string;
+  lastRestocked: string;
+  status: string;
+}
+
+export interface InfirmaryAppointment {
+  id: string;
+  studentId: string;
+  studentName: string;
+  date: string;
+  time: string;
+  type: string;
+  reason: string;
+  status: string;
+  notes: string;
+}
+
+export interface InfirmaryDocument {
+  id: string;
+  studentId: string;
+  studentName: string;
+  name: string;
+  type: string;
+  date: string;
+  uploadedBy: string;
+  notes: string;
+}
+
+export interface InfirmaryFollowUp {
+  id: string;
+  studentId: string;
+  studentName: string;
+  reason: string;
+  dueDate: string;
+  status: string;
+  priority: string;
+  notes: string;
+  createdAt: string;
+}
+
+export interface InfirmaryFormQ {
+  id: string;
+  text: string;
+  type: "text" | "multiple_choice" | "yes_no" | "rating";
+  options?: string[];
+  required: boolean;
+}
+
+export interface InfirmaryForm {
+  id: string;
+  name: string;
+  description: string;
+  questions: InfirmaryFormQ[];
+  responses: number;
+  completion: number;
+  status: string;
+  updated: string;
+  shareLink?: string;
+}
+
+export interface InfirmaryFormResponse {
+  id: string;
+  formId: string;
+  studentId: string;
+  studentName: string;
+  answers: Record<string, string>;
+  submittedAt: string;
+}
+
+export interface InfirmaryAnalytics {
+  totalStudents: number;
+  consultationsThisMonth: number;
+  totalConsultations: number;
+  activePrescriptions: number;
+  totalMedications: number;
+  lowStockMedications: number;
+  upcomingAppointments: number;
+  pendingFollowUps: number;
+  overdueFollowUps: number;
+  totalFormResponses: number;
+  documentsThisMonth: number;
+  monthlyConsultations: { label: string; count: number }[];
+}
+
+// Settings
+export const getInfirmarySettings = () =>
+  request<InfirmarySettings>("/infirmary/settings");
+export const updateInfirmarySettings = (data: Partial<InfirmarySettings>) =>
+  request<InfirmarySettings>("/infirmary/settings", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+
+// Students
+export const getInfirmaryStudents = () =>
+  request<InfirmaryStudent[]>("/infirmary/students");
+
+// Consultations
+export const getInfirmaryConsultations = () =>
+  request<InfirmaryConsultation[]>("/infirmary/consultations");
+export const createInfirmaryConsultation = (data: Partial<InfirmaryConsultation>) =>
+  request<InfirmaryConsultation>("/infirmary/consultations", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryConsultation = (id: string, data: Partial<InfirmaryConsultation>) =>
+  request<InfirmaryConsultation>(`/infirmary/consultations/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryConsultation = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/consultations/${id}`, { method: "DELETE" });
+
+// Prescriptions
+export const getInfirmaryPrescriptions = () =>
+  request<InfirmaryPrescription[]>("/infirmary/prescriptions");
+export const createInfirmaryPrescription = (data: Partial<InfirmaryPrescription>) =>
+  request<InfirmaryPrescription>("/infirmary/prescriptions", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryPrescription = (id: string, data: Partial<InfirmaryPrescription>) =>
+  request<InfirmaryPrescription>(`/infirmary/prescriptions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryPrescription = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/prescriptions/${id}`, { method: "DELETE" });
+
+// Medications
+export const getInfirmaryMedications = () =>
+  request<InfirmaryMedication[]>("/infirmary/medications");
+export const createInfirmaryMedication = (data: Partial<InfirmaryMedication>) =>
+  request<InfirmaryMedication>("/infirmary/medications", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryMedication = (id: string, data: Partial<InfirmaryMedication>) =>
+  request<InfirmaryMedication>(`/infirmary/medications/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryMedication = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/medications/${id}`, { method: "DELETE" });
+
+// Appointments
+export const getInfirmaryAppointments = () =>
+  request<InfirmaryAppointment[]>("/infirmary/appointments");
+export const createInfirmaryAppointment = (data: Partial<InfirmaryAppointment>) =>
+  request<InfirmaryAppointment>("/infirmary/appointments", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryAppointment = (id: string, data: Partial<InfirmaryAppointment>) =>
+  request<InfirmaryAppointment>(`/infirmary/appointments/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryAppointment = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/appointments/${id}`, { method: "DELETE" });
+
+// Documents
+export const getInfirmaryDocuments = () =>
+  request<InfirmaryDocument[]>("/infirmary/documents");
+export const createInfirmaryDocument = (data: Partial<InfirmaryDocument>) =>
+  request<InfirmaryDocument>("/infirmary/documents", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryDocument = (id: string, data: Partial<InfirmaryDocument>) =>
+  request<InfirmaryDocument>(`/infirmary/documents/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryDocument = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/documents/${id}`, { method: "DELETE" });
+
+// Follow-ups
+export const getInfirmaryFollowUps = () =>
+  request<InfirmaryFollowUp[]>("/infirmary/follow-ups");
+export const createInfirmaryFollowUp = (data: Partial<InfirmaryFollowUp>) =>
+  request<InfirmaryFollowUp>("/infirmary/follow-ups", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryFollowUp = (id: string, data: Partial<InfirmaryFollowUp>) =>
+  request<InfirmaryFollowUp>(`/infirmary/follow-ups/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryFollowUp = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/follow-ups/${id}`, { method: "DELETE" });
+
+// Forms
+export const getInfirmaryForms = () =>
+  request<InfirmaryForm[]>("/infirmary/forms");
+export const getInfirmaryForm = (id: string) =>
+  request<InfirmaryForm & { responses: InfirmaryFormResponse[] }>(`/infirmary/forms/${id}`);
+export const createInfirmaryForm = (data: Partial<InfirmaryForm>) =>
+  request<InfirmaryForm>("/infirmary/forms", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const updateInfirmaryForm = (id: string, data: Partial<InfirmaryForm>) =>
+  request<InfirmaryForm>(`/infirmary/forms/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryForm = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/forms/${id}`, { method: "DELETE" });
+
+// Form Responses
+export const getInfirmaryFormResponses = (formId: string) =>
+  request<InfirmaryFormResponse[]>(`/infirmary/forms/${formId}/responses`);
+export const createInfirmaryFormResponse = (formId: string, data: { studentId: string; studentName: string; answers: Record<string, string> }) =>
+  request<InfirmaryFormResponse>(`/infirmary/forms/${formId}/responses`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const deleteInfirmaryFormResponse = (id: string) =>
+  request<{ ok: boolean }>(`/infirmary/responses/${id}`, { method: "DELETE" });
+
+// Analytics
+export const getInfirmaryAnalytics = () =>
+  request<InfirmaryAnalytics>("/infirmary/analytics");
+// Enrollment override: student-initiated request after enroll() rejected them.
+export type EnrollmentOverrideGate =
+  | "prerequisite"
+  | "corequisite"
+  | "capacity"
+  | "holds"
+  | "credit_cap"
+  | "standing"
+  | "major_restriction"
+  | "record_status"
+  | "add_deadline";
+
+export type EnrollmentOverrideFailure =
+  | { gate: "prerequisite"; courses: { code: string; minGrade: string | null }[] }
+  | { gate: "corequisite"; courses: string[] }
+  | { gate: "capacity"; taken: number; capacity: number }
+  | { gate: "holds"; kinds: string[] }
+  | { gate: "credit_cap"; currentCredits: number; afterAdd: number; ceiling: number }
+  | { gate: "standing"; required: string; actual: number }
+  | { gate: "major_restriction"; required: string }
+  | { gate: "record_status"; status: string }
+  | { gate: "add_deadline"; closedOn: string };
+
+export interface EnrollmentOverrideRequestResponse {
+  id: string;
+  status: string;
+  failures: EnrollmentOverrideFailure[];
+}
+
+export const submitEnrollmentOverride = (body: {
+  sectionId: string;
+  reason: string;
+  requestedWaivers: EnrollmentOverrideGate[];
+}) =>
+  request<EnrollmentOverrideRequestResponse>(
+    "/academics/enrollment-overrides",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+
+export interface MyOverrideRequest {
+  id: string;
+  status: string;
+  reason: string;
+  targetId: string | null;
+  decisionNote: string | null;
+  reviewedAt: string | null;
+  appliedAt: string | null;
+  createdAt: string;
+  afterJson: {
+    sectionId: string;
+    studentId: string;
+    requestedWaivers: EnrollmentOverrideGate[];
+    failures: EnrollmentOverrideFailure[];
+  } | null;
+}
+
+export const myOverrideRequests = () =>
+  request<MyOverrideRequest[]>("/academics/enrollment-overrides/mine");
+
+export const cancelOverrideRequest = (id: string) =>
+  request<{ id: string; status: string }>(
+    `/academics/enrollment-overrides/${id}/cancel`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+
+export type FacultyWaivableGate =
+  | "prerequisite"
+  | "corequisite"
+  | "capacity"
+  | "credit_cap"
+  | "major_restriction"
+  | "add_deadline";
+
+export const FACULTY_WAIVABLE_GATES: FacultyWaivableGate[] = [
+  "prerequisite",
+  "corequisite",
+  "capacity",
+  "credit_cap",
+  "major_restriction",
+  "add_deadline",
+];
+
+export interface FacultyOverrideRequest {
+  id: string;
+  status: string;
+  reason: string;
+  targetId: string | null;
+  decisionNote: string | null;
+  reviewedAt: string | null;
+  appliedAt: string | null;
+  createdAt: string;
+  requestedBy: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    student: { studentNo: string } | null;
+  } | null;
+  afterJson: {
+    sectionId: string;
+    studentId: string;
+    requestedWaivers: EnrollmentOverrideGate[];
+    failures: EnrollmentOverrideFailure[];
+  } | null;
+}
+
+export const facultyOverrideRequests = () =>
+  request<FacultyOverrideRequest[]>(
+    "/academics/enrollment-overrides/faculty",
+  );
+
+export const facultyDecideOverride = (
+  id: string,
+  body: {
+    waive: boolean;
+    waivedGates?: EnrollmentOverrideGate[];
+    note?: string;
+  },
+) =>
+  request<{ id: string; status: string; enrollmentId?: string }>(
+    `/academics/enrollment-overrides/${id}/faculty-decide`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+// --- Custom Forms (registrar + respondent) ---
+
+export interface FormListItem {
+  id: string;
+  title: string;
+  description: string | null;
+  status: "draft" | "published" | "closed";
+  requiresAuth: boolean;
+  publishedAt: string | null;
+  closesAt: string | null;
+  maxResponses: number | null;
+  responseCount: number;
+  createdAt: string;
+}
+
+export interface FormFieldDef {
+  id: string;
+  type: string;
+  label: string;
+  required: boolean;
+  sortOrder: number;
+  optionsJson: { label: string; value: string }[] | null;
+  conditionJson: unknown;
+}
+
+export interface FormSectionDef {
+  id: string;
+  title: string;
+  sortOrder: number;
+  conditionJson: unknown;
+  fields: FormFieldDef[];
+}
+
+export interface FormDetail {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  requiresAuth: boolean;
+  publishedAt: string | null;
+  closesAt: string | null;
+  maxResponses: number | null;
+  responseCount: number;
+  publicToken: string | null;
+  createdAt: string;
+  sections: FormSectionDef[];
+}
+
+export interface FormResponseRow {
+  id: string;
+  formId: string;
+  personId: string | null;
+  respondentName: string | null;
+  respondentEmail: string | null;
+  submittedAt: string;
+  updatedAt: string;
+  answers: { fieldId: string; value: unknown }[];
+}
+
+export interface FormInputSection {
+  title: string;
+  sortOrder: number;
+  conditionJson?: unknown;
+  fields: FormInputField[];
+}
+
+export interface FormInputField {
+  type: string;
+  label: string;
+  required: boolean;
+  sortOrder: number;
+  optionsJson?: { label: string; value: string }[];
+  conditionJson?: unknown;
+}
+
+export const listForms = () => request<FormListItem[]>("/forms");
+
+export const getFormDetail = (id: string) =>
+  request<FormDetail>(`/forms/${id}`);
+
+export const createForm = (body: {
+  title: string;
+  description?: string;
+  requiresAuth?: boolean;
+  closesAt?: string;
+  maxResponses?: number;
+  sections: FormInputSection[];
+}) => request<FormDetail>("/forms", { method: "POST", body: JSON.stringify(body) });
+
+export const updateForm = (
+  id: string,
+  body: {
+    title: string;
+    description?: string;
+    requiresAuth?: boolean;
+    closesAt?: string;
+    maxResponses?: number;
+    sections: FormInputSection[];
+  },
+) => request<FormDetail>(`/forms/${id}`, { method: "PUT", body: JSON.stringify(body) });
+
+export const publishForm = (id: string) =>
+  request<FormDetail>(`/forms/${id}/publish`, { method: "POST" });
+
+export const closeForm = (id: string) =>
+  request<FormDetail>(`/forms/${id}/close`, { method: "POST" });
+
+export const deleteForm = (id: string) =>
+  request<{ deleted: boolean }>(`/forms/${id}`, { method: "DELETE" });
+
+export const listFormResponses = (formId: string) =>
+  request<FormResponseRow[]>(`/forms/${formId}/responses`);
+
+export const getFormResponse = (formId: string, responseId: string) =>
+  request<FormResponseRow>(`/forms/${formId}/responses/${responseId}`);
+
+export const exportFormCsv = (formId: string) =>
+  `${API_URL}/api/forms/${formId}/export`;
+
+export const getPublicForm = (token: string) =>
+  request<FormDetail>(`/forms/public/${token}`);
+
+export const submitPublicForm = (
+  token: string,
+  body: {
+    respondentName: string;
+    respondentEmail: string;
+    answers: { fieldId: string; value: unknown }[];
+  },
+) =>
+  request<FormResponseRow>(`/forms/public/${token}/respond`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const getFormForRespondent = (formId: string) =>
+  request<{ form: FormDetail; existingResponse: FormResponseRow | null }>(
+    `/forms/${formId}/respond`,
+  );
+
+export const submitAuthForm = (
+  formId: string,
+  body: {
+    answers: { fieldId: string; value: unknown }[];
+  },
+) =>
+  request<FormResponseRow>(`/forms/${formId}/respond`, {
+    method: "POST",
+    body: JSON.stringify(body),
   });

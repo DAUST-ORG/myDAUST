@@ -134,6 +134,16 @@ const AdminStudentRosterQueryInput = z.object({
   }).default(50),
   search: z.string().trim().max(100).optional(),
   program: z.string().trim().max(20).optional(),
+  // Academic level is a derived value (see AcademicsService.adminStudentRoster). We
+  // accept it here so the API surface is uniform with the other filters; the service
+  // decides whether a request needs the derived-fetch path.
+  level: z.string().trim().max(20).optional(),
+  // Student.gender is free-text (legacy data). Case-insensitive substring match,
+  // bounded length so an attacker cannot probe arbitrary sizes.
+  gender: z.string().trim().max(40).optional(),
+  // Student.nationality is free-text country names typed by registrars. Same shape
+  // as `gender`.
+  nationality: z.string().trim().max(40).optional(),
   sort: z.enum(["name", "program", "level", "gpa", "balance", "status"]).default("name"),
   direction: z.enum(["asc", "desc"]).default("asc"),
 });
@@ -236,6 +246,9 @@ export class AcademicsController {
       ...parsed,
       search: parsed.search || undefined,
       program: parsed.program && parsed.program !== "all" ? parsed.program : undefined,
+      level: parsed.level && parsed.level !== "all" ? parsed.level : undefined,
+      gender: parsed.gender && parsed.gender !== "all" ? parsed.gender : undefined,
+      nationality: parsed.nationality && parsed.nationality !== "all" ? parsed.nationality : undefined,
     });
   }
 
@@ -305,7 +318,8 @@ export class AcademicsController {
   }
 
   @Get("admin/programs")
-  @Roles("admin", "registrar")
+  // Read-only reference data: the applicant list and modal render programme names.
+  @Roles("admin", "registrar", "admissions")
   adminPrograms() {
     return this.academics.adminPrograms();
   }
@@ -377,7 +391,8 @@ export class AcademicsController {
   }
 
   @Get("admin/applicants")
-  @Roles("admin", "registrar")
+  // The only applicant list; without admissions here the officer's home screen never loads.
+  @Roles("admin", "registrar", "admissions")
   adminApplicants() {
     return this.academics.adminApplicants();
   }

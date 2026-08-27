@@ -92,14 +92,24 @@ export class NavController {
     const roles = user.roles ?? [];
     const out: Record<string, string> = {};
 
-    if (roles.includes("admin") || roles.includes("registrar")) {
-      const [applicants, approvals] = await Promise.all([
-        this.prisma.applicant.count({
-          where: { stage: { in: OPEN_APPLICANT_STAGES } },
-        }),
-        this.prisma.gradeSubmission.count({ where: { status: "submitted" } }),
-      ]);
+    // Split rather than widened: an admissions officer gets the applicant count and must not
+    // learn the registrar's grade-approval backlog, which the combined branch would have
+    // handed over for free.
+    if (
+      roles.includes("admin") ||
+      roles.includes("registrar") ||
+      roles.includes("admissions")
+    ) {
+      const applicants = await this.prisma.applicant.count({
+        where: { stage: { in: OPEN_APPLICANT_STAGES } },
+      });
       if (applicants > 0) out.admissions = String(applicants);
+    }
+
+    if (roles.includes("admin") || roles.includes("registrar")) {
+      const approvals = await this.prisma.gradeSubmission.count({
+        where: { status: "submitted" },
+      });
       if (approvals > 0) out.approvals = String(approvals);
     }
 

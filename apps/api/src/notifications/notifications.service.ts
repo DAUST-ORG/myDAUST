@@ -5,7 +5,10 @@ export type NotificationKind =
   | "grade_posted"
   | "assignment_created"
   | "work_graded"
-  | "material_published";
+  | "material_published"
+  | "override_approved"
+  | "override_rejected"
+  | "form_response_received";
 
 interface NewNotification {
   personId: string;
