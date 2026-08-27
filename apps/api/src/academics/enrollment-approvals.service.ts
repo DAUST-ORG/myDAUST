@@ -408,6 +408,37 @@ export class EnrollmentOverrideService {
         }
       }
 
+      // Claim the pending row BEFORE anything is written. This CAS used to sit at the end
+      // of the transaction, after the capacity bump and the enrollment, so two reviewers
+      // approving the same request could each bump Section.capacity before either claimed
+      // it: capacity +2 for one seat. Claiming first also makes the losing transaction
+      // block here rather than after it has already done the work.
+      const claimed = await tx.approvalRequest.updateMany({
+        where: { id, status: "pending" },
+        data: {
+          status: "approved" satisfies ApprovalRequestStatus,
+          reviewedById: actor.personId,
+          reviewedAt: new Date(),
+          appliedAt: new Date(),
+          decisionNote: note?.trim() || null,
+        },
+      });
+      if (claimed.count === 0) {
+        const current = await tx.approvalRequest.findUnique({ where: { id } });
+        throw new BadRequestException(
+          `Request is already ${current?.status ?? "unknown"}`,
+        );
+      }
+
+      // Serialize against racing enrollments the same way enroll() does. Without this row
+      // lock two concurrent overrides read the same seat count, both pass the capacity
+      // gate, and the section is oversold -- the exact case the lock in enroll() exists
+      // to prevent.
+      const lockedSection = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT id FROM "Section" WHERE id = ${after.sectionId} FOR UPDATE`;
+      if (!lockedSection[0]) throw new NotFoundException("Section not found");
+
       const waived = new Set(waivedGates);
       const validGates = new Set(after.failures.map((f) => f.gate));
       for (const gate of waived) {
@@ -470,25 +501,6 @@ export class EnrollmentOverrideService {
           } satisfies Prisma.InputJsonValue,
         },
       });
-
-      // CAS: claim the pending row. If another transaction already approved/rejected
-      // this request, count will be 0 and we bail.
-      const claimed = await tx.approvalRequest.updateMany({
-        where: { id, status: "pending" },
-        data: {
-          status: "approved" satisfies ApprovalRequestStatus,
-          reviewedById: actor.personId,
-          reviewedAt: new Date(),
-          appliedAt: new Date(),
-          decisionNote: note?.trim() || null,
-        },
-      });
-      if (claimed.count === 0) {
-        const current = await tx.approvalRequest.findUnique({ where: { id } });
-        throw new BadRequestException(
-          `Request is already ${current?.status ?? "unknown"}`,
-        );
-      }
 
       await tx.approvalEvent.create({
         data: {
