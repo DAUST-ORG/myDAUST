@@ -1,0 +1,16 @@
+{
+  "packages": {
+    "apps/api":     { "releaseType": "node", "packageName": "@mydaust/api" },
+    "apps/portal":  { "releaseType": "node", "packageName": "@mydaust/portal" },
+    "apps/vitrine": { "releaseType": "node", "packageName": "@mydaust/vitrine" }
+  },
+  "pull-request-header-pattern": "^release:\\s*",
+  "group-pull-request-patterns": [
+    { "group": "API",     "patterns": ["feat(api):", "fix(api):", "refactor(api):"] },
+    { "group": "Portal",  "patterns": ["feat(portal):", "fix(portal):", "refactor(portal):"] },
+    { "group": "Vitrine", "patterns": ["feat(vitrine):", "fix(vitrine):", "refactor(vitrine):"] }
+  ],
+  "changelog-path": "CHANGELOG.md",
+  "versioning": "default",
+  "branches": [{ "branch": "main" }]
+}

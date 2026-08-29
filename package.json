@@ -12,6 +12,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "commit:check": "node scripts/check-commit-msg.mjs",
     "db:generate": "pnpm --filter @mydaust/db generate",
     "db:migrate": "pnpm --filter @mydaust/db migrate",
     "db:studio": "pnpm --filter @mydaust/db studio",
