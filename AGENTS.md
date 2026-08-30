@@ -474,6 +474,16 @@ run. Input files must be `chmod 600`. Logs are deliberately redacted to counts a
 Never add a write mode to `reconcile:accepted-applicants` — it is a read-only reporting CLI that
 writes its report with `{ mode: 0o600, flag: "wx" }` so it cannot overwrite a review file.
 
+
+### Per-applicant notes (admissions team)
+
+`AdmissionNote` is the free-form notes thread scoped to an applicant. Authored by admissions
+officers or admins; only admissions / admin can read or write. The author may edit or delete
+their own notes; admins may edit or delete any. Notes are hard-deleted; the audit log retains
+metadata (who, when, which applicant, body length) but not the body. Body is plain text,
+rendered inside the authenticated portal shell only — it does not flow to the public vitrine.
+Pinned notes sort above unpinned notes within an applicant. See
+`apps/api/src/admissions/applicant-notes.controller.ts` for the four endpoints.
 ---
 
 ## 9. Portal frontend

@@ -3588,6 +3588,44 @@ export const resendApplicantStudentInvite = (id: string) =>
     { method: "POST", body: "{}" },
   );
 
+// --- Per-applicant notes thread (admissions / admin only) ---
+export interface ApplicantNote {
+  id: string;
+  applicantId: string;
+  authorId: string;
+  author: { id: string; firstName: string; lastName: string };
+  kind: "general" | "financial" | "academic" | "followup";
+  body: string;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  editedAt: string | null;
+}
+export const listApplicantNotes = (applicantId: string) =>
+  request<ApplicantNote[]>(`/admissions/applicants/${applicantId}/notes`);
+export const createApplicantNote = (
+  applicantId: string,
+  input: { kind?: ApplicantNote["kind"]; body: string },
+) =>
+  request<ApplicantNote>(`/admissions/applicants/${applicantId}/notes`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export const updateApplicantNote = (
+  applicantId: string,
+  noteId: string,
+  input: { body?: string; kind?: ApplicantNote["kind"]; pinned?: boolean },
+) =>
+  request<ApplicantNote>(
+    `/admissions/applicants/${applicantId}/notes/${noteId}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+export const deleteApplicantNote = (applicantId: string, noteId: string) =>
+  request<{ deleted: string }>(
+    `/admissions/applicants/${applicantId}/notes/${noteId}`,
+    { method: "DELETE" },
+  );
+
 export interface PublicApplicationStatus {
   onboardingStatus: ApplicantOnboardingStatus;
   readOnly: boolean;

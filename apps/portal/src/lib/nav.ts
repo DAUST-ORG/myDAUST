@@ -492,6 +492,7 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     crumb: "Accounts, roles & access · Administration",
   },
   "/faculty/submissions/": { title: "Submissions", crumb: "Review & grade" },
+  "/admissions/[id]/notes": { title: "Notes", crumb: "Applicant · Admissions" },
   // student
   "/student": { title: "Dashboard", crumb: "Academic overview · {term}" },
   "/student/registration": {
