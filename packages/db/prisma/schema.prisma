@@ -458,6 +458,7 @@ model Person {
   expensesVoided             Expense[]                 @relation("ExpenseVoider")
   directorWidgetPreference   DirectorWidgetPreference?
   notifications Notification[]
+  admissionNotes AdmissionNote[] @relation("AdmissionNoteAuthor")
   createdForms                CustomForm[]
 
   @@index([status])
@@ -1167,10 +1168,33 @@ model Applicant {
   paymentSubmissions PaymentSubmission[]
   legacyCohortImport LegacyCohortImportPerson?
   createdAt          DateTime            @default(now())
+  notes              AdmissionNote[]
 
   @@index([stage])
   @@index([onboardingStatus])
   @@index([admissionAcademicYearId])
+}
+
+
+/// Per-applicant notes thread. Authored by admissions officers (or admins) and
+/// scoped to the pre-acceptance pipeline. Body is plain text, rendered only
+/// inside the authenticated portal shell. Notes are hard-deletable; the
+/// audit log retains the metadata but not the body.
+model AdmissionNote {
+  id          String    @id @default(uuid())
+  applicantId String
+  applicant   Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      Person    @relation("AdmissionNoteAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  kind        String    @default("general")
+  body        String
+  pinned      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  editedAt    DateTime?
+
+  @@index([applicantId, createdAt])
+  @@index([applicantId, pinned])
 }
 
 /// Monotonic, database-backed yearly counter for permanent Student IDs. The
