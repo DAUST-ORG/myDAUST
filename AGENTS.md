@@ -873,5 +873,5 @@ are gitignored on purpose — they contain real student PII.
   routing compatibility shim.
 
 Still unbuilt and safe to assume absent: Google Workspace OIDC (login is email + password), a
-notification model, Sentry/PostHog, a Redis/BullMQ worker tier (jobs run in-process via
+Sentry/PostHog, a Redis/BullMQ worker tier (jobs run in-process via
 `@nestjs/schedule`, so scaling out duplicates every cron), helmet, and `ARCHITECTURE.md`.

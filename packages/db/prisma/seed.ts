@@ -998,6 +998,20 @@ async function seedInfirmary() {
     ["infirmary:working_hours_end", "17:00"],
   ];
 
+  // Phase-0 notification infra defaults. notifications.emailEnabled is off so a fresh
+ // seed never accidentally mails anything; infirmary.emergencyRecipients starts empty
+ // until the infirmary branch wires a real paging list.
+ await prisma.appSetting.upsert({
+   where: { key: "notifications.emailEnabled" },
+   update: { valueJson: false },
+   create: { key: "notifications.emailEnabled", valueJson: false },
+ });
+ await prisma.appSetting.upsert({
+   where: { key: "infirmary.emergencyRecipients" },
+   update: { valueJson: [] },
+   create: { key: "infirmary.emergencyRecipients", valueJson: [] },
+ });
+
   for (const [key, value] of settingsData) {
     await prisma.appSetting.upsert({
       where: { key },

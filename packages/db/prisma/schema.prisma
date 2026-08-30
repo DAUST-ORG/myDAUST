@@ -2479,17 +2479,38 @@ model Notification {
   id        String    @id @default(uuid())
   personId  String
   person    Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
-  /// Coarse event type: grade_posted | assignment_created | work_graded | material_published
+  /// Coarse event type: grade_posted | assignment_created | work_graded | material_published |
+  /// infirmary_visit_logged | infirmary_emergency_flagged | helpdesk_ticket_created |
+  /// helpdesk_ticket_updated | applicant_note_added. New kinds are additive; existing readers
+  /// tolerate unknown kinds (the title drives display).
   kind      String
   title     String
   body      String?
   /// Where clicking it should land the reader.
   href      String?
   readAt    DateTime?
+  /// Mail delivery outcome. Default `not_attempted` keeps the existing rows consistent;
+  /// `deferred` rows are candidates for a future retry cron. `emailStatus` is updated only by
+  /// the mail-delivery seam; emitting a notification leaves it `not_attempted` until the
+  /// recipient actually gets the email.
+  emailStatus      NotificationEmailStatus @default(not_attempted)
+  emailAttemptedAt DateTime?
+  emailError       String?
   createdAt DateTime  @default(now())
 
   @@index([personId, readAt])
   @@index([personId, createdAt])
+  @@index([emailStatus])
+}
+
+/// Outcome of attempting to deliver a notification by mail. Default `not_attempted` means
+/// the in-app row was written but no mail was sent (recipient opted out of mail, or the
+/// feature flag is off). `deferred` rows are candidates for a future retry cron.
+enum NotificationEmailStatus {
+  not_attempted
+  sent
+  deferred
+  failed
 }
 
 enum CourseEvaluationKind {
