@@ -14,6 +14,7 @@ import {
   CheckCheck,
   ClipboardCheck,
   ClipboardList,
+  Flag,
   FileText,
   FolderOpen,
   GitBranch,
@@ -408,6 +409,7 @@ export const INFIRMARY_NAV: PortalNav = {
       { href: "/infirmary/students", label: "Students", icon: Users },
       { href: "/infirmary/follow-ups", label: "Follow-ups", icon: ClipboardList },
       { href: "/infirmary/documents", label: "Documents", icon: FileText },
+      { href: "/infirmary/consultations/flagged", label: "Flagged today", icon: Flag },
     ]),
     g("Administration", [
       { href: "/infirmary/forms", label: "Forms", icon: ClipboardList },
@@ -742,6 +744,7 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Settings",
     crumb: "Clinic configuration · Infirmary",
   },
+  "/infirmary/consultations/flagged": { title: "Flagged today", crumb: "Sick-flagged visits · Infirmary" },
 };
 
 /**

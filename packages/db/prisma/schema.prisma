@@ -439,6 +439,8 @@ model Person {
   academicCatalogsCreated    AcademicCatalogRevision[] @relation("AcademicCatalogCreator")
   academicCatalogsApproved   AcademicCatalogRevision[] @relation("AcademicCatalogApprover")
   infirmaryConsultations     Consultation[]            @relation("ConsultationClinician")
+  infirmaryConsultationsFlagged Consultation[]            @relation("ConsultationSickFlagger")
+  attendanceNotedBy        AttendanceRecord[]              @relation("AttendanceNotedBy")
   infirmaryPrescriptions     Prescription[]            @relation("PrescriptionAuthor")
   infirmaryDocuments         InfirmaryDocument[]       @relation("DocumentUploader")
   standingOverridesCreated   StudentStandingOverride[] @relation("StandingOverrideCreator")
@@ -1313,9 +1315,18 @@ model AttendanceRecord {
   date         DateTime // class day (date only)
   status       AttendanceStatus @default(present)
   createdAt    DateTime         @default(now())
+  /// Free-form reason, narrowed by CHECK to: null | "sick" | "infirmary_emergency" | "admin_override".
+  /// Pinned by a CHECK constraint in the migration; out-of-set inserts fail.
+  reason    String?
+  /// Who wrote this row. CHECK-pinned to: faculty | infirmary | admin. Defaults to
+  /// `faculty` so existing rows are unaffected.
+  source    String    @default("faculty")
+  notedById String?
+  notedBy   Person?   @relation("AttendanceNotedBy", fields: [notedById], references: [id], onDelete: SetNull)
 
   @@unique([enrollmentId, date])
   @@index([sectionId, date])
+  @@index([source, date])
 }
 
 // Coursework: an Assignment belongs to a Section; a Submission is the Enrollment<->Assignment join
@@ -2594,12 +2605,21 @@ model Consultation {
   followUpRequired Boolean @default(false)
   visitedAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  /// Sick flag: when set, today's AttendanceRecord rows for the student are written
+  /// as `absent` with `reason = sick | infirmary_emergency`, faculty-of-today and the
+  /// admin role receive a notification, and (if `isEmergency`) the
+  /// `infirmary.emergencyRecipients` AppSetting list is paged as well.
+  sickFlagged       Boolean   @default(false)
+  sickFlaggedAt     DateTime?
+  sickFlaggedById   String?
+  sickFlaggedBy     Person?   @relation("ConsultationSickFlagger", fields: [sickFlaggedById], references: [id], onDelete: SetNull)
 
   prescriptions Prescription[]
 
   @@index([studentId])
   @@index([visitedAt])
   @@index([clinicianId])
+  @@index([sickFlagged])
 }
 
 model Prescription {
