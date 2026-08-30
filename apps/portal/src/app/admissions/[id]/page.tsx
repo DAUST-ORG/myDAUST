@@ -18,6 +18,7 @@ import {
   MapPin,
   Pencil,
   RefreshCw,
+  StickyNote,
   Target,
   UserCheck,
   X,
@@ -229,6 +230,23 @@ export default function ApplicantDetailPage() {
           }}
         >
           <ArrowLeft size={16} /> All applicants
+        </Link>
+        <Link
+          href={`/admissions/${a.id}/notes`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "7px 12px",
+            borderRadius: 8,
+            border: "1px solid var(--border)",
+            background: "var(--surface)",
+            color: "var(--fg1)",
+            fontSize: 13.5,
+            fontWeight: 600,
+          }}
+        >
+          <StickyNote size={15} /> Notes
         </Link>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {(!a.onboarding || a.onboarding.status === "not_started") && (

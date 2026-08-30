@@ -14,6 +14,8 @@ import {
   CheckCheck,
   ClipboardCheck,
   ClipboardList,
+  Flag,
+  FileText,
   FolderOpen,
   GitBranch,
   GraduationCap,
@@ -28,13 +30,17 @@ import {
   MessageSquare,
   Network,
   Newspaper,
+  Pill,
+  Radio,
   Receipt,
   Rocket,
   Scale,
   Settings,
-  Radio,
+  ShieldAlert,
   ScanLine,
+  ShieldCheck,
   ShoppingBag,
+  Stethoscope,
   Table2,
   Target,
   UserPlus,
@@ -95,6 +101,8 @@ export const STUDENT_NAV: PortalNav = {
         icon: ClipboardList,
         badgeKey: "register",
       },
+      { href: "/student/overrides", label: "Overrides", icon: ShieldAlert },
+
       { href: "/student/courses", label: "My Courses", icon: BookOpen },
       { href: "/student/assignments", label: "Assignments", icon: ListChecks },
       { href: "/student/schedule", label: "Schedule", icon: CalendarDays },
@@ -175,6 +183,12 @@ export const FACULTY_NAV: PortalNav = {
         icon: FolderOpen,
       },
       {
+        href: "/faculty/overrides",
+        label: "Override Requests",
+        icon: ShieldAlert,
+        badgeKey: "approvalRequests",
+      },
+      {
         href: "/faculty/messages",
         label: "Messages",
         icon: Mail,
@@ -253,6 +267,9 @@ export const REGISTRAR_NAV: PortalNav = {
     ]),
     g("Communication", [
       { href: "/admin/messages", label: "Messages", icon: Mail },
+    ]),
+    g("Custom Forms", [
+      { href: "/admin/forms", label: "Forms", icon: FileText },
     ]),
   ],
 };
@@ -341,8 +358,14 @@ export const COMMS_NAV: PortalNav = {
 
 /**
  * IT administration. it_admin owns directory administration and nothing else today, so this
- * area is deliberately one entry rather than a copy of the registrar sidebar -- which is
+ * area is deliberately a single entry rather than a copy of the registrar sidebar -- which is
  * where the role used to be pointed, and which it cannot actually load.
+ *
+ * The Backlog entry points at the GitHub Issues integration (see
+ * docs/specs/phase-0-it-issues.md). It is reachable by any authenticated session;
+ * the portal shell renders the IT sidebar for it_admin / admin, and the page itself
+ * is a static link-out. See AGENTS.md §12 for the routing context that keeps
+ * it_admin from falling back to the student portal.
  */
 export const IT_NAV: PortalNav = {
   label: "IT Administration",
@@ -350,6 +373,9 @@ export const IT_NAV: PortalNav = {
   groups: [
     g("Administration", [
       { href: "/director/users", label: "Users", icon: Users },
+    ]),
+    g("Backlog", [
+      { href: "/it/backlog", label: "IT backlog", icon: ClipboardList },
     ]),
   ],
 };
@@ -370,6 +396,34 @@ export const ADMISSIONS_NAV: PortalNav = {
         icon: UserPlus,
         badgeKey: "admissions",
       },
+      ]),
+    ],
+};
+
+
+export const INFIRMARY_NAV: PortalNav = {
+  label: "Health Center",
+  meta: "Infirmary · Staff",
+  groups: [
+    g("Overview", [
+      { href: "/infirmary", label: "Dashboard", icon: LayoutDashboard },
+    ]),
+    g("Clinical", [
+      { href: "/infirmary/consultations", label: "Consultations", icon: Stethoscope },
+      { href: "/infirmary/prescriptions", label: "Prescriptions", icon: Pill },
+      { href: "/infirmary/medications", label: "Medications", icon: Pill },
+      { href: "/infirmary/appointments", label: "Appointments", icon: CalendarDays },
+    ]),
+    g("Records", [
+      { href: "/infirmary/students", label: "Students", icon: Users },
+      { href: "/infirmary/follow-ups", label: "Follow-ups", icon: ClipboardList },
+      { href: "/infirmary/documents", label: "Documents", icon: FileText },
+      { href: "/infirmary/consultations/flagged", label: "Flagged today", icon: Flag },
+    ]),
+    g("Administration", [
+      { href: "/infirmary/forms", label: "Forms", icon: ClipboardList },
+      { href: "/infirmary/analytics", label: "Analytics", icon: ChartNoAxesCombined },
+      { href: "/infirmary/settings", label: "Settings", icon: Settings },
     ]),
   ],
 };
@@ -413,6 +467,7 @@ export const PORTALS = {
   it: IT_NAV,
   admissions: ADMISSIONS_NAV,
   dining: DINING_NAV,
+  infirmary: INFIRMARY_NAV,
 } as const;
 export type PortalKey = keyof typeof PORTALS;
 
@@ -448,11 +503,17 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     crumb: "Accounts, roles & access · Administration",
   },
   "/faculty/submissions/": { title: "Submissions", crumb: "Review & grade" },
+  "/admissions/[id]/notes": { title: "Notes", crumb: "Applicant · Admissions" },
   // student
+  "/it/backlog": { title: "IT backlog", crumb: "Issues & requests · IT" },
   "/student": { title: "Dashboard", crumb: "Academic overview · {term}" },
   "/student/registration": {
     title: "Course Registration",
     crumb: "{term} · Add / drop",
+  },
+  "/student/overrides": {
+    title: "Enrollment overrides",
+    crumb: "Submitted override requests",
   },
   "/student/courses": { title: "My Courses", crumb: "{term} & past terms" },
   "/student/schedule": { title: "Weekly Schedule", crumb: "{term}" },
@@ -536,6 +597,14 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Messages",
     crumb: "Broadcast & direct messaging · Administration",
   },
+  "/admin/forms": {
+    title: "Custom Forms",
+    crumb: "Custom forms · Administration",
+  },
+  "/admin/forms/new": {
+    title: "New Form",
+    crumb: "Create form · Custom Forms",
+  },
   // finance
   "/finance": {
     title: "Dashboard",
@@ -604,6 +673,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Course Materials",
     crumb: "Upload course documents",
   },
+  "/faculty/overrides": {
+    title: "Override Requests",
+    crumb: "Student enrollment override requests",
+  },
   "/faculty/messages": { title: "Messages", crumb: "Message students" },
   // parent
   "/parent": { title: "Dashboard", crumb: "Academic overview · {term}" },
@@ -637,6 +710,52 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/dining/finances": { title: "Finances", crumb: "Cost center 3600 · Dining" },
   "/dining/reports": { title: "Reports", crumb: "Service trends · Dining" },
   "/dining/settings": { title: "Settings", crumb: "Service rules · Dining" },
+  // infirmary
+  "/infirmary": {
+    title: "Dashboard",
+    crumb: "Health center overview",
+  },
+  "/infirmary/consultations": {
+    title: "Consultations",
+    crumb: "Clinical visits · Infirmary",
+  },
+  "/infirmary/prescriptions": {
+    title: "Prescriptions",
+    crumb: "Medication orders · Infirmary",
+  },
+  "/infirmary/medications": {
+    title: "Medications",
+    crumb: "Inventory management · Infirmary",
+  },
+  "/infirmary/appointments": {
+    title: "Appointments",
+    crumb: "Scheduled visits · Infirmary",
+  },
+  "/infirmary/students": {
+    title: "Students",
+    crumb: "Student health records · Infirmary",
+  },
+  "/infirmary/follow-ups": {
+    title: "Follow-ups",
+    crumb: "Pending follow-up tasks · Infirmary",
+  },
+  "/infirmary/documents": {
+    title: "Documents",
+    crumb: "Medical documents · Infirmary",
+  },
+  "/infirmary/forms": {
+    title: "Forms",
+    crumb: "Health forms & questionnaires · Infirmary",
+  },
+  "/infirmary/analytics": {
+    title: "Analytics",
+    crumb: "Health center metrics · Infirmary",
+  },
+  "/infirmary/settings": {
+    title: "Settings",
+    crumb: "Clinic configuration · Infirmary",
+  },
+  "/infirmary/consultations/flagged": { title: "Flagged today", crumb: "Sick-flagged visits · Infirmary" },
 };
 
 /**
@@ -653,6 +772,7 @@ export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
     { role: "faculty", portal: "faculty", home: "/faculty" },
     { role: "communications", portal: "comms", home: "/comms" },
     { role: "it_admin", portal: "it", home: "/director/users" },
+    { role: "infirmary", portal: "infirmary", home: "/infirmary" },
     { role: "student", portal: "student", home: "/student" },
     { role: "parent", portal: "parent", home: "/parent" },
   ];

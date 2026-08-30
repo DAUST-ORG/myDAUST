@@ -474,6 +474,16 @@ run. Input files must be `chmod 600`. Logs are deliberately redacted to counts a
 Never add a write mode to `reconcile:accepted-applicants` — it is a read-only reporting CLI that
 writes its report with `{ mode: 0o600, flag: "wx" }` so it cannot overwrite a review file.
 
+
+### Per-applicant notes (admissions team)
+
+`AdmissionNote` is the free-form notes thread scoped to an applicant. Authored by admissions
+officers or admins; only admissions / admin can read or write. The author may edit or delete
+their own notes; admins may edit or delete any. Notes are hard-deleted; the audit log retains
+metadata (who, when, which applicant, body length) but not the body. Body is plain text,
+rendered inside the authenticated portal shell only — it does not flow to the public vitrine.
+Pinned notes sort above unpinned notes within an applicant. See
+`apps/api/src/admissions/applicant-notes.controller.ts` for the four endpoints.
 ---
 
 ## 9. Portal frontend
@@ -653,6 +663,36 @@ the university's account, and there is no payout capability to expose.
 
 `dayOnly()` is the Dakar calendar date at midnight UTC — the third component of
 `DiningScan @@unique([studentId, period, date])`, i.e. the double-serve guard.
+
+## 11c. Infirmary sickness flow
+
+Flagging a `Consultation` as sick writes today's `AttendanceRecord` rows for the student
+as `status: absent, reason: sick | infirmary_emergency, source: infirmary`. The sick flag
+overrides any prior faculty-recorded attendance for the same day — that is the user's
+intent ("faculty or student affairs can put down his absense as sick"). Recipients of the
+resulting notification are:
+
+- **Faculty-of-today:** every distinct `enrollment.section.instructorId` for the student
+  where the section's term includes today.
+- **Admin role:** every `Person` with `roles` containing `admin`.
+- **Emergency paging list:** only when `isEmergency = true`, parsed from
+  `AppSetting["infirmary.emergencyRecipients"]` (a JSON array of personIds). Missing or
+  malformed value is treated as an empty list and never throws.
+
+The default role for `student_affairs` is fulfilled by `admin` in v1 because there is no
+`student_affairs` role in `packages/shared/src/roles.ts`. The paging key (`notifications.emailEnabled`)
+is read from the same `AppSetting` namespace introduced by the notifications infra branch;
+a fresh seed sets it to `false` so a missing setting never pages anyone by accident.
+
+`Consultation.sickFlagged` is a snapshot of whether the visit was sick-flagged today.
+Clearing a flag (admin only) deletes only the infirmary-source `AttendanceRecord` rows
+that flag created, and emits a follow-up notification. Cleared flags from prior days are
+read-only — clearing them does not retroactively rewrite historical attendance.
+
+See `apps/api/src/infirmary/sickness-flag.service.ts` and
+`apps/api/src/infirmary/sickness-flag.controller.ts`. Audit invariants: every flag and
+every clear writes an `AuditLog` row inside the transaction with
+`action = flag_sick | flag_sick_cleared`.
 
 ---
 
@@ -873,5 +913,5 @@ are gitignored on purpose — they contain real student PII.
   routing compatibility shim.
 
 Still unbuilt and safe to assume absent: Google Workspace OIDC (login is email + password), a
-notification model, Sentry/PostHog, a Redis/BullMQ worker tier (jobs run in-process via
+Sentry/PostHog, a Redis/BullMQ worker tier (jobs run in-process via
 `@nestjs/schedule`, so scaling out duplicates every cron), helmet, and `ARCHITECTURE.md`.

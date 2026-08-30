@@ -130,6 +130,7 @@ enum ApprovalRequestKind {
   scholarship
   operating_budget
   management_actual
+  student_enrollment_override
 }
 
 enum OperatingBudgetStatus {
@@ -437,6 +438,11 @@ model Person {
   feeSchedulesApproved       FeeSchedule[]             @relation("FeeScheduleApprover")
   academicCatalogsCreated    AcademicCatalogRevision[] @relation("AcademicCatalogCreator")
   academicCatalogsApproved   AcademicCatalogRevision[] @relation("AcademicCatalogApprover")
+  infirmaryConsultations     Consultation[]            @relation("ConsultationClinician")
+  infirmaryConsultationsFlagged Consultation[]            @relation("ConsultationSickFlagger")
+  attendanceNotedBy        AttendanceRecord[]              @relation("AttendanceNotedBy")
+  infirmaryPrescriptions     Prescription[]            @relation("PrescriptionAuthor")
+  infirmaryDocuments         InfirmaryDocument[]       @relation("DocumentUploader")
   standingOverridesCreated   StudentStandingOverride[] @relation("StandingOverrideCreator")
   standingOverridesUpdated   StudentStandingOverride[] @relation("StandingOverrideUpdater")
   standingOverridesCleared   StudentStandingOverride[] @relation("StandingOverrideClearer")
@@ -452,6 +458,8 @@ model Person {
   expensesVoided             Expense[]                 @relation("ExpenseVoider")
   directorWidgetPreference   DirectorWidgetPreference?
   notifications Notification[]
+  admissionNotes AdmissionNote[] @relation("AdmissionNoteAuthor")
+  createdForms                CustomForm[]
 
   @@index([status])
 }
@@ -527,6 +535,12 @@ model Student {
   housing              HousingAssignment?
   roommateProfile      RoommateProfile?
   documents            StudentDocument[]
+  infirmaryConsultations Consultation[]
+  infirmaryPrescriptions Prescription[]
+  infirmaryAppointments InfirmaryAppointment[]
+  infirmaryDocuments    InfirmaryDocument[]
+  infirmaryFollowUps    FollowUp[]
+  infirmaryFormResponses InfirmaryFormResponse[]
   createdAt            DateTime                  @default(now())
 
   @@index([recordStatus])
@@ -1154,10 +1168,33 @@ model Applicant {
   paymentSubmissions PaymentSubmission[]
   legacyCohortImport LegacyCohortImportPerson?
   createdAt          DateTime            @default(now())
+  notes              AdmissionNote[]
 
   @@index([stage])
   @@index([onboardingStatus])
   @@index([admissionAcademicYearId])
+}
+
+
+/// Per-applicant notes thread. Authored by admissions officers (or admins) and
+/// scoped to the pre-acceptance pipeline. Body is plain text, rendered only
+/// inside the authenticated portal shell. Notes are hard-deletable; the
+/// audit log retains the metadata but not the body.
+model AdmissionNote {
+  id          String    @id @default(uuid())
+  applicantId String
+  applicant   Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      Person    @relation("AdmissionNoteAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  kind        String    @default("general")
+  body        String
+  pinned      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  editedAt    DateTime?
+
+  @@index([applicantId, createdAt])
+  @@index([applicantId, pinned])
 }
 
 /// Monotonic, database-backed yearly counter for permanent Student IDs. The
@@ -1302,9 +1339,18 @@ model AttendanceRecord {
   date         DateTime // class day (date only)
   status       AttendanceStatus @default(present)
   createdAt    DateTime         @default(now())
+  /// Free-form reason, narrowed by CHECK to: null | "sick" | "infirmary_emergency" | "admin_override".
+  /// Pinned by a CHECK constraint in the migration; out-of-set inserts fail.
+  reason    String?
+  /// Who wrote this row. CHECK-pinned to: faculty | infirmary | admin. Defaults to
+  /// `faculty` so existing rows are unaffected.
+  source    String    @default("faculty")
+  notedById String?
+  notedBy   Person?   @relation("AttendanceNotedBy", fields: [notedById], references: [id], onDelete: SetNull)
 
   @@unique([enrollmentId, date])
   @@index([sectionId, date])
+  @@index([source, date])
 }
 
 // Coursework: an Assignment belongs to a Section; a Submission is the Enrollment<->Assignment join
@@ -2468,17 +2514,38 @@ model Notification {
   id        String    @id @default(uuid())
   personId  String
   person    Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
-  /// Coarse event type: grade_posted | assignment_created | work_graded | material_published
+  /// Coarse event type: grade_posted | assignment_created | work_graded | material_published |
+  /// infirmary_visit_logged | infirmary_emergency_flagged | helpdesk_ticket_created |
+  /// helpdesk_ticket_updated | applicant_note_added. New kinds are additive; existing readers
+  /// tolerate unknown kinds (the title drives display).
   kind      String
   title     String
   body      String?
   /// Where clicking it should land the reader.
   href      String?
   readAt    DateTime?
+  /// Mail delivery outcome. Default `not_attempted` keeps the existing rows consistent;
+  /// `deferred` rows are candidates for a future retry cron. `emailStatus` is updated only by
+  /// the mail-delivery seam; emitting a notification leaves it `not_attempted` until the
+  /// recipient actually gets the email.
+  emailStatus      NotificationEmailStatus @default(not_attempted)
+  emailAttemptedAt DateTime?
+  emailError       String?
   createdAt DateTime  @default(now())
 
   @@index([personId, readAt])
   @@index([personId, createdAt])
+  @@index([emailStatus])
+}
+
+/// Outcome of attempting to deliver a notification by mail. Default `not_attempted` means
+/// the in-app row was written but no mail was sent (recipient opted out of mail, or the
+/// feature flag is off). `deferred` rows are candidates for a future retry cron.
+enum NotificationEmailStatus {
+  not_attempted
+  sent
+  deferred
+  failed
 }
 
 enum CourseEvaluationKind {
@@ -2563,4 +2630,261 @@ model CourseEvaluationReceipt {
   submittedAt  DateTime               @default(now())
 
   @@unique([windowId, enrollmentId])
+}
+
+// ─── Infirmary ──────────────────────────────────────────────────────────────
+
+model Consultation {
+  id              String   @id @default(uuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  clinicianId     String?
+  clinician       Person?  @relation("ConsultationClinician", fields: [clinicianId], references: [id], onDelete: SetNull)
+  reason          String
+  visitType       String
+  clinicalNotes   String   @default("")
+  status          String   @default("Completed")
+  vitalsJson      Json?
+  diagnosis       String?
+  treatmentPlan   String?
+  followUpRequired Boolean @default(false)
+  visitedAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  /// Sick flag: when set, today's AttendanceRecord rows for the student are written
+  /// as `absent` with `reason = sick | infirmary_emergency`, faculty-of-today and the
+  /// admin role receive a notification, and (if `isEmergency`) the
+  /// `infirmary.emergencyRecipients` AppSetting list is paged as well.
+  sickFlagged       Boolean   @default(false)
+  sickFlaggedAt     DateTime?
+  sickFlaggedById   String?
+  sickFlaggedBy     Person?   @relation("ConsultationSickFlagger", fields: [sickFlaggedById], references: [id], onDelete: SetNull)
+
+  prescriptions Prescription[]
+
+  @@index([studentId])
+  @@index([visitedAt])
+  @@index([clinicianId])
+  @@index([sickFlagged])
+}
+
+model Prescription {
+  id              String   @id @default(uuid())
+  consultationId  String?
+  consultation    Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  authorId        String?
+  author          Person?  @relation("PrescriptionAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  medication      String
+  dosage          String
+  frequency       String
+  duration        String
+  instructions    String   @default("")
+  status          String   @default("Active")
+  prescribedAt    DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([prescribedAt])
+  @@index([consultationId])
+  @@index([authorId])
+}
+
+model Medication {
+  id            String   @id @default(uuid())
+  name          String
+  category      String   @default("General")
+  stock         Int      @default(0)
+  unit          String   @default("tablets")
+  minStock      Int      @default(10)
+  expiryDate    DateTime
+  supplier      String   @default("")
+  lastRestocked DateTime @default(now())
+  status        String   @default("In Stock")
+  updatedAt     DateTime @updatedAt
+
+  @@index([name])
+  @@index([status])
+}
+
+model InfirmaryAppointment {
+  id          String   @id @default(uuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  time        String
+  type        String
+  reason      String
+  status      String   @default("Scheduled")
+  notes       String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([date])
+  @@index([status])
+}
+
+model InfirmaryDocument {
+  id           String   @id @default(uuid())
+  studentId    String
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  uploaderId   String?
+  uploader     Person?  @relation("DocumentUploader", fields: [uploaderId], references: [id], onDelete: SetNull)
+  name         String
+  type         String   @default("Other")
+  notes        String   @default("")
+  url          String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([uploaderId])
+}
+
+model FollowUp {
+  id          String   @id @default(uuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  reason      String
+  dueDate     DateTime @db.Date
+  status      String   @default("Pending")
+  priority    String   @default("Medium")
+  notes       String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model InfirmaryForm {
+  id          String   @id @default(uuid())
+  name        String
+  description String   @default("")
+  questions   Json     @default("[]")
+  status      String   @default("Draft")
+  shareLink   String?
+  updatedAt   DateTime @updatedAt
+
+  responses InfirmaryFormResponse[]
+
+  @@index([status])
+}
+
+model InfirmaryFormResponse {
+  id           String   @id @default(uuid())
+  formId       String
+  form         InfirmaryForm @relation(fields: [formId], references: [id], onDelete: Restrict)
+  studentId    String
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentName  String
+  answers      Json     @default("{}")
+  submittedAt  DateTime @default(now())
+
+  @@index([formId])
+  @@index([studentId])
+}
+
+// ─── Custom Forms ─────────────────────────────────────────────────────────────
+
+enum CustomFormStatus {
+  draft
+  published
+  closed
+}
+
+enum FormFieldType {
+  text
+  textarea
+  select
+  checkbox
+  date
+}
+
+model CustomForm {
+  id            String           @id @default(uuid())
+  title         String
+  description   String?
+  createdById   String
+  createdBy     Person           @relation(fields: [createdById], references: [id])
+  status        CustomFormStatus @default(draft)
+  requiresAuth  Boolean          @default(true)
+  publishedAt   DateTime?
+  closesAt      DateTime?
+  maxResponses  Int?
+  responseCount Int              @default(0)
+  publicToken   String?          @unique
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  sections  FormSection[]
+  responses FormResponse[]
+
+  @@index([status])
+  @@index([createdById])
+}
+
+model FormSection {
+  id            String    @id @default(uuid())
+  formId        String
+  title         String
+  sortOrder     Int       @default(0)
+  conditionJson Json?
+  createdAt     DateTime  @default(now())
+
+  form   CustomForm    @relation(fields: [formId], references: [id])
+  fields FormField[]
+
+  @@index([formId, sortOrder])
+}
+
+model FormField {
+  id            String        @id @default(uuid())
+  sectionId     String
+  type          FormFieldType
+  label         String
+  required      Boolean       @default(false)
+  sortOrder     Int           @default(0)
+  optionsJson   Json?
+  conditionJson Json?
+  createdAt     DateTime      @default(now())
+
+  section FormSection          @relation(fields: [sectionId], references: [id])
+  answers FormResponseAnswer[]
+
+  @@index([sectionId, sortOrder])
+}
+
+model FormResponse {
+  id              String   @id @default(uuid())
+  formId          String
+  personId        String?
+  respondentName  String?
+  respondentEmail String?
+  submittedAt     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  form    CustomForm          @relation(fields: [formId], references: [id])
+  answers FormResponseAnswer[]
+
+  @@unique([formId, personId])
+  @@index([formId])
+  @@index([personId])
+}
+
+model FormResponseAnswer {
+  id         String   @id @default(uuid())
+  responseId String
+  fieldId    String
+  value      Json
+  createdAt  DateTime @default(now())
+
+  response FormResponse @relation(fields: [responseId], references: [id])
+  field    FormField    @relation(fields: [fieldId], references: [id])
+
+  @@unique([responseId, fieldId])
+  @@index([responseId])
+  @@index([fieldId])
 }

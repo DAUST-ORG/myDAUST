@@ -1,0 +1,54 @@
+name: IT Bug Report
+description: Report an IT issue affecting the SIS, portal, or related systems.
+title: "[IT Bug] "
+labels: ["it-bug"]
+assignees: []
+body:
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-sentence description of the bug.
+      placeholder: "The student billing page shows a 500 error when opening an invoice."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Ordered steps to reproduce the bug.
+      placeholder: |
+        1. Log in as a bursar.
+        2. Open a student's billing page.
+        3. Click on the first invoice.
+    validations:
+      required: true
+  - type: input
+    id: expected
+    attributes:
+      label: Expected Behaviour
+      placeholder: The invoice detail page loads with line items.
+    validations:
+      required: true
+  - type: input
+    id: actual
+    attributes:
+      label: Actual Behaviour
+      placeholder: The page returns 500 and shows a generic error.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser, OS, role, student or staff.
+      placeholder: "Chrome 120 on macOS, bursar session, prod."
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional Notes
+      description: Screenshots, links to logs, anything else.
+    validations:
+      required: false

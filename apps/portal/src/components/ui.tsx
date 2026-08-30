@@ -213,19 +213,26 @@ export function Select({
   options,
   style,
   ariaLabel,
+  disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: (SelectOption | string)[];
   style?: React.CSSProperties;
   ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <select
       aria-label={ariaLabel}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      style={style}
+      disabled={disabled}
+      style={{
+        ...style,
+        opacity: disabled ? 0.6 : 1,
+        cursor: disabled ? "not-allowed" : "inherit",
+      }}
     >
       {options.map((o) => {
         const opt = typeof o === "string" ? { value: o, label: o } : o;
@@ -901,6 +908,48 @@ export function Input({
         fontFamily: "var(--font-body)",
         textAlign: align,
         outline: "none",
+      }}
+    />
+  );
+}
+
+// ---------- Textarea ----------
+export function Textarea({
+  value,
+  onChange,
+  placeholder,
+  disabled,
+  invalid,
+  rows = 3,
+  width,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  invalid?: boolean;
+  rows?: number;
+  width?: number | string;
+}) {
+  return (
+    <textarea
+      value={value}
+      rows={rows}
+      disabled={disabled}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        width: width ?? "100%",
+        padding: "9px 12px",
+        borderRadius: "var(--radius-md)",
+        border: `1px solid ${invalid ? "var(--error-500)" : "var(--border)"}`,
+        background: disabled ? "var(--surface-2)" : "var(--surface)",
+        color: "var(--fg1)",
+        fontSize: 13.5,
+        fontFamily: "var(--font-body)",
+        outline: "none",
+        resize: "vertical",
+        minHeight: 80,
       }}
     />
   );
