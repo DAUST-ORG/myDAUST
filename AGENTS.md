@@ -654,6 +654,36 @@ the university's account, and there is no payout capability to expose.
 `dayOnly()` is the Dakar calendar date at midnight UTC — the third component of
 `DiningScan @@unique([studentId, period, date])`, i.e. the double-serve guard.
 
+## 11c. Infirmary sickness flow
+
+Flagging a `Consultation` as sick writes today's `AttendanceRecord` rows for the student
+as `status: absent, reason: sick | infirmary_emergency, source: infirmary`. The sick flag
+overrides any prior faculty-recorded attendance for the same day — that is the user's
+intent ("faculty or student affairs can put down his absense as sick"). Recipients of the
+resulting notification are:
+
+- **Faculty-of-today:** every distinct `enrollment.section.instructorId` for the student
+  where the section's term includes today.
+- **Admin role:** every `Person` with `roles` containing `admin`.
+- **Emergency paging list:** only when `isEmergency = true`, parsed from
+  `AppSetting["infirmary.emergencyRecipients"]` (a JSON array of personIds). Missing or
+  malformed value is treated as an empty list and never throws.
+
+The default role for `student_affairs` is fulfilled by `admin` in v1 because there is no
+`student_affairs` role in `packages/shared/src/roles.ts`. The paging key (`notifications.emailEnabled`)
+is read from the same `AppSetting` namespace introduced by the notifications infra branch;
+a fresh seed sets it to `false` so a missing setting never pages anyone by accident.
+
+`Consultation.sickFlagged` is a snapshot of whether the visit was sick-flagged today.
+Clearing a flag (admin only) deletes only the infirmary-source `AttendanceRecord` rows
+that flag created, and emits a follow-up notification. Cleared flags from prior days are
+read-only — clearing them does not retroactively rewrite historical attendance.
+
+See `apps/api/src/infirmary/sickness-flag.service.ts` and
+`apps/api/src/infirmary/sickness-flag.controller.ts`. Audit invariants: every flag and
+every clear writes an `AuditLog` row inside the transaction with
+`action = flag_sick | flag_sick_cleared`.
+
 ---
 
 ## 12. Known defects (verified 2026-08-18)

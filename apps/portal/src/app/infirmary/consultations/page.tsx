@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { Plus, Pencil, Trash2, Eye, Thermometer, Heart, Activity, Weight } from "lucide-react";
+import { Plus, Pencil, Trash2, Eye, Thermometer, Heart, Activity, Weight, Flag, AlertTriangle } from "lucide-react";
 import type { Consultation } from "../types";
 import { useInfirmaryStore } from "../store";
 import { Card, SearchInput, Badge, Modal } from "@/components/ui";
+import { flagInfirmaryConsultationSick } from "@/lib/api";
 type VitalKey = keyof NonNullable<Consultation["vitals"]>;
 
 const VISIT_TYPES = ["Routine", "Follow-up", "Walk-in", "Emergency"];
@@ -178,6 +179,23 @@ export default function ConsultationsPage() {
       alert(e?.message ?? "Failed to save");
     }
   }
+  async function flagSick(c: Consultation, isEmergency: boolean) {
+    const verb = isEmergency ? "EMERGENCY flag" : "sick flag";
+    const prompt =
+      `Mark ${c.studentName}'s consultation as ${verb}?\n\n` +
+      (isEmergency
+        ? "Faculty-of-today, the admin role, and the emergency paging list will be notified."
+        : "Faculty-of-today and the admin role will be notified, and today's attendance will be marked absent.");
+    if (!window.confirm(prompt)) return;
+    try {
+      await flagInfirmaryConsultationSick(c.id, { isEmergency });
+      alert(isEmergency ? "Emergency flag set." : "Sick flag set.");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      alert(message || "Could not flag consultation");
+    }
+  }
+
 
   function pickStudent(id: string, name: string) {
     setForm((f) => ({ ...f, studentId: id, studentName: name }));
@@ -264,6 +282,12 @@ export default function ConsultationsPage() {
                     <div style={{ display: "flex", gap: 4 }}>
                       <button title="View details" onClick={() => setDetailId(c.id)} style={actionBtn("var(--daust-navy)")}>
                         <Eye size={15} />
+                      </button>
+                      <button title="Flag sick" onClick={() => flagSick(c, false)} style={actionBtn("var(--warning-500)")}>
+                        <Flag size={14} />
+                      </button>
+                      <button title="Flag sick + emergency" onClick={() => flagSick(c, true)} style={actionBtn("var(--daust-orange)")}>
+                        <AlertTriangle size={14} />
                       </button>
                       <button title="Edit" onClick={() => openEdit(c)} style={actionBtn("var(--fg2)")}>
                         <Pencil size={14} />

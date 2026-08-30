@@ -5017,6 +5017,31 @@ export const createInfirmaryConsultation = (data: Partial<InfirmaryConsultation>
     method: "POST",
     body: JSON.stringify(data),
   });
+
+// Sick-flag flow: flag a consultation as sick (or emergency) and notify faculty + admin.
+export const flagInfirmaryConsultationSick = (
+  consultationId: string,
+  input: { isEmergency?: boolean; notes?: string },
+) =>
+  request<{ updated: { id: string }; recipientCount: number }>(
+    `/infirmary/consultations/${consultationId}/flag-sick`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+export const clearInfirmaryConsultationSick = (consultationId: string) =>
+  request<{ cleared: { id: string }; removedAttendanceRows: boolean }>(
+    `/infirmary/consultations/${consultationId}/flag-sick`,
+    { method: "DELETE" },
+  );
+export interface FlaggedConsultationRow {
+  id: string;
+  reason: string;
+  visitedAt: string;
+  sickFlaggedAt: string | null;
+  student: { id: string; name: string };
+  flaggedBy: string | null;
+}
+export const getInfirmaryFlaggedToday = () =>
+  request<FlaggedConsultationRow[]>("/infirmary/consultations/flagged");
 export const updateInfirmaryConsultation = (id: string, data: Partial<InfirmaryConsultation>) =>
   request<InfirmaryConsultation>(`/infirmary/consultations/${id}`, {
     method: "PATCH",
