@@ -357,8 +357,14 @@ export const COMMS_NAV: PortalNav = {
 
 /**
  * IT administration. it_admin owns directory administration and nothing else today, so this
- * area is deliberately one entry rather than a copy of the registrar sidebar -- which is
+ * area is deliberately a single entry rather than a copy of the registrar sidebar -- which is
  * where the role used to be pointed, and which it cannot actually load.
+ *
+ * The Backlog entry points at the GitHub Issues integration (see
+ * docs/specs/phase-0-it-issues.md). It is reachable by any authenticated session;
+ * the portal shell renders the IT sidebar for it_admin / admin, and the page itself
+ * is a static link-out. See AGENTS.md §12 for the routing context that keeps
+ * it_admin from falling back to the student portal.
  */
 export const IT_NAV: PortalNav = {
   label: "IT Administration",
@@ -366,6 +372,9 @@ export const IT_NAV: PortalNav = {
   groups: [
     g("Administration", [
       { href: "/director/users", label: "Users", icon: Users },
+    ]),
+    g("Backlog", [
+      { href: "/it/backlog", label: "IT backlog", icon: ClipboardList },
     ]),
   ],
 };
@@ -493,6 +502,7 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   },
   "/faculty/submissions/": { title: "Submissions", crumb: "Review & grade" },
   // student
+  "/it/backlog": { title: "IT backlog", crumb: "Issues & requests · IT" },
   "/student": { title: "Dashboard", crumb: "Academic overview · {term}" },
   "/student/registration": {
     title: "Course Registration",
@@ -757,7 +767,7 @@ export const ROLE_PORTALS: { role: string; portal: PortalKey; home: string }[] =
     { role: "dining", portal: "dining", home: "/dining" },
     { role: "faculty", portal: "faculty", home: "/faculty" },
     { role: "communications", portal: "comms", home: "/comms" },
-{ role: "it_admin", portal: "it", home: "/director/users" },
+    { role: "it_admin", portal: "it", home: "/director/users" },
     { role: "infirmary", portal: "infirmary", home: "/infirmary" },
     { role: "student", portal: "student", home: "/student" },
     { role: "parent", portal: "parent", home: "/parent" },

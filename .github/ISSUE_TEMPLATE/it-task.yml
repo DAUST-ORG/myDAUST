@@ -1,0 +1,35 @@
+name: IT Task
+description: Log an operational IT task (maintenance, monitoring, infrastructure).
+title: "[IT Task] "
+labels: ["it-task"]
+assignees: []
+body:
+  - type: input
+    id: description
+    attributes:
+      label: Description
+      description: Short description of the task.
+      placeholder: "Rotate the API service's secrets in AWS Secrets Manager."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: How will we know the task is done?
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Blockers, prerequisites, related issues.
+    validations:
+      required: false
+  - type: input
+    id: owner
+    attributes:
+      label: Owner
+      description: Person or team responsible.
+    validations:
+      required: false
