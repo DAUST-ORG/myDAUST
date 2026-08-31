@@ -59,6 +59,10 @@ import {
   verifiedEnrollmentCashXof,
 } from "./admission-payment-gate.js";
 import { deliverStudentActivationInviteAfterCommit } from "./activation-invite-delivery.js";
+import {
+  isRunRateEligibleCashRecognition,
+  paymentCashRecognition,
+} from "./payment-cash-recognition.js";
 
 // Shared fee constants are bootstrap fallbacks only. Standard billing always reads
 // the current administrator-approved FeeSchedule revision from the database.
@@ -3811,13 +3815,25 @@ export class FinanceService {
           include: {
             term: true,
             plan: { include: { installments: true } },
-            payments: true,
+            payments: {
+              include: {
+                paymentBalanceImportRow: {
+                  select: {
+                    batch: { select: { sourceAsOfDate: true } },
+                  },
+                },
+              },
+            },
           },
         },
       },
     });
     const expectedByDate = new Map<string, number>();
     const cashByDate = new Map<string, number>();
+    const forecastCashByDate = new Map<string, number>();
+    const balanceReconciliationDates = new Set<string>();
+    let balanceReconciliationXof = 0;
+    let balanceReconciliationPaymentCount = 0;
     let unscheduledDebtXof = 0;
     let collectibleBalanceXof = 0;
     for (const student of students) {
@@ -3852,16 +3868,31 @@ export class FinanceService {
       for (const invoice of student.invoices) {
         if (!targetInvoiceIds.has(invoice.id)) continue;
         for (const payment of invoice.payments) {
+          const recognition = paymentCashRecognition(payment);
           if (
             (payment.status === "success" || payment.status === "refunded") &&
-            payment.settledAt
+            recognition
           ) {
-            const date = toDakarDateKey(payment.settledAt);
+            const date = toDakarDateKey(recognition.occurredOn);
             cashByDate.set(date, (cashByDate.get(date) ?? 0) + payment.amount);
+            if (isRunRateEligibleCashRecognition(recognition)) {
+              forecastCashByDate.set(
+                date,
+                (forecastCashByDate.get(date) ?? 0) + payment.amount,
+              );
+            } else {
+              balanceReconciliationDates.add(date);
+              balanceReconciliationXof += payment.amount;
+              balanceReconciliationPaymentCount += 1;
+            }
           }
           if (payment.status === "refunded" && payment.refundedAt) {
             const date = toDakarDateKey(payment.refundedAt);
             cashByDate.set(date, (cashByDate.get(date) ?? 0) - payment.amount);
+            forecastCashByDate.set(
+              date,
+              (forecastCashByDate.get(date) ?? 0) - payment.amount,
+            );
           }
         }
       }
@@ -3894,14 +3925,17 @@ export class FinanceService {
     const trailingStart = new Date(todayMs - 29 * 86_400_000)
       .toISOString()
       .slice(0, 10);
-    const trailingEvents = [...cashByDate.entries()].filter(
+    const forecastCollectedXof = [...forecastCashByDate.entries()]
+      .filter(([date]) => date <= today)
+      .reduce((sum, [, amount]) => sum + amount, 0);
+    const trailingEvents = [...forecastCashByDate.entries()].filter(
       ([date]) => date >= trailingStart && date <= today,
     );
     const trailingSettlementDays = new Set(
       trailingEvents.filter(([, amount]) => amount > 0).map(([date]) => date),
     ).size;
     const allSettlementDays = new Set(
-      [...cashByDate.entries()]
+      [...forecastCashByDate.entries()]
         .filter(
           ([date, amount]) => date >= startDate && date <= today && amount > 0,
         )
@@ -3927,7 +3961,7 @@ export class FinanceService {
           (todayMs - Date.parse(`${startDate}T00:00:00.000Z`)) / 86_400_000,
         ) + 1,
       );
-      dailyRateXof = Math.max(0, collectedXof / elapsedDays);
+      dailyRateXof = Math.max(0, forecastCollectedXof / elapsedDays);
     }
     if (!dailyRateXof) {
       forecastStatus = "insufficient_data";
@@ -3979,6 +4013,12 @@ export class FinanceService {
             .expectedCumulativeXof,
         collectibleBalanceXof,
         unscheduledDebtXof,
+      },
+      balanceReconciliation: {
+        paymentCount: balanceReconciliationPaymentCount,
+        amountXof: balanceReconciliationXof,
+        sourceAsOfDates: [...balanceReconciliationDates].sort(),
+        dateBasis: "source_as_of" as const,
       },
       forecast: {
         status: forecastStatus,

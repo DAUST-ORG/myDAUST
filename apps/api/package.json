@@ -11,6 +11,7 @@
     "test": "vitest run",
     "import:historical-transcripts": "node dist/transcript/historical-import.cli.js",
     "import:historical-payments": "node dist/finance/historical-payment-import.cli.js",
+    "import:payment-balances": "node dist/finance/payment-balance-import.cli.js",
     "import:legacy-cohort": "node dist/admissions/legacy-cohort-import.cli.js",
     "reconcile:accepted-applicants": "node dist/admissions/accepted-applicant-reconciliation.cli.js",
     "reconcile:installment-statuses": "node dist/finance/reconcile-installment-statuses.cli.js"

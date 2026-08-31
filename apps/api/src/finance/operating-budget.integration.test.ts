@@ -738,6 +738,113 @@ describe.skipIf(!DB_URL)("operating budget PostgreSQL flow", () => {
     );
   });
 
+  it("recognizes paid-to-date deltas on the reviewed source date without a settlement timestamp", async () => {
+    const invoice = await prisma.invoice.findUniqueOrThrow({
+      where: { id: nonCoreInvoiceId },
+      include: { components: true },
+    });
+    const digest = randomUUID().replaceAll("-", "").repeat(2);
+    const batch = await prisma.paymentBalanceImportBatch.create({
+      data: {
+        sourceFileName: "paid-to-date.xlsx",
+        sourceSha256: digest,
+        sourceExtractionSha256: digest,
+        manifestSha256: digest,
+        confirmationPlanSha256: digest,
+        status: "imported",
+        academicYearLabel: "2026–2027",
+        sourceAsOfDate: new Date("2026-08-29T00:00:00.000Z"),
+        sourceSheet: "Comparison",
+        sourceRowCount: 1,
+        sourcePaidTotalXof: 75n,
+        importedRows: 1,
+        resolvedSourcePaidXof: 75n,
+        importedDeltaXof: 75n,
+        createdById: admin.personId,
+        importedAt: new Date("2026-08-31T00:00:00.000Z"),
+      },
+    });
+    const payment = await prisma.payment.create({
+      data: {
+        invoiceId: invoice.id,
+        studentId: budgetStudentId,
+        amount: 75,
+        method: "legacy_unknown",
+        status: "success",
+        provider: "balance_reconciliation",
+        providerRef: `budget-balance-${randomUUID()}`,
+        source: "paid_to_date_workbook",
+        settledAt: null,
+        componentAllocations: {
+          create: {
+            invoiceComponentId: invoice.components[0]!.id,
+            amountXof: 75,
+          },
+        },
+      },
+    });
+    const sourceClaimSha256 = randomUUID().replaceAll("-", "").repeat(2);
+    const importedRow = await prisma.paymentBalanceImportRow.create({
+      data: {
+        batchId: batch.id,
+        sourceSheet: "Comparison",
+        sourceRowNumber: 29,
+        sourceRowKey: "Comparison!29",
+        sourceRowKeySha256: sourceClaimSha256,
+        rowFingerprintSha256: sourceClaimSha256,
+        sourcePaidToDateXof: 75n,
+        disposition: "post_delta",
+        identityDecision: "exact_match",
+        matchMethod: "exact_ordered",
+        studentId: budgetStudentId,
+        invoiceId: invoice.id,
+        invoiceRevision: invoice.revision,
+        baselineLedgerPaidXof: 0n,
+        deltaXof: 75n,
+        paymentId: payment.id,
+        sourceClaimSha256,
+      },
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    try {
+      const actuals = await budgets.listActuals({
+        academicYear: "2026–2027",
+        source: "balance_reconciliation",
+      });
+      expect(actuals).toMatchObject({ total: 1, totalXof: 75 });
+      expect(actuals.items[0]).toMatchObject({
+        source: "balance_reconciliation",
+        occurredOn: new Date("2026-08-29T00:00:00.000Z"),
+        amountXof: 75,
+      });
+      expect(
+        (await budgets.getOperatingBudget("2026–2027")).integrityWarnings,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "source_as_of_balance_reconciliations",
+            count: 1,
+            amountXof: 75,
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+      await prisma.paymentBalanceImportRow.delete({
+        where: { id: importedRow.id },
+      });
+      await prisma.paymentComponentAllocation.deleteMany({
+        where: { paymentId: payment.id },
+      });
+      await prisma.payment.delete({ where: { id: payment.id } });
+      await prisma.paymentBalanceImportBatch.delete({
+        where: { id: batch.id },
+      });
+    }
+  });
+
   it("keeps unclassified legacy expenses visible and drillable", async () => {
     const view = await budgets.getOperatingBudget("2026–2027");
     expect(view.integrityWarnings).toEqual(

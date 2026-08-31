@@ -617,7 +617,12 @@ export interface TeachingSection {
 export interface Roster {
   course: string;
   sectionCode: string;
-  students: { studentNo: string; name: string; grade: string | null; viaOverride: boolean }[];
+  students: {
+    studentNo: string;
+    name: string;
+    grade: string | null;
+    viaOverride: boolean;
+  }[];
 }
 export const getTeaching = () =>
   request<TeachingSection[]>("/academics/teaching");
@@ -2678,6 +2683,12 @@ export interface CollectionsTimeline {
     collectibleBalanceXof: number;
     unscheduledDebtXof: number;
   };
+  balanceReconciliation: {
+    paymentCount: number;
+    amountXof: number;
+    sourceAsOfDates: string[];
+    dateBasis: "source_as_of";
+  };
   forecast: {
     status: "trailing_30_days" | "academic_year_to_date" | "insufficient_data";
     dailyRateXof: number | null;
@@ -3105,6 +3116,7 @@ export interface OperatingBudgetView {
     code:
       | "unclassified_expenses"
       | "unclassified_collections"
+      | "source_as_of_balance_reconciliations"
       | "ambiguous_legacy_payment_dates";
     count: number;
     amountXof: number;
@@ -3166,6 +3178,7 @@ export interface OperatingBudgetActualEntry {
   source:
     | "bursar"
     | "payment"
+    | "balance_reconciliation"
     | "legacy_payment"
     | "expense"
     | "manual_income"
@@ -4922,7 +4935,12 @@ export interface InfirmaryConsultation {
   date: string;
   time: string;
   followUpRequired: boolean;
-  vitals?: { temperature?: string; bloodPressure?: string; heartRate?: string; weight?: string };
+  vitals?: {
+    temperature?: string;
+    bloodPressure?: string;
+    heartRate?: string;
+    weight?: string;
+  };
   diagnosis?: string;
   treatmentPlan?: string;
 }
@@ -5050,7 +5068,9 @@ export const getInfirmaryStudents = () =>
 // Consultations
 export const getInfirmaryConsultations = () =>
   request<InfirmaryConsultation[]>("/infirmary/consultations");
-export const createInfirmaryConsultation = (data: Partial<InfirmaryConsultation>) =>
+export const createInfirmaryConsultation = (
+  data: Partial<InfirmaryConsultation>,
+) =>
   request<InfirmaryConsultation>("/infirmary/consultations", {
     method: "POST",
     body: JSON.stringify(data),
@@ -5080,29 +5100,41 @@ export interface FlaggedConsultationRow {
 }
 export const getInfirmaryFlaggedToday = () =>
   request<FlaggedConsultationRow[]>("/infirmary/consultations/flagged");
-export const updateInfirmaryConsultation = (id: string, data: Partial<InfirmaryConsultation>) =>
+export const updateInfirmaryConsultation = (
+  id: string,
+  data: Partial<InfirmaryConsultation>,
+) =>
   request<InfirmaryConsultation>(`/infirmary/consultations/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 export const deleteInfirmaryConsultation = (id: string) =>
-  request<{ ok: boolean }>(`/infirmary/consultations/${id}`, { method: "DELETE" });
+  request<{ ok: boolean }>(`/infirmary/consultations/${id}`, {
+    method: "DELETE",
+  });
 
 // Prescriptions
 export const getInfirmaryPrescriptions = () =>
   request<InfirmaryPrescription[]>("/infirmary/prescriptions");
-export const createInfirmaryPrescription = (data: Partial<InfirmaryPrescription>) =>
+export const createInfirmaryPrescription = (
+  data: Partial<InfirmaryPrescription>,
+) =>
   request<InfirmaryPrescription>("/infirmary/prescriptions", {
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryPrescription = (id: string, data: Partial<InfirmaryPrescription>) =>
+export const updateInfirmaryPrescription = (
+  id: string,
+  data: Partial<InfirmaryPrescription>,
+) =>
   request<InfirmaryPrescription>(`/infirmary/prescriptions/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 export const deleteInfirmaryPrescription = (id: string) =>
-  request<{ ok: boolean }>(`/infirmary/prescriptions/${id}`, { method: "DELETE" });
+  request<{ ok: boolean }>(`/infirmary/prescriptions/${id}`, {
+    method: "DELETE",
+  });
 
 // Medications
 export const getInfirmaryMedications = () =>
@@ -5112,29 +5144,41 @@ export const createInfirmaryMedication = (data: Partial<InfirmaryMedication>) =>
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryMedication = (id: string, data: Partial<InfirmaryMedication>) =>
+export const updateInfirmaryMedication = (
+  id: string,
+  data: Partial<InfirmaryMedication>,
+) =>
   request<InfirmaryMedication>(`/infirmary/medications/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 export const deleteInfirmaryMedication = (id: string) =>
-  request<{ ok: boolean }>(`/infirmary/medications/${id}`, { method: "DELETE" });
+  request<{ ok: boolean }>(`/infirmary/medications/${id}`, {
+    method: "DELETE",
+  });
 
 // Appointments
 export const getInfirmaryAppointments = () =>
   request<InfirmaryAppointment[]>("/infirmary/appointments");
-export const createInfirmaryAppointment = (data: Partial<InfirmaryAppointment>) =>
+export const createInfirmaryAppointment = (
+  data: Partial<InfirmaryAppointment>,
+) =>
   request<InfirmaryAppointment>("/infirmary/appointments", {
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryAppointment = (id: string, data: Partial<InfirmaryAppointment>) =>
+export const updateInfirmaryAppointment = (
+  id: string,
+  data: Partial<InfirmaryAppointment>,
+) =>
   request<InfirmaryAppointment>(`/infirmary/appointments/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 export const deleteInfirmaryAppointment = (id: string) =>
-  request<{ ok: boolean }>(`/infirmary/appointments/${id}`, { method: "DELETE" });
+  request<{ ok: boolean }>(`/infirmary/appointments/${id}`, {
+    method: "DELETE",
+  });
 
 // Documents
 export const getInfirmaryDocuments = () =>
@@ -5144,7 +5188,10 @@ export const createInfirmaryDocument = (data: Partial<InfirmaryDocument>) =>
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryDocument = (id: string, data: Partial<InfirmaryDocument>) =>
+export const updateInfirmaryDocument = (
+  id: string,
+  data: Partial<InfirmaryDocument>,
+) =>
   request<InfirmaryDocument>(`/infirmary/documents/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
@@ -5160,7 +5207,10 @@ export const createInfirmaryFollowUp = (data: Partial<InfirmaryFollowUp>) =>
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryFollowUp = (id: string, data: Partial<InfirmaryFollowUp>) =>
+export const updateInfirmaryFollowUp = (
+  id: string,
+  data: Partial<InfirmaryFollowUp>,
+) =>
   request<InfirmaryFollowUp>(`/infirmary/follow-ups/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
@@ -5172,7 +5222,9 @@ export const deleteInfirmaryFollowUp = (id: string) =>
 export const getInfirmaryForms = () =>
   request<InfirmaryForm[]>("/infirmary/forms");
 export const getInfirmaryForm = (id: string) =>
-  request<InfirmaryForm & { responses: InfirmaryFormResponse[] }>(`/infirmary/forms/${id}`);
+  request<InfirmaryForm & { responses: InfirmaryFormResponse[] }>(
+    `/infirmary/forms/${id}`,
+  );
 export const createInfirmaryForm = (data: Partial<InfirmaryForm>) =>
   request<InfirmaryForm>("/infirmary/forms", {
     method: "POST",
@@ -5189,7 +5241,14 @@ export const deleteInfirmaryForm = (id: string) =>
 // Form Responses
 export const getInfirmaryFormResponses = (formId: string) =>
   request<InfirmaryFormResponse[]>(`/infirmary/forms/${formId}/responses`);
-export const createInfirmaryFormResponse = (formId: string, data: { studentId: string; studentName: string; answers: Record<string, string> }) =>
+export const createInfirmaryFormResponse = (
+  formId: string,
+  data: {
+    studentId: string;
+    studentName: string;
+    answers: Record<string, string>;
+  },
+) =>
   request<InfirmaryFormResponse>(`/infirmary/forms/${formId}/responses`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -5213,11 +5272,19 @@ export type EnrollmentOverrideGate =
   | "add_deadline";
 
 export type EnrollmentOverrideFailure =
-  | { gate: "prerequisite"; courses: { code: string; minGrade: string | null }[] }
+  | {
+      gate: "prerequisite";
+      courses: { code: string; minGrade: string | null }[];
+    }
   | { gate: "corequisite"; courses: string[] }
   | { gate: "capacity"; taken: number; capacity: number }
   | { gate: "holds"; kinds: string[] }
-  | { gate: "credit_cap"; currentCredits: number; afterAdd: number; ceiling: number }
+  | {
+      gate: "credit_cap";
+      currentCredits: number;
+      afterAdd: number;
+      ceiling: number;
+    }
   | { gate: "standing"; required: string; actual: number }
   | { gate: "major_restriction"; required: string }
   | { gate: "record_status"; status: string }
@@ -5309,9 +5376,7 @@ export interface FacultyOverrideRequest {
 }
 
 export const facultyOverrideRequests = () =>
-  request<FacultyOverrideRequest[]>(
-    "/academics/enrollment-overrides/faculty",
-  );
+  request<FacultyOverrideRequest[]>("/academics/enrollment-overrides/faculty");
 
 export const facultyDecideOverride = (
   id: string,
@@ -5412,7 +5477,8 @@ export const createForm = (body: {
   closesAt?: string;
   maxResponses?: number;
   sections: FormInputSection[];
-}) => request<FormDetail>("/forms", { method: "POST", body: JSON.stringify(body) });
+}) =>
+  request<FormDetail>("/forms", { method: "POST", body: JSON.stringify(body) });
 
 export const updateForm = (
   id: string,
@@ -5424,7 +5490,11 @@ export const updateForm = (
     maxResponses?: number;
     sections: FormInputSection[];
   },
-) => request<FormDetail>(`/forms/${id}`, { method: "PUT", body: JSON.stringify(body) });
+) =>
+  request<FormDetail>(`/forms/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 
 export const publishForm = (id: string) =>
   request<FormDetail>(`/forms/${id}/publish`, { method: "POST" });
