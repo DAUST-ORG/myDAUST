@@ -128,13 +128,11 @@ Normal admissions and manifests using `respect_payment_gate` are unchanged.
 
 The reviewed manifest must use `notificationPolicy: "suppress_all"`. The
 importer sends no acceptance email, receipt, or account-setup invitation. When
-historical cash activates a student, the normal activation path still creates
-its single-use setup secret, but the importer marks that secret used inside the
-same serializable transaction and audits
-`legacy-cohort-activation-invite-suppressed`. No plaintext token leaves the
-transaction, and `studentInviteSentAt` remains empty. Staff can later use the
-existing explicit Admissions resend action after reviewing the imported
-student. Exact reruns of a completed batch remain no-ops and never send email.
+historical cash activates a student, it creates no password, invite, setup
+secret, or email delivery. The audit records
+`legacy-cohort-student-activation-required`; the student later uses the public
+`/activate-student` page with their Student ID and date of birth. Exact reruns
+of a completed batch remain no-ops and never send email.
 
 Durable provenance records the batch, manifest and extraction digests, permanent
 F-ID, person grouping digest, Applicant/Student/invoice links, each source

@@ -166,6 +166,8 @@ export default function LoginPage() {
           </form>
 
           <p className="muted" style={{ fontSize: 12.5, textAlign: "center", marginTop: 18 }}>
+            New student? <a href="/activate-student">Activate your account</a>
+            <br />
             Need help? <a href="mailto:info@daust.org">Contact IT support</a>
           </p>
 

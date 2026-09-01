@@ -13,7 +13,12 @@ import {
   suspendManagedUser,
   updateUserRoles,
 } from "@/lib/api";
-import { APP_ROLES, type AppRole, ROLES_NEEDING_A_RECORD, ROLE_LABELS } from "@mydaust/shared";
+import {
+  APP_ROLES,
+  type AppRole,
+  ROLES_NEEDING_A_RECORD,
+  ROLE_LABELS,
+} from "@mydaust/shared";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   Badge,
@@ -44,7 +49,8 @@ const ASSIGNABLE: readonly string[] = APP_ROLES.filter(
 );
 
 /** Roles arrive from the API as plain strings; fall back to the raw slug if one is unknown. */
-const roleLabel = (role: string): string => ROLE_LABELS[role as AppRole] ?? role;
+const roleLabel = (role: string): string =>
+  ROLE_LABELS[role as AppRole] ?? role;
 
 /**
  * Roles that grant API access but have no portal of their own yet, so the person lands
@@ -84,7 +90,9 @@ export default function UsersPage() {
   } | null>(null);
 
   useEffect(() => {
-    getMe().then(setMe).catch(() => {});
+    getMe()
+      .then(setMe)
+      .catch(() => {});
   }, []);
 
   const load = useCallback(() => {
@@ -119,15 +127,30 @@ export default function UsersPage() {
         title="Users"
         subtitle="Every account, the roles it holds, and whether it can sign in."
         actions={
-          <Button variant="primary" icon={<Plus size={15} />} onClick={() => setCreating(true)}>
+          <Button
+            variant="primary"
+            icon={<Plus size={15} />}
+            onClick={() => setCreating(true)}
+          >
             Add user
           </Button>
         }
       />
 
       <Card>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <SearchInput value={q} onChange={setQ} placeholder="Name, address or student ID…" />
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <SearchInput
+            value={q}
+            onChange={setQ}
+            placeholder="Name, address or student ID…"
+          />
           <Select
             ariaLabel="Filter by type"
             value={kind}
@@ -136,7 +159,6 @@ export default function UsersPage() {
               { value: "", label: "All types" },
               { value: "staff", label: "Staff" },
               { value: "faculty", label: "Faculty" },
-              { value: "student", label: "Student" },
               { value: "parent", label: "Parent" },
             ]}
           />
@@ -146,7 +168,10 @@ export default function UsersPage() {
             onChange={setRole}
             options={[
               { value: "", label: "All roles" },
-              ...Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label })),
+              ...Object.entries(ROLE_LABELS).map(([value, label]) => ({
+                value,
+                label,
+              })),
             ]}
           />
           <Select
@@ -195,7 +220,10 @@ export default function UsersPage() {
                       <td style={{ fontWeight: 600 }}>
                         {u.name}
                         {u.studentNo && (
-                          <span className="muted" style={{ fontWeight: 400 }}> · {u.studentNo}</span>
+                          <span className="muted" style={{ fontWeight: 400 }}>
+                            {" "}
+                            · {u.studentNo}
+                          </span>
                         )}
                       </td>
                       <td className="muted">{u.email ?? "—"}</td>
@@ -208,7 +236,9 @@ export default function UsersPage() {
                       </td>
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                         {u.id === me?.personId ? (
-                          <span className="muted" style={{ fontSize: 12 }}>You</span>
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            You
+                          </span>
                         ) : !canAdminister(u, isAdmin) ? (
                           <span
                             className="muted"
@@ -218,26 +248,39 @@ export default function UsersPage() {
                             Admin only
                           </span>
                         ) : (
-                          <span style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
-                            <IconButton label={`Edit roles for ${u.name}`} onClick={() => setEditing(u)}>
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              gap: 6,
+                              justifyContent: "flex-end",
+                            }}
+                          >
+                            <IconButton
+                              label={`Edit roles for ${u.name}`}
+                              onClick={() => setEditing(u)}
+                            >
                               <Pencil size={15} />
                             </IconButton>
-                            <IconButton
-                              label={`Reset the password for ${u.name}`}
-                              onClick={() =>
-                                resetManagedUserPassword(u.id)
-                                  .then((r) =>
-                                    setCredentials({
-                                      name: r.name,
-                                      email: r.email,
-                                      tempPassword: r.tempPassword,
-                                    }),
-                                  )
-                                  .catch((e: Error) => setError(e.message))
-                              }
-                            >
-                              <KeyRound size={15} />
-                            </IconButton>
+                            {u.kind !== "student" &&
+                              !u.roles.includes("student") &&
+                              !u.studentNo && (
+                                <IconButton
+                                  label={`Reset the password for ${u.name}`}
+                                  onClick={() =>
+                                    resetManagedUserPassword(u.id)
+                                      .then((r) =>
+                                        setCredentials({
+                                          name: r.name,
+                                          email: r.email,
+                                          tempPassword: r.tempPassword,
+                                        }),
+                                      )
+                                      .catch((e: Error) => setError(e.message))
+                                  }
+                                >
+                                  <KeyRound size={15} />
+                                </IconButton>
+                              )}
                             <IconButton
                               label={
                                 u.status === "suspended"
@@ -270,16 +313,29 @@ export default function UsersPage() {
 
           <div
             aria-live="polite"
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, gap: 10, flexWrap: "wrap" }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginTop: 12,
+              gap: 10,
+              flexWrap: "wrap",
+            }}
           >
             <span className="muted" style={{ fontSize: 12.5 }}>
               {total} account{total === 1 ? "" : "s"} · page {page} of {pages}
             </span>
             <span style={{ display: "inline-flex", gap: 8 }}>
-              <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              <Button
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
                 Previous
               </Button>
-              <Button disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
+              <Button
+                disabled={page >= pages}
+                onClick={() => setPage((p) => p + 1)}
+              >
                 Next
               </Button>
             </span>
@@ -287,11 +343,16 @@ export default function UsersPage() {
         </div>
       )}
 
-      <p className="muted" style={{ fontSize: 12, marginTop: 14, maxWidth: 640 }}>
-        A login address is a sign-in identifier, not a mailbox — mail sent to one does not
-        arrive. Suspending an account ends its open sessions immediately and blocks sign-in;
-        it does not remove the person from rosters or course assignments.
-        {!isAdmin && " Only an administrator can assign or remove the Admin role."}
+      <p
+        className="muted"
+        style={{ fontSize: 12, marginTop: 14, maxWidth: 640 }}
+      >
+        A login address is a sign-in identifier, not a mailbox — mail sent to
+        one does not arrive. Suspending an account ends its open sessions
+        immediately and blocks sign-in; it does not remove the person from
+        rosters or course assignments.
+        {!isAdmin &&
+          " Only an administrator can assign or remove the Admin role."}
       </p>
 
       {creating && (
@@ -323,8 +384,8 @@ export default function UsersPage() {
           title={`Suspend ${confirming.name}?`}
           message={
             <>
-              They will be signed out immediately and cannot sign in again until restored.
-              Their record, grades and history are kept.
+              They will be signed out immediately and cannot sign in again until
+              restored. Their record, grades and history are kept.
             </>
           }
           confirmLabel="Suspend"
@@ -377,7 +438,8 @@ function RoleCell({ roles }: { roles: string[] }) {
 function StatusCell({ user }: { user: ManagedUser }) {
   if (user.status === "suspended") return <Badge tone="error">Suspended</Badge>;
   if (!user.hasLogin) return <Badge tone="neutral">No login</Badge>;
-  if (user.mustChangePassword) return <Badge tone="warning">Must change password</Badge>;
+  if (user.mustChangePassword)
+    return <Badge tone="warning">Must change password</Badge>;
   return <Badge tone="success">Active</Badge>;
 }
 
@@ -408,7 +470,9 @@ function RolesModal({
     try {
       await updateUserRoles(
         user.id,
-        Array.from(new Set([...kept, ...roles.filter((r) => ASSIGNABLE.includes(r))])),
+        Array.from(
+          new Set([...kept, ...roles.filter((r) => ASSIGNABLE.includes(r))]),
+        ),
       );
       onSaved();
     } catch (e) {
@@ -425,7 +489,9 @@ function RolesModal({
       width={460}
       footer={
         <>
-          <Button onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
           <Button variant="primary" onClick={save} disabled={busy}>
             {busy ? "Saving…" : "Save changes"}
           </Button>
@@ -433,8 +499,14 @@ function RolesModal({
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
-        <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>{user.email}</p>
+        {err && (
+          <div className="badge overdue" style={{ padding: "8px 12px" }}>
+            {err}
+          </div>
+        )}
+        <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+          {user.email}
+        </p>
         {kept.length > 0 && (
           <p className="muted" style={{ margin: 0, fontSize: 12 }}>
             Also holds {kept.map(roleLabel).join(", ")}, which is granted by
@@ -445,7 +517,9 @@ function RolesModal({
           roles={roles}
           canAssignAdmin={canAssignAdmin}
           onToggle={(r) =>
-            setRoles((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]))
+            setRoles((cur) =>
+              cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r],
+            )
           }
         />
       </div>
@@ -469,7 +543,11 @@ function RoleChecklist({
         return (
           <label
             key={r}
-            title={locked ? "Only an administrator can assign the Admin role" : undefined}
+            title={
+              locked
+                ? "Only an administrator can assign the Admin role"
+                : undefined
+            }
             style={{
               display: "flex",
               alignItems: "center",
@@ -488,9 +566,13 @@ function RoleChecklist({
               disabled={locked}
               onChange={() => onToggle(r)}
             />
-            <span style={{ fontSize: 13.5, fontWeight: 600 }}>{roleLabel(r)}</span>
+            <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+              {roleLabel(r)}
+            </span>
             {ROLE_HINT[r] && (
-              <span className="muted" style={{ fontSize: 11.5 }}>{ROLE_HINT[r]}</span>
+              <span className="muted" style={{ fontSize: 11.5 }}>
+                {ROLE_HINT[r]}
+              </span>
             )}
           </label>
         );
@@ -506,7 +588,9 @@ function CreateUserModal({
 }: {
   canAssignAdmin: boolean;
   onClose: () => void;
-  onCreated: (credentials: { name: string; email: string; tempPassword: string } | null) => void;
+  onCreated: (
+    credentials: { name: string; email: string; tempPassword: string } | null,
+  ) => void;
 }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -533,8 +617,13 @@ function CreateUserModal({
   useEffect(() => {
     if (addressEdited) return;
     const clean = (v: string) =>
-      v.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "");
-    const suggestion = [clean(firstName), clean(lastName)].filter(Boolean).join(".");
+      v
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[^a-z0-9]+/g, "");
+    const suggestion = [clean(firstName), clean(lastName)]
+      .filter(Boolean)
+      .join(".");
     setEmailLocal(suggestion);
   }, [firstName, lastName, addressEdited]);
 
@@ -549,7 +638,7 @@ function CreateUserModal({
         emailDomain,
         kind,
         roles: isStudent ? [] : roles,
-        provisionLogin,
+        provisionLogin: isStudent ? false : provisionLogin,
         ...(isStudent
           ? { student: { studentNo, programCode: programCode || null } }
           : {}),
@@ -570,7 +659,10 @@ function CreateUserModal({
   }
 
   const ready =
-    firstName.trim() && lastName.trim() && emailLocal.trim() && (!isStudent || studentNo.trim());
+    firstName.trim() &&
+    lastName.trim() &&
+    emailLocal.trim() &&
+    (!isStudent || studentNo.trim());
 
   return (
     <Modal
@@ -580,7 +672,9 @@ function CreateUserModal({
       width={540}
       footer={
         <>
-          <Button onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
           <Button variant="primary" onClick={save} disabled={busy || !ready}>
             {busy ? "Creating…" : "Create account"}
           </Button>
@@ -588,9 +682,15 @@ function CreateUserModal({
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {err && <div className="badge overdue" style={{ padding: "8px 12px" }}>{err}</div>}
+        {err && (
+          <div className="badge overdue" style={{ padding: "8px 12px" }}>
+            {err}
+          </div>
+        )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+        >
           <Field label="First name">
             <Input value={firstName} onChange={setFirstName} />
           </Field>
@@ -637,27 +737,39 @@ function CreateUserModal({
             options={[
               { value: "staff", label: "Staff" },
               { value: "faculty", label: "Faculty" },
-              { value: "student", label: "Student" },
             ]}
           />
         </Field>
 
         {isStudent ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+          >
             <Field label="Student ID">
-              <Input value={studentNo} onChange={setStudentNo} placeholder="DS2026001" />
+              <Input
+                value={studentNo}
+                onChange={setStudentNo}
+                placeholder="DS2026001"
+              />
             </Field>
             <Field label="Programme code" hint="Optional">
-              <Input value={programCode} onChange={setProgramCode} placeholder="CSC" />
+              <Input
+                value={programCode}
+                onChange={setProgramCode}
+                placeholder="CSC"
+              />
             </Field>
           </div>
         ) : kind === "faculty" ? (
           <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
-            Faculty accounts receive the Faculty role and a public profile that stays hidden
-            until Communications publishes it.
+            Faculty accounts receive the Faculty role and a public profile that
+            stays hidden until Communications publishes it.
           </p>
         ) : (
-          <Field label="Roles" hint="Leave every box unticked to create an account with no access yet.">
+          <Field
+            label="Roles"
+            hint="Leave every box unticked to create an account with no access yet."
+          >
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <RoleChecklist
                 roles={roles}
@@ -672,16 +784,23 @@ function CreateUserModal({
           </Field>
         )}
 
-        <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <input
-            type="checkbox"
-            checked={provisionLogin}
-            onChange={() => setProvisionLogin((v) => !v)}
-          />
-          <span style={{ fontSize: 13.5 }}>
-            Create a password now — shown once, on the next screen
-          </span>
-        </label>
+        {isStudent ? (
+          <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+            Create student records from the Registrar Students page. Students
+            activate with their Student ID and date of birth.
+          </p>
+        ) : (
+          <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={provisionLogin}
+              onChange={() => setProvisionLogin((v) => !v)}
+            />
+            <span style={{ fontSize: 13.5 }}>
+              Create a password now — shown once, on the next screen
+            </span>
+          </label>
+        )}
       </div>
     </Modal>
   );

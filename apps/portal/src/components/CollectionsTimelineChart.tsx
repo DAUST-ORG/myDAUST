@@ -325,6 +325,28 @@ export function CollectionsTimelineChart({
         </div>
       </div>
 
+      {data.balanceReconciliation.paymentCount > 0 && (
+        <p
+          className="muted"
+          style={{ fontSize: 12.5, margin: "12px 0 0", lineHeight: 1.55 }}
+        >
+          Includes {data.balanceReconciliation.paymentCount} paid-to-date
+          balance reconciliation
+          {data.balanceReconciliation.paymentCount === 1
+            ? ""
+            : "s"} totaling {formatXof(data.balanceReconciliation.amountXof)},
+          recognized on the reviewed source date
+          {data.balanceReconciliation.sourceAsOfDates.length === 1
+            ? ""
+            : "s"}{" "}
+          {data.balanceReconciliation.sourceAsOfDates
+            .map(formatDateShort)
+            .join(", ")}
+          . Individual settlement dates remain unknown and are excluded from the
+          run-rate calculation.
+        </p>
+      )}
+
       <div
         role="group"
         aria-label="Chart series"

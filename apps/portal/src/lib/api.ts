@@ -327,6 +327,7 @@ export interface BillingPayment {
   method: string;
   status: string;
   providerRef?: string;
+  transactionReference?: string | null;
   source?: string;
   initiatedByEmail?: string | null;
   settledAt?: string | null;
@@ -617,7 +618,12 @@ export interface TeachingSection {
 export interface Roster {
   course: string;
   sectionCode: string;
-  students: { studentNo: string; name: string; grade: string | null; viaOverride: boolean }[];
+  students: {
+    studentNo: string;
+    name: string;
+    grade: string | null;
+    viaOverride: boolean;
+  }[];
 }
 export const getTeaching = () =>
   request<TeachingSection[]>("/academics/teaching");
@@ -726,7 +732,7 @@ export const submitGrades = (
 
 export interface AttendanceSheet {
   date: string;
-  /** False when this session has no roll call yet — distinct from an all-present one. */
+  /** False when this session has no roll call yet ΓÇö distinct from an all-present one. */
   recorded: boolean;
   students: {
     enrollmentId: string;
@@ -851,12 +857,12 @@ export interface MyAssignment {
   submittedAt: string | null;
   description: string | null;
   weight: number;
-  /** What was already handed in — the submit form doubles as the edit form. */
+  /** What was already handed in ΓÇö the submit form doubles as the edit form. */
   text: string | null;
   fileUrl: string | null;
   fileName: string | null;
 }
-/** A material as a student sees it — always published, always with a file. */
+/** A material as a student sees it ΓÇö always published, always with a file. */
 export interface StudentMaterial {
   id: string;
   title: string;
@@ -1011,7 +1017,7 @@ export interface AdminStudentRosterParams {
   pageSize?: 25 | 50 | 100;
   search?: string;
   program?: string;
-  // `level` is a derived catalog code (S1, S2, …) — handled server-side by
+  // `level` is a derived catalog code (S1, S2, ΓÇª) ΓÇö handled server-side by
   // fetching the full filtered set, deriving per-row, then filtering. The API
   // is uniform with the SQL-pushdown filters even though this one can't go
   // into WHERE.
@@ -1021,22 +1027,19 @@ export interface AdminStudentRosterParams {
   sort?: AdminStudentRosterSort;
   direction?: "asc" | "desc";
 }
-export interface ProvisionedLogin {
-  studentId: string;
-  studentNo: string;
-  name: string;
-  email: string;
-  tempPassword: string;
+export interface StudentActivationStart {
+  accepted: true;
 }
-export const provisionStudentLogin = (id: string) =>
-  request<ProvisionedLogin>(`/registrar/students/${id}/provision-login`, {
+export const startStudentActivation = (input: {
+  studentNo: string;
+  dob: string;
+  requestToken: string;
+}) =>
+  request<StudentActivationStart>("/student-activation/requests", {
     method: "POST",
+    cache: "no-store",
+    body: JSON.stringify(input),
   });
-export const provisionAllStudentLogins = () =>
-  request<{ count: number; credentials: ProvisionedLogin[] }>(
-    "/registrar/students/provision-logins",
-    { method: "POST" },
-  );
 export interface ProgramRow {
   code: string;
   name: string;
@@ -1242,7 +1245,7 @@ export const getAdminStudentRoster = (
   if (params.program && params.program !== "all") {
     query.set("program", params.program);
   }
-  // `level` is a free-text catalog code (S1, S2, …). It is the registrar's
+  // `level` is a free-text catalog code (S1, S2, ΓÇª). It is the registrar's
   // intent for a *single* level; passing "all" or an empty string clears it
   // on the server the same way the program filter does.
   if (params.level && params.level !== "all") {
@@ -2263,6 +2266,33 @@ export interface StudentAccount {
 export const getStudentAccount = (studentId: string) =>
   request<StudentAccount>(`/finance/admin/students/${studentId}/account`);
 
+export type StaffRecordedPaymentMethod = "cash" | "wave" | "orange_money";
+
+export interface RecordStudentPaymentInput {
+  amountXof: number;
+  method: StaffRecordedPaymentMethod;
+  transactionReference?: string;
+  idempotencyKey: string;
+}
+
+export interface RecordStudentPaymentResult {
+  ok: boolean;
+  paymentId: string;
+  receipt: Receipt;
+}
+
+export const recordStudentPayment = (
+  studentId: string,
+  input: RecordStudentPaymentInput,
+) =>
+  request<RecordStudentPaymentResult>(
+    `/finance/admin/students/${encodeURIComponent(studentId)}/payments`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+
 export const assignStandardPackage = (studentId: string) =>
   request<{
     created: boolean;
@@ -2311,7 +2341,7 @@ export const listStudentAccounts = () =>
   request<StudentAccountRow[]>("/finance/admin/accounts");
 
 // Registrar student provisioning (design flow): creates the record + account + a
-// password-setup invite email, and bills nothing (money stays in the Finance portal).
+// student record, and bills nothing (money stays in the Finance portal).
 export interface RegistrarStudentInput {
   studentNo: string;
   firstName: string;
@@ -2547,7 +2577,19 @@ export const rejectWireTransfer = (id: string, reason: string) =>
     body: JSON.stringify({ reason }),
   });
 
-export interface AdminPaymentSubmission extends PaymentSubmissionSummary {
+export interface AdminPaymentSubmission extends Omit<
+  PaymentSubmissionSummary,
+  "method" | "details"
+> {
+  method: ProofPaymentMethod | StaffRecordedPaymentMethod;
+  details:
+    | PublicProofMethodConfig
+    | {
+        method: "cash";
+        enabled: false;
+        label: "Cash";
+        instructions: string;
+      };
   target: string;
   purpose: string;
   hasPayerProof: boolean;
@@ -2677,6 +2719,12 @@ export interface CollectionsTimeline {
     varianceXof: number;
     collectibleBalanceXof: number;
     unscheduledDebtXof: number;
+  };
+  balanceReconciliation: {
+    paymentCount: number;
+    amountXof: number;
+    sourceAsOfDates: string[];
+    dateBasis: "source_as_of";
   };
   forecast: {
     status: "trailing_30_days" | "academic_year_to_date" | "insufficient_data";
@@ -2842,6 +2890,7 @@ export interface DirectorPaymentVerification {
   verifiedByName: string | null;
   verifiedByEmail: string | null;
   verifiedAt: string | null;
+  transactionReference?: string | null;
   createdAt: string;
   hasPayerProof?: boolean;
   hasVerificationProof?: boolean;
@@ -2927,6 +2976,7 @@ export interface Receipt {
   method: string;
   status: string;
   providerRef: string;
+  transactionReference?: string | null;
   paidAt: string;
   refundedAt?: string | null;
   source?: string;
@@ -3012,7 +3062,7 @@ export interface DirectorOverview {
 export const getDirectorOverview = () =>
   request<DirectorOverview>("/finance/admin/director-overview");
 
-// --- Finance operating budget (August–July) ---
+// --- Finance operating budget (AugustΓÇôJuly) ---
 export type OperatingBudgetKind = "income" | "expense";
 export type OperatingBudgetStatus =
   "draft" | "pending" | "approved" | "rejected" | "superseded";
@@ -3105,6 +3155,7 @@ export interface OperatingBudgetView {
     code:
       | "unclassified_expenses"
       | "unclassified_collections"
+      | "source_as_of_balance_reconciliations"
       | "ambiguous_legacy_payment_dates";
     count: number;
     amountXof: number;
@@ -3166,6 +3217,7 @@ export interface OperatingBudgetActualEntry {
   source:
     | "bursar"
     | "payment"
+    | "balance_reconciliation"
     | "legacy_payment"
     | "expense"
     | "manual_income"
@@ -3575,19 +3627,6 @@ export const cancelApplicantOnboarding = (id: string, reason: string) =>
     method: "POST",
     body: JSON.stringify({ reason }),
   });
-export type ApplicantStudentInviteResult = ApplicantDetail & {
-  studentInvite: {
-    inviteUrl: string;
-    expiresAt: string;
-    delivery: "sent" | "not_sent";
-  };
-};
-export const resendApplicantStudentInvite = (id: string) =>
-  request<ApplicantStudentInviteResult>(
-    `/admissions/applicants/${id}/student-invite/resend`,
-    { method: "POST", body: "{}" },
-  );
-
 // --- Per-applicant notes thread (admissions / admin only) ---
 export interface ApplicantNote {
   id: string;
@@ -4040,9 +4079,9 @@ export interface StudentGuardianLink {
     | "invited"
     | "invite-expired";
 }
-/** Public: a guardian redeeming their single-use password-setup invite. */
-export const redeemGuardianInvite = (token: string, password: string) =>
-  request<{ ok: boolean }>("/guardian-invites/redeem", {
+/** Public: a student or guardian redeeming their single-use password-setup invite. */
+export const redeemAccountInvite = (token: string, password: string) =>
+  request<{ ok: boolean; email: string }>("/guardian-invites/redeem", {
     method: "POST",
     body: JSON.stringify({ token, password }),
   });
@@ -4876,7 +4915,7 @@ export const releaseEvaluationWindow = (windowId: string, released: boolean) =>
     body: JSON.stringify({ released }),
   });
 
-// ─── Infirmary ──────────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Infirmary ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 export interface InfirmarySettings {
   clinic_name: string;
@@ -4922,7 +4961,12 @@ export interface InfirmaryConsultation {
   date: string;
   time: string;
   followUpRequired: boolean;
-  vitals?: { temperature?: string; bloodPressure?: string; heartRate?: string; weight?: string };
+  vitals?: {
+    temperature?: string;
+    bloodPressure?: string;
+    heartRate?: string;
+    weight?: string;
+  };
   diagnosis?: string;
   treatmentPlan?: string;
 }
@@ -5050,7 +5094,9 @@ export const getInfirmaryStudents = () =>
 // Consultations
 export const getInfirmaryConsultations = () =>
   request<InfirmaryConsultation[]>("/infirmary/consultations");
-export const createInfirmaryConsultation = (data: Partial<InfirmaryConsultation>) =>
+export const createInfirmaryConsultation = (
+  data: Partial<InfirmaryConsultation>,
+) =>
   request<InfirmaryConsultation>("/infirmary/consultations", {
     method: "POST",
     body: JSON.stringify(data),
@@ -5080,29 +5126,41 @@ export interface FlaggedConsultationRow {
 }
 export const getInfirmaryFlaggedToday = () =>
   request<FlaggedConsultationRow[]>("/infirmary/consultations/flagged");
-export const updateInfirmaryConsultation = (id: string, data: Partial<InfirmaryConsultation>) =>
+export const updateInfirmaryConsultation = (
+  id: string,
+  data: Partial<InfirmaryConsultation>,
+) =>
   request<InfirmaryConsultation>(`/infirmary/consultations/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 export const deleteInfirmaryConsultation = (id: string) =>
-  request<{ ok: boolean }>(`/infirmary/consultations/${id}`, { method: "DELETE" });
+  request<{ ok: boolean }>(`/infirmary/consultations/${id}`, {
+    method: "DELETE",
+  });
 
 // Prescriptions
 export const getInfirmaryPrescriptions = () =>
   request<InfirmaryPrescription[]>("/infirmary/prescriptions");
-export const createInfirmaryPrescription = (data: Partial<InfirmaryPrescription>) =>
+export const createInfirmaryPrescription = (
+  data: Partial<InfirmaryPrescription>,
+) =>
   request<InfirmaryPrescription>("/infirmary/prescriptions", {
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryPrescription = (id: string, data: Partial<InfirmaryPrescription>) =>
+export const updateInfirmaryPrescription = (
+  id: string,
+  data: Partial<InfirmaryPrescription>,
+) =>
   request<InfirmaryPrescription>(`/infirmary/prescriptions/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 export const deleteInfirmaryPrescription = (id: string) =>
-  request<{ ok: boolean }>(`/infirmary/prescriptions/${id}`, { method: "DELETE" });
+  request<{ ok: boolean }>(`/infirmary/prescriptions/${id}`, {
+    method: "DELETE",
+  });
 
 // Medications
 export const getInfirmaryMedications = () =>
@@ -5112,29 +5170,41 @@ export const createInfirmaryMedication = (data: Partial<InfirmaryMedication>) =>
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryMedication = (id: string, data: Partial<InfirmaryMedication>) =>
+export const updateInfirmaryMedication = (
+  id: string,
+  data: Partial<InfirmaryMedication>,
+) =>
   request<InfirmaryMedication>(`/infirmary/medications/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 export const deleteInfirmaryMedication = (id: string) =>
-  request<{ ok: boolean }>(`/infirmary/medications/${id}`, { method: "DELETE" });
+  request<{ ok: boolean }>(`/infirmary/medications/${id}`, {
+    method: "DELETE",
+  });
 
 // Appointments
 export const getInfirmaryAppointments = () =>
   request<InfirmaryAppointment[]>("/infirmary/appointments");
-export const createInfirmaryAppointment = (data: Partial<InfirmaryAppointment>) =>
+export const createInfirmaryAppointment = (
+  data: Partial<InfirmaryAppointment>,
+) =>
   request<InfirmaryAppointment>("/infirmary/appointments", {
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryAppointment = (id: string, data: Partial<InfirmaryAppointment>) =>
+export const updateInfirmaryAppointment = (
+  id: string,
+  data: Partial<InfirmaryAppointment>,
+) =>
   request<InfirmaryAppointment>(`/infirmary/appointments/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 export const deleteInfirmaryAppointment = (id: string) =>
-  request<{ ok: boolean }>(`/infirmary/appointments/${id}`, { method: "DELETE" });
+  request<{ ok: boolean }>(`/infirmary/appointments/${id}`, {
+    method: "DELETE",
+  });
 
 // Documents
 export const getInfirmaryDocuments = () =>
@@ -5144,7 +5214,10 @@ export const createInfirmaryDocument = (data: Partial<InfirmaryDocument>) =>
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryDocument = (id: string, data: Partial<InfirmaryDocument>) =>
+export const updateInfirmaryDocument = (
+  id: string,
+  data: Partial<InfirmaryDocument>,
+) =>
   request<InfirmaryDocument>(`/infirmary/documents/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
@@ -5160,7 +5233,10 @@ export const createInfirmaryFollowUp = (data: Partial<InfirmaryFollowUp>) =>
     method: "POST",
     body: JSON.stringify(data),
   });
-export const updateInfirmaryFollowUp = (id: string, data: Partial<InfirmaryFollowUp>) =>
+export const updateInfirmaryFollowUp = (
+  id: string,
+  data: Partial<InfirmaryFollowUp>,
+) =>
   request<InfirmaryFollowUp>(`/infirmary/follow-ups/${id}`, {
     method: "PATCH",
     body: JSON.stringify(data),
@@ -5172,7 +5248,9 @@ export const deleteInfirmaryFollowUp = (id: string) =>
 export const getInfirmaryForms = () =>
   request<InfirmaryForm[]>("/infirmary/forms");
 export const getInfirmaryForm = (id: string) =>
-  request<InfirmaryForm & { responses: InfirmaryFormResponse[] }>(`/infirmary/forms/${id}`);
+  request<InfirmaryForm & { responses: InfirmaryFormResponse[] }>(
+    `/infirmary/forms/${id}`,
+  );
 export const createInfirmaryForm = (data: Partial<InfirmaryForm>) =>
   request<InfirmaryForm>("/infirmary/forms", {
     method: "POST",
@@ -5189,7 +5267,14 @@ export const deleteInfirmaryForm = (id: string) =>
 // Form Responses
 export const getInfirmaryFormResponses = (formId: string) =>
   request<InfirmaryFormResponse[]>(`/infirmary/forms/${formId}/responses`);
-export const createInfirmaryFormResponse = (formId: string, data: { studentId: string; studentName: string; answers: Record<string, string> }) =>
+export const createInfirmaryFormResponse = (
+  formId: string,
+  data: {
+    studentId: string;
+    studentName: string;
+    answers: Record<string, string>;
+  },
+) =>
   request<InfirmaryFormResponse>(`/infirmary/forms/${formId}/responses`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -5213,11 +5298,19 @@ export type EnrollmentOverrideGate =
   | "add_deadline";
 
 export type EnrollmentOverrideFailure =
-  | { gate: "prerequisite"; courses: { code: string; minGrade: string | null }[] }
+  | {
+      gate: "prerequisite";
+      courses: { code: string; minGrade: string | null }[];
+    }
   | { gate: "corequisite"; courses: string[] }
   | { gate: "capacity"; taken: number; capacity: number }
   | { gate: "holds"; kinds: string[] }
-  | { gate: "credit_cap"; currentCredits: number; afterAdd: number; ceiling: number }
+  | {
+      gate: "credit_cap";
+      currentCredits: number;
+      afterAdd: number;
+      ceiling: number;
+    }
   | { gate: "standing"; required: string; actual: number }
   | { gate: "major_restriction"; required: string }
   | { gate: "record_status"; status: string }
@@ -5309,9 +5402,7 @@ export interface FacultyOverrideRequest {
 }
 
 export const facultyOverrideRequests = () =>
-  request<FacultyOverrideRequest[]>(
-    "/academics/enrollment-overrides/faculty",
-  );
+  request<FacultyOverrideRequest[]>("/academics/enrollment-overrides/faculty");
 
 export const facultyDecideOverride = (
   id: string,
@@ -5412,7 +5503,8 @@ export const createForm = (body: {
   closesAt?: string;
   maxResponses?: number;
   sections: FormInputSection[];
-}) => request<FormDetail>("/forms", { method: "POST", body: JSON.stringify(body) });
+}) =>
+  request<FormDetail>("/forms", { method: "POST", body: JSON.stringify(body) });
 
 export const updateForm = (
   id: string,
@@ -5424,7 +5516,11 @@ export const updateForm = (
     maxResponses?: number;
     sections: FormInputSection[];
   },
-) => request<FormDetail>(`/forms/${id}`, { method: "PUT", body: JSON.stringify(body) });
+) =>
+  request<FormDetail>(`/forms/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 
 export const publishForm = (id: string) =>
   request<FormDetail>(`/forms/${id}/publish`, { method: "POST" });
@@ -5530,7 +5626,7 @@ export {
   UpdateHelpdeskTicketInput,
 };
 
-/** Body returned by the GitHub re-sync endpoint — keeps the staff view honest. */
+/** Body returned by the GitHub re-sync endpoint ΓÇö keeps the staff view honest. */
 export interface HelpdeskGithubSyncResult {
   state: "pending" | "linked" | "failed";
   issueNumber?: number;
@@ -5553,7 +5649,7 @@ export const createHelpdeskTicket = (input: CreateHelpdeskTicketInput) =>
     body: JSON.stringify(input),
   });
 
-/** Read a single ticket — returns staff fields only to staff callers. */
+/** Read a single ticket ΓÇö returns staff fields only to staff callers. */
 export const getHelpdeskTicket = (id: string) =>
   request<HelpdeskTicketDetail>(`/helpdesk/tickets/${id}`);
 
@@ -5590,7 +5686,7 @@ export const getHelpdeskQueue = (
 
 /**
  * Staff-side patch. `baseRevision` MUST be the ticket `version` the editor
- * showed on load — the API returns 409 on a mismatch so concurrent edits
+ * showed on load ΓÇö the API returns 409 on a mismatch so concurrent edits
  * surface as a recoverable error rather than a silent overwrite.
  */
 export const updateHelpdeskTicket = (
@@ -5618,7 +5714,7 @@ export const retryHelpdeskGithubSync = (id: string) =>
  * magic-byte validator the existing `/uploads` route uses; this endpoint
  * additionally checks ticket-scoped read authorization. Use
  * `helpdeskAttachmentUrl(id)` to resolve the returned attachment id to an
- * absolute URL — it streams through the authorized `/helpdesk/attachments/:id`
+ * absolute URL ΓÇö it streams through the authorized `/helpdesk/attachments/:id`
  * route, never the public `/uploads/:filename` link.
  */
 export async function uploadHelpdeskAttachment(
@@ -5646,7 +5742,7 @@ export async function uploadHelpdeskAttachment(
  * `GET /helpdesk/attachments/:id` route, which validates that the caller is
  * the ticket owner, the parent of the linked student, or a member of the
  * support staff before streaming the bytes. Returns a URL that travels the
- * session cookie — do not embed this in a mailto or share it externally.
+ * session cookie ΓÇö do not embed this in a mailto or share it externally.
  */
 export function helpdeskAttachmentUrl(attachmentId: string): string {
   return `${API_URL}/api/helpdesk/attachments/${encodeURIComponent(attachmentId)}`;

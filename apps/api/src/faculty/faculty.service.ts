@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import bcrypt from "bcryptjs";
+import { Prisma } from "@mydaust/db";
 import {
   type FacultyCreateInput,
   type FacultyProfileInput,
@@ -22,7 +23,11 @@ const safePhoto = (v: string | null | undefined): string | null =>
 
 /** Faculty list source: platform people holding the "faculty" role. */
 function facultyWhere() {
-  return { roles: { has: "faculty" } };
+  return {
+    kind: "faculty" as const,
+    roles: { has: "faculty" },
+    student: { is: null },
+  };
 }
 
 function initials(firstName: string, lastName: string): string {
@@ -154,24 +159,38 @@ export class FacultyService {
    * returned once and is never included in the audit event.
    */
   async provisionLogin(actorId: string, personId: string) {
-    const person = await this.mustFaculty(personId);
+    await this.mustFaculty(personId);
     const tempPassword = this.randomTempPassword();
-    await this.prisma.person.update({
-      where: { id: person.id },
-      data: {
-        passwordHash: await bcrypt.hash(tempPassword, 10),
-        mustChangePassword: true,
-        // Ends any session still holding the replaced password.
-        sessionVersion: { increment: 1 },
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Person",
-        entityId: person.id,
-        action: "login-provisioned",
-        actorId,
-      },
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
+    const person = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Person" WHERE "id" = ${personId} FOR UPDATE`,
+      );
+      const current = await tx.person.findFirst({
+        where: { id: personId, ...facultyWhere() },
+      });
+      if (!current) throw new NotFoundException("Faculty member not found");
+      const updated = await tx.person.updateMany({
+        where: { id: personId, ...facultyWhere() },
+        data: {
+          passwordHash,
+          mustChangePassword: true,
+          // Ends any session still holding the replaced password.
+          sessionVersion: { increment: 1 },
+        },
+      });
+      if (updated.count !== 1) {
+        throw new NotFoundException("Faculty member not found");
+      }
+      await tx.auditLog.create({
+        data: {
+          entity: "Person",
+          entityId: current.id,
+          action: "login-provisioned",
+          actorId,
+        },
+      });
+      return current;
     });
     return {
       facultyId: person.id,

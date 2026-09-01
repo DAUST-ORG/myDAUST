@@ -142,8 +142,9 @@ module "secrets" {
   env = "staging"
   # RESEND_API_KEY joins only when set — Secrets Manager rejects an empty SecretString.
   secrets = merge({
-    DATABASE_URL   = local.database_url
-    SESSION_SECRET = var.session_secret
+    DATABASE_URL                   = local.database_url
+    SESSION_SECRET                 = var.session_secret
+    STUDENT_ACTIVATION_CODE_KEY_V1 = var.student_activation_code_key_v1
     },
     var.resend_api_key != "" ? { RESEND_API_KEY = var.resend_api_key } : {},
     var.tunnel_creds != "" ? { TUNNEL_CREDS = var.tunnel_creds } : {},
@@ -182,6 +183,7 @@ module "api_service" {
     [
       { name = "DATABASE_URL", valueFrom = module.secrets.arns["DATABASE_URL"] },
       { name = "SESSION_SECRET", valueFrom = module.secrets.arns["SESSION_SECRET"] },
+      { name = "STUDENT_ACTIVATION_CODE_KEY_V1", valueFrom = module.secrets.arns["STUDENT_ACTIVATION_CODE_KEY_V1"] },
     ],
     var.resend_api_key != "" ? [{ name = "RESEND_API_KEY", valueFrom = module.secrets.arns["RESEND_API_KEY"] }] : [],
   )

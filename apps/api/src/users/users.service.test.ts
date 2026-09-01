@@ -17,20 +17,28 @@ const IT: AuthUser = {
 };
 
 function serviceWith(person: Record<string, unknown> | null) {
+  const currentPerson = person ? { student: null, ...person } : null;
   const prisma = {
     person: {
-      findUnique: vi.fn().mockResolvedValue(person),
+      findUnique: vi.fn().mockResolvedValue(currentPerson),
       update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       count: vi.fn().mockResolvedValue(1),
     },
     student: { count: vi.fn().mockResolvedValue(0) },
     guardianStudent: { count: vi.fn().mockResolvedValue(0) },
+    guardianInvite: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    studentInvite: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     auditLog: { create: vi.fn() },
+    $queryRaw: vi.fn().mockResolvedValue([]),
     $transaction: vi.fn(),
   };
+  prisma.$transaction.mockImplementation(
+    async (work: (tx: typeof prisma) => Promise<unknown>) => work(prisma),
+  );
   return {
     prisma,
-    users: new UsersService(prisma as never, {} as never, {} as never),
+    users: new UsersService(prisma as never, {} as never),
   };
 }
 
@@ -58,9 +66,9 @@ describe("the identity ceiling", () => {
   it("refuses an it_admin suspending an admin", async () => {
     const { users, prisma } = serviceWith({ ...TARGET, roles: ["admin"] });
 
-    await expect(
-      users.suspend(IT, "target-1", {}),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(users.suspend(IT, "target-1", {})).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -77,12 +85,59 @@ describe("the identity ceiling", () => {
 
   it("allows an it_admin to reset ordinary staff", async () => {
     const { users, prisma } = serviceWith(TARGET);
-    prisma.$transaction.mockResolvedValue(undefined);
 
     await expect(users.resetPassword(IT, "target-1")).resolves.toMatchObject({
       email: "bursar@daust.edu",
     });
     expect(prisma.$transaction).toHaveBeenCalled();
+    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(prisma.person.updateMany).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to mint a temporary password for a student account", async () => {
+    const { users, prisma } = serviceWith({
+      ...TARGET,
+      kind: "student",
+      roles: ["student"],
+    });
+
+    await expect(users.resetPassword(ADMIN, "target-1")).rejects.toMatchObject({
+      message:
+        "Student passwords can only be set through the student activation page",
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("re-checks the locked current row and refuses a student-state drift", async () => {
+    const { users, prisma } = serviceWith(TARGET);
+    prisma.person.findUnique
+      .mockResolvedValueOnce({ student: null, ...TARGET })
+      .mockResolvedValueOnce({
+        student: { id: "student-1" },
+        ...TARGET,
+        kind: "student",
+        roles: ["student"],
+      });
+
+    await expect(users.resetPassword(ADMIN, "target-1")).rejects.toMatchObject({
+      message:
+        "Student passwords can only be set through the student activation page",
+    });
+    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(prisma.person.updateMany).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the conditional reset write sees later identity drift", async () => {
+    const { users, prisma } = serviceWith(TARGET);
+    prisma.person.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(users.resetPassword(IT, "target-1")).rejects.toMatchObject({
+      message:
+        "This account changed while the password reset was being prepared",
+    });
+    expect(prisma.studentInvite.updateMany).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 
   it("refuses an it_admin granting admin to anyone", async () => {
@@ -130,10 +185,14 @@ describe("self-protection", () => {
 
 describe("roles that need a backing record", () => {
   it("refuses student without an active Student row", async () => {
-    const { users } = serviceWith(TARGET);
+    const { users } = serviceWith({
+      ...TARGET,
+      kind: "student",
+      roles: [],
+    });
 
     await expect(
-      users.setRoles(ADMIN, "target-1", ["bursar", "student"] as never),
+      users.setRoles(ADMIN, "target-1", ["student"] as never),
     ).rejects.toThrow(/active student record/);
   });
 
@@ -153,6 +212,33 @@ describe("roles that need a backing record", () => {
     await expect(
       users.setRoles(ADMIN, "target-1", ["student"] as never),
     ).resolves.toBeDefined();
+  });
+});
+
+describe("role-change credential revocation", () => {
+  it("burns all outstanding setup links in the role transaction", async () => {
+    const { users, prisma } = serviceWith(TARGET);
+    prisma.person.update.mockResolvedValue({
+      ...TARGET,
+      roles: ["registrar"],
+    });
+    prisma.$transaction.mockImplementation(
+      async (work: (client: typeof prisma) => Promise<unknown>) => work(prisma),
+    );
+
+    await expect(
+      users.setRoles(ADMIN, TARGET.id, ["registrar"] as never),
+    ).resolves.toMatchObject({ id: TARGET.id, roles: ["registrar"] });
+
+    expect(prisma.guardianInvite.updateMany).toHaveBeenCalledWith({
+      where: { guardianId: TARGET.id, usedAt: null },
+      data: { usedAt: expect.any(Date) },
+    });
+    expect(prisma.studentInvite.updateMany).toHaveBeenCalledWith({
+      where: { studentPersonId: TARGET.id, usedAt: null },
+      data: { usedAt: expect.any(Date) },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledOnce();
   });
 });
 

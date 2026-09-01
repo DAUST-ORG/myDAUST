@@ -8,8 +8,8 @@ import { Xof } from "./money.js";
  * `card` is retained for historical ledger rows only; `pi_spi` is the BCEAO
  * request-to-pay rail, where
  * the payer approves in their own banking app and settlement arrives asynchronously.
- * `cheque` and `legacy_unknown` are accounting-only values for reviewed
- * historical/manual records and are intentionally not exposed by payer-facing
+ * `cash`, `cheque`, and `legacy_unknown` are accounting-only values for reviewed
+ * staff/historical records and are intentionally not exposed by payer-facing
  * checkout endpoints.
  */
 export const PaymentMethod = z.enum([
@@ -17,6 +17,7 @@ export const PaymentMethod = z.enum([
   "orange_money",
   "card",
   "wire",
+  "cash",
   "cheque",
   "pi_spi",
   "legacy_unknown",

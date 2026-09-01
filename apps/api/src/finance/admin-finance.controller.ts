@@ -35,7 +35,7 @@ const CreatePaymentLinkInput = z.object({
 
 const CreateStudentInput = z.object({
   fullName: z.string().min(1).max(120),
-  dateOfBirth: z.string().min(8).max(10), // YYYY-MM-DD
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   studentNo: z.string().min(1).max(64).optional(),
   email: z.string().email().max(160).optional(),
   programCode: z.string().min(1).max(16).optional(),
@@ -178,6 +178,37 @@ const CreatePlanRequestInput = CreatePaymentPlanInput.extend({
   requestReason: RequestReason,
 });
 const RemoveChargeInput = z.object({ reason: RequestReason });
+
+/** Staff-only ledger entry. Payer-facing methods remain a separate contract. */
+export const RecordStudentPaymentInput = z
+  .object({
+    amountXof: z.number().int().positive().max(100_000_000),
+    method: z.enum(["cash", "wave", "orange_money"]),
+    transactionReference: z.string().trim().max(160).optional(),
+    // Retried browser requests must resolve to the same ledger row.
+    idempotencyKey: z.string().uuid(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const reference = input.transactionReference?.trim();
+    if (input.method === "cash" && reference) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transactionReference"],
+        message: "Cash payments do not use a transaction reference",
+      });
+    }
+    if (
+      input.method !== "cash" &&
+      (!reference || !/[a-z0-9]/i.test(reference))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transactionReference"],
+        message: "A transaction reference is required for mobile money",
+      });
+    }
+  });
 
 const OperatingBudgetKindInput = z.enum(["income", "expense"]);
 const OperatingBudgetCategoryKeyInput = z
@@ -382,6 +413,21 @@ export class AdminFinanceController {
   @Roles("bursar", "admin", "registrar")
   account(@Param("id") id: string) {
     return this.finance.getStudentAccount(id);
+  }
+
+  /** Record money already received by Finance; Director audit remains post-hoc. */
+  @Post("students/:studentId/payments")
+  @Roles("bursar")
+  recordStudentPayment(
+    @CurrentUser() user: AuthUser,
+    @Param("studentId") studentId: string,
+    @Body() body: unknown,
+  ) {
+    return this.finance.recordStudentPayment({
+      studentId,
+      ...RecordStudentPaymentInput.parse(body),
+      actor: user,
+    });
   }
 
   @Post("students")

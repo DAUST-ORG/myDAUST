@@ -35,7 +35,6 @@ const esc = (s: unknown): string =>
 
 const STATUS_TOKEN_BYTES = 32;
 const ENROLLED_STATUS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const STUDENT_INVITE_TTL_MS = 72 * 60 * 60 * 1000;
 const SERIALIZABLE_RETRIES = 3;
 
 const hashCapability = (token: string): string =>
@@ -1024,106 +1023,6 @@ export class AdmissionsService {
       });
     });
     return this.applicantDetail(id);
-  }
-
-  /** Re-issue the single-use account-setup credential after enrollment. */
-  async adminResendStudentInvite(actorId: string, id: string) {
-    const token = newCapability();
-    const tokenHash = hashCapability(token);
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + STUDENT_INVITE_TTL_MS);
-    const recipient = await this.serializable(async (tx) => {
-      const applicant = await tx.applicant.findUnique({
-        where: { id },
-        include: { student: { include: { person: true } } },
-      });
-      if (!applicant) throw new NotFoundException("Applicant not found");
-      if (applicant.onboardingStatus !== "enrolled" || !applicant.student) {
-        throw new BadRequestException(
-          "Account setup can only be resent after enrollment activation",
-        );
-      }
-      if (applicant.student.person.passwordHash) {
-        throw new BadRequestException(
-          "This student has already set an account password",
-        );
-      }
-      await tx.studentInvite.updateMany({
-        where: {
-          studentPersonId: applicant.student.person.id,
-          usedAt: null,
-        },
-        data: { usedAt: now },
-      });
-      await tx.studentInvite.create({
-        data: {
-          studentPersonId: applicant.student.person.id,
-          tokenHash,
-          expiresAt,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          entity: "Applicant",
-          entityId: applicant.id,
-          action: "student-invite-resend-created",
-          actorId,
-          data: {
-            expiresAt: expiresAt.toISOString(),
-            linkDisclosedToActor: true,
-          },
-        },
-      });
-      return {
-        email: applicant.email,
-        name: `${applicant.firstName} ${applicant.lastName}`.trim(),
-      };
-    });
-
-    const inviteUrl = `${loadEnv().PORTAL_ORIGIN}/set-password?token=${encodeURIComponent(token)}`;
-    let sent = false;
-    try {
-      const delivery = await this.mail.send({
-        to: recipient.email,
-        subject: "Set up your myDAUST student account",
-        html: `
-          <p>Hello ${esc(recipient.name)},</p>
-          <p>Your enrollment is active and your myDAUST student account is ready.</p>
-          <p><a href="${inviteUrl}">Set your password</a> (this link is valid for 72 hours).</p>
-          <p>If you were not expecting this, you can ignore this email.</p>
-        `,
-      });
-      sent = delivery.sent;
-    } catch (error) {
-      this.logger.warn(`student invite email failed: ${String(error)}`);
-    }
-    await this.prisma.$transaction(async (tx) => {
-      if (sent) {
-        await tx.applicant.update({
-          where: { id },
-          data: { studentInviteSentAt: new Date() },
-        });
-      }
-      await tx.auditLog.create({
-        data: {
-          entity: "Applicant",
-          entityId: id,
-          action: sent
-            ? "student-invite-resend-sent"
-            : "student-invite-resend-not-sent",
-          actorId,
-        },
-      });
-    });
-    const detail = await this.applicantDetail(id);
-    return {
-      ...detail,
-      studentInvite: {
-        inviteUrl,
-        expiresAt: expiresAt.toISOString(),
-        delivery: sent ? ("sent" as const) : ("not_sent" as const),
-      },
-    };
   }
 
   /** Public capability read. A raw Applicant id is never accepted here. */

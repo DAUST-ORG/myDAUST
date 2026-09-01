@@ -14,8 +14,10 @@ export type HistoricalCashSettlementInput = {
   amountXof: number;
   method: PaymentMethod;
   providerRef: string;
+  provider?: string;
+  source?: string;
   externalReferenceFingerprintSha256?: string | null;
-  settledAt: Date;
+  settledAt: Date | null;
   actorId: string;
   importBatchId?: string;
   importRowKey?: string;
@@ -286,11 +288,11 @@ export async function applyHistoricalCashSettlementInTransaction(
       amount: input.amountXof,
       method: input.method,
       status: "success",
-      provider: "historical_import",
+      provider: input.provider ?? "historical_import",
       providerRef: input.providerRef,
       externalReferenceFingerprintSha256:
         input.externalReferenceFingerprintSha256 ?? null,
-      source: "legacy_cohort_import",
+      source: input.source ?? "legacy_cohort_import",
       initiatedById: input.actorId,
       settledAt: input.settledAt,
       importBatchId: input.importBatchId,

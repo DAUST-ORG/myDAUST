@@ -1,23 +1,18 @@
-import { createHash, randomBytes } from "node:crypto";
 import {
   BadRequestException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import bcrypt from "bcryptjs";
 import { Prisma } from "@mydaust/db";
 import { normalizeStudentNumber } from "@mydaust/shared";
-import { requirePersonEmail } from "../auth/person-email.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
-import { MailService } from "../mail/mail.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
 import { assignStandardPackageInTransaction } from "../finance/standard-package.js";
 
 /** Defaults for the early-alert thresholds shown on Student Success. */
 const DEFAULT_MIN_GPA = 2.5;
 const DEFAULT_MIN_ATTENDANCE = 75;
-const INVITE_TTL_HOURS = 72;
 
 /** The extended student columns the design's Add/Edit record modal captures. */
 export interface RegistrarStudentInput {
@@ -25,7 +20,7 @@ export interface RegistrarStudentInput {
   firstName: string;
   lastName: string;
   email: string;
-  dateOfBirth?: string | null;
+  dateOfBirth: string;
   programCode?: string | null;
   gender?: string | null;
   phone?: string | null;
@@ -59,16 +54,16 @@ export interface RegistrarStudentInput {
 export class RegistrarService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly mail: MailService,
     private readonly notifications?: NotificationsService,
   ) {}
 
   // --- Students -----------------------------------------------------------
 
   /**
-   * Provision a student record + account, atomically assign the administrator-approved
-   * annual package, and email a password-setup link. A missing/incomplete schedule rolls
-   * back the student instead of leaving an active account outside the billing cohort.
+   * Provision a student record and atomically assign the administrator-approved
+   * annual package. Account activation is exclusively the student's card-based
+   * activation-card ceremony bound to ID and DOB; student creation never mints
+   * or discloses a credential.
    */
   async createStudent(actorId: string, input: RegistrarStudentInput) {
     const studentNo = normalizeStudentNumber(input.studentNo);
@@ -87,10 +82,13 @@ export class RegistrarService {
     if (await this.prisma.person.findUnique({ where: { email } })) {
       throw new BadRequestException(`Email ${email} is already in use`);
     }
-    const dob = input.dateOfBirth
-      ? new Date(`${input.dateOfBirth.slice(0, 10)}T00:00:00Z`)
-      : null;
-    if (dob && Number.isNaN(dob.getTime()))
+    const dob = /^\d{4}-\d{2}-\d{2}$/.test(input.dateOfBirth)
+      ? new Date(`${input.dateOfBirth}T00:00:00.000Z`)
+      : new Date(Number.NaN);
+    if (
+      Number.isNaN(dob.getTime()) ||
+      dob.toISOString().slice(0, 10) !== input.dateOfBirth
+    )
       throw new BadRequestException("Invalid date of birth");
 
     let programId: string | null = null;
@@ -193,160 +191,11 @@ export class RegistrarService {
     }
     if (!student) throw new Error("Student creation retry limit exhausted");
 
-    const name = `${input.firstName.trim()} ${input.lastName.trim()}`.trim();
-    const invite = await this.issueStudentInvite(
-      student.person.id,
-      email,
-      name,
-    );
     return {
       id: student.student.id,
       studentNo,
       email,
-      inviteExpiresAt: invite.expiresAt,
     };
-  }
-
-  /** Invite tokens are stored hashed — a leaked database row must not grant access. */
-  private hashToken(token: string): string {
-    return createHash("sha256").update(token).digest("hex");
-  }
-
-  /** Issue a student password-setup token and email it (mirrors the guardian invite). */
-  private async issueStudentInvite(
-    studentPersonId: string,
-    email: string,
-    name: string,
-  ) {
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 3600_000);
-    await this.prisma.studentInvite.create({
-      data: { studentPersonId, tokenHash: this.hashToken(token), expiresAt },
-    });
-    const origin = process.env.PUBLIC_URL ?? "http://localhost:3000";
-    const link = `${origin}/set-password?token=${token}`;
-    await this.mail.send({
-      to: email,
-      subject: "Set up your myDAUST student account",
-      html: `
-        <p>Hello ${name},</p>
-        <p>A myDAUST student account has been created for you.</p>
-        <p><a href="${link}">Set your password</a> (link valid for ${INVITE_TTL_HOURS} hours).</p>
-        <p>If you were not expecting this, you can ignore this email.</p>
-      `,
-    });
-    return { expiresAt, link };
-  }
-
-  // --- Login provisioning (@mydaust.com identity + temp password) ---------
-
-  private mydaustLocal(first: string, last: string): string {
-    const clean = (s: string) =>
-      s
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[̀-ͯ]/g, "")
-        .replace(/[^a-z0-9]+/g, "");
-    const f = clean(first) || "student";
-    const l = clean(last);
-    return l ? `${f}.${l}` : f;
-  }
-
-  /** A free @mydaust.com address, suffixing .2/.3… against the Person.email unique constraint. */
-  private async allocMydaustEmail(
-    first: string,
-    last: string,
-  ): Promise<string> {
-    const base = this.mydaustLocal(first, last);
-    let candidate = `${base}@mydaust.com`;
-    let n = 1;
-    while (
-      await this.prisma.person.findUnique({ where: { email: candidate } })
-    ) {
-      n += 1;
-      candidate = `${base}.${n}@mydaust.com`;
-    }
-    return candidate;
-  }
-
-  /** Readable temp password (no ambiguous chars); shown once to the registrar, never stored plaintext. */
-  private randomTempPassword(): string {
-    const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-    const bytes = randomBytes(14);
-    let out = "";
-    for (let i = 0; i < 14; i += 1)
-      out += alphabet[bytes[i]! % alphabet.length];
-    return out;
-  }
-
-  /**
-   * Give a student a working login: ensure an @mydaust.com identity (preserving the
-   * prior email as personalEmail), set a random temp password + force-change flag.
-   * Returns the temp password ONCE — never logged or audited.
-   */
-  async provisionLogin(actorId: string, studentId: string) {
-    const student = await this.prisma.student.findUnique({
-      where: { id: studentId },
-      include: { person: true },
-    });
-    if (!student) throw new NotFoundException("Student not found");
-    if (student.recordStatus !== "active") {
-      throw new BadRequestException(
-        "A student login can be provisioned only after enrollment is active",
-      );
-    }
-    const person = student.person;
-    let email = requirePersonEmail(person.email, "Student");
-
-    if (!email.toLowerCase().endsWith("@mydaust.com")) {
-      if (!student.personalEmail) {
-        await this.prisma.student.update({
-          where: { id: studentId },
-          data: { personalEmail: email },
-        });
-      }
-      email = await this.allocMydaustEmail(person.firstName, person.lastName);
-    }
-
-    const tempPassword = this.randomTempPassword();
-    await this.prisma.person.update({
-      where: { id: person.id },
-      data: {
-        email,
-        passwordHash: await bcrypt.hash(tempPassword, 10),
-        mustChangePassword: true,
-        // Ends any session still holding the replaced password.
-        sessionVersion: { increment: 1 },
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Person",
-        entityId: person.id,
-        action: "login-provisioned",
-        actorId,
-      },
-    });
-    return {
-      studentId,
-      studentNo: student.studentNo,
-      name: `${person.firstName} ${person.lastName}`,
-      email,
-      tempPassword,
-    };
-  }
-
-  /** Bulk-provision every student that has no password yet (onboards the imported cohort). */
-  async provisionAllMissing(actorId: string) {
-    const students = await this.prisma.student.findMany({
-      where: { recordStatus: "active", person: { passwordHash: null } },
-      select: { id: true },
-      orderBy: { studentNo: "asc" },
-    });
-    const credentials = [];
-    for (const s of students)
-      credentials.push(await this.provisionLogin(actorId, s.id));
-    return { count: credentials.length, credentials };
   }
 
   // --- Student documents (design's "Documents on file") -------------------

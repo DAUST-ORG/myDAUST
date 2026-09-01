@@ -97,6 +97,7 @@ const STATUS_LABEL = {
 const SOURCE_LABEL: Record<OperatingBudgetActualEntry["source"], string> = {
   bursar: "Bursar settlement",
   payment: "Bursar settlement",
+  balance_reconciliation: "Paid-to-date balance reconciliation",
   legacy_payment: "Legacy settled payment",
   expense: "Operating expense",
   manual_income: "Manual income",
@@ -1076,6 +1077,14 @@ export default function BudgetingCashflowPage() {
               totaling {formatXof(warning.amountXof)}. They remain included in
               cash and closing totals but cannot be budgeted or adjusted here.
               Resolve their source allocation in Finance.
+            </span>
+          ) : warning.code === "source_as_of_balance_reconciliations" ? (
+            <span>
+              <strong>
+                {warning.count} paid-to-date balance reconciliation
+                {warning.count === 1 ? "" : "s"}
+              </strong>{" "}
+              totaling {formatXof(warning.amountXof)}. {warning.message}
             </span>
           ) : (
             <span>

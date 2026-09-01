@@ -725,35 +725,20 @@ export async function planLegacyCohortImport(
   };
 }
 
-async function suppressLegacyCohortActivationInviteInTransaction(
+async function recordLegacyCohortPairedActivationInTransaction(
   tx: Prisma.TransactionClient,
   activation: {
     applicantId: string;
     studentId: string;
-    personId: string;
-    inviteToken: string;
   },
   batchId: string,
   actorId: string,
 ): Promise<void> {
-  const marked = await tx.studentInvite.updateMany({
-    where: {
-      studentPersonId: activation.personId,
-      tokenHash: sha256(activation.inviteToken),
-      usedAt: null,
-    },
-    data: { usedAt: new Date() },
-  });
-  if (marked.count !== 1) {
-    throw new Error(
-      "Legacy cohort activation invite could not be suppressed atomically",
-    );
-  }
   await tx.auditLog.create({
     data: {
       entity: "Applicant",
       entityId: activation.applicantId,
-      action: "legacy-cohort-activation-invite-suppressed",
+      action: "legacy-cohort-student-activation-required",
       actorId,
       data: {
         batchId,
@@ -1246,7 +1231,7 @@ export async function executeLegacyCohortImport(
                 paymentId,
               );
               if (settlement.activation) {
-                await suppressLegacyCohortActivationInviteInTransaction(
+                await recordLegacyCohortPairedActivationInTransaction(
                   tx,
                   settlement.activation,
                   cohortBatch.id,

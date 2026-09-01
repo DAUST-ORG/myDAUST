@@ -14,6 +14,7 @@ import { toDakarDateKey } from "@mydaust/shared";
 import { type AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { deriveApiAccountPosition } from "./account-position.js";
+import { paymentCashRecognition } from "./payment-cash-recognition.js";
 import {
   OPERATING_BUDGET_CATEGORIES,
   UNCLASSIFIED_COLLECTION_CATEGORY,
@@ -60,6 +61,7 @@ export type ActualRecord = {
   id: string;
   source:
     | "payment"
+    | "balance_reconciliation"
     | "unallocated_credit"
     | "refund"
     | "legacy_payment"
@@ -262,6 +264,15 @@ export class OperatingBudgetService {
           OR: [
             { settledAt: { gte: start, lt: timestampEndExclusive } },
             { refundedAt: { gte: start, lt: timestampEndExclusive } },
+            {
+              paymentBalanceImportRow: {
+                is: {
+                  batch: {
+                    sourceAsOfDate: { gte: start, lt: dateEndExclusive },
+                  },
+                },
+              },
+            },
           ],
         },
         include: {
@@ -275,6 +286,11 @@ export class OperatingBudgetService {
                   costCenterCode: true,
                 },
               },
+            },
+          },
+          paymentBalanceImportRow: {
+            select: {
+              batch: { select: { sourceAsOfDate: true } },
             },
           },
         },
@@ -317,6 +333,23 @@ export class OperatingBudgetService {
 
     const records: ActualRecord[] = [];
     for (const payment of payments) {
+      const recognition = paymentCashRecognition(payment);
+      const recognitionInRange =
+        recognition &&
+        recognition.occurredOn >= start &&
+        recognition.occurredOn < timestampEndExclusive
+          ? recognition
+          : null;
+      const recognitionSource =
+        recognitionInRange?.basis === "source_as_of_balance"
+          ? ("balance_reconciliation" as const)
+          : ("payment" as const);
+      const recognitionDescription = (description: string) =>
+        recognitionInRange?.basis === "source_as_of_balance"
+          ? `Paid-to-date balance as of ${toDakarDateKey(
+              recognitionInRange.occurredOn,
+            )} · ${description}`
+          : description;
       const allocations = payment.componentAllocations;
       if (allocations.length > 0) {
         for (const allocation of allocations) {
@@ -329,24 +362,21 @@ export class OperatingBudgetService {
           const categoryLabel = isBursarComponent
             ? this.categoryLabel("bursar")
             : UNCLASSIFIED_COLLECTION_CATEGORY.label;
-          if (
-            payment.settledAt &&
-            payment.settledAt >= start &&
-            payment.settledAt < timestampEndExclusive
-          ) {
+          if (recognitionInRange) {
             records.push({
-              id: `${allocation.id}:settled`,
-              source: "payment",
+              id: `${allocation.id}:${recognitionInRange.basis}`,
+              source: recognitionSource,
               sourceId: payment.id,
               kind: "income",
               categoryKey,
               categoryLabel,
               costCenterCode: allocation.invoiceComponent.costCenterCode,
-              occurredOn: payment.settledAt,
+              occurredOn: recognitionInRange.occurredOn,
               amountXof: allocation.amountXof,
-              description:
+              description: recognitionDescription(
                 allocation.invoiceComponent.label ||
-                allocation.invoiceComponent.kind,
+                  allocation.invoiceComponent.kind,
+              ),
               status: "approved",
               isEstimate: false,
               payee: null,
@@ -385,23 +415,21 @@ export class OperatingBudgetService {
           "Payment component allocation total",
         );
         const unallocatedCreditXof = Math.max(0, payment.amount - allocatedXof);
-        if (
-          unallocatedCreditXof > 0 &&
-          payment.settledAt &&
-          payment.settledAt >= start &&
-          payment.settledAt < timestampEndExclusive
-        ) {
+        if (unallocatedCreditXof > 0 && recognitionInRange) {
           records.push({
-            id: `${payment.id}:unallocated-credit`,
-            source: "unallocated_credit",
+            id: `${payment.id}:unallocated-credit:${recognitionInRange.basis}`,
+            source:
+              recognitionInRange.basis === "source_as_of_balance"
+                ? "balance_reconciliation"
+                : "unallocated_credit",
             sourceId: payment.id,
             kind: "income",
             categoryKey: UNCLASSIFIED_COLLECTION_CATEGORY.key,
             categoryLabel: UNCLASSIFIED_COLLECTION_CATEGORY.label,
             costCenterCode: payment.invoice.costCenterCode,
-            occurredOn: payment.settledAt,
+            occurredOn: recognitionInRange.occurredOn,
             amountXof: unallocatedCreditXof,
-            description: "Unallocated payment credit",
+            description: recognitionDescription("Unallocated payment credit"),
             status: "approved",
             isEstimate: false,
             payee: null,
@@ -444,22 +472,23 @@ export class OperatingBudgetService {
         const categoryLabel = isBursarLegacy
           ? this.categoryLabel("bursar")
           : UNCLASSIFIED_COLLECTION_CATEGORY.label;
-        if (
-          payment.settledAt &&
-          payment.settledAt >= start &&
-          payment.settledAt < timestampEndExclusive
-        ) {
+        if (recognitionInRange) {
           records.push({
-            id: `${payment.id}:settled`,
-            source: "legacy_payment",
+            id: `${payment.id}:${recognitionInRange.basis}`,
+            source:
+              recognitionInRange.basis === "source_as_of_balance"
+                ? "balance_reconciliation"
+                : "legacy_payment",
             sourceId: payment.id,
             kind: "income",
             categoryKey,
             categoryLabel,
             costCenterCode: payment.invoice.costCenterCode,
-            occurredOn: payment.settledAt,
+            occurredOn: recognitionInRange.occurredOn,
             amountXof: payment.amount,
-            description: "Bursar collection (legacy allocation)",
+            description: recognitionDescription(
+              "Bursar collection (legacy allocation)",
+            ),
             status: "approved",
             isEstimate: false,
             payee: null,
@@ -987,6 +1016,9 @@ export class OperatingBudgetService {
         record.kind === "income" &&
         record.categoryKey === UNCLASSIFIED_COLLECTION_CATEGORY.key,
     );
+    const balanceReconciliations = actualRecords.filter(
+      (record) => record.source === "balance_reconciliation",
+    );
     const matrix = matrixFromCells(year.label, planned, actual);
     const openingBalanceXof = selected
       ? toApiXof(selected.openingBalanceXof, "Opening balance")
@@ -1172,6 +1204,22 @@ export class OperatingBudgetService {
                 ),
                 message:
                   "Some legacy refunds have identical settlement and refund timestamps. Net totals remain included, but their monthly timing cannot be stated precisely.",
+              },
+            ]
+          : []),
+        ...(balanceReconciliations.length > 0
+          ? [
+              {
+                code: "source_as_of_balance_reconciliations" as const,
+                count: new Set(
+                  balanceReconciliations.map((record) => record.sourceId),
+                ).size,
+                amountXof: sumXof(
+                  balanceReconciliations.map((record) => record.amountXof),
+                  "Paid-to-date balance reconciliation total",
+                ),
+                message:
+                  "Paid-to-date workbook deltas are recognized on the reviewed source-as-of date. Individual settlement timestamps remain unknown and were not invented.",
               },
             ]
           : []),
@@ -1400,7 +1448,9 @@ export class OperatingBudgetService {
           !input.source ||
           (input.source === "bursar"
             ? row.categoryKey === "bursar" &&
-              (row.source === "payment" || row.source === "legacy_payment")
+              (row.source === "payment" ||
+                row.source === "legacy_payment" ||
+                row.source === "balance_reconciliation")
             : row.source === input.source),
       )
       .sort(

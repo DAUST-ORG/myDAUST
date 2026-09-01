@@ -153,6 +153,62 @@ async function makePlannedInvoiceWithPayments(
   return { invoice, payments };
 }
 
+async function makeIsolatedStudent() {
+  const person = await prisma.person.create({
+    data: {
+      email: `recorded-payment-${randomUUID()}@test.local`,
+      firstName: "Recorded",
+      lastName: "Payment",
+      kind: "student",
+      roles: ["student"],
+    },
+  });
+  return prisma.student.create({
+    data: {
+      personId: person.id,
+      studentNo: `RP${randomUUID().replace(/-/g, "").slice(0, 10)}`,
+    },
+  });
+}
+
+async function makeInvoiceForStudent(
+  studentId: string,
+  total: number,
+  dueDate: Date,
+) {
+  return prisma.invoice.create({
+    data: {
+      studentId,
+      termId: ctx.termId,
+      totalAmount: total,
+      amountPaid: 0,
+      status: "open",
+      costCenterCode: "9100",
+      plan: {
+        create: {
+          installments: {
+            create: {
+              sequence: 1,
+              dueDate,
+              amountDue: total,
+              amountPaid: 0,
+              status: "overdue",
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+function recordedPaymentActor() {
+  return {
+    personId: ctx.reviewerId,
+    email: "bursar@test.local",
+    name: "Test Bursar",
+  };
+}
+
 /**
  * The claim step from `settlePayment`, exercised directly.
  *
@@ -539,5 +595,230 @@ describe.skipIf(noDb)("settlement money path", () => {
     if (results[1]!.status === "rejected") {
       expect(String(results[1]!.reason)).toContain("cannot be removed");
     }
+  });
+
+  it("records one cash payment when the same cashier request races itself", async () => {
+    const student = await makeIsolatedStudent();
+    const invoice = await makeInvoiceForStudent(
+      student.id,
+      300_000,
+      new Date("2026-01-05T00:00:00.000Z"),
+    );
+    const idempotencyKey = randomUUID();
+    const input = {
+      studentId: student.id,
+      amountXof: 75_000,
+      method: "cash" as const,
+      idempotencyKey,
+      actor: recordedPaymentActor(),
+    };
+
+    const receipts = await Promise.all([
+      finance.recordStudentPayment(input),
+      finance.recordStudentPayment(input),
+    ]);
+
+    const [afterInvoice, payments, submissions, paymentAudits] =
+      await Promise.all([
+        prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } }),
+        prisma.payment.findMany({
+          where: { studentId: student.id, source: "finance_manual" },
+        }),
+        prisma.paymentSubmission.findMany({
+          where: { studentId: student.id, source: "finance_manual" },
+        }),
+        prisma.auditLog.findMany({
+          where: {
+            actorId: ctx.reviewerId,
+            entity: "Payment",
+            action: "received-and-recorded",
+          },
+        }),
+      ]);
+
+    expect(new Set(receipts.map((result) => result.paymentId))).toEqual(
+      new Set([idempotencyKey.toLowerCase()]),
+    );
+    expect(payments).toHaveLength(1);
+    expect(payments[0]).toMatchObject({
+      id: idempotencyKey.toLowerCase(),
+      invoiceId: invoice.id,
+      amount: 75_000,
+      method: "cash",
+      status: "success",
+      initiatedById: ctx.reviewerId,
+      initiatedByEmail: null,
+    });
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toMatchObject({
+      paymentId: idempotencyKey.toLowerCase(),
+      status: "approved",
+      auditStatus: "unreviewed",
+      method: "cash",
+      bankReference: null,
+    });
+    expect(afterInvoice.amountPaid).toBe(75_000);
+    expect(
+      paymentAudits.filter(
+        (audit) => audit.entityId === idempotencyKey.toLowerCase(),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("allows only one concurrent Finance entry for a normalized mobile reference", async () => {
+    const student = await makeIsolatedStudent();
+    const invoice = await makeInvoiceForStudent(
+      student.id,
+      300_000,
+      new Date("2026-01-06T00:00:00.000Z"),
+    );
+    const firstId = randomUUID();
+    const secondId = randomUUID();
+    const originalReferenceCheck = (
+      finance as unknown as {
+        assertFinanceReferenceAvailable: (
+          method: "wave",
+          reference: string,
+          paymentId: string,
+        ) => Promise<string>;
+      }
+    ).assertFinanceReferenceAvailable.bind(finance);
+    let arrivals = 0;
+    let releaseChecks!: () => void;
+    const bothChecked = new Promise<void>((resolve) => {
+      releaseChecks = resolve;
+    });
+    (
+      finance as unknown as {
+        assertFinanceReferenceAvailable: typeof originalReferenceCheck;
+      }
+    ).assertFinanceReferenceAvailable = async (
+      method,
+      reference,
+      paymentId,
+    ) => {
+      const fingerprint = await originalReferenceCheck(
+        method,
+        reference,
+        paymentId,
+      );
+      arrivals += 1;
+      if (arrivals === 2) releaseChecks();
+      await bothChecked;
+      return fingerprint;
+    };
+
+    let results: PromiseSettledResult<unknown>[];
+    try {
+      results = await Promise.allSettled([
+        finance.recordStudentPayment({
+          studentId: student.id,
+          amountXof: 50_000,
+          method: "wave",
+          transactionReference: "Wave Ref-2026/42",
+          idempotencyKey: firstId,
+          actor: recordedPaymentActor(),
+        }),
+        finance.recordStudentPayment({
+          studentId: student.id,
+          amountXof: 50_000,
+          method: "wave",
+          transactionReference: "wave-ref 2026 42",
+          idempotencyKey: secondId,
+          actor: recordedPaymentActor(),
+        }),
+      ]);
+    } finally {
+      (
+        finance as unknown as {
+          assertFinanceReferenceAvailable: typeof originalReferenceCheck;
+        }
+      ).assertFinanceReferenceAvailable = originalReferenceCheck;
+    }
+
+    const [afterInvoice, payments, submissions] = await Promise.all([
+      prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } }),
+      prisma.payment.findMany({
+        where: { studentId: student.id, source: "finance_manual" },
+      }),
+      prisma.paymentSubmission.findMany({
+        where: { studentId: student.id, source: "finance_manual" },
+      }),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected?.status).toBe("rejected");
+    if (rejected?.status === "rejected") {
+      expect(String(rejected.reason)).toContain(
+        "payment reference has already been recorded",
+      );
+    }
+    expect(payments).toHaveLength(1);
+    expect(submissions).toHaveLength(1);
+    expect(afterInvoice.amountPaid).toBe(50_000);
+  });
+
+  it("rolls back a Finance entry when its previously selected invoice is stale", async () => {
+    const student = await makeIsolatedStudent();
+    const staleInvoice = await makeInvoiceForStudent(
+      student.id,
+      100_000,
+      new Date("2025-12-01T00:00:00.000Z"),
+    );
+    const nextInvoice = await makeInvoiceForStudent(
+      student.id,
+      100_000,
+      new Date("2026-01-01T00:00:00.000Z"),
+    );
+    await finance.recordStudentPayment({
+      studentId: student.id,
+      amountXof: 100_000,
+      method: "cash",
+      idempotencyKey: randomUUID(),
+      actor: recordedPaymentActor(),
+    });
+
+    const stalePaymentId = randomUUID();
+    await expect(
+      (finance as any).settlePayment(stalePaymentId, {
+        via: "finance_manual",
+        actorId: ctx.reviewerId,
+        method: "cash",
+        confirmedAmount: 25_000,
+        createPayment: {
+          invoiceId: staleInvoice.id,
+          studentId: student.id,
+          amount: 25_000,
+          method: "cash",
+          providerRef: `FINANCE-MANUAL-${stalePaymentId}`,
+          externalReferenceFingerprintSha256: null,
+          source: "finance_manual",
+          initiatedById: ctx.reviewerId,
+          initiatedByEmail: null,
+        },
+        financeRecord: {
+          id: randomUUID(),
+          contactEmail: "recorded-payment@test.local",
+          transactionReference: null,
+          reviewedByName: "Test Bursar",
+          reviewedByEmail: "bursar@test.local",
+        },
+      }),
+    ).rejects.toThrow();
+
+    const [stalePayment, staleSubmission, afterNextInvoice] = await Promise.all(
+      [
+        prisma.payment.findUnique({ where: { id: stalePaymentId } }),
+        prisma.paymentSubmission.findUnique({
+          where: { paymentId: stalePaymentId },
+        }),
+        prisma.invoice.findUniqueOrThrow({ where: { id: nextInvoice.id } }),
+      ],
+    );
+    expect(stalePayment).toBeNull();
+    expect(staleSubmission).toBeNull();
+    expect(afterNextInvoice.amountPaid).toBe(0);
   });
 });

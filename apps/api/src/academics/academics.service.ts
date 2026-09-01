@@ -3414,6 +3414,10 @@ export class AcademicsService {
       personData.lastName = parts.join(" ") || personData.firstName;
     }
     if (input.email !== undefined) personData.email = input.email.toLowerCase();
+    const loginEmailChanged =
+      personData.email !== undefined &&
+      personData.email !== student.person.email;
+    const inviteRevokedAt = new Date();
 
     let programId: string | null | undefined;
     if (input.programCode !== undefined) {
@@ -3515,6 +3519,14 @@ export class AcademicsService {
             this.prisma.person.update({
               where: { id: student.personId },
               data: personData,
+            }),
+          ]
+        : []),
+      ...(loginEmailChanged
+        ? [
+            this.prisma.studentInvite.updateMany({
+              where: { studentPersonId: student.personId, usedAt: null },
+              data: { usedAt: inviteRevokedAt },
             }),
           ]
         : []),

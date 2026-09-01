@@ -30,6 +30,9 @@ enum PaymentMethod {
   orange_money
   card
   wire
+  // Cash received and recorded directly by a named Finance staff member.
+  // Accounting-only: payer-facing checkout endpoints must never offer it.
+  cash
   // Historical/manual bank records may be settled by cheque. This remains an
   // accounting value only; payer-facing checkout endpoints do not offer it.
   cheque
@@ -67,6 +70,15 @@ enum PaymentImportBatchStatus {
   pending
   imported
   failed
+}
+
+/// Final disposition of one paid-to-date workbook row. A later reviewed pass
+/// may resolve a held row, but a physical source row can post cash only once.
+enum PaymentBalanceImportDisposition {
+  post_delta
+  already_reconciled
+  previously_imported
+  held
 }
 
 enum PaymentSubmissionStatus {
@@ -391,162 +403,169 @@ model ManagementActualEntry {
 }
 
 model Person {
-  id                         String                    @id @default(uuid())
-  email                      String?                   @unique
-  firstName                  String
-  lastName                   String
-  kind                       PersonKind
+  id                            String                       @id @default(uuid())
+  email                         String?                      @unique
+  firstName                     String
+  lastName                      String
+  kind                          PersonKind
   // App RBAC roles (a person can hold several). Validated against AppRole in code.
-  roles                      String[]                  @default([])
+  roles                         String[]                     @default([])
   // bcrypt hash; null until a password is set.
-  passwordHash               String?
+  passwordHash                  String?
   // Set when a temp password was assigned; forces a change on next login.
-  mustChangePassword         Boolean                   @default(false)
+  mustChangePassword            Boolean                      @default(false)
   // Suspended accounts cannot sign in and their live sessions are ended (see sessionVersion).
   // DB CHECK Person_suspended_has_timestamp keeps status and suspendedAt in agreement.
-  status                     PersonStatus              @default(active)
-  suspendedAt                DateTime?
-  suspendedById              String?
+  status                        PersonStatus                 @default(active)
+  suspendedAt                   DateTime?
+  suspendedById                 String?
   // Signed into the session JWT at login and compared on every authenticated request.
   // Bump it to end every live session this person holds.
-  sessionVersion             Int                       @default(0)
-  createdAt                  DateTime                  @default(now())
-  student                    Student?
-  taughtSections             Section[]                 @relation("Instructor")
-  threadParticipations       ThreadParticipant[]
-  messagesSent               Message[]
-  projectMemberships         ProjectMember[]
+  sessionVersion                Int                          @default(0)
+  createdAt                     DateTime                     @default(now())
+  student                       Student?
+  taughtSections                Section[]                    @relation("Instructor")
+  threadParticipations          ThreadParticipant[]
+  messagesSent                  Message[]
+  projectMemberships            ProjectMember[]
   // --- SIS redesign ---
-  guardianOf                 GuardianStudent[]         @relation("GuardianOf")
-  guardianProfile            GuardianProfile?
-  guardianInvites            GuardianInvite[]          @relation("GuardianInvites")
-  studentInvites             StudentInvite[]           @relation("StudentInvites")
-  broadcasts                 Broadcast[]               @relation("BroadcastSender")
+  guardianOf                    GuardianStudent[]            @relation("GuardianOf")
+  guardianProfile               GuardianProfile?
+  guardianInvites               GuardianInvite[]             @relation("GuardianInvites")
+  studentInvites                StudentInvite[]              @relation("StudentInvites")
+  activationRequestsAsStudent   StudentActivationRequest[]   @relation("StudentActivationRequestStudent")
+  activationRequestsApproved    StudentActivationRequest[]   @relation("StudentActivationRequestApprover")
+  studentActivationCards        StudentActivationCard[]      @relation("StudentActivationCardStudent")
+  activationCardBatchesCreated  StudentActivationCardBatch[] @relation("StudentActivationCardBatchCreator")
+  activationCardBatchesRevoked  StudentActivationCardBatch[] @relation("StudentActivationCardBatchRevoker")
+  broadcasts                    Broadcast[]                  @relation("BroadcastSender")
   // Public website profile for faculty (see FacultyProfile).
-  facultyProfile             FacultyProfile?
-  paymentSubmissionsStarted  PaymentSubmission[]       @relation("PaymentSubmissionInitiator")
-  paymentSubmissionsVerified PaymentSubmission[]       @relation("PaymentSubmissionVerifier")
-  paymentSubmissionsAudited  PaymentSubmission[]       @relation("PaymentSubmissionAuditor")
-  transcriptImportBatches    TranscriptImportBatch[]   @relation("TranscriptImportBatchCreator")
-  paymentImportBatches       PaymentImportBatch[]      @relation("PaymentImportBatchCreator")
-  legacyCohortImportBatches  LegacyCohortImportBatch[] @relation("LegacyCohortImportBatchCreator")
-  transcriptEntriesCreated   TranscriptEntry[]         @relation("TranscriptEntryCreator")
-  transcriptEntriesUpdated   TranscriptEntry[]         @relation("TranscriptEntryUpdater")
-  transcriptEntriesVoided    TranscriptEntry[]         @relation("TranscriptEntryVoider")
-  paymentsInitiated          Payment[]                 @relation("PaymentInitiator")
-  feeSchedulesCreated        FeeSchedule[]             @relation("FeeScheduleCreator")
-  feeSchedulesApproved       FeeSchedule[]             @relation("FeeScheduleApprover")
-  academicCatalogsCreated    AcademicCatalogRevision[] @relation("AcademicCatalogCreator")
-  academicCatalogsApproved   AcademicCatalogRevision[] @relation("AcademicCatalogApprover")
-  infirmaryConsultations     Consultation[]            @relation("ConsultationClinician")
-  infirmaryConsultationsFlagged Consultation[]            @relation("ConsultationSickFlagger")
-  attendanceNotedBy        AttendanceRecord[]              @relation("AttendanceNotedBy")
-  infirmaryPrescriptions     Prescription[]            @relation("PrescriptionAuthor")
-  infirmaryDocuments         InfirmaryDocument[]       @relation("DocumentUploader")
-  standingOverridesCreated   StudentStandingOverride[] @relation("StandingOverrideCreator")
-  standingOverridesUpdated   StudentStandingOverride[] @relation("StandingOverrideUpdater")
-  standingOverridesCleared   StudentStandingOverride[] @relation("StandingOverrideClearer")
-  approvalRequestsCreated    ApprovalRequest[]         @relation("ApprovalRequester")
-  approvalRequestsReviewed   ApprovalRequest[]         @relation("ApprovalReviewer")
-  approvalEvents             ApprovalEvent[]           @relation("ApprovalEventActor")
-  operatingBudgetsCreated    OperatingBudget[]         @relation("OperatingBudgetCreator")
-  operatingBudgetsReviewed   OperatingBudget[]         @relation("OperatingBudgetReviewer")
-  managementActualsCreated   ManagementActualEntry[]   @relation("ManagementActualCreator")
-  managementActualsApproved  ManagementActualEntry[]   @relation("ManagementActualApprover")
-  managementActualsVoided    ManagementActualEntry[]   @relation("ManagementActualVoider")
-  expensesApproved           Expense[]                 @relation("ExpenseApprover")
-  expensesVoided             Expense[]                 @relation("ExpenseVoider")
-  directorWidgetPreference   DirectorWidgetPreference?
-  notifications Notification[]
-  admissionNotes AdmissionNote[] @relation("AdmissionNoteAuthor")
-  createdForms                CustomForm[]
-  helpdeskTicketsRequested  HelpdeskTicket[]      @relation("HelpdeskTicketRequester")
-  helpdeskTicketsAssigned   HelpdeskTicket[]      @relation("HelpdeskTicketAssignee")
-  helpdeskCommentsAuthored  HelpdeskComment[]     @relation("HelpdeskCommentAuthor")
-  helpdeskAttachmentsUploaded HelpdeskAttachment[] @relation("HelpdeskAttachmentUploader")
+  facultyProfile                FacultyProfile?
+  paymentSubmissionsStarted     PaymentSubmission[]          @relation("PaymentSubmissionInitiator")
+  paymentSubmissionsVerified    PaymentSubmission[]          @relation("PaymentSubmissionVerifier")
+  paymentSubmissionsAudited     PaymentSubmission[]          @relation("PaymentSubmissionAuditor")
+  transcriptImportBatches       TranscriptImportBatch[]      @relation("TranscriptImportBatchCreator")
+  paymentImportBatches          PaymentImportBatch[]         @relation("PaymentImportBatchCreator")
+  paymentBalanceImportBatches   PaymentBalanceImportBatch[]  @relation("PaymentBalanceImportBatchCreator")
+  legacyCohortImportBatches     LegacyCohortImportBatch[]    @relation("LegacyCohortImportBatchCreator")
+  transcriptEntriesCreated      TranscriptEntry[]            @relation("TranscriptEntryCreator")
+  transcriptEntriesUpdated      TranscriptEntry[]            @relation("TranscriptEntryUpdater")
+  transcriptEntriesVoided       TranscriptEntry[]            @relation("TranscriptEntryVoider")
+  paymentsInitiated             Payment[]                    @relation("PaymentInitiator")
+  feeSchedulesCreated           FeeSchedule[]                @relation("FeeScheduleCreator")
+  feeSchedulesApproved          FeeSchedule[]                @relation("FeeScheduleApprover")
+  academicCatalogsCreated       AcademicCatalogRevision[]    @relation("AcademicCatalogCreator")
+  academicCatalogsApproved      AcademicCatalogRevision[]    @relation("AcademicCatalogApprover")
+  infirmaryConsultations        Consultation[]               @relation("ConsultationClinician")
+  infirmaryConsultationsFlagged Consultation[]               @relation("ConsultationSickFlagger")
+  attendanceNotedBy             AttendanceRecord[]           @relation("AttendanceNotedBy")
+  infirmaryPrescriptions        Prescription[]               @relation("PrescriptionAuthor")
+  infirmaryDocuments            InfirmaryDocument[]          @relation("DocumentUploader")
+  standingOverridesCreated      StudentStandingOverride[]    @relation("StandingOverrideCreator")
+  standingOverridesUpdated      StudentStandingOverride[]    @relation("StandingOverrideUpdater")
+  standingOverridesCleared      StudentStandingOverride[]    @relation("StandingOverrideClearer")
+  approvalRequestsCreated       ApprovalRequest[]            @relation("ApprovalRequester")
+  approvalRequestsReviewed      ApprovalRequest[]            @relation("ApprovalReviewer")
+  approvalEvents                ApprovalEvent[]              @relation("ApprovalEventActor")
+  operatingBudgetsCreated       OperatingBudget[]            @relation("OperatingBudgetCreator")
+  operatingBudgetsReviewed      OperatingBudget[]            @relation("OperatingBudgetReviewer")
+  managementActualsCreated      ManagementActualEntry[]      @relation("ManagementActualCreator")
+  managementActualsApproved     ManagementActualEntry[]      @relation("ManagementActualApprover")
+  managementActualsVoided       ManagementActualEntry[]      @relation("ManagementActualVoider")
+  expensesApproved              Expense[]                    @relation("ExpenseApprover")
+  expensesVoided                Expense[]                    @relation("ExpenseVoider")
+  directorWidgetPreference      DirectorWidgetPreference?
+  notifications                 Notification[]
+  admissionNotes                AdmissionNote[]              @relation("AdmissionNoteAuthor")
+  createdForms                  CustomForm[]
+  helpdeskTicketsRequested      HelpdeskTicket[]             @relation("HelpdeskTicketRequester")
+  helpdeskTicketsAssigned       HelpdeskTicket[]             @relation("HelpdeskTicketAssignee")
+  helpdeskCommentsAuthored      HelpdeskComment[]            @relation("HelpdeskCommentAuthor")
+  helpdeskAttachmentsUploaded   HelpdeskAttachment[]         @relation("HelpdeskAttachmentUploader")
 
   @@index([status])
 }
 
 model Student {
-  id                   String                    @id @default(uuid())
-  personId             String                    @unique
-  person               Person                    @relation(fields: [personId], references: [id])
-  studentNo            String                    @unique
-  programId            String?
-  program              Program?                  @relation(fields: [programId], references: [id])
+  id                       String                    @id @default(uuid())
+  personId                 String                    @unique
+  person                   Person                    @relation(fields: [personId], references: [id])
+  studentNo                String                    @unique
+  programId                String?
+  program                  Program?                  @relation(fields: [programId], references: [id])
   // Date of birth (date only). Second factor for the public bill-payment lookup.
-  dateOfBirth          DateTime?
+  dateOfBirth              DateTime?
   // Roster photo, resolved to an absolute URL (served from the vitrine bucket).
-  photoUrl             String?
+  photoUrl                 String?
   // --- Extended SIS profile (all optional; captured via the admin Edit-record form) ---
-  gender               String?
-  phone                String?
-  address              String?
-  city                 String?
-  nationality          String?
-  guardianName         String?
-  guardianRelation     String?
-  guardianPhone        String?
-  advisor              String? // free-text advisor name (no faculty FK yet)
-  yearLevel            Int? // year of study 1..N
-  cohort               String? // e.g. "Class of 2028"
-  enrolledAt           DateTime? // first enrolment date
+  gender                   String?
+  phone                    String?
+  address                  String?
+  city                     String?
+  nationality              String?
+  guardianName             String?
+  guardianRelation         String?
+  guardianPhone            String?
+  advisor                  String? // free-text advisor name (no faculty FK yet)
+  yearLevel                Int? // year of study 1..N
+  cohort                   String? // e.g. "Class of 2028"
+  enrolledAt               DateTime? // first enrolment date
   // --- Remaining SIS profile fields (SIS redesign; all optional) ---
-  preferredName        String?
-  nationalId           String?
-  maritalStatus        String?
-  personalEmail        String? // non-institutional address
+  preferredName            String?
+  nationalId               String?
+  maritalStatus            String?
+  personalEmail            String? // non-institutional address
   // Saved PI-SPI payment alias, so a returning payer does not retype it. Always
   // overridable at pay time; never used without the payer confirming the resolved name.
-  piSpiAlias           String?
-  language             String? // preferred language, e.g. "French"
-  bloodType            String?
-  allergies            String?
-  insurance            String? // provider + policy number
-  physician            String? // campus physician
-  emergencyName2       String?
-  emergencyPhone2      String?
-  major                String?
-  minor                String?
-  admitTerm            String?
-  expectedGrad         String?
-  enrollmentStatus     String? // full-time | part-time | leave
-  catalogYear          String? // requirement set the student is audited against
-  catalogYearId        String?
-  catalogAcademicYear  AcademicYear?             @relation("StudentCatalogYear", fields: [catalogYearId], references: [id], onDelete: SetNull)
-  standing             String? // Good Standing | Probation | ...
+  piSpiAlias               String?
+  language                 String? // preferred language, e.g. "French"
+  bloodType                String?
+  allergies                String?
+  insurance                String? // provider + policy number
+  physician                String? // campus physician
+  emergencyName2           String?
+  emergencyPhone2          String?
+  major                    String?
+  minor                    String?
+  admitTerm                String?
+  expectedGrad             String?
+  enrollmentStatus         String? // full-time | part-time | leave
+  catalogYear              String? // requirement set the student is audited against
+  catalogYearId            String?
+  catalogAcademicYear      AcademicYear?             @relation("StudentCatalogYear", fields: [catalogYearId], references: [id], onDelete: SetNull)
+  standing                 String? // Good Standing | Probation | ...
   // Lifecycle of the SIS record itself. Archiving hides a student from active
   // rosters without deleting their academic or financial history.
-  recordStatus         StudentRecordStatus       @default(active)
-  applicant            Applicant?                @relation("ApplicantStudent")
-  legacyCohortImport   LegacyCohortImportPerson?
-  holds                StudentHold[]
-  alerts               StudentAlert[]
-  watchers             StaffWatch[]
-  guardians            GuardianStudent[]
-  invoices             Invoice[]
-  payments             Payment[]
-  paymentSubmissions   PaymentSubmission[]
-  piSpiRequests        PiSpiRequest[]
-  enrollments          Enrollment[]
-  transcriptEntries    TranscriptEntry[]
-  standingOverrides    StudentStandingOverride[]
-  gradeSubmissionItems GradeSubmissionItem[]
-  mealPlan             MealPlan?
-  diningOrders         DiningOrder[]
-  diningScans          DiningScan[]
-  housing              HousingAssignment?
-  roommateProfile      RoommateProfile?
-  documents            StudentDocument[]
-  infirmaryConsultations Consultation[]
-  infirmaryPrescriptions Prescription[]
+  recordStatus             StudentRecordStatus       @default(active)
+  applicant                Applicant?                @relation("ApplicantStudent")
+  legacyCohortImport       LegacyCohortImportPerson?
+  holds                    StudentHold[]
+  alerts                   StudentAlert[]
+  watchers                 StaffWatch[]
+  guardians                GuardianStudent[]
+  invoices                 Invoice[]
+  payments                 Payment[]
+  paymentBalanceImportRows PaymentBalanceImportRow[]
+  paymentSubmissions       PaymentSubmission[]
+  piSpiRequests            PiSpiRequest[]
+  enrollments              Enrollment[]
+  transcriptEntries        TranscriptEntry[]
+  standingOverrides        StudentStandingOverride[]
+  gradeSubmissionItems     GradeSubmissionItem[]
+  mealPlan                 MealPlan?
+  diningOrders             DiningOrder[]
+  diningScans              DiningScan[]
+  housing                  HousingAssignment?
+  roommateProfile          RoommateProfile?
+  documents                StudentDocument[]
+  infirmaryConsultations   Consultation[]
+  infirmaryPrescriptions   Prescription[]
   helpdeskTickets          HelpdeskTicket[]
-  infirmaryAppointments InfirmaryAppointment[]
-  infirmaryDocuments    InfirmaryDocument[]
-  infirmaryFollowUps    FollowUp[]
-  infirmaryFormResponses InfirmaryFormResponse[]
-  createdAt            DateTime                  @default(now())
+  infirmaryAppointments    InfirmaryAppointment[]
+  infirmaryDocuments       InfirmaryDocument[]
+  infirmaryFollowUps       FollowUp[]
+  infirmaryFormResponses   InfirmaryFormResponse[]
+  createdAt                DateTime                  @default(now())
 
   @@index([recordStatus])
   @@index([catalogYearId])
@@ -574,8 +593,8 @@ model FacultyProfile {
 }
 
 model Term {
-  id                   String                @id @default(uuid())
-  name                 String                @unique
+  id                   String                   @id @default(uuid())
+  name                 String                   @unique
   startDate            DateTime
   endDate              DateTime
   // Registration windows. Null = falls back to endDate (add) / unbounded (drop).
@@ -583,7 +602,7 @@ model Term {
   dropDeadline         DateTime?
   // Which catalog year this term belongs to (e.g. Fall 2026 -> 2026-2027).
   academicYearId       String?
-  academicYear         AcademicYear?         @relation(fields: [academicYearId], references: [id])
+  academicYear         AcademicYear?            @relation(fields: [academicYearId], references: [id])
   // Fall | Spring | Summer — the semester slot a curriculum entry maps onto.
   semester             String?
   // active | planning | draft — the registrar's term lifecycle. Only one active.
@@ -592,44 +611,45 @@ model Term {
   sections             Section[]
   transcriptEntries    TranscriptEntry[]
   gradeSubmissionItems GradeSubmissionItem[]
-  evaluationWindows CourseEvaluationWindow[]
+  evaluationWindows    CourseEvaluationWindow[]
 }
 
 model Invoice {
-  id                  String                     @id @default(uuid())
+  id                       String                     @id @default(uuid())
   // Human-readable billing handle shown to staff, e.g. "BILL-2026-001".
-  number              String?                    @unique
-  studentId           String
-  student             Student                    @relation(fields: [studentId], references: [id])
-  termId              String
-  term                Term                       @relation(fields: [termId], references: [id])
-  totalAmount         Int
-  amountPaid          Int                        @default(0)
-  status              InvoiceStatus              @default(open)
+  number                   String?                    @unique
+  studentId                String
+  student                  Student                    @relation(fields: [studentId], references: [id])
+  termId                   String
+  term                     Term                       @relation(fields: [termId], references: [id])
+  totalAmount              Int
+  amountPaid               Int                        @default(0)
+  status                   InvoiceStatus              @default(open)
   // Human label for an ad-hoc charge (e.g. "Lab & technology fee"); null for tuition.
-  description         String?
+  description              String?
   // Revenue dimension for the director dashboard (tuition -> 9100).
-  costCenterCode      String                     @default("9100")
-  costCenter          CostCenter                 @relation(fields: [costCenterCode], references: [code])
-  packageType         InvoicePackageType         @default(custom)
-  academicYearLabel   String?
-  feeScheduleId       String?
-  feeScheduleRevision Int?
-  feeSchedule         FeeSchedule?               @relation(fields: [feeScheduleId], references: [id], onDelete: SetNull)
+  costCenterCode           String                     @default("9100")
+  costCenter               CostCenter                 @relation(fields: [costCenterCode], references: [code])
+  packageType              InvoicePackageType         @default(custom)
+  academicYearLabel        String?
+  feeScheduleId            String?
+  feeScheduleRevision      Int?
+  feeSchedule              FeeSchedule?               @relation(fields: [feeScheduleId], references: [id], onDelete: SetNull)
   /// True only when this invoice has custom installment dates/count. Component
   /// selections use InvoiceComponentOverride and keep inheriting the schedule.
-  paymentPlanOverride Boolean                    @default(false)
-  revision            Int                        @default(0)
-  components          InvoiceComponent[]
-  componentOverrides  InvoiceComponentOverride[]
-  plan                PaymentPlan?
-  payments            Payment[]
-  paymentSubmissions  PaymentSubmission[]
-  piSpiRequests       PiSpiRequest[]
-  enrollmentForApplicant Applicant?                 @relation("ApplicantEnrollmentInvoice")
-  legacyCohortImport      LegacyCohortImportPerson?
-  createdAt           DateTime                   @default(now())
-  updatedAt           DateTime                   @updatedAt
+  paymentPlanOverride      Boolean                    @default(false)
+  revision                 Int                        @default(0)
+  components               InvoiceComponent[]
+  componentOverrides       InvoiceComponentOverride[]
+  plan                     PaymentPlan?
+  payments                 Payment[]
+  paymentSubmissions       PaymentSubmission[]
+  piSpiRequests            PiSpiRequest[]
+  enrollmentForApplicant   Applicant?                 @relation("ApplicantEnrollmentInvoice")
+  legacyCohortImport       LegacyCohortImportPerson?
+  paymentBalanceImportRows PaymentBalanceImportRow[]
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
 
   @@index([studentId])
   @@index([termId])
@@ -648,17 +668,17 @@ model PaymentPlan {
 }
 
 model Installment {
-  id          String              @id @default(uuid())
+  id          String                 @id @default(uuid())
   planId      String
-  plan        PaymentPlan         @relation(fields: [planId], references: [id])
+  plan        PaymentPlan            @relation(fields: [planId], references: [id])
   sequence    Int
   // Staff-facing name for this installment, e.g. "Inscription"; null falls back to the sequence.
   label       String?
   /// Inclusive payment-plan calendar date in Africa/Dakar (not a timestamp).
-  dueDate     DateTime            @db.Date
+  dueDate     DateTime               @db.Date
   amountDue   Int
-  amountPaid  Int                 @default(0)
-  status      InstallmentStatus   @default(pending)
+  amountPaid  Int                    @default(0)
+  status      InstallmentStatus      @default(pending)
   allocations PaymentAllocation[]
   /// Optional per-student split of this due amount across the invoice's charge
   /// components. Absence means the installment inherits the standard aggregate
@@ -671,43 +691,44 @@ model Installment {
 }
 
 model Payment {
-  id                   String                       @id @default(uuid())
-  invoiceId            String
-  invoice              Invoice                      @relation(fields: [invoiceId], references: [id])
-  studentId            String
-  student              Student                      @relation(fields: [studentId], references: [id])
-  amount               Int
-  method               PaymentMethod
-  status               PaymentStatus                @default(pending)
-  provider             String                       @default("manual")
+  id                                 String                       @id @default(uuid())
+  invoiceId                          String
+  invoice                            Invoice                      @relation(fields: [invoiceId], references: [id])
+  studentId                          String
+  student                            Student                      @relation(fields: [studentId], references: [id])
+  amount                             Int
+  method                             PaymentMethod
+  status                             PaymentStatus                @default(pending)
+  provider                           String                       @default("manual")
   // Idempotency anchor: the gateway transaction reference is unique.
-  providerRef          String                       @unique
+  providerRef                        String                       @unique
   /// SHA-256 of payment method + canonical external accounting reference.
   /// Nullable for ordinary gateway payments; reviewed historical imports set it.
-  externalReferenceFingerprintSha256 String?        @unique
+  externalReferenceFingerprintSha256 String?                      @unique
   /// Durable origin of the payment attempt (student_portal, parent_portal, public_bill, ...).
-  source               String                       @default("legacy")
-  initiatedById        String?
-  initiatedBy          Person?                      @relation("PaymentInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
-  initiatedByEmail     String?
-  settledAt            DateTime?
-  refundedAt           DateTime?
+  source                             String                       @default("legacy")
+  initiatedById                      String?
+  initiatedBy                        Person?                      @relation("PaymentInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+  initiatedByEmail                   String?
+  settledAt                          DateTime?
+  refundedAt                         DateTime?
   /// Present only for reviewed historical-workbook imports. The source row is
   /// immutable provenance; it never replaces the canonical payment ledger.
-  importBatchId        String?
-  importBatch          PaymentImportBatch?          @relation(fields: [importBatchId], references: [id], onDelete: Restrict)
-  importRowKey         String?
-  importSheetName      String?
-  importRowNumber      Int?
-  ipnPayload           Json?
-  allocations          PaymentAllocation[]
-  componentAllocations PaymentComponentAllocation[]
-  submission           PaymentSubmission?
-  piSpiRequest         PiSpiRequest?
-  activatedApplicant   Applicant?                   @relation("ApplicantActivationPayment")
-  legacyCohortRows     LegacyCohortImportRow[]
-  createdAt            DateTime                     @default(now())
-  updatedAt            DateTime                     @updatedAt
+  importBatchId                      String?
+  importBatch                        PaymentImportBatch?          @relation(fields: [importBatchId], references: [id], onDelete: Restrict)
+  importRowKey                       String?
+  importSheetName                    String?
+  importRowNumber                    Int?
+  ipnPayload                         Json?
+  allocations                        PaymentAllocation[]
+  componentAllocations               PaymentComponentAllocation[]
+  submission                         PaymentSubmission?
+  piSpiRequest                       PiSpiRequest?
+  activatedApplicant                 Applicant?                   @relation("ApplicantActivationPayment")
+  legacyCohortRows                   LegacyCohortImportRow[]
+  paymentBalanceImportRow            PaymentBalanceImportRow?
+  createdAt                          DateTime                     @default(now())
+  updatedAt                          DateTime                     @updatedAt
 
   @@unique([importBatchId, importRowKey])
   @@index([invoiceId])
@@ -721,65 +742,147 @@ model Payment {
 /// prevents exact-workbook reruns; row keys and Payment.providerRef protect
 /// individual rows and concurrent retries.
 model PaymentImportBatch {
-  id                     String                   @id @default(uuid())
-  sourceFileName         String
-  sourceSha256           String                   @unique
-  sourceExtractionSha256 String
-  manifestSha256         String
-  status                 PaymentImportBatchStatus @default(pending)
-  academicYear           String
-  sourceGroupCount       Int                      @default(0)
-  totalRows              Int                      @default(0)
-  importedRows           Int                      @default(0)
-  alreadyRecordedRows    Int                      @default(0)
-  excludedSourceGroups   Int                      @default(0)
-  skippedRows            Int                      @default(0)
-  errorRows              Int                      @default(0)
-  sourceTotalXof         BigInt                   @default(0)
-  importedXof            BigInt                   @default(0)
-  alreadyRecordedXof     BigInt                   @default(0)
-  excludedXof            BigInt                   @default(0)
+  id                      String                   @id @default(uuid())
+  sourceFileName          String
+  sourceSha256            String                   @unique
+  sourceExtractionSha256  String
+  manifestSha256          String
+  status                  PaymentImportBatchStatus @default(pending)
+  academicYear            String
+  sourceGroupCount        Int                      @default(0)
+  totalRows               Int                      @default(0)
+  importedRows            Int                      @default(0)
+  alreadyRecordedRows     Int                      @default(0)
+  excludedSourceGroups    Int                      @default(0)
+  skippedRows             Int                      @default(0)
+  errorRows               Int                      @default(0)
+  sourceTotalXof          BigInt                   @default(0)
+  importedXof             BigInt                   @default(0)
+  alreadyRecordedXof      BigInt                   @default(0)
+  excludedXof             BigInt                   @default(0)
   /// Signed, explicitly reviewed difference between source controls and posted/excluded cash.
-  reviewedAdjustmentXof  BigInt                   @default(0)
-  errorSummary           Json?
-  note                   String?
-  createdById            String
-  createdBy              Person                   @relation("PaymentImportBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  createdAt              DateTime                 @default(now())
-  updatedAt              DateTime                 @updatedAt
-  importedAt             DateTime?
-  payments               Payment[]
+  reviewedAdjustmentXof   BigInt                   @default(0)
+  errorSummary            Json?
+  note                    String?
+  createdById             String
+  createdBy               Person                   @relation("PaymentImportBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  importedAt              DateTime?
+  payments                Payment[]
   legacyCohortImportBatch LegacyCohortImportBatch?
 
   @@index([status, createdAt])
   @@index([createdById, createdAt])
 }
 
+/// One reviewed reconciliation pass over an authoritative paid-to-date
+/// workbook. The workbook hash is deliberately non-unique: later manifests may
+/// resolve held rows, while manifestSha256 anchors exact replay to a no-op.
+model PaymentBalanceImportBatch {
+  id                     String                    @id @default(uuid())
+  sourceFileName         String
+  sourceSha256           String
+  sourceExtractionSha256 String
+  manifestSha256         String                    @unique
+  confirmationPlanSha256 String
+  status                 PaymentImportBatchStatus  @default(pending)
+  academicYearLabel      String
+  /// Reviewed date through which the source paid-to-date balance is
+  /// authoritative. This is not an individual Payment settlement timestamp.
+  sourceAsOfDate         DateTime                  @db.Date
+  sourceSheet            String
+  sourceRowCount         Int
+  sourcePaidTotalXof     BigInt
+  importedRows           Int                       @default(0)
+  alreadyReconciledRows  Int                       @default(0)
+  previouslyImportedRows Int                       @default(0)
+  heldRows               Int                       @default(0)
+  resolvedSourcePaidXof  BigInt                    @default(0)
+  heldSourcePaidXof      BigInt                    @default(0)
+  baselineLedgerPaidXof  BigInt                    @default(0)
+  importedDeltaXof       BigInt                    @default(0)
+  errorSummary           Json?
+  createdById            String
+  createdBy              Person                    @relation("PaymentBalanceImportBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+  importedAt             DateTime?
+  rows                   PaymentBalanceImportRow[]
+
+  @@index([sourceSha256, createdAt])
+  @@index([sourceAsOfDate])
+  @@index([status, createdAt])
+  @@index([createdById, createdAt])
+}
+
+/// Durable, name-free provenance for every physical row in a paid-to-date
+/// workbook. sourceClaimSha256 is populated by the first pass that resolves the
+/// row (cash post or already-reconciled proof), making remapping or a second cash
+/// post impossible across later reviewed manifests.
+model PaymentBalanceImportRow {
+  id                    String                          @id @default(uuid())
+  batchId               String
+  batch                 PaymentBalanceImportBatch       @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  sourceSheet           String
+  sourceRowNumber       Int
+  sourceRowKey          String
+  sourceRowKeySha256    String
+  rowFingerprintSha256  String
+  sourcePaidToDateXof   BigInt
+  disposition           PaymentBalanceImportDisposition
+  identityDecision      String
+  matchMethod           String?
+  holdCode              String?
+  holdReason            String?
+  studentId             String?
+  student               Student?                        @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  invoiceId             String?
+  invoice               Invoice?                        @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  invoiceRevision       Int?
+  baselineLedgerPaidXof BigInt?
+  deltaXof              BigInt?
+  paymentId             String?                         @unique
+  payment               Payment?                        @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  sourceClaimSha256     String?                         @unique
+  priorImportedRowId    String?
+  priorImportedRow      PaymentBalanceImportRow?        @relation("PaymentBalanceImportPriorRow", fields: [priorImportedRowId], references: [id], onDelete: Restrict)
+  laterReviewedRows     PaymentBalanceImportRow[]       @relation("PaymentBalanceImportPriorRow")
+  createdAt             DateTime                        @default(now())
+
+  @@unique([batchId, sourceSheet, sourceRowNumber])
+  @@unique([batchId, sourceRowKey])
+  @@index([studentId])
+  @@index([invoiceId])
+  @@index([disposition])
+  @@index([priorImportedRowId])
+}
+
 /// One reviewed, idempotent import of a legacy admissions cohort. The workbook
 /// stays outside the application; immutable coordinates, fingerprints, legacy
 /// IDs, and authoritative record links remain as durable provenance.
 model LegacyCohortImportBatch {
-  id                     String                   @id @default(uuid())
+  id                     String                     @id @default(uuid())
   sourceFileName         String
-  sourceSha256           String                   @unique
+  sourceSha256           String                     @unique
   sourceExtractionSha256 String
-  manifestSha256         String                   @unique
+  manifestSha256         String                     @unique
   confirmationPlanSha256 String
-  status                 PaymentImportBatchStatus @default(pending)
+  status                 PaymentImportBatchStatus   @default(pending)
   academicYearId         String
-  academicYear           AcademicYear             @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  academicYear           AcademicYear               @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
   sourceRowCount         Int
   personCount            Int
   paymentCount           Int
-  sourcePaidTotalXof     BigInt                   @default(0)
-  importedPaymentXof     BigInt                   @default(0)
+  sourcePaidTotalXof     BigInt                     @default(0)
+  importedPaymentXof     BigInt                     @default(0)
   notificationPolicy     String
-  paymentImportBatchId   String?                  @unique
-  paymentImportBatch     PaymentImportBatch?      @relation(fields: [paymentImportBatchId], references: [id], onDelete: Restrict)
+  paymentImportBatchId   String?                    @unique
+  paymentImportBatch     PaymentImportBatch?        @relation(fields: [paymentImportBatchId], references: [id], onDelete: Restrict)
   createdById            String
-  createdBy              Person                   @relation("LegacyCohortImportBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  createdAt              DateTime                 @default(now())
-  updatedAt              DateTime                 @updatedAt
+  createdBy              Person                     @relation("LegacyCohortImportBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
   importedAt             DateTime?
   people                 LegacyCohortImportPerson[]
   rows                   LegacyCohortImportRow[]
@@ -815,23 +918,23 @@ model LegacyCohortImportPerson {
 /// Immutable source-row provenance. Repeated physical rows may belong to one
 /// person/payment only when the reviewed manifest says so explicitly.
 model LegacyCohortImportRow {
-  id                   String                    @id @default(uuid())
-  batchId              String
-  batch                LegacyCohortImportBatch   @relation(fields: [batchId], references: [id], onDelete: Restrict)
-  personRecordId       String
-  personRecord         LegacyCohortImportPerson  @relation(fields: [personRecordId], references: [id], onDelete: Restrict)
-  sourceSheet          String
-  sourceRowNumber      Int
-  rowFingerprintSha256 String
+  id                    String                   @id @default(uuid())
+  batchId               String
+  batch                 LegacyCohortImportBatch  @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  personRecordId        String
+  personRecord          LegacyCohortImportPerson @relation(fields: [personRecordId], references: [id], onDelete: Restrict)
+  sourceSheet           String
+  sourceRowNumber       Int
+  rowFingerprintSha256  String
   sourceLegacyStudentNo String?
-  sourceLabel          String
-  disposition          String
-  paymentId            String?
-  payment              Payment?                  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
-  duplicateOfId        String?
-  duplicateOf          LegacyCohortImportRow?     @relation("LegacyCohortRowDuplicate", fields: [duplicateOfId], references: [id], onDelete: Restrict)
-  duplicates           LegacyCohortImportRow[]    @relation("LegacyCohortRowDuplicate")
-  createdAt            DateTime                   @default(now())
+  sourceLabel           String
+  disposition           String
+  paymentId             String?
+  payment               Payment?                 @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  duplicateOfId         String?
+  duplicateOf           LegacyCohortImportRow?   @relation("LegacyCohortRowDuplicate", fields: [duplicateOfId], references: [id], onDelete: Restrict)
+  duplicates            LegacyCohortImportRow[]  @relation("LegacyCohortRowDuplicate")
+  createdAt             DateTime                 @default(now())
 
   @@unique([batchId, sourceSheet, sourceRowNumber])
   @@unique([batchId, rowFingerprintSha256])
@@ -1114,72 +1217,71 @@ model ContactMessage {
 }
 
 model Applicant {
-  id                 String              @id @default(uuid())
-  firstName          String
-  lastName           String
-  email              String
-  programCode        String?
-  stage              String              @default("submitted") // submitted|review|interview|offer|accepted|rejected
+  id                            String                    @id @default(uuid())
+  firstName                     String
+  lastName                      String
+  email                         String
+  programCode                   String?
+  stage                         String                    @default("submitted") // submitted|review|interview|offer|accepted|rejected
   // Admissions acceptance and SIS activation are deliberately separate. Existing
   // accepted rows remain not_started until an administrator runs the reviewed flow.
-  onboardingStatus ApplicantOnboardingStatus @default(not_started)
-  studentId String? @unique
-  student Student? @relation("ApplicantStudent", fields: [studentId], references: [id], onDelete: Restrict)
-  admissionAcademicYearId String?
-  admissionAcademicYear AcademicYear? @relation("ApplicantAdmissionAcademicYear", fields: [admissionAcademicYearId], references: [id], onDelete: SetNull)
-  enrollmentInvoiceId String? @unique
-  enrollmentInvoice Invoice? @relation("ApplicantEnrollmentInvoice", fields: [enrollmentInvoiceId], references: [id], onDelete: Restrict)
-  requiredEnrollmentCashXof Int?
-  activeOnboardingPaymentLinkId String? @unique
-  activeOnboardingPaymentLink PaymentLink? @relation("ApplicantActiveOnboardingPaymentLink", fields: [activeOnboardingPaymentLinkId], references: [id], onDelete: SetNull)
-  onboardingPaymentLinks PaymentLink[] @relation("ApplicantOnboardingPaymentLinks")
-  activatedByPaymentId String? @unique
-  activatedByPayment Payment? @relation("ApplicantActivationPayment", fields: [activatedByPaymentId], references: [id], onDelete: Restrict)
-  acceptedAt DateTime?
-  paymentPendingAt DateTime?
-  enrolledAt DateTime?
-  onboardingCancelledAt DateTime?
+  onboardingStatus              ApplicantOnboardingStatus @default(not_started)
+  studentId                     String?                   @unique
+  student                       Student?                  @relation("ApplicantStudent", fields: [studentId], references: [id], onDelete: Restrict)
+  admissionAcademicYearId       String?
+  admissionAcademicYear         AcademicYear?             @relation("ApplicantAdmissionAcademicYear", fields: [admissionAcademicYearId], references: [id], onDelete: SetNull)
+  enrollmentInvoiceId           String?                   @unique
+  enrollmentInvoice             Invoice?                  @relation("ApplicantEnrollmentInvoice", fields: [enrollmentInvoiceId], references: [id], onDelete: Restrict)
+  requiredEnrollmentCashXof     Int?
+  activeOnboardingPaymentLinkId String?                   @unique
+  activeOnboardingPaymentLink   PaymentLink?              @relation("ApplicantActiveOnboardingPaymentLink", fields: [activeOnboardingPaymentLinkId], references: [id], onDelete: SetNull)
+  onboardingPaymentLinks        PaymentLink[]             @relation("ApplicantOnboardingPaymentLinks")
+  activatedByPaymentId          String?                   @unique
+  activatedByPayment            Payment?                  @relation("ApplicantActivationPayment", fields: [activatedByPaymentId], references: [id], onDelete: Restrict)
+  acceptedAt                    DateTime?
+  paymentPendingAt              DateTime?
+  enrolledAt                    DateTime?
+  onboardingCancelledAt         DateTime?
   // Only hashes are persisted. While payment is pending the capability has no
   // expiry; enrollment makes it read-only and sets an expiry 30 days later.
-  statusTokenHash String? @unique
-  statusTokenExpiresAt DateTime?
-  statusTokenRevokedAt DateTime?
-  acceptanceEmailSentAt DateTime?
-  studentInviteSentAt DateTime?
-  score              Int? // BAC score (0–20)
-  country            String?
+  statusTokenHash               String?                   @unique
+  statusTokenExpiresAt          DateTime?
+  statusTokenRevokedAt          DateTime?
+  acceptanceEmailSentAt         DateTime?
+  studentInviteSentAt           DateTime?
+  score                         Int? // BAC score (0–20)
+  country                       String?
   // Application fee settles after Finance verifies both payment proofs.
-  feePaid            Boolean             @default(false)
+  feePaid                       Boolean                   @default(false)
   // --- Full application intake (SIS redesign; all optional) ---
-  phone              String?
-  dateOfBirth        DateTime?
-  gender             String?
-  nationality        String?
-  city               String?
+  phone                         String?
+  dateOfBirth                   DateTime?
+  gender                        String?
+  nationality                   String?
+  city                          String?
   // "high-school" | "transfer" — decides whether `school` reads as HS or prior university.
-  origin             String?
-  school             String?
-  priorGpa           String? // free text: "17.2/20" (BAC) or "3.4/4" (transfer)
+  origin                        String?
+  school                        String?
+  priorGpa                      String? // free text: "17.2/20" (BAC) or "3.4/4" (transfer)
   // Guardian contact captured on the application. NOT a portal Guardian account —
   // that is provisioned separately by the registrar after enrolment.
-  parentName         String?
-  parentPhone        String?
-  parentEmail        String?
-  allergies          String?
-  source             String? // how they heard about DAUST
-  essay              String?
-  term               String? // intake term, e.g. "Fall 2026"
-  piSpiRequests      PiSpiRequest[]
-  paymentSubmissions PaymentSubmission[]
-  legacyCohortImport LegacyCohortImportPerson?
-  createdAt          DateTime            @default(now())
-  notes              AdmissionNote[]
+  parentName                    String?
+  parentPhone                   String?
+  parentEmail                   String?
+  allergies                     String?
+  source                        String? // how they heard about DAUST
+  essay                         String?
+  term                          String? // intake term, e.g. "Fall 2026"
+  piSpiRequests                 PiSpiRequest[]
+  paymentSubmissions            PaymentSubmission[]
+  legacyCohortImport            LegacyCohortImportPerson?
+  createdAt                     DateTime                  @default(now())
+  notes                         AdmissionNote[]
 
   @@index([stage])
   @@index([onboardingStatus])
   @@index([admissionAcademicYearId])
 }
-
 
 /// Per-applicant notes thread. Authored by admissions officers (or admins) and
 /// scoped to the pre-acceptance pipeline. Body is plain text, rendered only
@@ -1285,55 +1387,55 @@ model Course {
 }
 
 model Section {
-  id              String            @id @default(uuid())
-  courseId        String
-  course          Course            @relation(fields: [courseId], references: [id])
-  termId          String
-  term            Term              @relation(fields: [termId], references: [id])
-  instructorId    String?
-  instructor      Person?           @relation("Instructor", fields: [instructorId], references: [id])
-  sectionCode     String
-  capacity        Int
-  days            String // e.g. "MWF"
-  startTime       String // "10:00"
-  endTime         String // "11:00"
-  room            String?
-  enrollments     Enrollment[]
-  assignments     Assignment[]
-  materials       SectionMaterial[]
-  posts           SectionPost[]
+  id                  String                     @id @default(uuid())
+  courseId            String
+  course              Course                     @relation(fields: [courseId], references: [id])
+  termId              String
+  term                Term                       @relation(fields: [termId], references: [id])
+  instructorId        String?
+  instructor          Person?                    @relation("Instructor", fields: [instructorId], references: [id])
+  sectionCode         String
+  capacity            Int
+  days                String // e.g. "MWF"
+  startTime           String // "10:00"
+  endTime             String // "11:00"
+  room                String?
+  enrollments         Enrollment[]
+  assignments         Assignment[]
+  materials           SectionMaterial[]
+  posts               SectionPost[]
   // --- SIS redesign ---
   // Which scale this section is graded on. Null = the institution default (letter).
-  gradingSchemeId String?
-  gradingScheme   GradingScheme?    @relation(fields: [gradingSchemeId], references: [id])
-  gradeSubmission GradeSubmission?
+  gradingSchemeId     String?
+  gradingScheme       GradingScheme?             @relation(fields: [gradingSchemeId], references: [id])
+  gradeSubmission     GradeSubmission?
   // Registration gate: closed sections are not offered to students.
-  status          String            @default("open") // open | closed
+  status              String                     @default("open") // open | closed
+  evaluationSchedules CourseEvaluationSchedule[]
+  evaluationResponses CourseEvaluationResponse[]
 
   @@unique([courseId, termId, sectionCode])
   @@index([termId])
-  evaluationSchedules CourseEvaluationSchedule[]
-  evaluationResponses CourseEvaluationResponse[]
 }
 
 model Enrollment {
-  id                   String                @id @default(uuid())
+  id                   String                    @id @default(uuid())
   studentId            String
-  student              Student               @relation(fields: [studentId], references: [id])
+  student              Student                   @relation(fields: [studentId], references: [id])
   sectionId            String
-  section              Section               @relation(fields: [sectionId], references: [id])
-  status               EnrollmentStatus      @default(enrolled)
+  section              Section                   @relation(fields: [sectionId], references: [id])
+  status               EnrollmentStatus          @default(enrolled)
   grade                String?
-  enrolledAt           DateTime              @default(now())
+  enrolledAt           DateTime                  @default(now())
   attendance           AttendanceRecord[]
   submissions          Submission[]
   transcriptEntry      TranscriptEntry?
   gradeSubmissionItems GradeSubmissionItem[]
+  evaluationReceipts   CourseEvaluationReceipt[]
 
   @@unique([studentId, sectionId])
   @@index([sectionId])
   @@index([studentId])
-  evaluationReceipts CourseEvaluationReceipt[]
 }
 
 model AttendanceRecord {
@@ -1346,12 +1448,12 @@ model AttendanceRecord {
   createdAt    DateTime         @default(now())
   /// Free-form reason, narrowed by CHECK to: null | "sick" | "infirmary_emergency" | "admin_override".
   /// Pinned by a CHECK constraint in the migration; out-of-set inserts fail.
-  reason    String?
+  reason       String?
   /// Who wrote this row. CHECK-pinned to: faculty | infirmary | admin. Defaults to
   /// `faculty` so existing rows are unaffected.
-  source    String    @default("faculty")
-  notedById String?
-  notedBy   Person?   @relation("AttendanceNotedBy", fields: [notedById], references: [id], onDelete: SetNull)
+  source       String           @default("faculty")
+  notedById    String?
+  notedBy      Person?          @relation("AttendanceNotedBy", fields: [notedById], references: [id], onDelete: SetNull)
 
   @@unique([enrollmentId, date])
   @@index([sectionId, date])
@@ -1858,27 +1960,27 @@ model ProjectGlobalTask {
 // Bursar-generated payment link: any amount/purpose, settled by PI-SPI or Finance review.
 // Optional invoiceId puts the money on the normal tuition rail (Payment + allocations).
 model PaymentLink {
-  id                 String              @id @default(uuid())
-  token              String              @unique // unguessable public slug
-  amountXof          Int
-  purpose            String
-  payeeName          String
-  payeeMeta          String? // e.g. "DA24003 · Computer Science"
-  studentId          String?
-  invoiceId          String?
-  costCenterCode     String              @default("9100")
-  dueDate            DateTime?
-  expiresAt          DateTime?
-  status             String              @default("active") // active | paid | cancelled
-  method             String? // how it was settled (wave | orange_money | card | manual)
-  paidAt             DateTime?
-  createdById        String?
-  createdAt          DateTime            @default(now())
+  id                    String              @id @default(uuid())
+  token                 String              @unique // unguessable public slug
+  amountXof             Int
+  purpose               String
+  payeeName             String
+  payeeMeta             String? // e.g. "DA24003 · Computer Science"
+  studentId             String?
+  invoiceId             String?
+  costCenterCode        String              @default("9100")
+  dueDate               DateTime?
+  expiresAt             DateTime?
+  status                String              @default("active") // active | paid | cancelled
+  method                String? // how it was settled (wave | orange_money | card | manual)
+  paidAt                DateTime?
+  createdById           String?
+  createdAt             DateTime            @default(now())
   onboardingApplicantId String?
-  onboardingApplicant Applicant? @relation("ApplicantOnboardingPaymentLinks", fields: [onboardingApplicantId], references: [id], onDelete: SetNull)
-  activeForApplicant Applicant? @relation("ApplicantActiveOnboardingPaymentLink")
-  paymentSubmissions PaymentSubmission[]
-  piSpiRequests      PiSpiRequest[]
+  onboardingApplicant   Applicant?          @relation("ApplicantOnboardingPaymentLinks", fields: [onboardingApplicantId], references: [id], onDelete: SetNull)
+  activeForApplicant    Applicant?          @relation("ApplicantActiveOnboardingPaymentLink")
+  paymentSubmissions    PaymentSubmission[]
+  piSpiRequests         PiSpiRequest[]
 
   @@index([status])
   @@index([onboardingApplicantId])
@@ -1915,23 +2017,23 @@ enum AcademicCatalogStatus {
 /// Catalog year (e.g. "2026-2027"). Exactly one is `active` at a time; activating
 /// another archives the previous one.
 model AcademicYear {
-  id                      String                    @id @default(uuid())
-  label                   String                    @unique
-  status                  AcademicYearStatus        @default(draft)
-  startsOn                DateTime?
-  endsOn                  DateTime?
-  terms                   Term[]
-  curricula               Curriculum[]
-  events                  CalendarEvent[]
-  feeSchedules            FeeSchedule[]
-  operatingBudgets        OperatingBudget[]
-  managementActualEntries ManagementActualEntry[]
-  expenses                Expense[]
-  students                Student[]                 @relation("StudentCatalogYear")
-  admittedApplicants      Applicant[]               @relation("ApplicantAdmissionAcademicYear")
+  id                        String                    @id @default(uuid())
+  label                     String                    @unique
+  status                    AcademicYearStatus        @default(draft)
+  startsOn                  DateTime?
+  endsOn                    DateTime?
+  terms                     Term[]
+  curricula                 Curriculum[]
+  events                    CalendarEvent[]
+  feeSchedules              FeeSchedule[]
+  operatingBudgets          OperatingBudget[]
+  managementActualEntries   ManagementActualEntry[]
+  expenses                  Expense[]
+  students                  Student[]                 @relation("StudentCatalogYear")
+  admittedApplicants        Applicant[]               @relation("ApplicantAdmissionAcademicYear")
   legacyCohortImportBatches LegacyCohortImportBatch[]
-  catalogRevisions        AcademicCatalogRevision[]
-  createdAt               DateTime                  @default(now())
+  catalogRevisions          AcademicCatalogRevision[]
+  createdAt                 DateTime                  @default(now())
 
   @@index([status])
 }
@@ -2341,19 +2443,111 @@ model GuardianInvite {
   @@index([guardianId])
 }
 
-/// A student's single-use, expiring password-setup token. Mirrors GuardianInvite:
-/// the registrar provisions the account and the student sets their own password at
-/// the public /set-password page (same redemption path).
+/// A student's single-use, expiring password-setup token. A verified
+/// StudentActivationRequest creates one; the student-owned browser capability
+/// redeems it on the public /set-password page.
 model StudentInvite {
-  id              String    @id @default(uuid())
-  studentPersonId String
-  person          Person    @relation("StudentInvites", fields: [studentPersonId], references: [id], onDelete: Cascade)
-  tokenHash       String    @unique
-  expiresAt       DateTime
-  usedAt          DateTime?
-  createdAt       DateTime  @default(now())
+  id                String                    @id @default(uuid())
+  studentPersonId   String
+  person            Person                    @relation("StudentInvites", fields: [studentPersonId], references: [id], onDelete: Cascade)
+  tokenHash         String                    @unique
+  // Setup invites bind the capability to the reviewed login identity.
+  // Nullable keeps the migration additive; null legacy rows fail closed.
+  boundEmailSha256  String?
+  expiresAt         DateTime
+  usedAt            DateTime?
+  createdAt         DateTime                  @default(now())
+  activationRequest StudentActivationRequest? @relation("StudentActivationRequestInvite")
 
   @@index([studentPersonId])
+}
+
+/// Public student activation begins as a short-lived request. Historical rows
+/// may record named approval; newer self-service rows use either a historical
+/// issued card or the permanent student-ID-and-DOB path. Browser capabilities
+/// are stored only as hashes/HMACs.
+model StudentActivationRequest {
+  id                      String                 @id @default(uuid())
+  studentPersonId         String?
+  studentPerson           Person?                @relation("StudentActivationRequestStudent", fields: [studentPersonId], references: [id], onDelete: Cascade)
+  accountKeyHash          String
+  requestTokenHash        String                 @unique
+  approvalCodeHash        String?
+  expiresAt               DateTime
+  approvedAt              DateTime?
+  approvedById            String?
+  approvedBy              Person?                @relation("StudentActivationRequestApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  studentInviteId         String?                @unique
+  studentInvite           StudentInvite?         @relation("StudentActivationRequestInvite", fields: [studentInviteId], references: [id], onDelete: SetNull)
+  // Null for the legacy in-person pairing flow. Issued-card redemption records
+  // both the method and exact one-time card without storing the plaintext code.
+  verificationMethod      String?
+  studentActivationCardId String?                @unique
+  studentActivationCard   StudentActivationCard? @relation("StudentActivationRequestCard", fields: [studentActivationCardId], references: [id], onDelete: SetNull)
+  consumedAt              DateTime?
+  invalidatedAt           DateTime?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+
+  // The migration also owns partial unique indexes for unresolved account keys,
+  // real student-person IDs, and approval-code hashes. Prisma cannot express them.
+  @@index([accountKeyHash])
+  @@index([studentPersonId, consumedAt, invalidatedAt, expiresAt], map: "StudentActivationRequest_active_idx")
+  @@index([studentPersonId, approvedAt, expiresAt], map: "StudentActivationRequest_approval_idx")
+  @@index([approvedById])
+  @@index([expiresAt])
+}
+
+/// One reviewed operator run that issues print-only, one-time activation cards.
+/// The plaintext artifact stays outside the database; only its SHA-256 and the
+/// reviewed eligibility snapshot remain as durable provenance.
+model StudentActivationCardBatch {
+  id                        String                  @id @default(uuid())
+  confirmationPlanSha256    String                  @unique
+  eligibilitySnapshotSha256 String
+  expiresAt                 DateTime
+  eligibleCount             Int
+  generatedCount            Int
+  outputSha256              String                  @unique
+  status                    String                  @default("active")
+  createdById               String
+  createdBy                 Person                  @relation("StudentActivationCardBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  revokedAt                 DateTime?
+  revokedById               String?
+  revokedBy                 Person?                 @relation("StudentActivationCardBatchRevoker", fields: [revokedById], references: [id], onDelete: Restrict)
+  // Bounded non-PII reason code; allowed values are enforced by migration CHECK.
+  revokeReason              String?
+  createdAt                 DateTime                @default(now())
+  items                     StudentActivationCard[]
+
+  @@index([expiresAt, revokedAt])
+  @@index([createdById, createdAt])
+  @@index([revokedById, revokedAt])
+}
+
+/// A random 80-bit Crockford code issued to exactly one passwordless student.
+/// codeHmacSha256 is domain-separated with the dedicated activation key; the
+/// recoverable code exists only in the operator's mode-0600 print artifact.
+model StudentActivationCard {
+  id                String                     @id @default(uuid())
+  batchId           String
+  batch             StudentActivationCardBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  studentPersonId   String
+  person            Person                     @relation("StudentActivationCardStudent", fields: [studentPersonId], references: [id], onDelete: Restrict)
+  codeHmacSha256    String                     @unique
+  boundEmailSha256  String
+  expiresAt         DateTime
+  failedAttempts    Int                        @default(0)
+  claimedAt         DateTime?
+  usedAt            DateTime?
+  revokedAt         DateTime?
+  createdAt         DateTime                   @default(now())
+  activationRequest StudentActivationRequest?  @relation("StudentActivationRequestCard")
+
+  // The migration owns a partial unique index allowing no more than one
+  // unresolved card per student. Prisma cannot express partial indexes.
+  @@index([batchId, expiresAt])
+  @@index([studentPersonId, expiresAt])
 }
 
 /// A document on a student's record. `slot` is a fixed key for the six typed slots
@@ -2516,19 +2710,19 @@ model DirectorWidgetPreference {
 /// In-app notification. No email path by design — delivery is the nav badge and the
 /// notifications list. `readAt` is per-person, so there is no separate read-state table.
 model Notification {
-  id        String    @id @default(uuid())
-  personId  String
-  person    Person    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  id               String                  @id @default(uuid())
+  personId         String
+  person           Person                  @relation(fields: [personId], references: [id], onDelete: Cascade)
   /// Coarse event type: grade_posted | assignment_created | work_graded | material_published |
   /// infirmary_visit_logged | infirmary_emergency_flagged | helpdesk_ticket_created |
   /// helpdesk_ticket_updated | applicant_note_added. New kinds are additive; existing readers
   /// tolerate unknown kinds (the title drives display).
-  kind      String
-  title     String
-  body      String?
+  kind             String
+  title            String
+  body             String?
   /// Where clicking it should land the reader.
-  href      String?
-  readAt    DateTime?
+  href             String?
+  readAt           DateTime?
   /// Mail delivery outcome. Default `not_attempted` keeps the existing rows consistent;
   /// `deferred` rows are candidates for a future retry cron. `emailStatus` is updated only by
   /// the mail-delivery seam; emitting a notification leaves it `not_attempted` until the
@@ -2536,7 +2730,7 @@ model Notification {
   emailStatus      NotificationEmailStatus @default(not_attempted)
   emailAttemptedAt DateTime?
   emailError       String?
-  createdAt DateTime  @default(now())
+  createdAt        DateTime                @default(now())
 
   @@index([personId, readAt])
   @@index([personId, createdAt])
@@ -2640,29 +2834,29 @@ model CourseEvaluationReceipt {
 // ─── Infirmary ──────────────────────────────────────────────────────────────
 
 model Consultation {
-  id              String   @id @default(uuid())
-  studentId       String
-  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  clinicianId     String?
-  clinician       Person?  @relation("ConsultationClinician", fields: [clinicianId], references: [id], onDelete: SetNull)
-  reason          String
-  visitType       String
-  clinicalNotes   String   @default("")
-  status          String   @default("Completed")
-  vitalsJson      Json?
-  diagnosis       String?
-  treatmentPlan   String?
-  followUpRequired Boolean @default(false)
-  visitedAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String    @id @default(uuid())
+  studentId        String
+  student          Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  clinicianId      String?
+  clinician        Person?   @relation("ConsultationClinician", fields: [clinicianId], references: [id], onDelete: SetNull)
+  reason           String
+  visitType        String
+  clinicalNotes    String    @default("")
+  status           String    @default("Completed")
+  vitalsJson       Json?
+  diagnosis        String?
+  treatmentPlan    String?
+  followUpRequired Boolean   @default(false)
+  visitedAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
   /// Sick flag: when set, today's AttendanceRecord rows for the student are written
   /// as `absent` with `reason = sick | infirmary_emergency`, faculty-of-today and the
   /// admin role receive a notification, and (if `isEmergency`) the
   /// `infirmary.emergencyRecipients` AppSetting list is paged as well.
-  sickFlagged       Boolean   @default(false)
-  sickFlaggedAt     DateTime?
-  sickFlaggedById   String?
-  sickFlaggedBy     Person?   @relation("ConsultationSickFlagger", fields: [sickFlaggedById], references: [id], onDelete: SetNull)
+  sickFlagged      Boolean   @default(false)
+  sickFlaggedAt    DateTime?
+  sickFlaggedById  String?
+  sickFlaggedBy    Person?   @relation("ConsultationSickFlagger", fields: [sickFlaggedById], references: [id], onDelete: SetNull)
 
   prescriptions Prescription[]
 
@@ -2673,21 +2867,21 @@ model Consultation {
 }
 
 model Prescription {
-  id              String   @id @default(uuid())
-  consultationId  String?
-  consultation    Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
-  studentId       String
-  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  authorId        String?
-  author          Person?  @relation("PrescriptionAuthor", fields: [authorId], references: [id], onDelete: SetNull)
-  medication      String
-  dosage          String
-  frequency       String
-  duration        String
-  instructions    String   @default("")
-  status          String   @default("Active")
-  prescribedAt    DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String        @id @default(uuid())
+  consultationId String?
+  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  studentId      String
+  student        Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  authorId       String?
+  author         Person?       @relation("PrescriptionAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  medication     String
+  dosage         String
+  frequency      String
+  duration       String
+  instructions   String        @default("")
+  status         String        @default("Active")
+  prescribedAt   DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@index([studentId])
   @@index([prescribedAt])
@@ -2713,17 +2907,17 @@ model Medication {
 }
 
 model InfirmaryAppointment {
-  id          String   @id @default(uuid())
-  studentId   String
-  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  date        DateTime @db.Date
-  time        String
-  type        String
-  reason      String
-  status      String   @default("Scheduled")
-  notes       String   @default("")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  time      String
+  type      String
+  reason    String
+  status    String   @default("Scheduled")
+  notes     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([studentId])
   @@index([date])
@@ -2731,33 +2925,33 @@ model InfirmaryAppointment {
 }
 
 model InfirmaryDocument {
-  id           String   @id @default(uuid())
-  studentId    String
-  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  uploaderId   String?
-  uploader     Person?  @relation("DocumentUploader", fields: [uploaderId], references: [id], onDelete: SetNull)
-  name         String
-  type         String   @default("Other")
-  notes        String   @default("")
-  url          String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id         String   @id @default(uuid())
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  uploaderId String?
+  uploader   Person?  @relation("DocumentUploader", fields: [uploaderId], references: [id], onDelete: SetNull)
+  name       String
+  type       String   @default("Other")
+  notes      String   @default("")
+  url        String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([studentId])
   @@index([uploaderId])
 }
 
 model FollowUp {
-  id          String   @id @default(uuid())
-  studentId   String
-  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  reason      String
-  dueDate     DateTime @db.Date
-  status      String   @default("Pending")
-  priority    String   @default("Medium")
-  notes       String   @default("")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  reason    String
+  dueDate   DateTime @db.Date
+  status    String   @default("Pending")
+  priority  String   @default("Medium")
+  notes     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([studentId])
   @@index([dueDate])
@@ -2779,14 +2973,14 @@ model InfirmaryForm {
 }
 
 model InfirmaryFormResponse {
-  id           String   @id @default(uuid())
-  formId       String
-  form         InfirmaryForm @relation(fields: [formId], references: [id], onDelete: Restrict)
-  studentId    String
-  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  studentName  String
-  answers      Json     @default("{}")
-  submittedAt  DateTime @default(now())
+  id          String        @id @default(uuid())
+  formId      String
+  form        InfirmaryForm @relation(fields: [formId], references: [id], onDelete: Restrict)
+  studentId   String
+  student     Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentName String
+  answers     Json          @default("{}")
+  submittedAt DateTime      @default(now())
 
   @@index([formId])
   @@index([studentId])
@@ -2832,14 +3026,14 @@ model CustomForm {
 }
 
 model FormSection {
-  id            String    @id @default(uuid())
+  id            String   @id @default(uuid())
   formId        String
   title         String
-  sortOrder     Int       @default(0)
+  sortOrder     Int      @default(0)
   conditionJson Json?
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime @default(now())
 
-  form   CustomForm    @relation(fields: [formId], references: [id])
+  form   CustomForm  @relation(fields: [formId], references: [id])
   fields FormField[]
 
   @@index([formId, sortOrder])
@@ -2871,7 +3065,7 @@ model FormResponse {
   submittedAt     DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  form    CustomForm          @relation(fields: [formId], references: [id])
+  form    CustomForm           @relation(fields: [formId], references: [id])
   answers FormResponseAnswer[]
 
   @@unique([formId, personId])
@@ -2930,30 +3124,30 @@ enum HelpdeskRoutingType {
 /// requesters. Assignee is optional until a support role picks it up. Sync
 /// fields track mirroring to the upstream engineering tracker.
 model HelpdeskTicket {
-  id                 String              @id @default(uuid())
-  requesterId        String
-  requester          Person              @relation("HelpdeskTicketRequester", fields: [requesterId], references: [id], onDelete: Restrict)
-  studentId          String?
-  student            Student?            @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  assigneeId         String?
-  assignee           Person?             @relation("HelpdeskTicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  title              String
-  description        String
-  category           HelpdeskCategory
-  priority           HelpdeskPriority   @default(normal)
-  status             HelpdeskStatus     @default(new)
-  routingType        HelpdeskRoutingType @default(support)
-  githubIssueNumber  Int?
-  githubIssueUrl     String?
-  githubSyncState    String             @default("pending")
-  githubSyncError    String?
-  githubSyncedAt     DateTime?
-  resolvedAt         DateTime?
-  version            Int                @default(1)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  comments           HelpdeskComment[]
-  attachments        HelpdeskAttachment[]
+  id                String               @id @default(uuid())
+  requesterId       String
+  requester         Person               @relation("HelpdeskTicketRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  studentId         String?
+  student           Student?             @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  assigneeId        String?
+  assignee          Person?              @relation("HelpdeskTicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  title             String
+  description       String
+  category          HelpdeskCategory
+  priority          HelpdeskPriority     @default(normal)
+  status            HelpdeskStatus       @default(new)
+  routingType       HelpdeskRoutingType  @default(support)
+  githubIssueNumber Int?
+  githubIssueUrl    String?
+  githubSyncState   String               @default("pending")
+  githubSyncError   String?
+  githubSyncedAt    DateTime?
+  resolvedAt        DateTime?
+  version           Int                  @default(1)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  comments          HelpdeskComment[]
+  attachments       HelpdeskAttachment[]
 
   @@index([requesterId])
   @@index([status])
@@ -2966,15 +3160,15 @@ model HelpdeskTicket {
 /// Thread comment on a helpdesk ticket. `isInternal = true` keeps the note
 /// visible only to support/engineering staff (never the requester).
 model HelpdeskComment {
-  id         String        @id @default(uuid())
+  id         String         @id @default(uuid())
   ticketId   String
   ticket     HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   authorId   String
-  author     Person        @relation("HelpdeskCommentAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  author     Person         @relation("HelpdeskCommentAuthor", fields: [authorId], references: [id], onDelete: Restrict)
   body       String
-  isInternal Boolean       @default(false)
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  isInternal Boolean        @default(false)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
 
   @@index([ticketId])
   @@index([authorId])
@@ -2984,20 +3178,20 @@ model HelpdeskComment {
 /// `url` is a stored relative upload path served from disk/S3.
 /// `storageKey` is the private object key (not exposed via the public upload
 /// route). `url` is kept for backwards-compatibility of older clients but is
-/// never the address used to read the bytes — always go through the authorized
+/// never the address used to read the bytes ΓÇö always go through the authorized
 /// `GET /helpdesk/attachments/:id` route.
 model HelpdeskAttachment {
-  id         String        @id @default(uuid())
+  id         String         @id @default(uuid())
   ticketId   String
   ticket     HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   uploaderId String
-  uploader   Person        @relation("HelpdeskAttachmentUploader", fields: [uploaderId], references: [id], onDelete: Restrict)
+  uploader   Person         @relation("HelpdeskAttachmentUploader", fields: [uploaderId], references: [id], onDelete: Restrict)
   url        String
   storageKey String
   name       String
   size       Int
   mimeType   String
-  createdAt  DateTime      @default(now())
+  createdAt  DateTime       @default(now())
 
   @@index([ticketId])
   @@index([uploaderId])

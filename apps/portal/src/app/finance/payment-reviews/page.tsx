@@ -273,9 +273,11 @@ function ReviewWorkspace({ history }: { history: boolean }) {
                 flexWrap: "wrap",
               }}
             >
-              <button style={action} onClick={() => openFile("payer")}>
-                <Eye size={15} /> Payer proof
-              </button>
+              {selected.hasPayerProof && (
+                <button style={action} onClick={() => openFile("payer")}>
+                  <Eye size={15} /> Payer proof
+                </button>
+              )}
               {selected.hasVerificationProof && (
                 <button
                   style={{ ...action, background: "var(--daust-navy)" }}
