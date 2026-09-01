@@ -26,6 +26,7 @@ import {
 import {
   acceptApplicant,
   cancelApplicantOnboarding,
+  type ApplicantBillingProfileInput,
   type ApplicantDetail,
   type ApplicantOnboardingView,
   getApplicant,
@@ -39,6 +40,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Avatar, Badge, type BadgeTone, Modal, Tabs } from "@/components/ui";
 import { useAuth } from "@/lib/use-auth";
 import { ApplicationModal, type ProgramOption } from "../ApplicationModal";
+import { ApplicantBillingAcceptanceModal } from "./ApplicantBillingAcceptanceModal";
 
 const STAGES = ["submitted", "review", "interview", "offer", "accepted"];
 const STAGE_TONE: Record<string, BadgeTone> = {
@@ -124,12 +126,15 @@ export default function ApplicantDetailPage() {
 
   async function move(stage: string) {
     if (stage === "accepted" && !isAdmin) return;
+    if (stage === "accepted") {
+      setConfirmAcceptanceOpen(true);
+      return;
+    }
     setErr(null);
     setNotice(null);
     setBusyAction(stage);
     try {
-      if (stage === "accepted") await acceptApplicant(id);
-      else await setApplicantStage(id, stage);
+      await setApplicantStage(id, stage);
       load();
     } catch (e) {
       setErr(
@@ -161,13 +166,15 @@ export default function ApplicantDetailPage() {
     );
   }
 
-  async function confirmAcceptance() {
+  async function confirmAcceptance(
+    billingProfile: ApplicantBillingProfileInput,
+  ) {
     if (!isAdmin) return;
     setErr(null);
     setNotice(null);
     setBusyAction("accepted");
     try {
-      const { onboarding } = await acceptApplicant(id);
+      const { onboarding } = await acceptApplicant(id, billingProfile);
       setIssuedStatusUrl(onboarding.statusUrl ?? null);
       updateOnboarding(
         onboarding,
@@ -728,18 +735,8 @@ export default function ApplicantDetailPage() {
         />
       )}
       {confirmAcceptanceOpen && isAdmin && (
-        <ConfirmDialog
-          title="Accept applicant and prepare payment?"
-          message={
-            <>
-              <strong>{a.name}</strong> will receive a permanent Student ID and
-              first-installment invoice. They will remain payment pending,
-              without student access, until Finance verifies the full
-              installment.
-            </>
-          }
-          confirmLabel="Accept and prepare payment"
-          danger={false}
+        <ApplicantBillingAcceptanceModal
+          applicant={{ id: a.id, name: a.name, score: a.score }}
           onClose={() => setConfirmAcceptanceOpen(false)}
           onConfirm={confirmAcceptance}
         />

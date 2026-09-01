@@ -29,14 +29,22 @@ async function main() {
 
   await seedSisReference(prisma);
 
-  const [schemes, years, requirements, fees] = await Promise.all([
-    prisma.gradingScheme.count(),
-    prisma.academicYear.count(),
-    prisma.programRequirement.count(),
-    prisma.feePlanInstallment.count(),
-  ]);
+  const [schemes, years, requirements, fees, serviceOptions, adjustments] =
+    await Promise.all([
+      prisma.gradingScheme.count(),
+      prisma.academicYear.count(),
+      prisma.programRequirement.count(),
+      prisma.feePlanInstallment.count(),
+      prisma.billingServiceOption.count({
+        where: { academicYearLabel: "2026–2027" },
+      }),
+      prisma.billingAdjustmentDefinition.count({
+        where: { academicYearLabel: "2026–2027" },
+      }),
+    ]);
   console.log(
-    `Loaded: ${schemes} grading schemes, ${years} catalogue years, ${requirements} requirement buckets, ${fees} fee installments.`,
+    `Loaded: ${schemes} grading schemes, ${years} catalogue years, ${requirements} requirement buckets, ` +
+      `${fees} fee installments, ${serviceOptions} billing service options, ${adjustments} billing adjustments.`,
   );
 
   // The money rows must be exactly as we found them.
@@ -45,13 +53,19 @@ async function main() {
     prisma.invoice.count(),
     prisma.payment.count(),
   ]);
-  if (studentsAfter !== students || invoicesAfter !== invoices || paymentsAfter !== payments) {
+  if (
+    studentsAfter !== students ||
+    invoicesAfter !== invoices ||
+    paymentsAfter !== payments
+  ) {
     throw new Error(
       `Refusing to finish: row counts changed (students ${students}->${studentsAfter}, ` +
         `invoices ${invoices}->${invoicesAfter}, payments ${payments}->${paymentsAfter}).`,
     );
   }
-  console.log("Verified: no student, invoice or payment row was created or removed.");
+  console.log(
+    "Verified: no student, invoice or payment row was created or removed.",
+  );
 }
 
 main()

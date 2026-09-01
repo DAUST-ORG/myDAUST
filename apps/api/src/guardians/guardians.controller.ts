@@ -222,6 +222,14 @@ export class ParentController {
     return this.guardians.childAccount(user.personId, studentId);
   }
 
+  @Get("children/:studentId/billing-profile")
+  billingProfile(
+    @CurrentUser() user: AuthUser,
+    @Param("studentId") studentId: string,
+  ) {
+    return this.guardians.childBillingProfile(user.personId, studentId);
+  }
+
   @Post("children/:studentId/payments")
   initiatePayment(
     @CurrentUser() user: AuthUser,

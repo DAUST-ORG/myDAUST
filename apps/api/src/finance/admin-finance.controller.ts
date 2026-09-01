@@ -179,6 +179,102 @@ const CreatePlanRequestInput = CreatePaymentPlanInput.extend({
 });
 const RemoveChargeInput = z.object({ reason: RequestReason });
 
+const BillingProfileCode = z
+  .string()
+  .trim()
+  .regex(/^[a-z][a-z0-9_]{0,39}$/);
+const BillingProfileChangeRequestInput = z.object({
+  academicYearLabel: z.string().trim().min(4).max(20),
+  baseRevision: z.number().int().min(0),
+  housingOptionCode: BillingProfileCode,
+  cafeteriaOptionCode: BillingProfileCode,
+  insuranceSelected: z.boolean(),
+  cautionSelected: z.boolean(),
+  awardDefinitionIds: z.array(z.string().uuid()).max(20).default([]),
+  manualAdjustments: z
+    .array(
+      z.object({
+        definitionId: z.string().uuid().optional(),
+        label: z.string().trim().min(1).max(160),
+        amountXof: z
+          .number()
+          .int()
+          .min(-2_000_000_000)
+          .max(2_000_000_000)
+          .refine((amount) => amount !== 0, "Adjustment cannot be zero"),
+        reason: z.string().trim().min(1).max(1000),
+      }),
+    )
+    .max(20)
+    .default([]),
+  reason: RequestReason,
+});
+
+const BillingServiceKindInput = z.enum([
+  "housing",
+  "cafeteria",
+  "insurance",
+  "housing_caution",
+]);
+const BillingCatalogRequestInput = z.object({
+  academicYearLabel: z.string().trim().min(4).max(20),
+  expectedCatalogFingerprint: z.string().length(64).optional(),
+  serviceOptions: z
+    .array(
+      z.object({
+        id: z.string().uuid().optional(),
+        kind: BillingServiceKindInput,
+        code: BillingProfileCode,
+        label: z.string().trim().min(1).max(120),
+        description: z.string().trim().max(500).nullish(),
+        calculation: z.enum(["fixed", "percentage_of_service"]),
+        amountXof: z.number().int().min(0).max(2_000_000_000).nullish(),
+        percentageBasisPoints: z.number().int().min(1).max(10_000).nullish(),
+        basisServiceKind: BillingServiceKindInput.nullish(),
+        costCenterCode: z.string().trim().min(1).max(8),
+        refundable: z.boolean(),
+        defaultSelected: z.boolean(),
+        active: z.boolean(),
+        sortOrder: z.number().int().min(0).max(999),
+      }),
+    )
+    .min(4)
+    .max(100),
+  adjustmentDefinitions: z
+    .array(
+      z.object({
+        id: z.string().uuid().optional(),
+        key: BillingProfileCode,
+        label: z.string().trim().min(1).max(120),
+        description: z.string().trim().max(500).nullish(),
+        basis: z.enum([
+          "tuition",
+          "housing",
+          "cafeteria",
+          "insurance",
+          "housing_caution",
+          "gross_charges",
+          "manual",
+        ]),
+        calculation: z.enum(["percentage", "fixed", "manual"]),
+        stacking: z.enum(["additive", "sequential", "exclusive"]),
+        effect: z.enum(["discount", "charge"]),
+        percentageBasisPoints: z.number().int().min(1).max(10_000).nullish(),
+        fixedAmountXof: z
+          .number()
+          .int()
+          .positive()
+          .max(2_000_000_000)
+          .nullish(),
+        requiresApproval: z.boolean(),
+        active: z.boolean(),
+        sortOrder: z.number().int().min(0).max(999),
+      }),
+    )
+    .max(100),
+  reason: RequestReason,
+});
+
 /** Staff-only ledger entry. Payer-facing methods remain a separate contract. */
 export const RecordStudentPaymentInput = z
   .object({
@@ -413,6 +509,60 @@ export class AdminFinanceController {
   @Roles("bursar", "admin", "registrar")
   account(@Param("id") id: string) {
     return this.finance.getStudentAccount(id);
+  }
+
+  @Get("students/:id/billing-profile")
+  @Roles("bursar", "admin", "registrar")
+  billingProfile(
+    @Param("id") id: string,
+    @Query("academicYearLabel") academicYearLabel?: string,
+  ) {
+    return this.finance.getBillingProfile(id, academicYearLabel);
+  }
+
+  @Post("students/:studentId/billing-profile/requests")
+  @Roles("bursar", "admin", "registrar")
+  requestBillingProfileChange(
+    @CurrentUser() user: AuthUser,
+    @Param("studentId") studentId: string,
+    @Body() body: unknown,
+  ) {
+    const { reason, baseRevision, ...after } =
+      BillingProfileChangeRequestInput.parse(body);
+    return this.approvals.request(user, {
+      kind: "billing_profile",
+      targetType: "Student",
+      targetId: studentId,
+      academicYearLabel: after.academicYearLabel,
+      reason,
+      after: { ...after, expectedRevision: baseRevision },
+    });
+  }
+
+  @Put("billing-profile/catalog")
+  requestBillingCatalogChange(
+    @CurrentUser() user: AuthUser,
+    @Body() body: unknown,
+  ) {
+    const { reason, ...after } = BillingCatalogRequestInput.parse(body);
+    return this.approvals.request(user, {
+      kind: "billing_catalog",
+      targetType: "BillingCatalog",
+      targetId: after.academicYearLabel,
+      academicYearLabel: after.academicYearLabel,
+      reason,
+      after,
+    });
+  }
+
+  @Get("billing-profile/catalog")
+  billingCatalog(@Query("academicYearLabel") academicYearLabel?: string) {
+    return this.finance.getBillingCatalog(academicYearLabel);
+  }
+
+  @Get("billing-profile/catalog-years")
+  billingCatalogYears() {
+    return this.finance.listBillingCatalogYears();
   }
 
   /** Record money already received by Finance; Director audit remains post-hoc. */

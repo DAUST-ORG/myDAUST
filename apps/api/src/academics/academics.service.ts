@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
 import { deriveAcademicStanding, type AcademicStanding } from "@mydaust/shared";
@@ -21,6 +22,7 @@ import {
   AcademicStandingService,
   type StandingOverrideInput,
 } from "../academic-catalog/academic-standing.service.js";
+import { BillingProfileService } from "../finance/billing-profile.service.js";
 
 export const GRADE_POINTS: Record<string, number> = {
   "A+": 4.0,
@@ -288,10 +290,12 @@ export class AcademicsService {
   private readonly transcript: TranscriptService;
   private readonly catalogs: AcademicCatalogService;
   private readonly standings: AcademicStandingService;
+  private readonly billingProfiles: BillingProfileService;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications?: NotificationsService,
+    @Optional() billingProfiles?: BillingProfileService,
   ) {
     this.catalogs = new AcademicCatalogService(prisma);
     this.standings = new AcademicStandingService(prisma, this.catalogs);
@@ -300,6 +304,7 @@ export class AcademicsService {
       this.catalogs,
       this.standings,
     );
+    this.billingProfiles = billingProfiles ?? new BillingProfileService(prisma);
   }
 
   /** The active/upcoming term (the one registration targets). */
@@ -910,7 +915,10 @@ export class AcademicsService {
       throw new ForbiddenException("Student enrollment is not active");
     }
 
-    const transcript = await this.transcript.view(studentId);
+    const [transcript, billingProfile] = await Promise.all([
+      this.transcript.view(studentId),
+      this.billingProfiles.get(studentId),
+    ]);
     const gpa = transcript.totals.gpa ?? 0;
     const completedCredits = transcript.totals.earnedCredits;
 
@@ -921,6 +929,7 @@ export class AcademicsService {
       program: s.program?.name ?? null,
       gpa,
       completedCredits,
+      billingProfile,
       academicProgress: transcript.academicProgress,
       standing: transcript.academicStanding.label,
       academicStanding: transcript.academicStanding,
@@ -974,11 +983,14 @@ export class AcademicsService {
 
   /** The signed-in student's housing assignment, if any. */
   async myHousing(studentId: string) {
-    const assignment = await this.prisma.housingAssignment.findUnique({
-      where: { studentId },
+    const assignment = await this.prisma.housingAssignment.findFirst({
+      where: { studentId, academicYear: { status: "active" } },
+      orderBy: { academicYearLabel: "desc" },
       include: { hall: true },
     });
-    if (!assignment) return { assigned: false as const };
+    if (!assignment || assignment.status !== "assigned") {
+      return { assigned: false as const };
+    }
 
     // Anyone else assigned to the same room is a roommate.
     const roommates = assignment.room
@@ -986,7 +998,9 @@ export class AcademicsService {
           where: {
             hallId: assignment.hallId,
             room: assignment.room,
+            academicYearLabel: assignment.academicYearLabel,
             studentId: { not: studentId },
+            status: "assigned",
           },
           include: { student: { include: { person: true } } },
         })
@@ -1082,8 +1096,12 @@ export class AcademicsService {
       grade: e.status === "completed" ? e.grade : null,
     });
     return {
-      current: rows.filter((e) => term && e.section.termId === term.id).map(shape),
-      past: rows.filter((e) => !term || e.section.termId !== term.id).map(shape),
+      current: rows
+        .filter((e) => term && e.section.termId === term.id)
+        .map(shape),
+      past: rows
+        .filter((e) => !term || e.section.termId !== term.id)
+        .map(shape),
     };
   }
 
@@ -1418,8 +1436,12 @@ export class AcademicsService {
     >();
     for (const r of records) {
       const key = r.date.toISOString().slice(0, 10);
-      const row =
-        byDate.get(key) ?? { date: key, present: 0, late: 0, absent: 0 };
+      const row = byDate.get(key) ?? {
+        date: key,
+        present: 0,
+        late: 0,
+        absent: 0,
+      };
       if (r.status === "present") row.present += 1;
       else if (r.status === "late") row.late += 1;
       else if (r.status === "absent") row.absent += 1;
@@ -2089,7 +2111,10 @@ export class AcademicsService {
   }
 
   private adminStudentRosterWhere(
-    query: Pick<AdminStudentRosterQuery, "search" | "program" | "gender" | "nationality">,
+    query: Pick<
+      AdminStudentRosterQuery,
+      "search" | "program" | "gender" | "nationality"
+    >,
   ): Prisma.StudentWhereInput {
     const searchTokens =
       query.search?.trim().split(/\s+/).filter(Boolean) ?? [];
@@ -3193,11 +3218,12 @@ export class AcademicsService {
     });
     if (!student) throw new NotFoundException("Student not found");
 
-    const [transcriptView, standingPolicy] = await Promise.all([
+    const [transcriptView, standingPolicy, billingProfile] = await Promise.all([
       student.recordStatus === "pending_payment"
         ? Promise.resolve(null)
         : this.transcript.view(studentId),
       this.standings.policyForStudent(studentId),
+      this.billingProfiles.get(studentId),
     ]);
     const { gpa, completedCredits } = summarizeTranscriptRows(
       student.transcriptEntries,
@@ -3256,6 +3282,7 @@ export class AcademicsService {
       recordStatus: student.recordStatus,
       balance: summary.balanceXof,
       summary,
+      billingProfile,
       hasActiveHold: student.holds.length > 0,
       activeHoldCount: student.holds.length,
       activeHolds: student.holds.map((hold) => ({
@@ -3817,7 +3844,6 @@ export class AcademicsService {
       atRisk,
     };
   }
-
 
   /** Faculty teaching sections for the schedule grid (with day/time fields). */
   async mySchedule(instructorPersonId: string) {

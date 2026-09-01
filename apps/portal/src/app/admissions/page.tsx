@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FilePlus2 } from "lucide-react";
 import {
   acceptApplicant,
+  type ApplicantBillingProfileInput,
   type Admissions,
   getAdmissions,
   getAdminPrograms,
@@ -23,9 +24,9 @@ import {
   Stat,
   useSort,
 } from "@/components/ui";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/lib/use-auth";
 import { ApplicationModal, type ProgramOption } from "./ApplicationModal";
+import { ApplicantBillingAcceptanceModal } from "./[id]/ApplicantBillingAcceptanceModal";
 
 /**
  * How long ago an application landed. Sits under the timestamp because "3 hours ago" is
@@ -107,6 +108,7 @@ export default function AdmissionsPage() {
   const [pendingAcceptance, setPendingAcceptance] = useState<{
     id: string;
     name: string;
+    score: number | null;
   } | null>(null);
   const [advancing, setAdvancing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -133,11 +135,21 @@ export default function AdmissionsPage() {
 
   async function advance(id: string, next: string) {
     if (next === "accepted" && !isAdmin) return;
+    if (next === "accepted") {
+      const applicant = d?.applicants.find((candidate) => candidate.id === id);
+      if (applicant) {
+        setPendingAcceptance({
+          id: applicant.id,
+          name: applicant.name,
+          score: applicant.score,
+        });
+      }
+      return;
+    }
     setAdvancing(id);
     setErr(null);
     try {
-      if (next === "accepted") await acceptApplicant(id);
-      else await setApplicantStage(id, next);
+      await setApplicantStage(id, next);
       load();
     } catch (e) {
       setErr(
@@ -150,13 +162,18 @@ export default function AdmissionsPage() {
     }
   }
 
-  async function confirmAcceptance() {
+  async function confirmAcceptance(
+    billingProfile: ApplicantBillingProfileInput,
+  ) {
     if (!pendingAcceptance || !isAdmin) return;
     setAdvancing(pendingAcceptance.id);
     setErr(null);
     setNotice(null);
     try {
-      const { onboarding } = await acceptApplicant(pendingAcceptance.id);
+      const { onboarding } = await acceptApplicant(
+        pendingAcceptance.id,
+        billingProfile,
+      );
       setNotice(
         onboarding.emailDelivery === "not_sent"
           ? `${pendingAcceptance.name} was accepted, but the email failed. Open the record to copy or resend the private link.`
@@ -560,6 +577,7 @@ export default function AdmissionsPage() {
                                   ? setPendingAcceptance({
                                       id: a.id,
                                       name: a.name,
+                                      score: a.score,
                                     })
                                   : advance(a.id, STAGE_ACTION[a.stage]!.next)
                               }
@@ -599,18 +617,12 @@ export default function AdmissionsPage() {
         />
       )}
       {pendingAcceptance && isAdmin && (
-        <ConfirmDialog
-          title="Accept applicant and prepare payment?"
-          message={
-            <>
-              <strong>{pendingAcceptance.name}</strong> will receive a permanent
-              Student ID and first-installment invoice. They will remain payment
-              pending, without student access, until Finance verifies the full
-              installment.
-            </>
-          }
-          confirmLabel="Accept and prepare payment"
-          danger={false}
+        <ApplicantBillingAcceptanceModal
+          applicant={{
+            id: pendingAcceptance.id,
+            name: pendingAcceptance.name,
+            score: pendingAcceptance.score,
+          }}
           onClose={() => setPendingAcceptance(null)}
           onConfirm={confirmAcceptance}
         />

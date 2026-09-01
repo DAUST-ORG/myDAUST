@@ -48,7 +48,25 @@ const SetStageInput = z.object({
 });
 
 const AcceptApplicantInput = z.object({
-  academicYearId: z.string().uuid().optional(),
+  academicYearId: z.string().uuid(),
+  academicYearLabel: z.string().trim().min(1).max(80),
+  billingProfile: z.object({
+    feeScheduleId: z.string().uuid(),
+    feeScheduleRevision: z.number().int().positive(),
+    feeScheduleFingerprintSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    billingCatalogFingerprintSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    housingOptionCode: z
+      .string()
+      .trim()
+      .regex(/^[a-z][a-z0-9_]{0,39}$/),
+    cafeteriaOptionCode: z
+      .string()
+      .trim()
+      .regex(/^[a-z][a-z0-9_]{0,39}$/),
+    insuranceSelected: z.boolean(),
+    cautionSelected: z.boolean(),
+    awardDefinitionIds: z.array(z.string().uuid()).max(20).default([]),
+  }),
 });
 
 const CancelOnboardingInput = z.object({
@@ -77,6 +95,11 @@ export class AdminAdmissionsController {
   @Get("applicants/:id")
   detail(@Param("id") id: string) {
     return this.admissions.applicantDetail(id);
+  }
+
+  @Get("applicants/:id/billing-profile-options")
+  billingProfileOptions(@Param("id") id: string) {
+    return this.admissions.acceptanceBillingProfileOptions(id);
   }
 
   @Patch("applicants/:id")

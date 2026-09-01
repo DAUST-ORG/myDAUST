@@ -331,6 +331,8 @@ export interface BillingPayment {
   source?: string;
   initiatedByEmail?: string | null;
   settledAt?: string | null;
+  recognizedOn?: string | null;
+  dateBasis?: "settlement" | "source_as_of_balance" | null;
   refundedAt?: string | null;
   createdAt: string;
 }
@@ -377,6 +379,255 @@ export const getMyBilling = () =>
   request<BillingInvoice[]>("/finance/my/billing");
 export const getMyBillingSummary = () =>
   request<AccountBalanceSummary>("/finance/my/billing-summary");
+
+// --- Annual billing profile ---
+// The invoice remains the monetary authority. This view explains the annual
+// service selections and adjustments that produced that invoice.
+export interface BillingProfileServiceSelection {
+  code: string;
+  label: string;
+  amountXof: number;
+}
+
+export interface BillingProfileAward {
+  id: string;
+  code: string;
+  definitionKey: string;
+  label: string;
+  amountXof: number;
+  effect: "discount" | "charge";
+  basis: string;
+  calculation: string;
+  source: string;
+  reason?: string | null;
+}
+
+export interface BillingProfileAdjustment {
+  id: string;
+  code: string;
+  label: string;
+  source: string;
+  basis: string;
+  calculation: string;
+  amountXof: number;
+  kind: "discount" | "charge";
+  reason?: string | null;
+}
+
+export interface BillingProfileWarning {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+}
+
+export interface BillingProfileView {
+  id: string;
+  studentId: string;
+  academicYearLabel: string;
+  revision: number;
+  status: string;
+  source: {
+    kind: string;
+    workbookRow: number | null;
+    workbookFileHash?: string | null;
+  } | null;
+  housing: BillingProfileServiceSelection | null;
+  cafeteria: BillingProfileServiceSelection | null;
+  insurance: {
+    selected: boolean;
+    label?: string;
+    amountXof: number;
+  };
+  caution: {
+    selected: boolean;
+    label?: string;
+    amountXof: number;
+    refundable: boolean;
+  };
+  awards: BillingProfileAward[];
+  adjustments: BillingProfileAdjustment[];
+  grossChargesXof: number;
+  netBilledXof: number;
+  paidXof: number;
+  outstandingXof: number;
+  accountCreditXof: number;
+  warnings: BillingProfileWarning[];
+}
+
+export interface BillingProfileServiceOption {
+  id: string;
+  code: string;
+  label: string;
+  amountXof: number;
+  percentageBasisPoints?: number | null;
+  refundable: boolean;
+  active: boolean;
+}
+
+export interface BillingProfileAwardDefinition {
+  id: string;
+  code: string;
+  label: string;
+  basis: string;
+  calculation: string;
+  value: number | null;
+  stacking: string;
+  effect: "discount" | "charge";
+  requiresApproval: boolean;
+  active: boolean;
+}
+
+export interface BillingProfileOptions {
+  academicYearId: string;
+  academicYearLabel: string;
+  feeScheduleId: string | null;
+  feeScheduleRevision: number;
+  feeScheduleFingerprintSha256: string | null;
+  billingCatalogFingerprintSha256: string | null;
+  housingOptions: BillingProfileServiceOption[];
+  cafeteriaOptions: BillingProfileServiceOption[];
+  insuranceOption: BillingProfileServiceOption | null;
+  cautionOption: BillingProfileServiceOption | null;
+  awardDefinitions: BillingProfileAwardDefinition[];
+}
+
+export interface BillingProfileChangeInput {
+  academicYearLabel: string;
+  baseRevision: number;
+  housingOptionCode: string;
+  cafeteriaOptionCode: string;
+  insuranceSelected: boolean;
+  cautionSelected: boolean;
+  awardDefinitionIds: string[];
+  manualAdjustments?: {
+    definitionId?: string;
+    label: string;
+    amountXof: number;
+    reason: string;
+  }[];
+  reason: string;
+}
+
+export interface BillingProfileChangeResult {
+  applied: boolean;
+  request: ApprovalRequestRow;
+  result: BillingProfileView | null;
+}
+
+export const getMyBillingProfile = () =>
+  request<BillingProfileView | null>("/finance/my/billing-profile");
+export const getBillingProfileOptions = (academicYearLabel?: string) =>
+  request<BillingProfileOptions>(
+    `/finance/billing-profile/options${academicYearLabel ? `?academicYearLabel=${encodeURIComponent(academicYearLabel)}` : ""}`,
+  );
+export const getAdminBillingProfile = (studentId: string) =>
+  request<BillingProfileView | null>(
+    `/finance/admin/students/${encodeURIComponent(studentId)}/billing-profile`,
+  );
+export const requestBillingProfileChange = (
+  studentId: string,
+  input: BillingProfileChangeInput,
+) =>
+  request<BillingProfileChangeResult>(
+    `/finance/admin/students/${encodeURIComponent(studentId)}/billing-profile/requests`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+
+export type BillingCatalogServiceKind =
+  "housing" | "cafeteria" | "insurance" | "housing_caution";
+
+export interface BillingCatalogServiceOption {
+  id: string;
+  academicYearLabel: string;
+  kind: BillingCatalogServiceKind;
+  code: string;
+  label: string;
+  description: string | null;
+  calculation: "fixed" | "percentage_of_service";
+  amountXof: number | null;
+  percentageBasisPoints: number | null;
+  basisServiceKind: BillingCatalogServiceKind | null;
+  costCenterCode: string;
+  refundable: boolean;
+  defaultSelected: boolean;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillingCatalogAdjustmentDefinition {
+  id: string;
+  academicYearLabel: string;
+  key: string;
+  label: string;
+  description: string | null;
+  basis:
+    | "tuition"
+    | "housing"
+    | "cafeteria"
+    | "insurance"
+    | "housing_caution"
+    | "gross_charges"
+    | "manual";
+  calculation: "percentage" | "fixed" | "manual";
+  stacking: "additive" | "sequential" | "exclusive";
+  effect: "discount" | "charge";
+  percentageBasisPoints: number | null;
+  fixedAmountXof: number | null;
+  requiresApproval: boolean;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillingCatalogView {
+  academicYearLabel: string;
+  catalogFingerprint: string;
+  serviceOptions: BillingCatalogServiceOption[];
+  adjustmentDefinitions: BillingCatalogAdjustmentDefinition[];
+}
+
+export interface BillingCatalogYear {
+  id: string;
+  label: string;
+  status: "draft" | "active" | "archived";
+  startsOn: string | null;
+  endsOn: string | null;
+}
+
+export type BillingCatalogServiceOptionInput = Omit<
+  BillingCatalogServiceOption,
+  "id" | "academicYearLabel" | "createdAt" | "updatedAt"
+> & { id?: string };
+
+export type BillingCatalogAdjustmentDefinitionInput = Omit<
+  BillingCatalogAdjustmentDefinition,
+  "id" | "academicYearLabel" | "createdAt" | "updatedAt"
+> & { id?: string };
+
+export interface BillingCatalogChangeInput {
+  academicYearLabel: string;
+  expectedCatalogFingerprint: string;
+  serviceOptions: BillingCatalogServiceOptionInput[];
+  adjustmentDefinitions: BillingCatalogAdjustmentDefinitionInput[];
+  reason: string;
+}
+
+export const getBillingCatalog = (academicYearLabel?: string) =>
+  request<BillingCatalogView>(
+    `/finance/admin/billing-profile/catalog${academicYearLabel ? `?academicYearLabel=${encodeURIComponent(academicYearLabel)}` : ""}`,
+  );
+
+export const getBillingCatalogYears = () =>
+  request<BillingCatalogYear[]>("/finance/admin/billing-profile/catalog-years");
+
+export const requestBillingCatalogChange = (input: BillingCatalogChangeInput) =>
+  request<FinanceChangeResult>("/finance/admin/billing-profile/catalog", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
 // --- Resumable proof-based payments ---
 export const getProofPaymentMethods = () =>
   request<PublicProofMethodConfig[]>("/finance/payment-methods");
@@ -534,6 +785,10 @@ export interface AdminPayment {
   method: string;
   status: string;
   providerRef: string;
+  settledAt: string | null;
+  recognizedOn: string | null;
+  dateBasis: "settlement" | "source_as_of_balance" | null;
+  refundedAt: string | null;
   createdAt: string;
 }
 export const getAdminPayments = (status?: string) =>
@@ -1290,6 +1545,7 @@ export interface AdminStudentDetail {
   recordStatus: "pending_payment" | "active" | "archived";
   balance: number;
   summary?: AccountBalanceSummary;
+  billingProfile?: BillingProfileView | null;
   dateOfBirth: string | null;
   gender: string | null;
   phone: string | null;
@@ -1602,9 +1858,28 @@ export interface DiningPass {
   plan: string;
   active: boolean;
 }
+export type DiningPlanCode = "none" | "half" | "full";
+export interface DiningPlanOptions {
+  academicYearLabel: string;
+  currentOptionCode: DiningPlanCode;
+  options: {
+    code: DiningPlanCode;
+    label: string;
+    description: string | null;
+    amountXof: number;
+  }[];
+  pendingRequest: {
+    id: string;
+    status: "pending";
+    requestedOptionCode: DiningPlanCode | null;
+    createdAt: string;
+  } | null;
+}
 export const getDiningPass = () => request<DiningPass>("/dining/my/pass");
-export const chooseMealPlan = (type: string) =>
-  request("/dining/my/plan", {
+export const getDiningPlanOptions = () =>
+  request<DiningPlanOptions>("/dining/my/plan-options");
+export const chooseMealPlan = (type: DiningPlanCode) =>
+  request<FinanceChangeResult>("/dining/my/plan", {
     method: "POST",
     body: JSON.stringify({ type }),
   });
@@ -2261,6 +2536,7 @@ export interface StudentAccount {
     reason: string | null;
     placedAt: string;
   }[];
+  billingProfile?: BillingProfileView | null;
   invoices: AccountInvoice[];
 }
 export const getStudentAccount = (studentId: string) =>
@@ -2750,7 +3026,9 @@ export type ApprovalRequestKind =
   | "scholarship"
   | "operating_budget"
   | "management_actual"
-  | "student_enrollment_override";
+  | "student_enrollment_override"
+  | "billing_profile"
+  | "billing_catalog";
 export type ApprovalRequestStatus =
   "pending" | "approved" | "rejected" | "cancelled" | "stale";
 
@@ -2977,7 +3255,9 @@ export interface Receipt {
   status: string;
   providerRef: string;
   transactionReference?: string | null;
-  paidAt: string;
+  paidAt: string | null;
+  recognizedOn: string | null;
+  dateBasis: "settlement" | "source_as_of_balance" | null;
   refundedAt?: string | null;
   source?: string;
   initiatedByEmail?: string | null;
@@ -3570,12 +3850,45 @@ export interface ApplicantOnboardingView {
 export type ApplicantOnboardingActionResult = {
   onboarding: ApplicantOnboardingView;
 };
-export const acceptApplicant = (id: string, academicYearId?: string) =>
+export interface ApplicantBillingProfileInput {
+  academicYearId: string;
+  academicYearLabel: string;
+  feeScheduleId: string;
+  feeScheduleRevision: number;
+  feeScheduleFingerprintSha256: string;
+  billingCatalogFingerprintSha256: string;
+  housingOptionCode: string;
+  cafeteriaOptionCode: string;
+  insuranceSelected: boolean;
+  cautionSelected: boolean;
+  awardDefinitionIds?: string[];
+}
+
+export const acceptApplicant = (
+  id: string,
+  billingProfile: ApplicantBillingProfileInput,
+) =>
   request<ApplicantOnboardingActionResult>(
     `/admissions/applicants/${id}/accept`,
     {
       method: "POST",
-      body: JSON.stringify({ academicYearId }),
+      body: JSON.stringify({
+        academicYearId: billingProfile.academicYearId,
+        academicYearLabel: billingProfile.academicYearLabel,
+        billingProfile: {
+          feeScheduleId: billingProfile.feeScheduleId,
+          feeScheduleRevision: billingProfile.feeScheduleRevision,
+          feeScheduleFingerprintSha256:
+            billingProfile.feeScheduleFingerprintSha256,
+          billingCatalogFingerprintSha256:
+            billingProfile.billingCatalogFingerprintSha256,
+          housingOptionCode: billingProfile.housingOptionCode,
+          cafeteriaOptionCode: billingProfile.cafeteriaOptionCode,
+          insuranceSelected: billingProfile.insuranceSelected,
+          cautionSelected: billingProfile.cautionSelected,
+          awardDefinitionIds: billingProfile.awardDefinitionIds ?? [],
+        },
+      }),
     },
   );
 export const rotateApplicantOnboardingLink = (id: string) =>
@@ -3622,6 +3935,10 @@ export interface ApplicantDetail {
 }
 export const getApplicant = (id: string) =>
   request<ApplicantDetail>(`/admissions/applicants/${id}`);
+export const getApplicantBillingProfileOptions = (id: string) =>
+  request<BillingProfileOptions>(
+    `/admissions/applicants/${encodeURIComponent(id)}/billing-profile-options`,
+  );
 export const cancelApplicantOnboarding = (id: string, reason: string) =>
   request<ApplicantDetail>(`/admissions/applicants/${id}/onboarding/cancel`, {
     method: "POST",
@@ -3976,6 +4293,11 @@ export const getChildAttendance = (studentId: string) =>
 export const getChildAccount = (studentId: string) =>
   request<StudentAccount>(`/parent/children/${studentId}/account`);
 
+export const getChildBillingProfile = (studentId: string) =>
+  request<BillingProfileView | null>(
+    `/parent/children/${encodeURIComponent(studentId)}/billing-profile`,
+  );
+
 export const getChildPaymentAttempts = (studentId: string) =>
   request<PaymentSubmissionSummary[]>(
     `/parent/children/${encodeURIComponent(studentId)}/payment-attempts`,
@@ -4004,6 +4326,8 @@ export interface ChildPaymentStatus {
   providerRef: string;
   source?: string;
   settledAt?: string | null;
+  recognizedOn?: string | null;
+  dateBasis?: "settlement" | "source_as_of_balance" | null;
   refundedAt?: string | null;
   createdAt: string;
 }
@@ -4429,6 +4753,75 @@ export const activateAcademicYear = (id: string) =>
   request<{ ok: boolean }>(`/registrar/academic-years/${id}/activate`, {
     method: "POST",
   });
+
+export type HousingAssignmentStatus = "pending" | "assigned" | "unassigned";
+export interface HousingOperationsAssignment {
+  id: string;
+  academicYearLabel: string;
+  studentId: string;
+  studentNo: string;
+  studentName: string;
+  studentRecordStatus: "active" | "pending_payment" | "archived";
+  billedOption: {
+    id: string;
+    code: string;
+    label: string;
+    amountXof: number;
+    active: boolean;
+  } | null;
+  status: HousingAssignmentStatus;
+  hallId: string | null;
+  hallName: string | null;
+  room: string | null;
+  roomCapacity: 1 | 2 | null;
+  roomOccupants: number;
+  note: string | null;
+  updatedAt: string;
+  warnings: string[];
+}
+export interface HousingOperationsHall {
+  id: string;
+  name: string;
+  kind: string;
+  beds: number;
+  occupiedBeds: number;
+  availableBeds: number;
+}
+export interface HousingOperationsView {
+  academicYearLabel: string;
+  assignments: HousingOperationsAssignment[];
+  halls: HousingOperationsHall[];
+}
+export const getHousingOperations = (academicYearLabel?: string) =>
+  request<HousingOperationsView>(
+    `/registrar/housing${academicYearLabel ? `?academicYearLabel=${encodeURIComponent(academicYearLabel)}` : ""}`,
+  );
+export const assignHousingRoom = (
+  assignmentId: string,
+  input: {
+    academicYearLabel: string;
+    expectedUpdatedAt: string;
+    hallId: string;
+    room: string;
+    reason: string;
+  },
+) =>
+  request<HousingOperationsAssignment>(
+    `/registrar/housing/${encodeURIComponent(assignmentId)}/assign`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+export const releaseHousingRoom = (
+  assignmentId: string,
+  input: {
+    academicYearLabel: string;
+    expectedUpdatedAt: string;
+    reason: string;
+  },
+) =>
+  request<HousingOperationsAssignment>(
+    `/registrar/housing/${encodeURIComponent(assignmentId)}/release`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
 
 export interface AcademicCatalogRevisionView {
   id: string;

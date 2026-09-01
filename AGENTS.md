@@ -89,7 +89,7 @@ apps/api/        NestJS (:4000). 22 domain modules + health. Global prefix /api.
 apps/portal/     Next.js (:3000). All authenticated UI, 7 role portals.
 apps/vitrine/    Next.js (:3001). Public site — static export, ONE page route.
 packages/shared/ Zod contracts + pure domain logic (money, account position, catalog rules).
-packages/db/     Prisma schema, 58 migrations, seed + bootstrap + importer scripts.
+packages/db/     Prisma schema, 80 migrations, seed + bootstrap + importer scripts.
 packages/tsconfig/
 infra/           OpenTofu — global/, environments/{staging,prod}/, modules/, tunnel*/
 design/          SIS design prototype (source of truth for screens) + design system
@@ -224,18 +224,18 @@ plans plus a student's overdue total, nothing else.
 
 Nine portals, defined once in `apps/portal/src/lib/nav.ts`:
 
-| Route area  | Owning role               | Landing     |
-| ----------- | ------------------------- | ----------- |
-| `/student`  | student                   | `/student`  |
-| `/parent`   | parent                    | `/parent`   |
-| `/faculty`  | faculty                   | `/faculty`  |
-| `/admin`    | **registrar** (not admin) | `/admin`    |
-| `/finance`  | bursar                    | `/finance`  |
-| `/director` | admin                     | `/director` |
-| `/comms`    | communications            | `/comms`    |
-| `/admissions` | admissions              | `/admissions` |
-| `/it`       | it_admin                  | `/director/users` |
-| `/dining`   | dining                    | `/dining`   |
+| Route area    | Owning role               | Landing           |
+| ------------- | ------------------------- | ----------------- |
+| `/student`    | student                   | `/student`        |
+| `/parent`     | parent                    | `/parent`         |
+| `/faculty`    | faculty                   | `/faculty`        |
+| `/admin`      | **registrar** (not admin) | `/admin`          |
+| `/finance`    | bursar                    | `/finance`        |
+| `/director`   | admin                     | `/director`       |
+| `/comms`      | communications            | `/comms`          |
+| `/admissions` | admissions                | `/admissions`     |
+| `/it`         | it_admin                  | `/director/users` |
+| `/dining`     | dining                    | `/dining`         |
 
 `hr` is the only role with **no `ROLE_PORTALS` entry**, so `portalForRoles()` silently falls back
 to the student portal: it logs in, lands on `/student`, and every tile 403s. `it_admin` was given
@@ -317,6 +317,14 @@ an individual plan uses. Exit only via restore-to-standard.
 
 A `standard_full` invoice **rejects hand-edited installment amounts** unless a full component
 grid is submitted — amounts are derived from the selected charges. Dates and labels stay editable.
+
+`AnnualBillingProfile` is the annual operational snapshot above the invoice: approved housing,
+cafeteria, insurance and refundable-caution selections; award and adjustment provenance; gross
+and net component snapshots; and the one canonical invoice. The invoice remains monetary
+authority. Profile/catalog changes are approval-backed and bind the reviewed fee schedule,
+catalog fingerprint and resolved totals. Approved profiles project Dining and Housing state;
+students and guardians only read the profile. Cafeteria operational codes fail closed to
+`none|full|half`, and `half` is unavailable until it has an active approved positive price.
 
 ### Approvals and separation of duties
 
@@ -422,6 +430,11 @@ constructs `AcademicCatalogService`, `AcademicStandingService` and `TranscriptSe
 `syncEnrollmentGateInTransaction`, triggered **from Finance** (settlement, refund, approved plan
 change, historical cash) — never from Admissions.
 
+Acceptance now requires explicit annual billing-profile service selections. It resolves the
+approved catalog and supported BAC merit award before creating the enrollment invoice/payment
+link. Definitions marked `requiresApproval` cannot be smuggled through acceptance; they must use
+the durable Finance approval flow.
+
 The threshold is `verifiedEnrollmentCashXof`: the sum of `status: "success"` Payments against the
 designated enrollment invoice. Deliberately **not** `Invoice.amountPaid` — scholarships and
 account credits never activate a student.
@@ -485,9 +498,16 @@ legacy-cohort import additionally requires `CONFIRM=1` **and** a `LEGACY_COHORT_
 copied from a clean dry run — a digest that anchors live DB state, so any drift invalidates the
 run. Input files must be `chmod 600`. Logs are deliberately redacted to counts and issue codes.
 
+The one-time August 29 roster/billing cutover is documented in
+`docs/workbook-roster-billing-cutover.md`. Its production snapshot exporter is `REPEATABLE READ`
+and `READ ONLY`; the signed-review builder is offline; and confirmation requires an exhaustive
+403-row/production-Student/current-Applicant manifest, a Finance freeze, an exact live plan
+digest, a `SERIALIZABLE` transaction, independent post-audit and exact no-op replay. It archives
+reviewed production exceptions but never hard-deletes people or academic history. Never run its
+`CONFIRM=1` path until every review decision and refund blocker is closed.
+
 Never add a write mode to `reconcile:accepted-applicants` — it is a read-only reporting CLI that
 writes its report with `{ mode: 0o600, flag: "wx" }` so it cannot overwrite a review file.
-
 
 ### Per-applicant notes (admissions team)
 
@@ -642,11 +662,11 @@ tab has been reading and writing them since the redesign.)
 Three surfaces, built to `design/daust-dining-design/` (deleted from the tree in `5c25845`;
 recover with `git show 5c25845^:design/daust-dining-design/<file>`):
 
-| Surface | Route | Who |
-| --- | --- | --- |
+| Surface         | Route                                                | Who               |
+| --------------- | ---------------------------------------------------- | ----------------- |
 | Scanner Station | `/station` — full-bleed kiosk, outside `PortalShell` | `dining`, `admin` |
-| Dining console | `/dining` — 8 pages | `dining`, `admin` |
-| Student screen | `/student/dining` | `student` |
+| Dining console  | `/dining` — 8 pages                                  | `dining`, `admin` |
+| Student screen  | `/student/dining`                                    | `student`         |
 
 **One entrance rule, in one place.** `diningEligibility()` in
 `packages/shared/src/dining-eligibility.ts` decides every verdict, and both the scanner and the
@@ -657,9 +677,16 @@ significant — a student is told the thing they can act on:
 (already eaten this period) → `OK`.
 
 `UNPAID` is derived, never stored: `deriveApiAccountPosition(invoices).summary.overdueXof > 0`.
-There is no separate meal-plan price — cafeteria is a core fee component pinned to cost center
-**3600** at `FEE_STRUCTURE.cafeteriaPerYear = 630_000`, billed inside the 4,285,000 package.
-`MealPlanType` (`none|half|full`) says which meals are covered, not what anything costs.
+Cafeteria pricing is annual billing-profile configuration pinned to cost center **3600**. The
+shipped 2026–2027 catalog offers `none` and a 630,000 XOF `full` plan; `half` is unavailable until
+Finance approves a positive price. `MealPlanType` (`none|half|full`) is the operational access
+projection of that approved annual selection, never an independent billing authority.
+
+`MealPlan` is keyed by `(studentId, academicYearLabel)`. Every scanner, student-pass, eligibility,
+reporting and back-office read resolves exactly one active AcademicYear whose date range contains
+today in Dakar, then reads only that year's plan. Missing dates or overlapping active years fail
+closed; a future profile cannot grant current Dining access. Students request a profile change,
+which remains pending until the existing Finance approval workflow applies it.
 
 **`AppSetting["dining.settings"]`** holds the service windows, cost per meal, weekend-order
 switch and two entrance rules. `enforcePayment` ships **off**: turning it on refuses every
