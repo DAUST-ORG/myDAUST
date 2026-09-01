@@ -63,6 +63,17 @@ const schema = z
       .min(1)
       .max(720)
       .default(72),
+    // --- Helpdesk GitHub sync (Phase 4) ------------------------------------
+    // Optional: when either is unset the sync is a no-op and `githubSyncState`
+    HELPDESK_GITHUB_REPO: z
+      .preprocess(
+        (value) => (typeof value === "string" && value.length > 0 ? value : undefined),
+        z.string().regex(/^[^/\s]+\/[^/\s]+$/, "Expected owner/name").optional(),
+      ),
+    HELPDESK_GITHUB_TOKEN: z.preprocess(
+      (value) => (typeof value === "string" && value.length >= 10 ? value : undefined),
+      z.string().min(10).optional(),
+    ),
   })
   .superRefine((env, ctx) => {
     if (

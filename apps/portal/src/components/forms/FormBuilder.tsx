@@ -161,7 +161,7 @@ export default function FormBuilder({ sections, onChange }: Props) {
           alignSelf: "flex-start",
         }}
       >
-        <h3 style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 8 }}>
+        <h3 style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--fg3)", marginBottom: 8 }}>
           Fields
         </h3>
         {FIELD_TYPES.map((ft) => (
@@ -198,9 +198,9 @@ export default function FormBuilder({ sections, onChange }: Props) {
             width: "100%",
             textAlign: "center",
             padding: "8px",
-            border: "1px solid var(--navy)",
+            border: "1px solid var(--daust-navy)",
             borderRadius: 4,
-            background: "var(--navy)",
+            background: "var(--daust-navy)",
             color: "#fff",
             cursor: "pointer",
             fontSize: 13,
@@ -214,7 +214,7 @@ export default function FormBuilder({ sections, onChange }: Props) {
       {/* Center: Preview */}
       <div style={{ flex: 1 }}>
         {sections.length === 0 && (
-          <p style={{ color: "var(--muted)", padding: 24, textAlign: "center" }}>
+          <p style={{ color: "var(--fg3)", padding: 24, textAlign: "center" }}>
             Click "Add Section" to start building your form.
           </p>
         )}
@@ -231,7 +231,7 @@ export default function FormBuilder({ sections, onChange }: Props) {
                 setSelectedField(null);
               }}
               style={{
-                border: `1px solid ${selectedSection === si ? "var(--navy)" : "var(--border)"}`,
+                border: `1px solid ${selectedSection === si ? "var(--daust-navy)" : "var(--border)"}`,
                 borderRadius: 8,
                 padding: 14,
                 marginBottom: 12,
@@ -240,7 +240,7 @@ export default function FormBuilder({ sections, onChange }: Props) {
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <GripVertical size={14} style={{ color: "var(--muted)" }} />
+                <GripVertical size={14} style={{ color: "var(--fg3)" }} />
                 <input
                   value={section.title}
                   onChange={(e) => updateSection(si, { title: e.target.value })}
@@ -266,7 +266,7 @@ export default function FormBuilder({ sections, onChange }: Props) {
               </div>
 
               {section.fields.length === 0 && (
-                <p style={{ color: "var(--muted)", fontSize: 12, padding: 8, textAlign: "center" }}>
+                <p style={{ color: "var(--fg3)", fontSize: 12, padding: 8, textAlign: "center" }}>
                   No fields. Use the palette to add fields to this section.
                 </p>
               )}
@@ -307,7 +307,7 @@ export default function FormBuilder({ sections, onChange }: Props) {
           overflow: "auto",
         }}
       >
-        <h3 style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", marginBottom: 8 }}>
+        <h3 style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--fg3)", marginBottom: 8 }}>
           Properties
         </h3>
         {selectedFieldData ? (
@@ -330,7 +330,7 @@ export default function FormBuilder({ sections, onChange }: Props) {
             onChange={(patch) => updateSection(selectedSection, patch)}
           />
         ) : (
-          <p style={{ color: "var(--muted)", fontSize: 13 }}>
+          <p style={{ color: "var(--fg3)", fontSize: 13 }}>
             Select a field or section to edit its properties.
           </p>
         )}
@@ -360,7 +360,7 @@ function SortableField({
     gap: 8,
     padding: "8px 10px",
     marginBottom: 4,
-    border: `1px solid ${isSelected ? "var(--navy)" : "var(--border)"}`,
+    border: `1px solid ${isSelected ? "var(--daust-navy)" : "var(--border)"}`,
     borderRadius: 4,
     background: isSelected ? "rgba(21,59,106,0.05)" : "var(--bg)",
     cursor: "pointer",
@@ -380,7 +380,7 @@ function SortableField({
         <GripVertical size={12} />
       </span>
       <span style={{ flex: 1, fontWeight: 500 }}>{field.label}</span>
-      <span style={{ color: "var(--muted)", fontSize: 11 }}>
+      <span style={{ color: "var(--fg3)", fontSize: 11 }}>
         {field.type}
         {field.required ? " *" : ""}
       </span>
@@ -506,7 +506,7 @@ function SectionProperties({
           style={propInput}
         />
       </div>
-      <p style={{ color: "var(--muted)", fontSize: 12 }}>
+      <p style={{ color: "var(--fg3)", fontSize: 12 }}>
         {section.fields.length} field{section.fields.length !== 1 ? "s" : ""} in this section.
       </p>
     </div>
@@ -519,7 +519,7 @@ const propLabel: React.CSSProperties = {
   fontWeight: 600,
   textTransform: "uppercase",
   letterSpacing: "0.05em",
-  color: "var(--muted)",
+  color: "var(--fg3)",
   marginBottom: 4,
 };
 

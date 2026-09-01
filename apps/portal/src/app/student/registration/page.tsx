@@ -10,6 +10,7 @@ import {
   Lock,
   MapPin,
   SearchX,
+  Sparkles,
   User,
   Users,
 } from "lucide-react";
@@ -100,6 +101,20 @@ export default function StudentRegistration() {
         (s.instructor ?? "").toLowerCase().includes(needle),
     );
   }, [data, q]);
+
+  // Up to three suggested sections pulled from this term's catalogue: they must be
+  // open to the student (not blocked) and must not clash with the rest of the plan.
+  const recommended = useMemo(() => {
+    const out: string[] = [];
+    for (const s of data?.sections ?? []) {
+      if (out.length >= 3) break;
+      if (s.blockedReason || cart.includes(s.sectionId)) continue;
+      if (clashesWithPlan(s)) continue;
+      out.push(s.sectionId);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, cart]);
 
   async function confirm() {
     if (!termId || cart.length === 0 || overload || blockedByHold) return;
@@ -290,6 +305,23 @@ export default function StudentRegistration() {
                       >
                         {s.credits} cr
                       </span>
+                      {recommended.includes(s.sectionId) && (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            padding: "2px 9px",
+                            borderRadius: "var(--radius-pill)",
+                            background: "var(--daust-orange)",
+                            color: "#fff",
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                          }}
+                        >
+                          <Sparkles size={11} /> Recommended
+                        </span>
+                      )}
                       <span className="muted" style={{ fontSize: 11.5 }}>
                         §{s.sectionCode}
                       </span>

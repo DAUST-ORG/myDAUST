@@ -23,6 +23,7 @@ import {
   Image as ImageIcon,
   LayoutDashboard,
   LayoutTemplate,
+  LifeBuoy,
   ListChecks,
   type LucideIcon,
   Mail,
@@ -142,6 +143,9 @@ export const STUDENT_NAV: PortalNav = {
       { href: "/student/profile", label: "My Profile", icon: UserRound },
       { href: "/student/documents", label: "Documents", icon: FolderOpen },
     ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
+    ]),
   ],
 };
 
@@ -156,6 +160,9 @@ export const PARENT_NAV: PortalNav = {
       { href: "/parent/grades", label: "Grades", icon: GraduationCap },
       { href: "/parent/attendance", label: "Attendance", icon: CheckCheck },
       { href: "/parent/billing", label: "Billing", icon: Wallet },
+    ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
     ]),
   ],
 };
@@ -199,6 +206,9 @@ export const FACULTY_NAV: PortalNav = {
         label: "Evaluations",
         icon: ClipboardCheck,
       },
+    ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
     ]),
   ],
 };
@@ -271,6 +281,9 @@ export const REGISTRAR_NAV: PortalNav = {
     g("Custom Forms", [
       { href: "/admin/forms", label: "Forms", icon: FileText },
     ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
+    ]),
   ],
 };
 
@@ -299,6 +312,9 @@ export const DIRECTOR_NAV: PortalNav = {
     ]),
     g("Administration", [
       { href: "/director/users", label: "Users", icon: Users },
+    ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
     ]),
   ],
 };
@@ -334,6 +350,9 @@ export const FINANCE_NAV: PortalNav = {
         badgeKey: "approvalRequests",
       },
     ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
+    ]),
   ],
 };
 
@@ -353,6 +372,9 @@ export const COMMS_NAV: PortalNav = {
       { href: "/comms/assistant", label: "AI Assistant", icon: MessageSquare },
     ]),
     g("Inbox", [{ href: "/comms/messages", label: "Messages", icon: Mail }]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
+    ]),
   ],
 };
 
@@ -377,6 +399,9 @@ export const IT_NAV: PortalNav = {
     g("Backlog", [
       { href: "/it/backlog", label: "IT backlog", icon: ClipboardList },
     ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
+    ]),
   ],
 };
 
@@ -396,10 +421,12 @@ export const ADMISSIONS_NAV: PortalNav = {
         icon: UserPlus,
         badgeKey: "admissions",
       },
-      ]),
-    ],
+    ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
+    ]),
+  ],
 };
-
 
 export const INFIRMARY_NAV: PortalNav = {
   label: "Health Center",
@@ -424,6 +451,9 @@ export const INFIRMARY_NAV: PortalNav = {
       { href: "/infirmary/forms", label: "Forms", icon: ClipboardList },
       { href: "/infirmary/analytics", label: "Analytics", icon: ChartNoAxesCombined },
       { href: "/infirmary/settings", label: "Settings", icon: Settings },
+    ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
     ]),
   ],
 };
@@ -451,6 +481,9 @@ export const DINING_NAV: PortalNav = {
       { href: "/dining/finances", label: "Finances", icon: Wallet },
       { href: "/dining/reports", label: "Reports", icon: ChartNoAxesCombined },
       { href: "/dining/settings", label: "Settings", icon: Settings },
+    ]),
+    g("Support", [
+      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
     ]),
   ],
 };
@@ -756,6 +789,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     crumb: "Clinic configuration · Infirmary",
   },
   "/infirmary/consultations/flagged": { title: "Flagged today", crumb: "Sick-flagged visits · Infirmary" },
+  "/helpdesk": {
+    title: "Helpdesk",
+    crumb: "In-app support tickets",
+  },
 };
 
 /**

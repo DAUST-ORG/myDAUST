@@ -74,12 +74,12 @@ export default function FormRenderer({ form, answers, onChange, disabled }: Prop
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {form.title && (
-        <h2 style={{ fontSize: 20, fontWeight: 600, color: "var(--navy)" }}>
+        <h2 style={{ fontSize: 20, fontWeight: 600, color: "var(--daust-navy)" }}>
           {form.title}
         </h2>
       )}
       {form.description && (
-        <p style={{ color: "var(--muted)", marginTop: -12 }}>
+        <p style={{ color: "var(--fg3)", marginTop: -12 }}>
           {form.description}
         </p>
       )}
@@ -133,7 +133,7 @@ function SectionBlock({
           fontSize: 15,
           fontWeight: 600,
           marginBottom: 14,
-          color: "var(--navy)",
+          color: "var(--daust-navy)",
         }}
       >
         {section.title}
@@ -178,7 +178,7 @@ function FieldInput({
           fontSize: 13,
           fontWeight: 500,
           marginBottom: 4,
-          color: "var(--fg)",
+          color: "var(--fg1)",
         }}
       >
         {field.label}
@@ -196,7 +196,7 @@ function FieldInput({
             border: `1px solid ${missing ? "var(--danger)" : "var(--border)"}`,
             borderRadius: 6,
             fontSize: 14,
-            background: disabled ? "var(--bg-muted)" : "var(--bg)",
+            background: disabled ? "var(--surface-2)" : "var(--bg)",
           }}
         />
       )}
@@ -213,7 +213,7 @@ function FieldInput({
             borderRadius: 6,
             fontSize: 14,
             resize: "vertical",
-            background: disabled ? "var(--bg-muted)" : "var(--bg)",
+            background: disabled ? "var(--surface-2)" : "var(--bg)",
           }}
         />
       )}
@@ -228,7 +228,7 @@ function FieldInput({
             border: `1px solid ${missing ? "var(--danger)" : "var(--border)"}`,
             borderRadius: 6,
             fontSize: 14,
-            background: disabled ? "var(--bg-muted)" : "var(--bg)",
+            background: disabled ? "var(--surface-2)" : "var(--bg)",
           }}
         >
           <option value="">Select...</option>
@@ -264,7 +264,7 @@ function FieldInput({
             border: `1px solid ${missing ? "var(--danger)" : "var(--border)"}`,
             borderRadius: 6,
             fontSize: 14,
-            background: disabled ? "var(--bg-muted)" : "var(--bg)",
+            background: disabled ? "var(--surface-2)" : "var(--bg)",
           }}
         />
       )}
