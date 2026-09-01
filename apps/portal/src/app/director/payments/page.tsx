@@ -144,7 +144,7 @@ export default function DirectorPaymentsPage() {
                   borderTop: "1px solid var(--divider)",
                   background:
                     selectedId === row.id ? "var(--surface-2)" : "transparent",
-                  color: "var(--fg)",
+                  color: "var(--fg1)",
                   textAlign: "left",
                   cursor: "pointer",
                 }}

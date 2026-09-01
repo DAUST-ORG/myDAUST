@@ -29,7 +29,7 @@ const field: React.CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 8,
   background: "var(--surface)",
-  color: "var(--fg)",
+  color: "var(--fg1)",
 };
 const action: React.CSSProperties = {
   display: "inline-flex",
@@ -215,7 +215,7 @@ function ReviewWorkspace({ history }: { history: boolean }) {
                 borderTop: "1px solid var(--divider)",
                 background:
                   row.id === selectedId ? "var(--surface-2)" : "transparent",
-                color: "var(--fg)",
+                color: "var(--fg1)",
                 textAlign: "left",
                 cursor: "pointer",
               }}
