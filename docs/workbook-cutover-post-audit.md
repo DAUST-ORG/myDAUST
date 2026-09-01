@@ -9,7 +9,8 @@ The audit verifies:
 
 - every workbook row, original production Student, and current Applicant is
   represented exactly once by a signed, applied source disposition, including
-  the reviewed baseline counts of 403, 417, and 42 respectively;
+  the immutable 403 workbook rows and the production Student/Applicant counts
+  declared by the reviewed production snapshot and manifest hashes;
 - the included and reviewed-exclusion monetary partitions add back to
   1,514,469,978 XOF billed and 286,551,264 XOF paid;
 - every original production Student and Applicant ID still exists;

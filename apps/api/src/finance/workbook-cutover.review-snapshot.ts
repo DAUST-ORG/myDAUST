@@ -115,7 +115,31 @@ export function projectWorkbookCutoverProductionSnapshot(
   });
 }
 
-/** Fail closed when the database no longer matches the signed review baseline. */
+export type WorkbookCutoverProductionSnapshotControls =
+  WorkbookCutoverProductionSnapshot["controls"];
+
+/**
+ * Fail closed when the database no longer matches the operator-declared live
+ * controls captured immediately before export. Production and Admissions stay
+ * live while a review is in progress, so these counts must not be pinned to an
+ * older workbook version; the resulting snapshot digest becomes the immutable
+ * review anchor instead.
+ */
+export function assertWorkbookCutoverProductionSnapshotControls(
+  snapshot: WorkbookCutoverProductionSnapshot,
+  expected: WorkbookCutoverProductionSnapshotControls,
+): void {
+  if (
+    canonicalWorkbookCutoverJson(snapshot.controls) !==
+    canonicalWorkbookCutoverJson(expected)
+  ) {
+    throw new Error(
+      "Production roster controls drifted from the operator-declared live controls",
+    );
+  }
+}
+
+/** Retained for verifying artifacts frozen against the original v1 review. */
 export function assertWorkbookCutoverProductionSnapshotBaseline(
   snapshot: WorkbookCutoverProductionSnapshot,
 ): void {
@@ -129,14 +153,7 @@ export function assertWorkbookCutoverProductionSnapshotBaseline(
       WORKBOOK_CUTOVER_BASELINE.productionArchivedStudents,
     currentApplicants: WORKBOOK_CUTOVER_BASELINE.currentApplicants,
   };
-  if (
-    canonicalWorkbookCutoverJson(snapshot.controls) !==
-    canonicalWorkbookCutoverJson(expected)
-  ) {
-    throw new Error(
-      "Production roster controls drifted from the signed review baseline",
-    );
-  }
+  assertWorkbookCutoverProductionSnapshotControls(snapshot, expected);
 }
 
 /**

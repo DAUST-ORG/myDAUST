@@ -1105,26 +1105,29 @@ describe("workbook cutover exhaustive reviewed inputs", () => {
     input.liveSnapshot.existingStudentNumbers.push(addedStudent.studentNo);
     input.liveSnapshot.existingLoginEmails.push(addedStudent.loginEmail);
 
-    const addedApplicant = {
-      sourceKey: workbookCutoverApplicantKey("applicant-id-new"),
-      sourceRecordSha256: sha("applicant-new"),
-      applicantId: "applicant-id-new",
+    const addedApplicants = Array.from({ length: 4 }, (_, index) => ({
+      sourceKey: workbookCutoverApplicantKey(`applicant-id-new-${index + 1}`),
+      sourceRecordSha256: sha(`applicant-new-${index + 1}`),
+      applicantId: `applicant-id-new-${index + 1}`,
       firstName: "Later",
-      lastName: "Applicant",
-      email: "later.applicant@example.com",
+      lastName: `Applicant ${index + 1}`,
+      email: `later.applicant.${index + 1}@example.com`,
       stage: "submitted",
-    };
-    input.reviewedProductionSnapshot.applicants.push(addedApplicant);
-    input.reviewedProductionSnapshot.controls.currentApplicants += 1;
-    input.manifest.applicants.push({
-      decision: "preserve",
-      ...addedApplicant,
-      review: review(
-        "This later open Applicant was included in the refreshed exhaustive review.",
-      ),
-    });
-    input.manifest.controls.currentApplicants += 1;
-    input.liveSnapshot.applicants.push(addedApplicant);
+    }));
+    input.reviewedProductionSnapshot.applicants.push(...addedApplicants);
+    input.reviewedProductionSnapshot.controls.currentApplicants +=
+      addedApplicants.length;
+    input.manifest.applicants.push(
+      ...addedApplicants.map((applicant) => ({
+        decision: "preserve" as const,
+        ...applicant,
+        review: review(
+          "This later open Applicant was included in the refreshed exhaustive review.",
+        ),
+      })),
+    );
+    input.manifest.controls.currentApplicants += addedApplicants.length;
+    input.liveSnapshot.applicants.push(...addedApplicants);
     recomputeDispositionControls(input.manifest);
     resignManifest(input.manifest as WorkbookCutoverManifest);
 
@@ -1133,8 +1136,8 @@ describe("workbook cutover exhaustive reviewed inputs", () => {
     );
     expect(plan.confirmBlocked).toBe(false);
     expect(plan.controls.productionStudents).toBe(418);
-    expect(plan.controls.applicants).toBe(43);
-    expect(plan.controls.preserveApplicants).toBe(43);
+    expect(plan.controls.applicants).toBe(46);
+    expect(plan.controls.preserveApplicants).toBe(46);
   });
 
   it("preplans locked permanent numbers and collision-safe SIS-only login identities", () => {

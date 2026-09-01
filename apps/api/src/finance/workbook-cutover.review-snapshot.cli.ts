@@ -3,7 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import { PrismaClient } from "@mydaust/db";
 import { z } from "zod";
 import {
-  assertWorkbookCutoverProductionSnapshotBaseline,
+  assertWorkbookCutoverProductionSnapshotControls,
   captureWorkbookCutoverProductionSnapshotReadOnly,
   writeWorkbookCutoverProductionSnapshotFile,
 } from "./workbook-cutover.review-snapshot.js";
@@ -22,6 +22,31 @@ const EnvironmentSchema = z
     DATABASE_URL: z.string().trim().min(1),
     CUTOVER_ACADEMIC_YEAR_LABEL: AcademicYearLabelSchema,
     CUTOVER_PRODUCTION_SNAPSHOT_OUTPUT_PATH: z.string().trim().min(1),
+    CUTOVER_EXPECTED_PRODUCTION_STUDENTS: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .max(50_000),
+    CUTOVER_EXPECTED_ACTIVE_STUDENTS: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .max(50_000),
+    CUTOVER_EXPECTED_PENDING_PAYMENT_STUDENTS: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .max(50_000),
+    CUTOVER_EXPECTED_ARCHIVED_STUDENTS: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .max(50_000),
+    CUTOVER_EXPECTED_CURRENT_APPLICANTS: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .max(50_000),
   })
   .strict();
 
@@ -31,6 +56,16 @@ async function main(): Promise<void> {
     CUTOVER_ACADEMIC_YEAR_LABEL: process.env.CUTOVER_ACADEMIC_YEAR_LABEL,
     CUTOVER_PRODUCTION_SNAPSHOT_OUTPUT_PATH:
       process.env.CUTOVER_PRODUCTION_SNAPSHOT_OUTPUT_PATH,
+    CUTOVER_EXPECTED_PRODUCTION_STUDENTS:
+      process.env.CUTOVER_EXPECTED_PRODUCTION_STUDENTS,
+    CUTOVER_EXPECTED_ACTIVE_STUDENTS:
+      process.env.CUTOVER_EXPECTED_ACTIVE_STUDENTS,
+    CUTOVER_EXPECTED_PENDING_PAYMENT_STUDENTS:
+      process.env.CUTOVER_EXPECTED_PENDING_PAYMENT_STUDENTS,
+    CUTOVER_EXPECTED_ARCHIVED_STUDENTS:
+      process.env.CUTOVER_EXPECTED_ARCHIVED_STUDENTS,
+    CUTOVER_EXPECTED_CURRENT_APPLICANTS:
+      process.env.CUTOVER_EXPECTED_CURRENT_APPLICANTS,
   });
   if (!isAbsolute(env.CUTOVER_PRODUCTION_SNAPSHOT_OUTPUT_PATH)) {
     throw new Error("Production snapshot output path must be absolute");
@@ -46,7 +81,14 @@ async function main(): Promise<void> {
         academicYearStart,
       },
     );
-    assertWorkbookCutoverProductionSnapshotBaseline(snapshot);
+    assertWorkbookCutoverProductionSnapshotControls(snapshot, {
+      productionStudents: env.CUTOVER_EXPECTED_PRODUCTION_STUDENTS,
+      productionActiveStudents: env.CUTOVER_EXPECTED_ACTIVE_STUDENTS,
+      productionPendingPaymentStudents:
+        env.CUTOVER_EXPECTED_PENDING_PAYMENT_STUDENTS,
+      productionArchivedStudents: env.CUTOVER_EXPECTED_ARCHIVED_STUDENTS,
+      currentApplicants: env.CUTOVER_EXPECTED_CURRENT_APPLICANTS,
+    });
     const artifact = await writeWorkbookCutoverProductionSnapshotFile(
       outputPath,
       snapshot,
