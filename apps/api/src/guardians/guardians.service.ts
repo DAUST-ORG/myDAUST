@@ -6,6 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "@mydaust/db";
 import bcrypt from "bcryptjs";
 import type { AuthUser } from "../auth/current-user.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -961,7 +962,14 @@ export class GuardiansService {
 
     const sInvite = await this.prisma.studentInvite.findUnique({
       where: { tokenHash },
-      include: { person: { include: { student: true } } },
+      include: {
+        person: { include: { student: true } },
+        activationRequest: {
+          include: {
+            studentActivationCard: { include: { batch: true } },
+          },
+        },
+      },
     });
     if (sInvite) {
       if (
@@ -989,7 +997,9 @@ export class GuardiansService {
               entity: "Person",
               entityId: sInvite.studentPersonId,
               action: "student-setup-link-invalidated",
-              actorId: sInvite.studentPersonId,
+              // This is an anonymous bearer attempt, not an authenticated
+              // action by the student identity named in the invite.
+              actorId: null,
               data: { reason: "identity_binding_drift" },
             },
           });
@@ -997,9 +1007,118 @@ export class GuardiansService {
         throw invalidInvite();
       }
       const studentEmail = sInvite.person.email;
+      const issuedRequest =
+        sInvite.activationRequest?.verificationMethod === "issued_code"
+          ? sInvite.activationRequest
+          : null;
       const passwordHash = await bcrypt.hash(password, 10);
       const redeemedAt = new Date();
       const redeemed = await this.prisma.$transaction(async (tx) => {
+        // An issued-card setup remains revocable until the password is set.
+        // Re-read under batch -> card -> request locks, matching the revocation
+        // transaction so neither path can deadlock the other. Expiry is checked
+        // when the card is claimed; a timely claim keeps its 30-minute invite
+        // even if the 24-hour card window elapses, unless the batch/card is
+        // explicitly revoked before password setup.
+        if (issuedRequest) {
+          const expectedCard = issuedRequest.studentActivationCard;
+          const lockedBatches = expectedCard
+            ? await tx.$queryRaw<
+                Array<{ id: string; status: string; revokedAt: Date | null }>
+              >(Prisma.sql`
+                SELECT "id", "status", "revokedAt"
+                FROM "StudentActivationCardBatch"
+                WHERE "id" = ${expectedCard.batchId}
+                FOR SHARE
+              `)
+            : [];
+          const lockedBatch = lockedBatches[0];
+          const lockedCards = expectedCard
+            ? await tx.$queryRaw<
+                Array<{
+                  id: string;
+                  batchId: string;
+                  studentPersonId: string;
+                  boundEmailSha256: string;
+                  claimedAt: Date | null;
+                  usedAt: Date | null;
+                  revokedAt: Date | null;
+                }>
+              >(Prisma.sql`
+                SELECT "id", "batchId", "studentPersonId", "boundEmailSha256", "claimedAt", "usedAt", "revokedAt"
+                FROM "StudentActivationCard"
+                WHERE "id" = ${expectedCard.id}
+                  AND "batchId" = ${expectedCard.batchId}
+                FOR UPDATE
+              `)
+            : [];
+          const lockedCard = lockedCards[0];
+          const lockedRequests = await tx.$queryRaw<
+            Array<{
+              id: string;
+              studentActivationCardId: string | null;
+              studentInviteId: string | null;
+              verificationMethod: string | null;
+              approvedAt: Date | null;
+              consumedAt: Date | null;
+              invalidatedAt: Date | null;
+            }>
+          >(Prisma.sql`
+            SELECT "id", "studentActivationCardId", "studentInviteId", "verificationMethod",
+                   "approvedAt", "consumedAt", "invalidatedAt"
+            FROM "StudentActivationRequest"
+            WHERE "id" = ${issuedRequest.id}
+            FOR UPDATE
+          `);
+          const lockedRequest = lockedRequests[0];
+          const validIssuedProof =
+            !!expectedCard &&
+            !!lockedCard &&
+            !!lockedBatch &&
+            !!lockedRequest &&
+            lockedCard.id === expectedCard.id &&
+            lockedCard.batchId === lockedBatch.id &&
+            lockedCard.studentPersonId === sInvite.studentPersonId &&
+            lockedCard.boundEmailSha256 === sInvite.boundEmailSha256 &&
+            lockedCard.claimedAt !== null &&
+            lockedCard.usedAt === null &&
+            lockedCard.revokedAt === null &&
+            lockedBatch.status === "active" &&
+            lockedBatch.revokedAt === null &&
+            lockedRequest.studentActivationCardId === lockedCard.id &&
+            lockedRequest.studentInviteId === sInvite.id &&
+            lockedRequest.verificationMethod === "issued_code" &&
+            lockedRequest.approvedAt !== null &&
+            lockedRequest.consumedAt === null &&
+            lockedRequest.invalidatedAt === null;
+          if (!validIssuedProof) {
+            const burned = await tx.studentInvite.updateMany({
+              where: { id: sInvite.id, usedAt: null },
+              data: { usedAt: redeemedAt },
+            });
+            if (burned.count === 1) {
+              await tx.studentActivationRequest.updateMany({
+                where: {
+                  id: issuedRequest.id,
+                  consumedAt: null,
+                  invalidatedAt: null,
+                },
+                data: { invalidatedAt: redeemedAt },
+              });
+              await tx.auditLog.create({
+                data: {
+                  entity: "Person",
+                  entityId: sInvite.studentPersonId,
+                  action: "student-setup-link-invalidated",
+                  actorId: null,
+                  data: { reason: "activation_card_revoked" },
+                },
+              });
+            }
+            return false;
+          }
+        }
+
         const claim = await tx.studentInvite.updateMany({
           where: {
             id: sInvite.id,
@@ -1046,11 +1165,41 @@ export class GuardiansService {
               entity: "Person",
               entityId: sInvite.studentPersonId,
               action: "student-setup-link-invalidated",
-              actorId: sInvite.studentPersonId,
+              actorId: null,
               data: { reason: "identity_state_drift" },
             },
           });
           return false;
+        }
+        if (issuedRequest) {
+          const issuedCardId =
+            issuedRequest.studentActivationCardId ?? "__missing__";
+          const cardConsumed = await tx.studentActivationCard.updateMany({
+            where: {
+              id: issuedCardId,
+              studentPersonId: sInvite.studentPersonId,
+              claimedAt: { not: null },
+              usedAt: null,
+              revokedAt: null,
+              batch: { is: { status: "active", revokedAt: null } },
+            },
+            data: { usedAt: redeemedAt },
+          });
+          if (cardConsumed.count !== 1) throw invalidInvite();
+          const requestConsumed = await tx.studentActivationRequest.updateMany({
+            where: {
+              id: issuedRequest.id,
+              studentPersonId: sInvite.studentPersonId,
+              studentInviteId: sInvite.id,
+              studentActivationCardId: issuedCardId,
+              verificationMethod: "issued_code",
+              approvedAt: { not: null },
+              consumedAt: null,
+              invalidatedAt: null,
+            },
+            data: { consumedAt: redeemedAt },
+          });
+          if (requestConsumed.count !== 1) throw invalidInvite();
         }
         await tx.studentInvite.updateMany({
           where: { studentPersonId: sInvite.studentPersonId, usedAt: null },

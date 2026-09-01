@@ -1,177 +1,97 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
+import { AlertCircle, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import {
-  AlertCircle,
-  CheckCircle2,
-  Clock3,
-  Loader2,
-  ShieldCheck,
-} from "lucide-react";
-import {
-  getStudentActivationStatus,
-  startStudentActivation,
-  type StudentActivationStart,
-} from "@/lib/api";
+  normalizeStudentActivationCode,
+  STUDENT_ACTIVATION_CODE_LENGTH,
+} from "@mydaust/shared";
+import { ApiError, startStudentActivation } from "@/lib/api";
 
-const POLL_MS = 5_000;
-// Approval can begin just before request expiry and commit within the API's
-// bounded 30-second transaction. Keep polling briefly so that safe race wins.
-const APPROVAL_GRACE_MS = 35_000;
-const REQUEST_TTL_MS = 10 * 60_000;
-const CEREMONY_STORAGE_KEY = "mydaust.studentActivation.v1";
-type BrowserCeremony = StudentActivationStart & { localExpiresAt: number };
+function cleanPartialCardCode(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/[\s-]/g, "")
+    .replace(/O/g, "0")
+    .replace(/[IL]/g, "1")
+    .replace(/[^0-9A-HJKMNP-TV-Z]/g, "")
+    .slice(0, STUDENT_ACTIVATION_CODE_LENGTH);
+}
 
-function clearStoredCeremony() {
-  try {
-    window.sessionStorage.removeItem(CEREMONY_STORAGE_KEY);
-  } catch {
-    // Storage is only reload recovery; it is not required for the ceremony.
-  }
+function formatCardCode(value: string): string {
+  return cleanPartialCardCode(value).replace(/(.{4})(?=.)/g, "$1-");
+}
+
+function createRequestToken(): string {
+  const bytes = window.crypto.getRandomValues(new Uint8Array(32));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return window
+    .btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 export default function ActivateStudentPage() {
   const [studentNo, setStudentNo] = useState("");
   const [dob, setDob] = useState("");
-  const [ceremony, setCeremony] = useState<BrowserCeremony | null>(null);
+  const [activationCode, setActivationCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [remainingSeconds, setRemainingSeconds] = useState(0);
-
-  const expiryMs = useMemo(
-    () => ceremony?.localExpiresAt ?? 0,
-    [ceremony],
+  const [pendingRequestToken, setPendingRequestToken] = useState<string | null>(
+    null,
   );
 
-  useEffect(() => {
-    try {
-      const stored = window.sessionStorage.getItem(CEREMONY_STORAGE_KEY);
-      if (!stored) return;
-      const parsed = JSON.parse(stored) as Partial<BrowserCeremony>;
-      if (
-        typeof parsed.requestToken === "string" &&
-        /^[A-Za-z0-9_-]{43}$/.test(parsed.requestToken) &&
-        typeof parsed.approvalCode === "string" &&
-        /^\d{6}$/.test(parsed.approvalCode) &&
-        typeof parsed.localExpiresAt === "number" &&
-        Number.isFinite(parsed.localExpiresAt) &&
-        parsed.localExpiresAt + APPROVAL_GRACE_MS > Date.now()
-      ) {
-        setCeremony(parsed as BrowserCeremony);
-      } else {
-        clearStoredCeremony();
-      }
-    } catch {
-      clearStoredCeremony();
-    }
-  }, []);
+  const canonicalActivationCode =
+    normalizeStudentActivationCode(activationCode);
+  const codeReady = canonicalActivationCode !== null;
 
-  useEffect(() => {
-    if (!ceremony || !Number.isFinite(expiryMs)) return;
-    let stopped = false;
-    let polling = false;
-    const finalDeadlineMs = expiryMs + APPROVAL_GRACE_MS;
-
-    const updateClock = () => {
-      const remaining = Math.max(0, Math.ceil((expiryMs - Date.now()) / 1_000));
-      setRemainingSeconds(remaining);
-      if (Date.now() >= finalDeadlineMs) {
-        // Do not trust the browser clock as the final authority. Force one
-        // body-only server status check before discarding the retained bearer.
-        void poll();
-      }
-    };
-    const poll = async () => {
-      if (stopped || polling) return;
-      polling = true;
-      try {
-        const result = await getStudentActivationStatus(ceremony.requestToken);
-        if (stopped) return;
-        if (result.status === "approved") {
-          stopped = true;
-          clearStoredCeremony();
-          window.location.replace(
-            `/set-password#token=${encodeURIComponent(ceremony.requestToken)}`,
-          );
-        } else if (result.status === "expired") {
-          stopped = true;
-          clearStoredCeremony();
-          setRemainingSeconds(0);
-          setError(
-            "This pairing request expired. Start again with the registrar present.",
-          );
-        } else if (Date.now() >= finalDeadlineMs) {
-          stopped = true;
-          clearStoredCeremony();
-          setRemainingSeconds(0);
-          setError(
-            "This pairing request expired. Start again with the registrar present.",
-          );
-        }
-      } catch {
-        // A transient poll failure is safe to retry while the local 10-minute
-        // deadline remains. Never place the request token in an error or URL.
-      } finally {
-        polling = false;
-      }
-    };
-
-    updateClock();
-    void poll();
-    const clockId = window.setInterval(updateClock, 1_000);
-    const pollId = window.setInterval(() => void poll(), POLL_MS);
-    return () => {
-      stopped = true;
-      window.clearInterval(clockId);
-      window.clearInterval(pollId);
-    };
-  }, [ceremony, expiryMs]);
+  function continueToPasswordSetup(requestToken: string) {
+    // The server stores only this token's hash. Keep the plaintext in the URL
+    // fragment so browsers never send it in HTTP requests, logs, or referrers.
+    window.location.replace(
+      `/set-password#token=${encodeURIComponent(requestToken)}`,
+    );
+  }
 
   async function begin(event: React.FormEvent) {
     event.preventDefault();
-    if (!studentNo.trim() || !dob || busy) return;
+    if (!studentNo.trim() || !dob || !codeReady || busy) return;
     setBusy(true);
     setError(null);
-    try {
-      const response = await startStudentActivation({
-        studentNo: studentNo.trim(),
-        dob,
-      });
-      // Count down relative to receipt. A student's mis-set wall clock must not
-      // discard a valid server request merely because the absolute ISO timestamp
-      // appears to be in the past or future on that device.
-      const started: BrowserCeremony = {
-        ...response,
-        localExpiresAt: Date.now() + REQUEST_TTL_MS,
-      };
-      setStudentNo("");
-      setDob("");
-      setCeremony(started);
+    const requestToken = createRequestToken();
+    const input = {
+      studentNo: studentNo.trim(),
+      dob,
+      activationCode: canonicalActivationCode!,
+      requestToken,
+    };
+    let failure: unknown = null;
+    // A dropped response is ambiguous: the server may already have claimed the
+    // card. Retry once with the exact same browser token, never a new one.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        window.sessionStorage.setItem(
-          CEREMONY_STORAGE_KEY,
-          JSON.stringify(started),
-        );
-      } catch {
-        // Storage may be blocked or full. The in-memory ceremony remains fully
-        // usable; only reload recovery is unavailable.
+        await startStudentActivation(input);
+        continueToPasswordSetup(requestToken);
+        return;
+      } catch (caught) {
+        failure = caught;
+        if (caught instanceof ApiError) break;
       }
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Activation is unavailable. Please ask the registrar for help.",
-      );
-    } finally {
-      setBusy(false);
     }
-  }
-
-  function restart() {
-    clearStoredCeremony();
-    setCeremony(null);
-    setError(null);
-    setRemainingSeconds(0);
+    if (!(failure instanceof ApiError)) {
+      // The request may have committed even though both responses were lost.
+      // The retained token is safe to try and is the only possible live invite.
+      continueToPasswordSetup(requestToken);
+      return;
+    }
+    setPendingRequestToken(requestToken);
+    setError(
+      `${failure.message} If the request completed before the error, continue with this same activation attempt.`,
+    );
+    setBusy(false);
   }
 
   return (
@@ -185,7 +105,10 @@ export default function ActivateStudentPage() {
           "radial-gradient(circle at 15% 15%, rgba(237,132,37,.12), transparent 34%), var(--bg-subtle)",
       }}
     >
-      <section className="card" style={{ width: "100%", maxWidth: 480, margin: 0 }}>
+      <section
+        className="card"
+        style={{ width: "100%", maxWidth: 480, margin: 0 }}
+      >
         <div
           style={{
             width: 44,
@@ -202,113 +125,121 @@ export default function ActivateStudentPage() {
         </div>
         <p className="eyebrow">Student account activation</p>
         <h1 className="page-title" style={{ fontSize: 26, marginBottom: 6 }}>
-          Pair with the registrar
+          Set up your account
         </h1>
-        <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.55, marginBottom: 22 }}>
-          Start this process only while you are physically with an authorized registrar.
-          Your date of birth is checked privately and is never shown to staff.
+        <p
+          className="muted"
+          style={{ fontSize: 13.5, lineHeight: 1.55, marginBottom: 22 }}
+        >
+          Enter your Student ID, date of birth, and the private activation code
+          on your card. You will choose your password on the next screen.
         </p>
 
-        {!ceremony ? (
-          <form onSubmit={begin} style={{ display: "grid", gap: 15 }}>
-            <label style={{ display: "grid", gap: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 650 }}>Student ID</span>
-              <input
-                value={studentNo}
-                onChange={(event) => setStudentNo(event.target.value)}
-                autoComplete="username"
-                maxLength={40}
-                placeholder="Enter your student ID"
-                style={{ padding: "11px 12px" }}
-              />
-            </label>
-            <label style={{ display: "grid", gap: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 650 }}>Date of birth</span>
-              <input
-                type="date"
-                value={dob}
-                onChange={(event) => setDob(event.target.value)}
-                autoComplete="bday"
-                style={{ padding: "11px 12px" }}
-              />
-            </label>
-            {error && <ActivationError>{error}</ActivationError>}
+        <form onSubmit={begin} style={{ display: "grid", gap: 15 }}>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 650 }}>Student ID</span>
+            <input
+              value={studentNo}
+              onChange={(event) => setStudentNo(event.target.value)}
+              autoComplete="username"
+              maxLength={40}
+              placeholder="Enter your student ID"
+              disabled={busy || pendingRequestToken !== null}
+              style={{ padding: "11px 12px" }}
+            />
+          </label>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 650 }}>Date of birth</span>
+            <input
+              type="date"
+              value={dob}
+              onChange={(event) => setDob(event.target.value)}
+              autoComplete="bday"
+              disabled={busy || pendingRequestToken !== null}
+              style={{ padding: "11px 12px" }}
+            />
+          </label>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 650 }}>
+              Activation code
+            </span>
+            <input
+              value={formatCardCode(activationCode)}
+              onChange={(event) => setActivationCode(event.target.value)}
+              autoComplete="one-time-code"
+              autoCapitalize="characters"
+              spellCheck={false}
+              inputMode="text"
+              maxLength={19}
+              placeholder="XXXX-XXXX-XXXX-XXXX"
+              disabled={busy || pendingRequestToken !== null}
+              style={{
+                padding: "11px 12px",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontSize: 16,
+                letterSpacing: ".08em",
+              }}
+            />
+          </label>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "flex-start",
+              padding: "11px 12px",
+              borderRadius: 12,
+              background: "var(--surface-2)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            <KeyRound
+              size={16}
+              style={{
+                color: "var(--daust-navy)",
+                marginTop: 2,
+                flex: "0 0 auto",
+              }}
+            />
+            <p
+              className="muted"
+              style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5 }}
+            >
+              Your activation code works once and expires at the time printed on
+              your card. Keep it private until your password is set.
+            </p>
+          </div>
+
+          {error && <ActivationError>{error}</ActivationError>}
+          {pendingRequestToken && (
             <button
-              type="submit"
-              className="sis-btn"
-              disabled={busy || !studentNo.trim() || !dob}
+              type="button"
+              onClick={() => continueToPasswordSetup(pendingRequestToken)}
               style={{ justifyContent: "center", padding: "11px 16px" }}
             >
-              {busy ? <Loader2 size={16} className="spin" /> : <ShieldCheck size={16} />}
-              {busy ? "Starting secure pairing…" : "Start activation"}
+              Continue with this activation attempt
             </button>
-          </form>
-        ) : (
-          <div style={{ display: "grid", gap: 18 }}>
-            <div
-              style={{
-                border: "1px solid var(--border)",
-                borderRadius: 16,
-                padding: "20px 18px",
-                textAlign: "center",
-                background: "var(--surface-2)",
-              }}
-            >
-              <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
-                Show this pairing code to the registrar
-              </div>
-              <div
-                style={{
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 38,
-                  fontWeight: 800,
-                  letterSpacing: ".18em",
-                  color: "var(--daust-navy)",
-                  marginLeft: ".18em",
-                }}
-              >
-                {ceremony.approvalCode.slice(0, 3)} {ceremony.approvalCode.slice(3)}
-              </div>
-            </div>
-
-            {remainingSeconds > 0 && !error ? (
-              <div
-                role="status"
-                aria-live="polite"
-                style={{ display: "flex", gap: 10, alignItems: "center" }}
-              >
-                <Loader2 size={17} className="spin" style={{ color: "var(--daust-navy)" }} />
-                <div>
-                  <strong style={{ fontSize: 13.5 }}>Waiting for registrar approval</strong>
-                  <div className="muted" aria-live="off" style={{ fontSize: 12.5 }}>
-                    <Clock3 size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-                    Expires in {Math.floor(remainingSeconds / 60)}:
-                    {String(remainingSeconds % 60).padStart(2, "0")}
-                  </div>
-                </div>
-              </div>
-            ) : !error ? (
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <Loader2 size={17} className="spin" style={{ color: "var(--daust-navy)" }} />
-                <strong style={{ fontSize: 13.5 }}>Checking final registrar approval…</strong>
-              </div>
-            ) : null}
-            {error && <ActivationError>{error}</ActivationError>}
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <CheckCircle2 size={16} style={{ color: "var(--success)", marginTop: 2 }} />
-              <p className="muted" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5 }}>
-                Keep this page open. After the registrar confirms your identity, it will
-                securely unlock the password setup screen. The pairing code cannot set a
-                password by itself.
-              </p>
-            </div>
-            {error && (
-              <button type="button" onClick={restart} style={{ justifyContent: "center" }}>
-                Start again
-              </button>
+          )}
+          <button
+            type="submit"
+            className="sis-btn"
+            disabled={
+              busy ||
+              pendingRequestToken !== null ||
+              !studentNo.trim() ||
+              !dob ||
+              !codeReady
+            }
+            style={{ justifyContent: "center", padding: "11px 16px" }}
+          >
+            {busy ? (
+              <Loader2 size={16} className="spin" />
+            ) : (
+              <ShieldCheck size={16} />
             )}
-          </div>
-        )}
+            {busy ? "Checking your details…" : "Continue to password setup"}
+          </button>
+        </form>
       </section>
     </main>
   );

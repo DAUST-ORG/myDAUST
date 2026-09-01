@@ -403,77 +403,80 @@ model ManagementActualEntry {
 }
 
 model Person {
-  id                            String                      @id @default(uuid())
-  email                         String?                     @unique
+  id                            String                       @id @default(uuid())
+  email                         String?                      @unique
   firstName                     String
   lastName                      String
   kind                          PersonKind
   // App RBAC roles (a person can hold several). Validated against AppRole in code.
-  roles                         String[]                    @default([])
+  roles                         String[]                     @default([])
   // bcrypt hash; null until a password is set.
   passwordHash                  String?
   // Set when a temp password was assigned; forces a change on next login.
-  mustChangePassword            Boolean                     @default(false)
+  mustChangePassword            Boolean                      @default(false)
   // Suspended accounts cannot sign in and their live sessions are ended (see sessionVersion).
   // DB CHECK Person_suspended_has_timestamp keeps status and suspendedAt in agreement.
-  status                        PersonStatus                @default(active)
+  status                        PersonStatus                 @default(active)
   suspendedAt                   DateTime?
   suspendedById                 String?
   // Signed into the session JWT at login and compared on every authenticated request.
   // Bump it to end every live session this person holds.
-  sessionVersion                Int                         @default(0)
-  createdAt                     DateTime                    @default(now())
+  sessionVersion                Int                          @default(0)
+  createdAt                     DateTime                     @default(now())
   student                       Student?
-  taughtSections                Section[]                   @relation("Instructor")
+  taughtSections                Section[]                    @relation("Instructor")
   threadParticipations          ThreadParticipant[]
   messagesSent                  Message[]
   projectMemberships            ProjectMember[]
   // --- SIS redesign ---
-  guardianOf                    GuardianStudent[]           @relation("GuardianOf")
+  guardianOf                    GuardianStudent[]            @relation("GuardianOf")
   guardianProfile               GuardianProfile?
-  guardianInvites               GuardianInvite[]            @relation("GuardianInvites")
-  studentInvites                StudentInvite[]             @relation("StudentInvites")
+  guardianInvites               GuardianInvite[]             @relation("GuardianInvites")
+  studentInvites                StudentInvite[]              @relation("StudentInvites")
   activationRequestsAsStudent   StudentActivationRequest[]   @relation("StudentActivationRequestStudent")
   activationRequestsApproved    StudentActivationRequest[]   @relation("StudentActivationRequestApprover")
-  broadcasts                    Broadcast[]                 @relation("BroadcastSender")
+  studentActivationCards        StudentActivationCard[]      @relation("StudentActivationCardStudent")
+  activationCardBatchesCreated  StudentActivationCardBatch[] @relation("StudentActivationCardBatchCreator")
+  activationCardBatchesRevoked  StudentActivationCardBatch[] @relation("StudentActivationCardBatchRevoker")
+  broadcasts                    Broadcast[]                  @relation("BroadcastSender")
   // Public website profile for faculty (see FacultyProfile).
   facultyProfile                FacultyProfile?
-  paymentSubmissionsStarted     PaymentSubmission[]         @relation("PaymentSubmissionInitiator")
-  paymentSubmissionsVerified    PaymentSubmission[]         @relation("PaymentSubmissionVerifier")
-  paymentSubmissionsAudited     PaymentSubmission[]         @relation("PaymentSubmissionAuditor")
-  transcriptImportBatches       TranscriptImportBatch[]     @relation("TranscriptImportBatchCreator")
-  paymentImportBatches          PaymentImportBatch[]        @relation("PaymentImportBatchCreator")
-  paymentBalanceImportBatches   PaymentBalanceImportBatch[] @relation("PaymentBalanceImportBatchCreator")
-  legacyCohortImportBatches     LegacyCohortImportBatch[]   @relation("LegacyCohortImportBatchCreator")
-  transcriptEntriesCreated      TranscriptEntry[]           @relation("TranscriptEntryCreator")
-  transcriptEntriesUpdated      TranscriptEntry[]           @relation("TranscriptEntryUpdater")
-  transcriptEntriesVoided       TranscriptEntry[]           @relation("TranscriptEntryVoider")
-  paymentsInitiated             Payment[]                   @relation("PaymentInitiator")
-  feeSchedulesCreated           FeeSchedule[]               @relation("FeeScheduleCreator")
-  feeSchedulesApproved          FeeSchedule[]               @relation("FeeScheduleApprover")
-  academicCatalogsCreated       AcademicCatalogRevision[]   @relation("AcademicCatalogCreator")
-  academicCatalogsApproved      AcademicCatalogRevision[]   @relation("AcademicCatalogApprover")
-  infirmaryConsultations        Consultation[]              @relation("ConsultationClinician")
-  infirmaryConsultationsFlagged Consultation[]              @relation("ConsultationSickFlagger")
-  attendanceNotedBy             AttendanceRecord[]          @relation("AttendanceNotedBy")
-  infirmaryPrescriptions        Prescription[]              @relation("PrescriptionAuthor")
-  infirmaryDocuments            InfirmaryDocument[]         @relation("DocumentUploader")
-  standingOverridesCreated      StudentStandingOverride[]   @relation("StandingOverrideCreator")
-  standingOverridesUpdated      StudentStandingOverride[]   @relation("StandingOverrideUpdater")
-  standingOverridesCleared      StudentStandingOverride[]   @relation("StandingOverrideClearer")
-  approvalRequestsCreated       ApprovalRequest[]           @relation("ApprovalRequester")
-  approvalRequestsReviewed      ApprovalRequest[]           @relation("ApprovalReviewer")
-  approvalEvents                ApprovalEvent[]             @relation("ApprovalEventActor")
-  operatingBudgetsCreated       OperatingBudget[]           @relation("OperatingBudgetCreator")
-  operatingBudgetsReviewed      OperatingBudget[]           @relation("OperatingBudgetReviewer")
-  managementActualsCreated      ManagementActualEntry[]     @relation("ManagementActualCreator")
-  managementActualsApproved     ManagementActualEntry[]     @relation("ManagementActualApprover")
-  managementActualsVoided       ManagementActualEntry[]     @relation("ManagementActualVoider")
-  expensesApproved              Expense[]                   @relation("ExpenseApprover")
-  expensesVoided                Expense[]                   @relation("ExpenseVoider")
+  paymentSubmissionsStarted     PaymentSubmission[]          @relation("PaymentSubmissionInitiator")
+  paymentSubmissionsVerified    PaymentSubmission[]          @relation("PaymentSubmissionVerifier")
+  paymentSubmissionsAudited     PaymentSubmission[]          @relation("PaymentSubmissionAuditor")
+  transcriptImportBatches       TranscriptImportBatch[]      @relation("TranscriptImportBatchCreator")
+  paymentImportBatches          PaymentImportBatch[]         @relation("PaymentImportBatchCreator")
+  paymentBalanceImportBatches   PaymentBalanceImportBatch[]  @relation("PaymentBalanceImportBatchCreator")
+  legacyCohortImportBatches     LegacyCohortImportBatch[]    @relation("LegacyCohortImportBatchCreator")
+  transcriptEntriesCreated      TranscriptEntry[]            @relation("TranscriptEntryCreator")
+  transcriptEntriesUpdated      TranscriptEntry[]            @relation("TranscriptEntryUpdater")
+  transcriptEntriesVoided       TranscriptEntry[]            @relation("TranscriptEntryVoider")
+  paymentsInitiated             Payment[]                    @relation("PaymentInitiator")
+  feeSchedulesCreated           FeeSchedule[]                @relation("FeeScheduleCreator")
+  feeSchedulesApproved          FeeSchedule[]                @relation("FeeScheduleApprover")
+  academicCatalogsCreated       AcademicCatalogRevision[]    @relation("AcademicCatalogCreator")
+  academicCatalogsApproved      AcademicCatalogRevision[]    @relation("AcademicCatalogApprover")
+  infirmaryConsultations        Consultation[]               @relation("ConsultationClinician")
+  infirmaryConsultationsFlagged Consultation[]               @relation("ConsultationSickFlagger")
+  attendanceNotedBy             AttendanceRecord[]           @relation("AttendanceNotedBy")
+  infirmaryPrescriptions        Prescription[]               @relation("PrescriptionAuthor")
+  infirmaryDocuments            InfirmaryDocument[]          @relation("DocumentUploader")
+  standingOverridesCreated      StudentStandingOverride[]    @relation("StandingOverrideCreator")
+  standingOverridesUpdated      StudentStandingOverride[]    @relation("StandingOverrideUpdater")
+  standingOverridesCleared      StudentStandingOverride[]    @relation("StandingOverrideClearer")
+  approvalRequestsCreated       ApprovalRequest[]            @relation("ApprovalRequester")
+  approvalRequestsReviewed      ApprovalRequest[]            @relation("ApprovalReviewer")
+  approvalEvents                ApprovalEvent[]              @relation("ApprovalEventActor")
+  operatingBudgetsCreated       OperatingBudget[]            @relation("OperatingBudgetCreator")
+  operatingBudgetsReviewed      OperatingBudget[]            @relation("OperatingBudgetReviewer")
+  managementActualsCreated      ManagementActualEntry[]      @relation("ManagementActualCreator")
+  managementActualsApproved     ManagementActualEntry[]      @relation("ManagementActualApprover")
+  managementActualsVoided       ManagementActualEntry[]      @relation("ManagementActualVoider")
+  expensesApproved              Expense[]                    @relation("ExpenseApprover")
+  expensesVoided                Expense[]                    @relation("ExpenseVoider")
   directorWidgetPreference      DirectorWidgetPreference?
   notifications                 Notification[]
-  admissionNotes                AdmissionNote[]             @relation("AdmissionNoteAuthor")
+  admissionNotes                AdmissionNote[]              @relation("AdmissionNoteAuthor")
   createdForms                  CustomForm[]
 
   @@index([status])
@@ -2435,45 +2438,50 @@ model GuardianInvite {
   @@index([guardianId])
 }
 
-/// A student's single-use, expiring password-setup token. Only an approved
+/// A student's single-use, expiring password-setup token. A verified
 /// StudentActivationRequest creates one; the student-owned browser capability
 /// redeems it on the public /set-password page.
 model StudentInvite {
-  id              String    @id @default(uuid())
-  studentPersonId String
-  person          Person    @relation("StudentInvites", fields: [studentPersonId], references: [id], onDelete: Cascade)
-  tokenHash       String    @unique
+  id                String                    @id @default(uuid())
+  studentPersonId   String
+  person            Person                    @relation("StudentInvites", fields: [studentPersonId], references: [id], onDelete: Cascade)
+  tokenHash         String                    @unique
   // Setup invites bind the capability to the reviewed login identity.
   // Nullable keeps the migration additive; null legacy rows fail closed.
-  boundEmailSha256 String?
-  expiresAt       DateTime
-  usedAt          DateTime?
-  createdAt       DateTime  @default(now())
+  boundEmailSha256  String?
+  expiresAt         DateTime
+  usedAt            DateTime?
+  createdAt         DateTime                  @default(now())
   activationRequest StudentActivationRequest? @relation("StudentActivationRequestInvite")
 
   @@index([studentPersonId])
 }
 
-/// Public student activation begins as a short-lived request and requires a
-/// named registrar/admin approval before a setup invite exists.
-/// Both public capabilities are stored only as hashes.
+/// Public student activation begins as a short-lived request. Historical rows
+/// may record named approval; self-service rows bind a verified issued card.
+/// Every public capability is stored only as a hash/HMAC.
 model StudentActivationRequest {
-  id               String    @id @default(uuid())
-  studentPersonId  String?
-  studentPerson    Person?   @relation("StudentActivationRequestStudent", fields: [studentPersonId], references: [id], onDelete: Cascade)
-  accountKeyHash   String
-  requestTokenHash String    @unique
-  approvalCodeHash String
-  expiresAt        DateTime
-  approvedAt       DateTime?
-  approvedById     String?
-  approvedBy       Person?   @relation("StudentActivationRequestApprover", fields: [approvedById], references: [id], onDelete: SetNull)
-  studentInviteId  String?   @unique
-  studentInvite    StudentInvite? @relation("StudentActivationRequestInvite", fields: [studentInviteId], references: [id], onDelete: SetNull)
-  consumedAt       DateTime?
-  invalidatedAt    DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                      String                 @id @default(uuid())
+  studentPersonId         String?
+  studentPerson           Person?                @relation("StudentActivationRequestStudent", fields: [studentPersonId], references: [id], onDelete: Cascade)
+  accountKeyHash          String
+  requestTokenHash        String                 @unique
+  approvalCodeHash        String
+  expiresAt               DateTime
+  approvedAt              DateTime?
+  approvedById            String?
+  approvedBy              Person?                @relation("StudentActivationRequestApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  studentInviteId         String?                @unique
+  studentInvite           StudentInvite?         @relation("StudentActivationRequestInvite", fields: [studentInviteId], references: [id], onDelete: SetNull)
+  // Null for the legacy in-person pairing flow. Issued-card redemption records
+  // both the method and exact one-time card without storing the plaintext code.
+  verificationMethod      String?
+  studentActivationCardId String?                @unique
+  studentActivationCard   StudentActivationCard? @relation("StudentActivationRequestCard", fields: [studentActivationCardId], references: [id], onDelete: SetNull)
+  consumedAt              DateTime?
+  invalidatedAt           DateTime?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
 
   // The migration also owns partial unique indexes for unresolved account keys,
   // real student-person IDs, and approval-code hashes. Prisma cannot express them.
@@ -2482,6 +2490,58 @@ model StudentActivationRequest {
   @@index([studentPersonId, approvedAt, expiresAt], map: "StudentActivationRequest_approval_idx")
   @@index([approvedById])
   @@index([expiresAt])
+}
+
+/// One reviewed operator run that issues print-only, one-time activation cards.
+/// The plaintext artifact stays outside the database; only its SHA-256 and the
+/// reviewed eligibility snapshot remain as durable provenance.
+model StudentActivationCardBatch {
+  id                        String                  @id @default(uuid())
+  confirmationPlanSha256    String                  @unique
+  eligibilitySnapshotSha256 String
+  expiresAt                 DateTime
+  eligibleCount             Int
+  generatedCount            Int
+  outputSha256              String                  @unique
+  status                    String                  @default("active")
+  createdById               String
+  createdBy                 Person                  @relation("StudentActivationCardBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  revokedAt                 DateTime?
+  revokedById               String?
+  revokedBy                 Person?                 @relation("StudentActivationCardBatchRevoker", fields: [revokedById], references: [id], onDelete: Restrict)
+  // Bounded non-PII reason code; allowed values are enforced by migration CHECK.
+  revokeReason              String?
+  createdAt                 DateTime                @default(now())
+  items                     StudentActivationCard[]
+
+  @@index([expiresAt, revokedAt])
+  @@index([createdById, createdAt])
+  @@index([revokedById, revokedAt])
+}
+
+/// A random 80-bit Crockford code issued to exactly one passwordless student.
+/// codeHmacSha256 is domain-separated with the dedicated activation key; the
+/// recoverable code exists only in the operator's mode-0600 print artifact.
+model StudentActivationCard {
+  id                String                     @id @default(uuid())
+  batchId           String
+  batch             StudentActivationCardBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  studentPersonId   String
+  person            Person                     @relation("StudentActivationCardStudent", fields: [studentPersonId], references: [id], onDelete: Restrict)
+  codeHmacSha256    String                     @unique
+  boundEmailSha256  String
+  expiresAt         DateTime
+  failedAttempts    Int                        @default(0)
+  claimedAt         DateTime?
+  usedAt            DateTime?
+  revokedAt         DateTime?
+  createdAt         DateTime                   @default(now())
+  activationRequest StudentActivationRequest?  @relation("StudentActivationRequestCard")
+
+  // The migration owns a partial unique index allowing no more than one
+  // unresolved card per student. Prisma cannot express partial indexes.
+  @@index([batchId, expiresAt])
+  @@index([studentPersonId, expiresAt])
 }
 
 /// A document on a student's record. `slot` is a fixed key for the six typed slots

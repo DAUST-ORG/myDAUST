@@ -6,25 +6,17 @@ import {
   METHOD_METADATA,
 } from "@nestjs/common/constants";
 import { describe, expect, it, vi } from "vitest";
-import { IS_PUBLIC_KEY, ROLES_KEY } from "../auth/decorators.js";
+import { encodeStudentActivationCode } from "@mydaust/shared";
+import { IS_PUBLIC_KEY } from "../auth/decorators.js";
+import { StudentActivationPublicController } from "./student-activation.controller.js";
 import {
-  StudentActivationPublicController,
-  StudentActivationStaffController,
-} from "./student-activation.controller.js";
-import {
-  StudentActivationStaffThrottleGuard,
+  ACTIVATION_RATE_BUCKET_MAX_KEYS,
   StudentActivationStartThrottleGuard,
-  StudentActivationStatusThrottleGuard,
 } from "./student-activation-throttle.guard.js";
 
-function context(body: unknown, personId?: string) {
+function context(body: unknown) {
   return {
-    switchToHttp: () => ({
-      getRequest: () => ({
-        body,
-        user: personId ? { personId } : undefined,
-      }),
-    }),
+    switchToHttp: () => ({ getRequest: () => ({ body }) }),
   } as never;
 }
 
@@ -39,236 +31,210 @@ function expectRateLimited(action: () => unknown) {
   }
 }
 
-describe("student activation controller and throttles", () => {
-  it("keeps only POST routes public or registrar-scoped with private response headers", () => {
-    const publicStart = StudentActivationPublicController.prototype.start;
-    const publicStatus = StudentActivationPublicController.prototype.status;
-    const staffResolve = StudentActivationStaffController.prototype.resolve;
-    const staffApprove = StudentActivationStaffController.prototype.approve;
-    const methods = [publicStart, publicStatus, staffResolve, staffApprove];
+const TOKEN = "t".repeat(43);
 
-    expect(Reflect.getMetadata(IS_PUBLIC_KEY, publicStart)).toBe(true);
-    expect(Reflect.getMetadata(IS_PUBLIC_KEY, publicStatus)).toBe(true);
-    expect(Reflect.getMetadata(IS_PUBLIC_KEY, staffResolve)).toBeUndefined();
-    expect(Reflect.getMetadata(IS_PUBLIC_KEY, staffApprove)).toBeUndefined();
-    expect(
-      Reflect.getMetadata(ROLES_KEY, StudentActivationStaffController),
-    ).toEqual(["admin", "registrar"]);
-    expect(Reflect.getMetadata(ROLES_KEY, staffResolve)).toEqual([
-      "admin",
-      "registrar",
-    ]);
-    expect(Reflect.getMetadata(ROLES_KEY, staffApprove)).toEqual([
-      "admin",
-      "registrar",
-    ]);
-    expect(Reflect.getMetadata(HTTP_CODE_METADATA, publicStart)).toBe(202);
-    expect(Reflect.getMetadata(HTTP_CODE_METADATA, publicStatus)).toBe(200);
-    expect(Reflect.getMetadata(HTTP_CODE_METADATA, staffResolve)).toBe(200);
-    expect(Reflect.getMetadata(HTTP_CODE_METADATA, staffApprove)).toBe(200);
+function cardCode(index: number): string {
+  const bytes = new Uint8Array(10);
+  new DataView(bytes.buffer).setUint32(6, index);
+  return encodeStudentActivationCode(bytes);
+}
 
-    for (const method of methods) {
-      expect(Reflect.getMetadata(METHOD_METADATA, method)).toBe(
-        RequestMethod.POST,
-      );
-      const headers = Reflect.getMetadata(HEADERS_METADATA, method) as Array<{
-        name: string;
-        value: string;
-      }>;
-      expect(
-        Object.fromEntries(
-          headers.map((header) => [header.name, header.value]),
-        ),
-      ).toMatchObject({
-        "Cache-Control": "private, no-store, max-age=0",
-        Pragma: "no-cache",
-        Expires: "0",
-        "Referrer-Policy": "no-referrer",
-      });
-    }
-    for (const controller of [
-      StudentActivationPublicController,
-      StudentActivationStaffController,
-    ]) {
-      for (const name of Object.getOwnPropertyNames(controller.prototype)) {
-        const candidate = controller.prototype[
-          name as keyof typeof controller.prototype
-        ] as unknown;
-        if (
-          typeof candidate === "function" &&
-          Reflect.hasMetadata(METHOD_METADATA, candidate)
-        ) {
-          expect(Reflect.getMetadata(METHOD_METADATA, candidate)).toBe(
-            RequestMethod.POST,
-          );
-        }
-      }
-    }
-    for (const method of [publicStart, publicStatus]) {
-      const headers = Reflect.getMetadata(HEADERS_METADATA, method) as Array<{
-        name: string;
-        value: string;
-      }>;
-      expect(
-        Object.fromEntries(
-          headers.map((header) => [header.name, header.value]),
-        ),
-      ).toMatchObject({
-        "X-Robots-Tag": "noindex, nofollow, noarchive",
-      });
-    }
-  });
+describe("student activation controller and throttle", () => {
+  it("exposes one no-store public POST and no staff approval routes", () => {
+    const start = StudentActivationPublicController.prototype.start;
 
-  it("pins each route to its dedicated trusted throttle guard", () => {
-    expect(
-      Reflect.getMetadata(
-        GUARDS_METADATA,
-        StudentActivationPublicController.prototype.start,
-      ),
-    ).toEqual([StudentActivationStartThrottleGuard]);
-    expect(
-      Reflect.getMetadata(
-        GUARDS_METADATA,
-        StudentActivationPublicController.prototype.status,
-      ),
-    ).toEqual([StudentActivationStatusThrottleGuard]);
-    expect(
-      Reflect.getMetadata(
-        GUARDS_METADATA,
-        StudentActivationStaffController.prototype.resolve,
-      ),
-    ).toEqual([StudentActivationStaffThrottleGuard]);
-    expect(
-      Reflect.getMetadata(
-        GUARDS_METADATA,
-        StudentActivationStaffController.prototype.approve,
-      ),
-    ).toEqual([StudentActivationStaffThrottleGuard]);
-  });
-
-  it("keeps controller bodies strict and requires explicit identity verification", async () => {
-    const start = vi.fn().mockResolvedValue({ requestToken: "opaque" });
-    const status = vi.fn().mockResolvedValue({ status: "pending" });
-    const approve = vi.fn().mockResolvedValue({ kind: "approved" });
-    const publicController = new StudentActivationPublicController({
-      start,
-      status,
-    } as never);
-    const staffController = new StudentActivationStaffController({
-      approve,
-    } as never);
-
-    expect(() =>
-      publicController.start({
-        studentNo: "F2026001",
-        dob: "2002-04-19",
-        requestToken: "cannot-switch-throttle-route",
-      }),
-    ).toThrow();
-    expect(() =>
-      staffController.approve(
-        { personId: "registrar-1", roles: ["registrar"] } as never,
-        "2b966215-a9d4-475f-8587-d3854cdb7c2f",
-        { approvalCode: "123456", identityVerified: false },
-      ),
-    ).toThrow();
-    await expect(
-      staffController.approve(
-        { personId: "registrar-1", roles: ["registrar"] } as never,
-        "2b966215-a9d4-475f-8587-d3854cdb7c2f",
-        { approvalCode: "123456", identityVerified: true },
-      ),
-    ).resolves.toEqual({ kind: "approved" });
-    expect(approve).toHaveBeenCalledWith(
-      "registrar-1",
-      "2b966215-a9d4-475f-8587-d3854cdb7c2f",
-      "123456",
-      {
-        identityVerification: "official_photo_credential_checked_in_person",
-      },
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, start)).toBe(true);
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, start)).toBe(202);
+    expect(Reflect.getMetadata(METHOD_METADATA, start)).toBe(
+      RequestMethod.POST,
     );
+    expect(
+      Object.fromEntries(
+        (
+          Reflect.getMetadata(HEADERS_METADATA, start) as Array<{
+            name: string;
+            value: string;
+          }>
+        ).map((header) => [header.name, header.value]),
+      ),
+    ).toMatchObject({
+      "Cache-Control": "private, no-store, max-age=0",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Referrer-Policy": "no-referrer",
+      "X-Robots-Tag": "noindex, nofollow, noarchive",
+    });
+    expect(Reflect.getMetadata(GUARDS_METADATA, start)).toEqual([
+      StudentActivationStartThrottleGuard,
+    ]);
+
+    const routes = Object.getOwnPropertyNames(
+      StudentActivationPublicController.prototype,
+    ).filter((name) => {
+      const candidate = StudentActivationPublicController.prototype[
+        name as keyof StudentActivationPublicController
+      ] as unknown;
+      return (
+        typeof candidate === "function" &&
+        Reflect.hasMetadata(METHOD_METADATA, candidate)
+      );
+    });
+    expect(routes).toEqual(["start"]);
   });
 
-  it("limits normalized student-number and DOB start attempts without cross-locking a corrected DOB", () => {
+  it("passes the strict browser-owned capability contract to the service", async () => {
+    const start = vi.fn().mockResolvedValue({ accepted: true });
+    const controller = new StudentActivationPublicController({
+      start,
+    } as never);
+    const input = {
+      studentNo: "F2026001",
+      dob: "2002-04-19",
+      activationCode: "ABCD2345EFGH6789",
+      requestToken: TOKEN,
+    };
+
+    await expect(controller.start(input)).resolves.toEqual({ accepted: true });
+    expect(start).toHaveBeenCalledWith(input);
+    expect(() => controller.start({ ...input, extra: true })).toThrow();
+    expect(() =>
+      controller.start({ ...input, requestToken: "server-mint-this" }),
+    ).toThrow();
+  });
+
+  it("does not let wrong-DOB traffic consume the real normalized ID+DOB bucket", () => {
     const guard = new StudentActivationStartThrottleGuard();
-    const samePair = [
+    const idVariants = [
       " f2026001 ",
       "F2026001",
       "f2026001",
       "Ｆ２０２６００１",
       "F2026001",
     ];
-    for (const studentNo of samePair) {
+    for (const [index, studentNo] of idVariants.entries()) {
       expect(
         guard.canActivate(
-          context({ studentNo, dob: "2002-04-18", requestToken: "ignored" }),
+          context({
+            studentNo,
+            dob: "2002-04-18",
+            activationCode: cardCode(index),
+            requestToken: TOKEN,
+          }),
+        ),
+      ).toBe(true);
+    }
+    expect(
+      guard.canActivate(
+        context({
+          studentNo: "F2026001",
+          dob: "2002-04-19",
+          activationCode: cardCode(50),
+          requestToken: TOKEN,
+        }),
+      ),
+    ).toBe(true);
+    expectRateLimited(() =>
+      guard.canActivate(
+        context({
+          studentNo: "F2026001",
+          dob: "2002-04-18",
+          activationCode: cardCode(51),
+          requestToken: TOKEN,
+        }),
+      ),
+    );
+    expect(
+      guard.canActivate(
+        context({
+          studentNo: "F2026002",
+          dob: "1999-01-01",
+          activationCode: cardCode(52),
+          requestToken: TOKEN,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("also limits repeated attempts with one normalized card code", () => {
+    const guard = new StudentActivationStartThrottleGuard();
+    const variants = [
+      "abcd-2345-efgh-6789",
+      "ABCD2345EFGH6789",
+      "ＡＢＣＤ２３４５ＥＦＧＨ６７８９",
+      "ABCD 2345 EFGH 6789",
+      "abcd2345efgh6789",
+    ];
+    for (let index = 0; index < variants.length; index += 1) {
+      expect(
+        guard.canActivate(
+          context({
+            studentNo: `F-CODE-${index}`,
+            dob: `2002-04-${String(index + 10).padStart(2, "0")}`,
+            activationCode: variants[index],
+            requestToken: TOKEN,
+          }),
         ),
       ).toBe(true);
     }
     expectRateLimited(() =>
-      guard.canActivate(context({ studentNo: "F2026001", dob: "2002-04-18" })),
-    );
-    expect(
-      guard.canActivate(context({ studentNo: "F2026001", dob: "2002-04-19" })),
-    ).toBe(true);
-  });
-
-  it("limits status polling per opaque token", () => {
-    const guard = new StudentActivationStatusThrottleGuard();
-    const body = { requestToken: "t".repeat(43) };
-    for (let attempt = 0; attempt < 150; attempt += 1) {
-      expect(guard.canActivate(context(body))).toBe(true);
-    }
-    expectRateLimited(() => guard.canActivate(context(body)));
-    expect(guard.canActivate(context({ requestToken: "u".repeat(43) }))).toBe(
-      true,
+      guard.canActivate(
+        context({
+          studentNo: "F-CODE-OVERFLOW",
+          dob: "2002-04-20",
+          activationCode: "ABCD-2345-EFGH-6789",
+          requestToken: TOKEN,
+        }),
+      ),
     );
   });
 
-  it("limits registrar resolve and approve traffic per actor", () => {
-    const guard = new StudentActivationStaffThrottleGuard();
-    for (let attempt = 0; attempt < 240; attempt += 1) {
-      expect(guard.canActivate(context({}, "registrar-1"))).toBe(true);
-    }
-    expectRateLimited(() => guard.canActivate(context({}, "registrar-1")));
-    expect(guard.canActivate(context({}, "registrar-2"))).toBe(true);
-  });
-
-  it("bounds attacker-controlled key memory above ten thousand buckets and enforces the global ceiling", () => {
-    const statusGuard = new StudentActivationStatusThrottleGuard();
+  it("bounds attacker-controlled key memory and enforces the global ceiling", () => {
+    const guard = new StudentActivationStartThrottleGuard();
     let now = 0;
     const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
     try {
-      for (let index = 0; index < 10_050; index += 1) {
+      for (let index = 0; index < 5_100; index += 1) {
         now += 61_000;
         expect(
-          statusGuard.canActivate(
-            context({ requestToken: `unique-status-token-${index}` }),
+          guard.canActivate(
+            context({
+              studentNo: `MEMORY-${index}`,
+              dob: "2002-04-19",
+              activationCode: cardCode(index),
+              requestToken: TOKEN,
+            }),
           ),
         ).toBe(true);
       }
     } finally {
       clock.mockRestore();
     }
-    const internal = statusGuard as unknown as {
+    const internal = guard as unknown as {
       buckets: { byKey: Map<string, number[]> };
     };
-    expect(internal.buckets.byKey.size).toBe(10_000);
+    expect(internal.buckets.byKey.size).toBe(ACTIVATION_RATE_BUCKET_MAX_KEYS);
 
-    const startGuard = new StudentActivationStartThrottleGuard();
+    const globalGuard = new StudentActivationStartThrottleGuard();
     for (let index = 0; index < 300; index += 1) {
       expect(
-        startGuard.canActivate(
+        globalGuard.canActivate(
           context({
             studentNo: `GLOBAL-${index}`,
-            dob: "2002-04-19",
+            dob: `2002-04-${String((index % 28) + 1).padStart(2, "0")}`,
+            activationCode: cardCode(index),
+            requestToken: TOKEN,
           }),
         ),
       ).toBe(true);
     }
     expectRateLimited(() =>
-      startGuard.canActivate(
-        context({ studentNo: "GLOBAL-OVERFLOW", dob: "2002-04-19" }),
+      globalGuard.canActivate(
+        context({
+          studentNo: "GLOBAL-OVERFLOW",
+          dob: "2002-05-01",
+          activationCode: cardCode(999),
+          requestToken: TOKEN,
+        }),
       ),
     );
   });

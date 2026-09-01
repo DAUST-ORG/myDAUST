@@ -61,8 +61,9 @@ export class RegistrarService {
 
   /**
    * Provision a student record and atomically assign the administrator-approved
-   * annual package. Account activation is exclusively the student's paired
-   * ID+DOB ceremony; student creation never mints or discloses a credential.
+   * annual package. Account activation is exclusively the student's card-based
+   * activation-card ceremony bound to ID and DOB; student creation never mints
+   * or discloses a credential.
    */
   async createStudent(actorId: string, input: RegistrarStudentInput) {
     const studentNo = normalizeStudentNumber(input.studentNo);

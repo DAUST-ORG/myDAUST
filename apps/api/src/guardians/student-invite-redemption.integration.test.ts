@@ -42,6 +42,12 @@ interface SeededInvite {
   inviteId: string;
 }
 
+interface SeededIssuedInvite extends SeededInvite {
+  activationRequestId: string;
+  batchId: string;
+  cardId: string;
+}
+
 async function seedInvite(
   label: string,
   options: {
@@ -98,6 +104,60 @@ async function seedInvite(
     email,
     personId: person.id,
     inviteId: invite.id,
+  };
+}
+
+async function seedIssuedInvite(label: string): Promise<SeededIssuedInvite> {
+  const seeded = await seedInvite(label);
+  const issuer = await prisma.person.create({
+    data: {
+      email: `issued-card-${label}-${randomUUID()}@test.local`,
+      firstName: "Card",
+      lastName: "Issuer",
+      kind: "staff",
+      roles: ["registrar"],
+      status: "active",
+    },
+  });
+  const batch = await prisma.studentActivationCardBatch.create({
+    data: {
+      confirmationPlanSha256: sha256(`plan-${randomUUID()}`),
+      eligibilitySnapshotSha256: sha256(`snapshot-${randomUUID()}`),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60_000),
+      eligibleCount: 1,
+      generatedCount: 1,
+      outputSha256: sha256(`output-${randomUUID()}`),
+      createdById: issuer.id,
+    },
+  });
+  const card = await prisma.studentActivationCard.create({
+    data: {
+      batchId: batch.id,
+      studentPersonId: seeded.personId,
+      codeHmacSha256: sha256(`code-hmac-${randomUUID()}`),
+      boundEmailSha256: sha256(seeded.email),
+      expiresAt: batch.expiresAt,
+      claimedAt: new Date(),
+    },
+  });
+  const request = await prisma.studentActivationRequest.create({
+    data: {
+      studentPersonId: seeded.personId,
+      accountKeyHash: sha256(`account-${randomUUID()}`),
+      requestTokenHash: sha256(seeded.token),
+      approvalCodeHash: sha256(`legacy-required-${randomUUID()}`),
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+      approvedAt: new Date(),
+      verificationMethod: "issued_code",
+      studentActivationCardId: card.id,
+      studentInviteId: seeded.inviteId,
+    },
+  });
+  return {
+    ...seeded,
+    activationRequestId: request.id,
+    batchId: batch.id,
+    cardId: card.id,
   };
 }
 
@@ -167,6 +227,117 @@ describe.skipIf(!DB_URL)("student invite redemption security", () => {
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ actorId: seeded.personId });
   });
+
+  it("consumes every linked issued-card credential on successful redemption", async () => {
+    const seeded = await seedIssuedInvite("issued-success");
+
+    await expect(
+      guardians.redeemInvite(seeded.token, seeded.password),
+    ).resolves.toEqual({ ok: true, email: seeded.email });
+
+    const [invite, card, request] = await Promise.all([
+      prisma.studentInvite.findUniqueOrThrow({
+        where: { id: seeded.inviteId },
+      }),
+      prisma.studentActivationCard.findUniqueOrThrow({
+        where: { id: seeded.cardId },
+      }),
+      prisma.studentActivationRequest.findUniqueOrThrow({
+        where: { id: seeded.activationRequestId },
+      }),
+    ]);
+    expect(invite.usedAt).toBeInstanceOf(Date);
+    expect(card.usedAt).toBeInstanceOf(Date);
+    expect(request.consumedAt).toBeInstanceOf(Date);
+    expect(request.invalidatedAt).toBeNull();
+  });
+
+  it("honors the 30-minute invite after a timely claim crosses card expiry", async () => {
+    const seeded = await seedIssuedInvite("claimed-before-expiry");
+    const [card, batch] = await Promise.all([
+      prisma.studentActivationCard.findUniqueOrThrow({
+        where: { id: seeded.cardId },
+      }),
+      prisma.studentActivationCardBatch.findUniqueOrThrow({
+        where: { id: seeded.batchId },
+      }),
+    ]);
+    await prisma.studentActivationCard.update({
+      where: { id: card.id },
+      data: { expiresAt: new Date(card.createdAt.getTime() + 1) },
+    });
+    await prisma.studentActivationCardBatch.update({
+      where: { id: batch.id },
+      data: { expiresAt: new Date(batch.createdAt.getTime() + 1) },
+    });
+
+    await expect(
+      guardians.redeemInvite(seeded.token, seeded.password),
+    ).resolves.toEqual({ ok: true, email: seeded.email });
+    expect(
+      await prisma.studentActivationRequest.findUniqueOrThrow({
+        where: { id: seeded.activationRequestId },
+      }),
+    ).toMatchObject({ invalidatedAt: null });
+  });
+
+  it.each(["card", "batch"] as const)(
+    "burns an issued invite when its linked %s is revoked before password setup",
+    async (target) => {
+      const seeded = await seedIssuedInvite(`revoked-${target}`);
+      const revokedAt = new Date();
+      if (target === "card") {
+        await prisma.studentActivationCard.update({
+          where: { id: seeded.cardId },
+          data: { revokedAt },
+        });
+      } else {
+        await prisma.studentActivationCardBatch.update({
+          where: { id: seeded.batchId },
+          data: {
+            status: "revoked",
+            revokedAt,
+            revokedById: (
+              await prisma.studentActivationCardBatch.findUniqueOrThrow({
+                where: { id: seeded.batchId },
+                select: { createdById: true },
+              })
+            ).createdById,
+            revokeReason: "security_response",
+          },
+        });
+      }
+
+      const error = await redemptionError(seeded.token, seeded.password);
+      expect(error).toMatchObject({ message: GENERIC_INVITE_ERROR });
+
+      const [person, invite, request, audit] = await Promise.all([
+        prisma.person.findUniqueOrThrow({ where: { id: seeded.personId } }),
+        prisma.studentInvite.findUniqueOrThrow({
+          where: { id: seeded.inviteId },
+        }),
+        prisma.studentActivationRequest.findUniqueOrThrow({
+          where: { id: seeded.activationRequestId },
+        }),
+        prisma.auditLog.findFirstOrThrow({
+          where: {
+            entity: "Person",
+            entityId: seeded.personId,
+            action: "student-setup-link-invalidated",
+          },
+          orderBy: { createdAt: "desc" },
+        }),
+      ]);
+      expect(person.passwordHash).toBeNull();
+      expect(invite.usedAt).toBeInstanceOf(Date);
+      expect(request.invalidatedAt).toBeInstanceOf(Date);
+      expect(request.consumedAt).toBeNull();
+      expect(audit).toMatchObject({
+        actorId: null,
+        data: { reason: "activation_card_revoked" },
+      });
+    },
+  );
 
   it("allows exactly one of two concurrent redemptions", async () => {
     const seeded = await seedInvite("concurrent");
