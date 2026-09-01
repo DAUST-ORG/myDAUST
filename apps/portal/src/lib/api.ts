@@ -5475,3 +5475,179 @@ export const submitAuthForm = (
     method: "POST",
     body: JSON.stringify(body),
   });
+
+// --- Helpdesk (in-app support tickets) ---
+// Native tickets cover admissions / academics / student affairs / IT / portal
+// requests. The IT backlog (it_portal) is part of the categories but remains a
+// queue decision, not a separate workflow. See packages/shared/src/helpdesk.ts
+// for the canonical enum + transition map re-exported below.
+import {
+  HELPDESK_CATEGORIES,
+  HELPDESK_PRIORITIES,
+  HELPDESK_ROUTING_TYPES,
+  HELPDESK_STATUSES,
+  HELPDESK_STATUS_TRANSITIONS,
+  HELP_DESK_CATEGORY_LABELS,
+  HELP_DESK_PRIORITY_LABELS,
+  HELP_DESK_ROUTING_LABELS,
+  HELP_DESK_STATUS_LABELS,
+  isValidHelpdeskStatusTransition,
+  type CreateHelpdeskCommentInput,
+  type CreateHelpdeskTicketInput,
+  type HelpdeskAttachmentSummary,
+  type HelpdeskCategory,
+  type HelpdeskCommentSummary,
+  type HelpdeskPriority,
+  type HelpdeskQueueItem,
+  type HelpdeskRoutingType,
+  type HelpdeskStatus,
+  type HelpdeskTicketDetail,
+  type HelpdeskTicketSummary,
+  type UpdateHelpdeskTicketInput,
+} from "@mydaust/shared";
+export {
+  HELPDESK_CATEGORIES,
+  HELPDESK_PRIORITIES,
+  HELPDESK_ROUTING_TYPES,
+  HELPDESK_STATUSES,
+  HELPDESK_STATUS_TRANSITIONS,
+  HELP_DESK_CATEGORY_LABELS,
+  HELP_DESK_PRIORITY_LABELS,
+  HELP_DESK_ROUTING_LABELS,
+  HELP_DESK_STATUS_LABELS,
+  isValidHelpdeskStatusTransition,
+  CreateHelpdeskCommentInput,
+  CreateHelpdeskTicketInput,
+  HelpdeskAttachmentSummary,
+  HelpdeskCategory,
+  HelpdeskCommentSummary,
+  HelpdeskPriority,
+  HelpdeskQueueItem,
+  HelpdeskRoutingType,
+  HelpdeskStatus,
+  HelpdeskTicketDetail,
+  HelpdeskTicketSummary,
+  UpdateHelpdeskTicketInput,
+};
+
+/** Body returned by the GitHub re-sync endpoint — keeps the staff view honest. */
+export interface HelpdeskGithubSyncResult {
+  state: "pending" | "linked" | "failed";
+  issueNumber?: number;
+  issueUrl?: string;
+  /** True when the helpdesk is configured without a GitHub token/repo. */
+  disabled?: boolean;
+}
+
+/** Public-facing read of a single ticket attachment. */
+export interface HelpdeskAttachment extends HelpdeskAttachmentSummary {}
+
+/** Tickets the caller is allowed to see (own tickets + parent-linked children). */
+export const getMyHelpdeskTickets = () =>
+  request<HelpdeskTicketSummary[]>("/helpdesk/mine");
+
+/** Open a new ticket. Student/parent `studentId` enforcement happens server-side. */
+export const createHelpdeskTicket = (input: CreateHelpdeskTicketInput) =>
+  request<HelpdeskTicketDetail>("/helpdesk/tickets", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+/** Read a single ticket — returns staff fields only to staff callers. */
+export const getHelpdeskTicket = (id: string) =>
+  request<HelpdeskTicketDetail>(`/helpdesk/tickets/${id}`);
+
+/** Post a comment. `isInternal` is honored only for staff callers. */
+export const addHelpdeskComment = (
+  id: string,
+  input: CreateHelpdeskCommentInput,
+) =>
+  request<HelpdeskTicketDetail>(`/helpdesk/tickets/${id}/comments`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+/** Shared staff queue. Caller MUST hold a queue role (API returns 403 otherwise). */
+export const getHelpdeskQueue = (
+  filter: {
+    status?: HelpdeskStatus;
+    category?: HelpdeskCategory;
+    priority?: HelpdeskPriority;
+    routingType?: HelpdeskRoutingType;
+    assigneeId?: string;
+    mineOnly?: boolean;
+    q?: string;
+  } = {},
+) => {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(filter)) {
+    if (v === undefined || v === null || v === "") continue;
+    qs.set(k, v === true ? "true" : v === false ? "false" : String(v));
+  }
+  const tail = qs.toString();
+  return request<HelpdeskQueueItem[]>(`/helpdesk/queue${tail ? `?${tail}` : ""}`);
+};
+
+/**
+ * Staff-side patch. `baseRevision` MUST be the ticket `version` the editor
+ * showed on load — the API returns 409 on a mismatch so concurrent edits
+ * surface as a recoverable error rather than a silent overwrite.
+ */
+export const updateHelpdeskTicket = (
+  id: string,
+  input: Omit<UpdateHelpdeskTicketInput, "baseRevision"> & {
+    baseRevision: number;
+  },
+) =>
+  request<HelpdeskTicketDetail>(`/helpdesk/tickets/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+
+/**
+ * Retry / trigger GitHub sync on a staff-routed engineering ticket. Returns
+ * the new sync state so the queue row can refresh in place.
+ */
+export const retryHelpdeskGithubSync = (id: string) =>
+  request<HelpdeskGithubSyncResult>(`/helpdesk/tickets/${id}/github-sync`, {
+    method: "POST",
+  });
+
+/**
+ * Upload a screenshot/attachment for a ticket. The file goes through the same
+ * magic-byte validator the existing `/uploads` route uses; this endpoint
+ * additionally checks ticket-scoped read authorization. Use
+ * `helpdeskAttachmentUrl(id)` to resolve the returned attachment id to an
+ * absolute URL — it streams through the authorized `/helpdesk/attachments/:id`
+ * route, never the public `/uploads/:filename` link.
+ */
+export async function uploadHelpdeskAttachment(
+  ticketId: string,
+  file: File,
+  name?: string,
+): Promise<HelpdeskAttachment> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append(
+    "data",
+    JSON.stringify({ ticketId, name: name ?? file.name }),
+  );
+  const res = await fetch(`${API_URL}/api/helpdesk/attachments`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!res.ok) throw await toApiError(res);
+  return res.json() as Promise<HelpdeskAttachment>;
+}
+
+/**
+ * Authorized read URL for a helpdesk attachment. Hits the controller's
+ * `GET /helpdesk/attachments/:id` route, which validates that the caller is
+ * the ticket owner, the parent of the linked student, or a member of the
+ * support staff before streaming the bytes. Returns a URL that travels the
+ * session cookie — do not embed this in a mailto or share it externally.
+ */
+export function helpdeskAttachmentUrl(attachmentId: string): string {
+  return `${API_URL}/api/helpdesk/attachments/${encodeURIComponent(attachmentId)}`;
+}

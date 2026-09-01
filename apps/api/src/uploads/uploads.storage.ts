@@ -98,6 +98,42 @@ export function validateUpload(
   return mime;
 }
 
+/** Image-only MIME set for helpdesk attachments. */
+const HELPDESK_IMAGE_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+]);
+
+/**
+ * Accept a helpdesk upload only when its real bytes are an allowed image.
+ * Stricter than `validateUpload` — PDFs are not allowed because helpdesk
+ * screenshots are images only, and the bytes-vs-declared-type discipline is
+ * what stops an attacker from smuggling a script with a renamed MIME.
+ */
+export function validateHelpdeskImageUpload(
+  file?: Pick<Express.Multer.File, "buffer" | "size" | "mimetype">,
+): string {
+  if (!file?.buffer) throw new BadRequestException("No file provided");
+  const mime = detectedUploadMime(file.buffer);
+  if (!mime || !HELPDESK_IMAGE_MIME.has(mime)) {
+    throw new BadRequestException(
+      "Helpdesk attachments accept images only (PNG, JPG, GIF, WEBP, AVIF).",
+    );
+  }
+  return mime;
+}
+
+/**
+ * Storage-key shape for helpdesk attachments. Constrained so a row cannot
+ * store a key that escapes its own prefix or smuggles traversal segments
+ * past the public upload route's filename regex.
+ */
+const HELPDESK_STORAGE_KEY = /^helpdesk\/[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/;
+
+
 export function detectedSiteVideoMime(buffer: Buffer): string | null {
   if (
     buffer.length >= 12 &&
@@ -285,6 +321,88 @@ export class UploadsStorage {
         )
       ) {
         throw new NotFoundException("Video not found");
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Store a helpdesk attachment in a private namespace that the public
+   * `/uploads/:filename` route never serves. Local disk goes under
+   * `<UPLOADS_DIR>/helpdesk/` and S3 objects live under the `helpdesk/` key
+   * prefix — both intentionally outside the `uploads/` prefix the public
+   * controller reads from. The returned key is what gets persisted on the
+   * attachment row; callers must never expose it through a public URL.
+   */
+  async putHelpdeskImage(file: Express.Multer.File): Promise<string> {
+    const mime = validateHelpdeskImageUpload(file);
+    const filename = createUploadFilename(file.originalname);
+    const key = `helpdesk/${filename}`;
+    if (this.env.MEDIA_BUCKET) {
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: this.env.MEDIA_BUCKET,
+          Key: key,
+          Body: file.buffer,
+          ContentType: mime,
+          // Helpdesk attachments are ticket-scoped and may contain PII (a
+          // student's transcript screenshot, an error page with their email,
+          // etc.). Never let an edge cache them.
+          CacheControl: "private, no-store",
+          ServerSideEncryption: "AES256",
+        }),
+      );
+    } else {
+      const directory = resolve(UPLOADS_DIR, "helpdesk");
+      await mkdir(directory, { recursive: true });
+      await writeFile(resolve(directory, filename), file.buffer);
+    }
+    return key;
+  }
+
+  /**
+   * Read back a helpdesk attachment by its private storage key. Mirrors `get`
+   * but reads from the `helpdesk/` namespace and accepts the full key
+   * (including the `helpdesk/` prefix). The caller is responsible for having
+   * already authorized the read against the ticket row.
+   */
+  async getHelpdeskImage(
+    key: string,
+  ): Promise<{ body: Buffer; contentType: string }> {
+    if (!HELPDESK_STORAGE_KEY.test(key)) {
+      throw new NotFoundException("Attachment not found");
+    }
+    const filename = key.slice("helpdesk/".length);
+    if (!validUploadFilename(filename)) {
+      throw new NotFoundException("Attachment not found");
+    }
+    try {
+      if (this.env.MEDIA_BUCKET) {
+        const result = await this.s3.send(
+          new GetObjectCommand({
+            Bucket: this.env.MEDIA_BUCKET,
+            Key: key,
+          }),
+        );
+        if (!result.Body) throw new NotFoundException("Attachment not found");
+        return {
+          body: Buffer.from(await result.Body.transformToByteArray()),
+          contentType: result.ContentType || contentTypeForFilename(filename),
+        };
+      }
+      return {
+        body: await readFile(resolve(UPLOADS_DIR, "helpdesk", filename)),
+        contentType: contentTypeForFilename(filename),
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      const detail = error as { name?: string; code?: string };
+      if (
+        ["ENOENT", "NoSuchKey", "NotFound"].includes(
+          detail.name ?? detail.code ?? "",
+        )
+      ) {
+        throw new NotFoundException("Attachment not found");
       }
       throw error;
     }

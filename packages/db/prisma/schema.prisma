@@ -460,6 +460,10 @@ model Person {
   notifications Notification[]
   admissionNotes AdmissionNote[] @relation("AdmissionNoteAuthor")
   createdForms                CustomForm[]
+  helpdeskTicketsRequested  HelpdeskTicket[]      @relation("HelpdeskTicketRequester")
+  helpdeskTicketsAssigned   HelpdeskTicket[]      @relation("HelpdeskTicketAssignee")
+  helpdeskCommentsAuthored  HelpdeskComment[]     @relation("HelpdeskCommentAuthor")
+  helpdeskAttachmentsUploaded HelpdeskAttachment[] @relation("HelpdeskAttachmentUploader")
 
   @@index([status])
 }
@@ -537,6 +541,7 @@ model Student {
   documents            StudentDocument[]
   infirmaryConsultations Consultation[]
   infirmaryPrescriptions Prescription[]
+  helpdeskTickets          HelpdeskTicket[]
   infirmaryAppointments InfirmaryAppointment[]
   infirmaryDocuments    InfirmaryDocument[]
   infirmaryFollowUps    FollowUp[]
@@ -2887,4 +2892,113 @@ model FormResponseAnswer {
   @@unique([responseId, fieldId])
   @@index([responseId])
   @@index([fieldId])
+}
+
+// --- Helpdesk (Phase 4) ---------------------------------------------------
+// Persistence for the campus helpdesk covering admissions, academics, student
+// affairs, IT/portal support, and the catch-all Other bucket. Distinct from
+// the existing IT backlog (which keeps its own narrow workflow).
+
+enum HelpdeskCategory {
+  admissions
+  academics
+  student_affairs
+  it_portal
+  other
+}
+
+enum HelpdeskPriority {
+  low
+  normal
+  high
+}
+
+enum HelpdeskStatus {
+  new
+  in_progress
+  waiting_on_requester
+  resolved
+}
+
+enum HelpdeskRoutingType {
+  support
+  engineering
+}
+
+/// Campus helpdesk ticket. The ticket may be raised against a Student record
+/// (for student-driven issues) or stand alone for staff/parent/guardian
+/// requesters. Assignee is optional until a support role picks it up. Sync
+/// fields track mirroring to the upstream engineering tracker.
+model HelpdeskTicket {
+  id                 String              @id @default(uuid())
+  requesterId        String
+  requester          Person              @relation("HelpdeskTicketRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  studentId          String?
+  student            Student?            @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  assigneeId         String?
+  assignee           Person?             @relation("HelpdeskTicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  title              String
+  description        String
+  category           HelpdeskCategory
+  priority           HelpdeskPriority   @default(normal)
+  status             HelpdeskStatus     @default(new)
+  routingType        HelpdeskRoutingType @default(support)
+  githubIssueNumber  Int?
+  githubIssueUrl     String?
+  githubSyncState    String             @default("pending")
+  githubSyncError    String?
+  githubSyncedAt     DateTime?
+  resolvedAt         DateTime?
+  version            Int                @default(1)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  comments           HelpdeskComment[]
+  attachments        HelpdeskAttachment[]
+
+  @@index([requesterId])
+  @@index([status])
+  @@index([category, status])
+  @@index([routingType, githubSyncState])
+  @@index([studentId])
+  @@index([assigneeId])
+}
+
+/// Thread comment on a helpdesk ticket. `isInternal = true` keeps the note
+/// visible only to support/engineering staff (never the requester).
+model HelpdeskComment {
+  id         String        @id @default(uuid())
+  ticketId   String
+  ticket     HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     Person        @relation("HelpdeskCommentAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  body       String
+  isInternal Boolean       @default(false)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([ticketId])
+  @@index([authorId])
+}
+
+/// File attached to a helpdesk ticket (screenshots, logs, exports).
+/// `url` is a stored relative upload path served from disk/S3.
+/// `storageKey` is the private object key (not exposed via the public upload
+/// route). `url` is kept for backwards-compatibility of older clients but is
+/// never the address used to read the bytes — always go through the authorized
+/// `GET /helpdesk/attachments/:id` route.
+model HelpdeskAttachment {
+  id         String        @id @default(uuid())
+  ticketId   String
+  ticket     HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  uploaderId String
+  uploader   Person        @relation("HelpdeskAttachmentUploader", fields: [uploaderId], references: [id], onDelete: Restrict)
+  url        String
+  storageKey String
+  name       String
+  size       Int
+  mimeType   String
+  createdAt  DateTime      @default(now())
+
+  @@index([ticketId])
+  @@index([uploaderId])
 }
