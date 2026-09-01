@@ -30,6 +30,9 @@ enum PaymentMethod {
   orange_money
   card
   wire
+  // Cash received and recorded directly by a named Finance staff member.
+  // Accounting-only: payer-facing checkout endpoints must never offer it.
+  cash
   // Historical/manual bank records may be settled by cheque. This remains an
   // accounting value only; payer-facing checkout endpoints do not offer it.
   cheque
