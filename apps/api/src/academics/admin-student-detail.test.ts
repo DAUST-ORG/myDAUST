@@ -92,3 +92,66 @@ describe("AcademicsService admin student detail", () => {
     });
   });
 });
+
+describe("AcademicsService student login email changes", () => {
+  function updateFixture() {
+    const student = {
+      id: "student-1",
+      personId: "person-1",
+      recordStatus: "active",
+      person: {
+        id: "person-1",
+        firstName: "Awa",
+        lastName: "Ndiaye",
+        email: "old@example.test",
+      },
+    };
+    const prisma = {
+      student: {
+        findUnique: vi.fn().mockResolvedValue(student),
+        update: vi.fn().mockResolvedValue(student),
+      },
+      person: { update: vi.fn().mockResolvedValue(student.person) },
+      studentInvite: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+      $transaction: vi.fn(async (work: Promise<unknown>[]) =>
+        Promise.all(work),
+      ),
+    };
+    const service = new AcademicsService(prisma as never);
+    vi.spyOn(service, "adminStudentDetail").mockResolvedValue({
+      id: student.id,
+    } as never);
+    return { prisma, service, student };
+  }
+
+  it("burns outstanding student setup links in the email update transaction", async () => {
+    const { prisma, service, student } = updateFixture();
+
+    await service.updateStudent("registrar-1", student.id, {
+      email: "new@example.test",
+    });
+
+    expect(prisma.person.update).toHaveBeenCalledWith({
+      where: { id: student.personId },
+      data: { email: "new@example.test" },
+    });
+    expect(prisma.studentInvite.updateMany).toHaveBeenCalledWith({
+      where: { studentPersonId: student.personId, usedAt: null },
+      data: { usedAt: expect.any(Date) },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+  });
+
+  it("does not revoke a setup link when the login email is unchanged", async () => {
+    const { prisma, service, student } = updateFixture();
+
+    await service.updateStudent("registrar-1", student.id, {
+      email: student.person.email,
+    });
+
+    expect(prisma.studentInvite.updateMany).not.toHaveBeenCalled();
+  });
+});

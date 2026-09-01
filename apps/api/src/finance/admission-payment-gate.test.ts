@@ -46,6 +46,7 @@ function gateFixture(options?: {
       recordStatus: "pending_payment",
       person: {
         id: "person-1",
+        email: "current-student@example.test",
         firstName: "Awa",
         lastName: "Ndiaye",
         roles: [],
@@ -309,7 +310,7 @@ describe("accepted-applicant cash gate", () => {
     expect(state.applicant.student.recordStatus).toBe("active");
     expect(state.applicant.student.person.roles).toContain("student");
     expect(state.links.every((link) => link.status === "cancelled")).toBe(true);
-    expect(state.invites).toHaveLength(1);
+    expect(state.invites).toHaveLength(0);
 
     await expect(
       syncEnrollmentGateInTransaction(state.tx, {
@@ -318,7 +319,7 @@ describe("accepted-applicant cash gate", () => {
       }),
     ).resolves.toBeNull();
     expect(state.tx.student.update).toHaveBeenCalledTimes(1);
-    expect(state.invites).toHaveLength(1);
+    expect(state.invites).toHaveLength(0);
   });
 
   it("uses net invoice cash even when a credit changed installment allocation order", async () => {
@@ -367,7 +368,7 @@ describe("accepted-applicant cash gate", () => {
         paymentId: "payment-success",
       }),
     ).resolves.toBeNull();
-    expect(state.invites).toHaveLength(1);
+    expect(state.invites).toHaveLength(0);
   });
 
   it("raises the remaining gate and rotates the link after a pre-activation refund", async () => {

@@ -3,6 +3,16 @@ variable "session_secret" {
   sensitive = true
 }
 
+variable "student_activation_code_key_v1" {
+  type        = string
+  sensitive   = true
+  description = "Dedicated 32-byte base64url HMAC key for student activation pairing codes"
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_-]{43}$", var.student_activation_code_key_v1))
+    error_message = "student_activation_code_key_v1 must be an unpadded 32-byte base64url value (43 characters)."
+  }
+}
+
 variable "resend_api_key" {
   type      = string
   sensitive = true

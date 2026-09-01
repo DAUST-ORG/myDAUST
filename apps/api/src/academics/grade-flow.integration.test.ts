@@ -37,7 +37,7 @@ describe.skipIf(!DB_URL)("faculty grading flow", () => {
     });
     prisma = new PrismaClient({ datasources: { db: { url } } });
     academics = new AcademicsService(prisma as never);
-    registrar = new RegistrarService(prisma as never, {} as never);
+    registrar = new RegistrarService(prisma as never);
 
     const [faculty, outsider, reviewer] = await Promise.all([
       prisma.person.create({

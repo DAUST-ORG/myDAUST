@@ -59,7 +59,6 @@ import {
   type EnrollmentActivation,
   verifiedEnrollmentCashXof,
 } from "./admission-payment-gate.js";
-import { deliverStudentActivationInviteAfterCommit } from "./activation-invite-delivery.js";
 import {
   isRunRateEligibleCashRecognition,
   paymentCashRecognition,
@@ -1691,9 +1690,6 @@ export class FinanceService {
       // best-effort and must never make a successful settlement look rolled back.
       await Promise.allSettled([
         this.emailReceipt(paymentId),
-        ...(result.activation
-          ? [this.deliverStudentActivationInvite(result.activation)]
-          : []),
       ]);
     }
   }
@@ -2716,15 +2712,6 @@ export class FinanceService {
     });
   }
 
-  /** Deliver the account setup secret created atomically by the enrollment gate. */
-  async deliverStudentActivationInvite(activation: EnrollmentActivation) {
-    await deliverStudentActivationInviteAfterCommit(
-      this.prisma,
-      this.mail,
-      activation,
-    );
-  }
-
   /** Email a payment receipt to the student (best-effort; dev-logs without a provider). */
   private async emailReceipt(paymentId: string) {
     const p = await this.prisma.payment.findUnique({
@@ -3577,8 +3564,13 @@ export class FinanceService {
   ) {
     const { firstName, lastName } = this.splitName(input.fullName);
     if (!firstName) throw new BadRequestException("Full name is required");
-    const dob = new Date(`${input.dateOfBirth.slice(0, 10)}T00:00:00Z`);
-    if (Number.isNaN(dob.getTime()))
+    const dob = /^\d{4}-\d{2}-\d{2}$/.test(input.dateOfBirth)
+      ? new Date(`${input.dateOfBirth}T00:00:00.000Z`)
+      : new Date(Number.NaN);
+    if (
+      Number.isNaN(dob.getTime()) ||
+      dob.toISOString().slice(0, 10) !== input.dateOfBirth
+    )
       throw new BadRequestException("Invalid date of birth");
 
     const studentNo = normalizeStudentNumber(

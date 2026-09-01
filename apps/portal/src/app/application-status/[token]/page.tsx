@@ -321,9 +321,11 @@ function StatusView({ data }: { data: PublicApplicationStatus }) {
               <div>
                 <strong>Your student record is active</strong>
                 <span>
-                  Check your email for the secure account-setup invitation. This
-                  page is now read-only.
+                  While physically present with an authorized registrar, open
+                  student account activation to pair this browser and set your
+                  password. This page is now read-only.
                 </span>
+                <Link href="/activate-student">Activate student account</Link>
               </div>
             </div>
           )}

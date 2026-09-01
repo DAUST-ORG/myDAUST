@@ -31,7 +31,6 @@ import {
   getApplicant,
   getAdminPrograms,
   resendApplicantAcceptanceEmail,
-  resendApplicantStudentInvite,
   rotateApplicantOnboardingLink,
   setApplicantStage,
 } from "@/lib/api";
@@ -89,7 +88,7 @@ export default function ApplicantDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { me } = useAuth();
   const isAdmin = me?.roles.includes("admin") ?? false;
-  // Rotating a payment link, resending a set-password invite and opening the student record
+  // Rotating a payment link and opening the student record
   // are registrar work; the API refuses them for an admissions officer, so the buttons must
   // not be offered either.
   const canManageOnboarding =
@@ -788,7 +787,6 @@ function EnrollmentPanel({
   const [latestStatusUrl, setLatestStatusUrl] = useState<string | null>(
     issuedStatusUrl,
   );
-  const [latestInviteUrl, setLatestInviteUrl] = useState<string | null>(null);
   const [confirmRotate, setConfirmRotate] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
 
@@ -845,30 +843,6 @@ function EnrollmentPanel({
           : "Could not replace the enrollment links.",
       );
       throw cause;
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function resendStudentInvite() {
-    setBusy("student-invite");
-    onError(null);
-    try {
-      const next = await resendApplicantStudentInvite(applicantId);
-      setLatestInviteUrl(next.studentInvite.inviteUrl);
-      if (next.onboarding)
-        onUpdated(
-          next.onboarding,
-          next.studentInvite.delivery === "sent"
-            ? "Account-setup invitation resent."
-            : "Invitation created, but email delivery failed. Copy the one-time link below.",
-        );
-    } catch (cause) {
-      onError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not resend the account-setup invitation.",
-      );
     } finally {
       setBusy(null);
     }
@@ -1169,23 +1143,6 @@ function EnrollmentPanel({
                   : "Copy new private status link"}
               </button>
             )}
-            {latestInviteUrl && (
-              <button
-                type="button"
-                onClick={() => copy("invite", latestInviteUrl)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  textAlign: "left",
-                }}
-              >
-                <Copy size={14} />{" "}
-                {copied === "invite"
-                  ? "Setup link copied"
-                  : "Copy one-time account setup link"}
-              </button>
-            )}
             {paymentPending && (
               <button
                 type="button"
@@ -1216,24 +1173,6 @@ function EnrollmentPanel({
                 }}
               >
                 <RefreshCw size={14} /> Replace payment and status links
-              </button>
-            )}
-            {enrolled && canManageOnboarding && (
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={resendStudentInvite}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  textAlign: "left",
-                }}
-              >
-                <Mail size={14} />{" "}
-                {busy === "student-invite"
-                  ? "Sending…"
-                  : "Resend account setup"}
               </button>
             )}
             {enrolled && onboarding.studentId && canManageOnboarding && (
@@ -1301,7 +1240,6 @@ function EnrollmentPanel({
           onCancelled={(next) => {
             setCancelOpen(false);
             setLatestStatusUrl(null);
-            setLatestInviteUrl(null);
             onCancelled(next);
           }}
         />

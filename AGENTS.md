@@ -450,6 +450,20 @@ Invite mechanics to preserve on any change: 32-byte base64url token, sha256 at r
 redemption claims the row with `updateMany({where:{id, usedAt:null, expiresAt:{gte:now}}})` and
 requires `count === 1`, and unknown/used/expired all return the same message (no oracle).
 
+`StudentInvite` redeems through the same public page but has stricter identity binding: every new
+row stores a sha256 of the exact current `Person.email`, and redemption conditionally requires an
+active, passwordless, student-only Person with an active Student row and that unchanged email.
+Legacy null-bound rows fail closed. Changing a student's login email or roles, or provisioning a
+temporary password, burns every outstanding student invite in the same transaction.
+
+Student password setup has exactly one issuance path: the public `/activate-student` ceremony.
+The student proves the exact Student ID + date of birth privately, retains a 32-byte browser
+capability, and shows a six-digit pairing code to an authenticated registrar/admin. Staff must
+visually check an official photo credential in person before approval. Approval rechecks the
+locked student identity and creates the only `StudentInvite`; tokens, codes, raw DOB, setup URLs
+and emails never enter staff responses or audits. Finance activation, Admissions, registrar
+creation and user administration must not mint, email, export or disclose student credentials.
+
 ### Identity is never resolved by similarity
 
 Guardian↔student matching is **exact-only** and reports `student_not_found` / `ambiguous_student`
@@ -518,9 +532,11 @@ Dead code an agent will otherwise copy as if it were the design system: `Panel.t
 `Announcements.tsx` (zero importers) and `lib/api-{affairs,campus,innovation}.ts` (leftovers from
 retired portals).
 
-Routes outside the authenticated shell: `/login`, `/set-password`, `/change-password`,
+Routes outside the authenticated shell: `/login`, `/activate-student`, `/set-password`, `/change-password`,
 `/pay-bill`, `/pay/[token]`, `/application-status/[token]`, `/billing-admin`. `middleware.ts`
 rewrites `/` → `/pay-bill` and `/admin` → `/billing-admin` **only** for the payment hosts.
+`/set-password` is a bearer-capability page: new links put the token in the URL fragment, and its
+layout/middleware enforce dynamic rendering, `no-store`, `no-referrer`, `noindex` and frame denial.
 
 ---
 

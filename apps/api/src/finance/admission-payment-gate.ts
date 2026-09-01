@@ -1,8 +1,7 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { BadRequestException } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
 
-const STUDENT_INVITE_TTL_MS = 72 * 60 * 60 * 1000;
 const ENROLLED_STATUS_LINK_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type EnrollmentActivation = {
@@ -10,10 +9,7 @@ export type EnrollmentActivation = {
   studentId: string;
   studentNo: string;
   personId: string;
-  email: string;
   name: string;
-  inviteToken: string;
-  inviteExpiresAt: Date;
 };
 
 export type EnrollmentGateSync = {
@@ -113,10 +109,6 @@ export async function assertCurrentEnrollmentInvoicePaymentInTransaction(
       "Amount exceeds the remaining first-installment cash requirement",
     );
   }
-}
-
-function inviteTokenHash(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
 }
 
 /** Fail closed when Finance tries to approve a stale onboarding-link attempt. */
@@ -500,24 +492,6 @@ export async function syncEnrollmentGateInTransaction(
     "preserve",
   );
 
-  // Create the single-use secret atomically with activation, then deliver it only
-  // after the surrounding money transaction commits.
-  const inviteToken = randomBytes(32).toString("base64url");
-  const inviteExpiresAt = new Date(now.getTime() + STUDENT_INVITE_TTL_MS);
-  await tx.studentInvite.updateMany({
-    where: {
-      studentPersonId: applicant.student.person.id,
-      usedAt: null,
-    },
-    data: { usedAt: now },
-  });
-  await tx.studentInvite.create({
-    data: {
-      studentPersonId: applicant.student.person.id,
-      tokenHash: inviteTokenHash(inviteToken),
-      expiresAt: inviteExpiresAt,
-    },
-  });
   await tx.auditLog.create({
     data: {
       entity: "Applicant",
@@ -540,12 +514,9 @@ export async function syncEnrollmentGateInTransaction(
       studentId: applicant.student.id,
       studentNo: applicant.student.studentNo,
       personId: applicant.student.person.id,
-      email: applicant.email,
       name: `${applicant.firstName} ${applicant.lastName}`
         .replace(/\s+/g, " ")
         .trim(),
-      inviteToken,
-      inviteExpiresAt,
     },
     requiredCashXof,
     paidCashXof,

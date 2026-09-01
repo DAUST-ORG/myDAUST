@@ -433,6 +433,8 @@ model Person {
   guardianProfile               GuardianProfile?
   guardianInvites               GuardianInvite[]            @relation("GuardianInvites")
   studentInvites                StudentInvite[]             @relation("StudentInvites")
+  activationRequestsAsStudent   StudentActivationRequest[]   @relation("StudentActivationRequestStudent")
+  activationRequestsApproved    StudentActivationRequest[]   @relation("StudentActivationRequestApprover")
   broadcasts                    Broadcast[]                 @relation("BroadcastSender")
   // Public website profile for faculty (see FacultyProfile).
   facultyProfile                FacultyProfile?
@@ -2433,19 +2435,53 @@ model GuardianInvite {
   @@index([guardianId])
 }
 
-/// A student's single-use, expiring password-setup token. Mirrors GuardianInvite:
-/// the registrar provisions the account and the student sets their own password at
-/// the public /set-password page (same redemption path).
+/// A student's single-use, expiring password-setup token. Only an approved
+/// StudentActivationRequest creates one; the student-owned browser capability
+/// redeems it on the public /set-password page.
 model StudentInvite {
   id              String    @id @default(uuid())
   studentPersonId String
   person          Person    @relation("StudentInvites", fields: [studentPersonId], references: [id], onDelete: Cascade)
   tokenHash       String    @unique
+  // Setup invites bind the capability to the reviewed login identity.
+  // Nullable keeps the migration additive; null legacy rows fail closed.
+  boundEmailSha256 String?
   expiresAt       DateTime
   usedAt          DateTime?
   createdAt       DateTime  @default(now())
+  activationRequest StudentActivationRequest? @relation("StudentActivationRequestInvite")
 
   @@index([studentPersonId])
+}
+
+/// Public student activation begins as a short-lived request and requires a
+/// named registrar/admin approval before a setup invite exists.
+/// Both public capabilities are stored only as hashes.
+model StudentActivationRequest {
+  id               String    @id @default(uuid())
+  studentPersonId  String?
+  studentPerson    Person?   @relation("StudentActivationRequestStudent", fields: [studentPersonId], references: [id], onDelete: Cascade)
+  accountKeyHash   String
+  requestTokenHash String    @unique
+  approvalCodeHash String
+  expiresAt        DateTime
+  approvedAt       DateTime?
+  approvedById     String?
+  approvedBy       Person?   @relation("StudentActivationRequestApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  studentInviteId  String?   @unique
+  studentInvite    StudentInvite? @relation("StudentActivationRequestInvite", fields: [studentInviteId], references: [id], onDelete: SetNull)
+  consumedAt       DateTime?
+  invalidatedAt    DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // The migration also owns partial unique indexes for unresolved account keys,
+  // real student-person IDs, and approval-code hashes. Prisma cannot express them.
+  @@index([accountKeyHash])
+  @@index([studentPersonId, consumedAt, invalidatedAt, expiresAt], map: "StudentActivationRequest_active_idx")
+  @@index([studentPersonId, approvedAt, expiresAt], map: "StudentActivationRequest_approval_idx")
+  @@index([approvedById])
+  @@index([expiresAt])
 }
 
 /// A document on a student's record. `slot` is a fixed key for the six typed slots

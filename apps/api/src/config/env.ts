@@ -29,6 +29,10 @@ const schema = z
       .string()
       .min(16)
       .default("dev-only-session-secret-change-me"),
+    // Dedicated pepper for the short student-activation pairing code. It is
+    // optional at boot so existing app services remain available; activation
+    // endpoints fail closed unless it decodes to exactly 32 bytes.
+    STUDENT_ACTIVATION_CODE_KEY_V1: z.string().optional(),
     COOKIE_SECURE: z.enum(["true", "false"]).optional(),
 
     // PI-SPI (BCEAO instant-payment rail). The app

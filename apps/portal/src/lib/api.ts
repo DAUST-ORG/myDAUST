@@ -1027,22 +1027,63 @@ export interface AdminStudentRosterParams {
   sort?: AdminStudentRosterSort;
   direction?: "asc" | "desc";
 }
-export interface ProvisionedLogin {
+export interface StudentActivationStart {
+  requestToken: string;
+  approvalCode: string;
+  requestExpiresAt: string;
+}
+export const startStudentActivation = (input: {
+  studentNo: string;
+  dob: string;
+}) =>
+  request<StudentActivationStart>("/student-activation/requests", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify(input),
+  });
+export const getStudentActivationStatus = (requestToken: string) =>
+  request<{ status: "pending" | "approved" | "expired" }>(
+    "/student-activation/status",
+    {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({ requestToken }),
+    },
+  );
+export interface ResolvedStudentActivation {
+  requestId: string;
   studentId: string;
   studentNo: string;
   name: string;
-  email: string;
-  tempPassword: string;
+  requestExpiresAt: string;
 }
-export const provisionStudentLogin = (id: string) =>
-  request<ProvisionedLogin>(`/registrar/students/${id}/provision-login`, {
-    method: "POST",
-  });
-export const provisionAllStudentLogins = () =>
-  request<{ count: number; credentials: ProvisionedLogin[] }>(
-    "/registrar/students/provision-logins",
-    { method: "POST" },
+export const resolveStudentActivation = (input: {
+  studentNo: string;
+  approvalCode: string;
+}) =>
+  request<ResolvedStudentActivation>(
+    "/registrar/student-activation-requests/resolve",
+    {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify(input),
+    },
   );
+export const approveStudentActivation = (
+  requestId: string,
+  approvalCode: string,
+) =>
+  request<{
+    kind: "approved";
+    studentId: string;
+    studentNo: string;
+    name: string;
+    inviteExpiresAt: string;
+  }>(`/registrar/student-activation-requests/${requestId}/approve`, {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({ approvalCode, identityVerified: true }),
+  });
 export interface ProgramRow {
   code: string;
   name: string;
@@ -2344,7 +2385,7 @@ export const listStudentAccounts = () =>
   request<StudentAccountRow[]>("/finance/admin/accounts");
 
 // Registrar student provisioning (design flow): creates the record + account + a
-// password-setup invite email, and bills nothing (money stays in the Finance portal).
+// student record, and bills nothing (money stays in the Finance portal).
 export interface RegistrarStudentInput {
   studentNo: string;
   firstName: string;
@@ -3630,19 +3671,6 @@ export const cancelApplicantOnboarding = (id: string, reason: string) =>
     method: "POST",
     body: JSON.stringify({ reason }),
   });
-export type ApplicantStudentInviteResult = ApplicantDetail & {
-  studentInvite: {
-    inviteUrl: string;
-    expiresAt: string;
-    delivery: "sent" | "not_sent";
-  };
-};
-export const resendApplicantStudentInvite = (id: string) =>
-  request<ApplicantStudentInviteResult>(
-    `/admissions/applicants/${id}/student-invite/resend`,
-    { method: "POST", body: "{}" },
-  );
-
 // --- Per-applicant notes thread (admissions / admin only) ---
 export interface ApplicantNote {
   id: string;
@@ -4095,9 +4123,9 @@ export interface StudentGuardianLink {
     | "invited"
     | "invite-expired";
 }
-/** Public: a guardian redeeming their single-use password-setup invite. */
-export const redeemGuardianInvite = (token: string, password: string) =>
-  request<{ ok: boolean }>("/guardian-invites/redeem", {
+/** Public: a student or guardian redeeming their single-use password-setup invite. */
+export const redeemAccountInvite = (token: string, password: string) =>
+  request<{ ok: boolean; email: string }>("/guardian-invites/redeem", {
     method: "POST",
     body: JSON.stringify({ token, password }),
   });

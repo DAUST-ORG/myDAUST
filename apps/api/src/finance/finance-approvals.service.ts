@@ -649,13 +649,6 @@ export class FinanceApprovalsService {
         activations,
       };
     });
-    if (this.finance && outcome.activations.length > 0) {
-      await Promise.allSettled(
-        outcome.activations.map((activation) =>
-          this.finance!.deliverStudentActivationInvite(activation),
-        ),
-      );
-    }
     return outcome.response;
   }
 

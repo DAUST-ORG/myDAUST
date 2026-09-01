@@ -497,7 +497,7 @@ describe("payment balance import planning", () => {
 });
 
 describe("payment balance activation post-audit", () => {
-  it("accepts one sent marker and one durable pending-delivery audit", () => {
+  it("requires one payment-bound activation audit per enrollment", () => {
     expect(
       auditPaymentBalanceActivationEvidence({
         expectedActivations: 2,
@@ -505,12 +505,10 @@ describe("payment balance activation post-audit", () => {
           {
             id: "applicant-sent",
             activatedByPaymentId: "payment-sent",
-            studentInviteSentAt: new Date("2026-08-31T13:00:00.000Z"),
           },
           {
             id: "applicant-pending",
             activatedByPaymentId: "payment-pending",
-            studentInviteSentAt: null,
           },
         ],
         auditLogs: [
@@ -524,21 +522,14 @@ describe("payment balance activation post-audit", () => {
             action: "onboarding-activated",
             data: { paymentId: "payment-pending" },
           },
-          {
-            entityId: "applicant-pending",
-            action: "student-invite-delivery-pending",
-            data: { studentId: "redacted-by-count-only-result" },
-          },
         ],
       }),
     ).toEqual({
       activationAuditRows: 2,
-      activationInvitesSent: 1,
-      activationInvitesPending: 1,
     });
   });
 
-  it("rejects an activation whose invite secret was neither delivered nor queued", () => {
+  it("rejects an activation without payment-bound audit evidence", () => {
     expect(() =>
       auditPaymentBalanceActivationEvidence({
         expectedActivations: 1,
@@ -546,18 +537,11 @@ describe("payment balance activation post-audit", () => {
           {
             id: "applicant-missing-delivery",
             activatedByPaymentId: "payment-1",
-            studentInviteSentAt: null,
           },
         ],
-        auditLogs: [
-          {
-            entityId: "applicant-missing-delivery",
-            action: "onboarding-activated",
-            data: { paymentId: "payment-1" },
-          },
-        ],
+        auditLogs: [],
       }),
-    ).toThrow(/lacks invite delivery or pending audit evidence/i);
+    ).toThrow(/lacks exact imported-payment audit evidence/i);
   });
 });
 

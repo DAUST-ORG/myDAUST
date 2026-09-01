@@ -82,6 +82,17 @@ export const CreateUserInput = z
         message: "Only a student account carries a student record",
       });
     }
+    if (
+      v.kind !== "student" &&
+      v.roles.some((role) => role === "student" || role === "parent")
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["roles"],
+        message:
+          "Student and parent roles are assigned only through their dedicated record workflows",
+      });
+    }
   });
 export type CreateUserInput = z.infer<typeof CreateUserInput>;
 

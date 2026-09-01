@@ -142,11 +142,4 @@ export class AdminAdmissionsController {
     return this.admissions.adminCancelOnboarding(user.personId, id, reason);
   }
 
-  @Post("applicants/:id/student-invite/resend")
-  // Returns a working set-password link to the caller, so it can set a new student's password
-  // before the student does. Same hazard class as the guardian-invite rule.
-  @Roles("admin", "registrar")
-  resendStudentInvite(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.admissions.adminResendStudentInvite(user.personId, id);
-  }
 }
