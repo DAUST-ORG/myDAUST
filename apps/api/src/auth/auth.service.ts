@@ -33,6 +33,13 @@ export class AuthService {
     const ok = await bcrypt.compare(password, person.passwordHash);
     if (!ok) throw new UnauthorizedException("Invalid credentials");
 
+    // Track only completed password authentication. Failed attempts must not
+    // alter this operational account timestamp.
+    await this.prisma.person.update({
+      where: { id: person.id },
+      data: { lastLoginAt: new Date() },
+    });
+
     return {
       personId: person.id,
       roles: person.roles.filter(isAppRole) as Role[],
@@ -64,6 +71,7 @@ export class AuthService {
   ): Promise<{ sessionVersion: number }> {
     const person = await this.prisma.person.findUnique({
       where: { id: personId },
+      include: { student: { select: { id: true } } },
     });
     if (!person || !person.passwordHash)
       throw new UnauthorizedException("Invalid credentials");
@@ -73,23 +81,73 @@ export class AuthService {
     // Bumping the version ends every session signed with the old password. The caller's own
     // cookie is re-minted by the controller, so changing a password does not sign you out of
     // the tab you changed it in -- which would strand every first-login user.
-    const updated = await this.prisma.person.update({
-      where: { id: personId },
-      data: {
-        passwordHash,
-        mustChangePassword: false,
-        sessionVersion: { increment: 1 },
-      },
-      select: { sessionVersion: true },
-    });
-    // Audit the action only — never the secret.
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Person",
-        entityId: personId,
-        action: "password-changed",
-        actorId: personId,
-      },
+    const changedAt = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // The verified hash and session version are optimistic-concurrency keys.
+      // A simultaneous registrar reset/redemption wins cleanly instead of being
+      // overwritten by this stale self-service request.
+      const changed = await tx.person.updateMany({
+        where: {
+          id: personId,
+          passwordHash: person.passwordHash,
+          sessionVersion: person.sessionVersion,
+          status: "active",
+          ...(person.student
+            ? {
+                student: {
+                  is: { id: person.student.id, recordStatus: "active" },
+                },
+              }
+            : {}),
+        },
+        data: {
+          passwordHash,
+          mustChangePassword: false,
+          passwordChangedAt: changedAt,
+          sessionVersion: { increment: 1 },
+        },
+      });
+      if (changed.count !== 1) {
+        throw new BadRequestException(
+          "Your account changed while the password was being updated. Sign in and try again.",
+        );
+      }
+      if (person.student) {
+        const invites = await tx.studentInvite.findMany({
+          where: { studentPersonId: personId, usedAt: null },
+          select: { id: true },
+        });
+        if (invites.length > 0) {
+          const inviteIds = invites.map((invite) => invite.id);
+          await tx.studentInvite.updateMany({
+            where: { id: { in: inviteIds }, usedAt: null },
+            data: { usedAt: changedAt },
+          });
+          await tx.studentActivationRequest.updateMany({
+            where: {
+              studentInviteId: { in: inviteIds },
+              consumedAt: null,
+              invalidatedAt: null,
+            },
+            data: { invalidatedAt: changedAt },
+          });
+        }
+      }
+      // Audit the action only — never the secret.
+      await tx.auditLog.create({
+        data: {
+          entity: "Person",
+          entityId: personId,
+          action: "password-changed",
+          actorId: personId,
+        },
+      });
+      const current = await tx.person.findUnique({
+        where: { id: personId },
+        select: { sessionVersion: true },
+      });
+      if (!current) throw new UnauthorizedException("Invalid credentials");
+      return current;
     });
     return { sessionVersion: updated.sessionVersion };
   }

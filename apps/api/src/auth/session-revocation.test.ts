@@ -52,4 +52,16 @@ describe("session revocation coverage", () => {
       `password writes with neither a sessionVersion bump nor a "${SESSION_EXEMPT}" note:\n${missing.join("\n")}`,
     ).toEqual([]);
   });
+
+  it("timestamps the password installed for workbook-created students", () => {
+    const source = execFileSync(
+      "sed",
+      ["-n", "1540,1620p", "src/finance/workbook-cutover.runner.ts"],
+      { encoding: "utf8" },
+    );
+    expect(source).toMatch(
+      /passwordHash,\s+mustChangePassword: true,\s+passwordChangedAt: createdAt/,
+    );
+    expect(source).toMatch(/createdAt,\s+student:/);
+  });
 });

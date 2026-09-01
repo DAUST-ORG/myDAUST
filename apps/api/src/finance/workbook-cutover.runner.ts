@@ -1578,6 +1578,7 @@ async function createNewStudent(
   const personId = randomUUID();
   const studentId = randomUUID();
   const passwordHash = await bcrypt.hash(input.temporaryPassword, 10);
+  const createdAt = new Date();
   await tx.person.create({
     data: {
       id: personId,
@@ -1590,7 +1591,9 @@ async function createNewStudent(
       // and therefore cannot have an earlier authenticated session to revoke.
       passwordHash,
       mustChangePassword: true,
+      passwordChangedAt: createdAt,
       status: "active",
+      createdAt,
       student: {
         create: {
           id: studentId,

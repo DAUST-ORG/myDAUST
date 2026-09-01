@@ -568,6 +568,17 @@ export class UsersService {
         person.kind,
       );
       if (email !== person.email) {
+        const hasStudentRecord =
+          (await this.prisma.student.count({ where: { personId: id } })) > 0;
+        if (
+          person.kind === "student" ||
+          person.roles.includes("student") ||
+          hasStudentRecord
+        ) {
+          throw new BadRequestException(
+            "A student's DAUST login email cannot be changed",
+          );
+        }
         const clash = await this.prisma.person.findUnique({ where: { email } });
         if (clash) throw new ConflictException(`${email} is already in use`);
         data.email = email;
@@ -576,6 +587,25 @@ export class UsersService {
     if (Object.keys(data).length === 0) return { id, email: person.email };
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Person" WHERE "id" = ${id} FOR UPDATE`,
+      );
+      const current = await tx.person.findUnique({
+        where: { id },
+        include: { student: { select: { id: true } } },
+      });
+      if (!current) throw new NotFoundException("User not found");
+      this.assertMayAdminister(actor, current.roles);
+      if (
+        data.email &&
+        (current.kind === "student" ||
+          current.roles.includes("student") ||
+          current.student !== null)
+      ) {
+        throw new BadRequestException(
+          "A student's DAUST login email cannot be changed",
+        );
+      }
       const row = await tx.person.update({ where: { id }, data });
       // The address is the sign-in identity, so changing it invalidates any setup link
       // pointing at the old one.
@@ -588,9 +618,9 @@ export class UsersService {
           actorId: actor.personId,
           data: {
             from: {
-              firstName: person.firstName,
-              lastName: person.lastName,
-              email: person.email,
+              firstName: current.firstName,
+              lastName: current.lastName,
+              email: current.email,
             },
             to: {
               firstName: row.firstName,

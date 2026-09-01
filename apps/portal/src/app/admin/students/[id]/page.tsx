@@ -50,6 +50,7 @@ import { EditStudentModal, type EditSection } from "./EditStudentModal";
 import { StudentDocuments } from "./StudentDocuments";
 import { StudentGuardians } from "./StudentGuardians";
 import { TranscriptManager } from "./TranscriptManager";
+import { AccountManagement } from "./AccountManagement";
 import { BillingProfileSummary } from "@/components/BillingProfileSummary";
 
 const ENROLL_BADGE: Record<string, string> = {
@@ -367,6 +368,9 @@ export default function AdminStudentDetailPage() {
               : []),
             { value: "finance", label: "Finance" },
             { value: "personal", label: "Personal & contact" },
+            ...(canManageStudent
+              ? [{ value: "account", label: "Account management" }]
+              : []),
             ...(canManageStudent
               ? [{ value: "parents", label: "Parents & guardians" }]
               : []),
@@ -841,6 +845,10 @@ export default function AdminStudentDetailPage() {
             <KV k="Campus physician" v={s.physician ?? "—"} />
           </ProfileCard>
         </div>
+      )}
+
+      {tab === "account" && canManageStudent && (
+        <AccountManagement studentId={id} />
       )}
 
       {tab === "parents" && canManageStudent && (

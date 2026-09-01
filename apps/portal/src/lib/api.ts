@@ -1590,6 +1590,83 @@ export interface AdminStudentDetail {
 export const getAdminStudentDetail = (id: string) =>
   request<AdminStudentDetail>(`/academics/admin/students/${id}`);
 
+// --- Registrar: student account management ---
+export type StudentLoginAccountState =
+  | "not_activated"
+  | "setup_pending"
+  | "must_change_password"
+  | "active"
+  | "suspended"
+  | "archived"
+  | "pending_payment";
+
+export interface RegistrarStudentAccount {
+  studentId: string;
+  personId: string;
+  loginEmail: string | null;
+  contactEmail: string | null;
+  accountState: StudentLoginAccountState;
+  eligibleForCredentialAction: boolean;
+  credentialBlockReason: string | null;
+  hasLogin: boolean;
+  mustChangePassword: boolean;
+  accountCreatedAt: string;
+  lastLoginAt: string | null;
+  passwordChangedAt: string | null;
+  pendingCredential: {
+    purpose: "first_time" | "password_reset";
+    expiresAt: string;
+  } | null;
+}
+
+export type StudentCredentialMethod = "temporary_password" | "setup_link";
+
+export type StudentCredentialResult =
+  | {
+      method: "temporary_password";
+      loginEmail: string;
+      temporaryPassword: string;
+    }
+  | {
+      method: "setup_link";
+      loginEmail: string;
+      setupUrl: string;
+      expiresAt: string;
+    };
+
+export const getRegistrarStudentAccount = (studentId: string) =>
+  request<RegistrarStudentAccount>(`/registrar/students/${studentId}/account`);
+
+export const updateRegistrarStudentContactEmail = (
+  studentId: string,
+  contactEmail: string | null,
+) =>
+  request<RegistrarStudentAccount>(
+    `/registrar/students/${studentId}/account/contact-email`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ contactEmail }),
+    },
+  );
+
+export const issueRegistrarStudentCredential = (
+  studentId: string,
+  method: StudentCredentialMethod,
+) =>
+  request<StudentCredentialResult>(
+    `/registrar/students/${studentId}/account/credentials`,
+    {
+      method: "POST",
+      body: JSON.stringify({ method }),
+    },
+  );
+
+export const signOutRegistrarStudentSessions = (studentId: string) =>
+  request<{ ok: boolean }>(
+    `/registrar/students/${studentId}/account/sign-out-all`,
+    { method: "POST" },
+  );
+
 // --- Registrar: canonical transcript ledger ---
 export type TranscriptEntrySource =
   "legacy_import" | "approved_enrollment" | "manual";
@@ -1706,7 +1783,6 @@ export const getAdminStudentActivity = (id: string) =>
   request<StudentActivity[]>(`/academics/admin/students/${id}/activity`);
 export interface UpdateStudentInput {
   fullName?: string;
-  email?: string;
   programCode?: string | null;
   dateOfBirth?: string | null;
   gender?: string | null;
@@ -1723,7 +1799,6 @@ export interface UpdateStudentInput {
   preferredName?: string | null;
   nationalId?: string | null;
   maritalStatus?: string | null;
-  personalEmail?: string | null;
   bloodType?: string | null;
   allergies?: string | null;
   insurance?: string | null;

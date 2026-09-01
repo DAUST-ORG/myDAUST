@@ -95,7 +95,9 @@ const UpdateSectionInput = z.object({
 
 const UpdateStudentInput = z.object({
   fullName: z.string().min(1).max(120).optional(),
-  email: z.string().email().optional(),
+  // The DAUST sign-in identity is read-only account metadata. Reject legacy
+  // clients that still attempt to alter it through profile edits.
+  email: z.never().optional(),
   programCode: z.string().max(20).nullable().optional(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   gender: z.string().max(20).nullable().optional(),
@@ -112,7 +114,9 @@ const UpdateStudentInput = z.object({
   preferredName: z.string().max(80).nullish(),
   nationalId: z.string().max(60).nullish(),
   maritalStatus: z.string().max(30).nullish(),
-  personalEmail: z.string().email().nullish(),
+  // Contact email is managed exclusively through the account-management tab,
+  // which applies lifecycle guards and a dedicated audit event.
+  personalEmail: z.never().optional(),
   bloodType: z.string().max(8).nullish(),
   allergies: z.string().max(300).nullish(),
   insurance: z.string().max(120).nullish(),
