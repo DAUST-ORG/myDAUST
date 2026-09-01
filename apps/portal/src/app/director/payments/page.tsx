@@ -100,7 +100,7 @@ export default function DirectorPaymentsPage() {
       <PageHeader
         eyebrow="Director · Collections assurance"
         title="Payment Verifications"
-        subtitle="Review how every payment was verified, inspect both evidence files, and flag exceptions without changing settled balances."
+        subtitle="Review how payments were verified, inspect available evidence, and flag exceptions without changing settled balances."
       />
       <div
         style={{
@@ -119,6 +119,7 @@ export default function DirectorPaymentsPage() {
             >
               <option value="all">All payments</option>
               <option value="unreviewed">Awaiting audit</option>
+              <option value="cash">Cash</option>
               <option value="wave">Wave</option>
               <option value="orange_money">Orange Money</option>
               <option value="wire">Bank</option>
@@ -183,6 +184,7 @@ export default function DirectorPaymentsPage() {
                     ),
                   ],
                   ["Method", selected.method.replaceAll("_", " ")],
+                  ["Reference", selected.transactionReference ?? "—"],
                   ["Status", selected.status],
                   [
                     "Verified",
@@ -232,6 +234,13 @@ export default function DirectorPaymentsPage() {
                       </button>
                     )}
                   </div>
+                  {!selected.hasPayerProof &&
+                    !selected.hasVerificationProof && (
+                      <p className="muted">
+                        Recorded directly by Finance; the named staff member and
+                        transaction reference are retained for audit.
+                      </p>
+                    )}
                   <textarea
                     value={note}
                     onChange={(event) => setNote(event.target.value)}
