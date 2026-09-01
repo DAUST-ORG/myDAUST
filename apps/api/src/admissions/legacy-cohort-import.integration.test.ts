@@ -635,17 +635,16 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
     expect(paid.student.person.roles).toEqual(["student"]);
     expect(paid.onboardingStatusAtImport).toBe("enrolled");
     expect(paid.applicant.studentInviteSentAt).toBeNull();
-    const suppressedInvites = await prisma.studentInvite.findMany({
+    const activationInvites = await prisma.studentInvite.findMany({
       where: { studentPersonId: paid.student.personId },
     });
-    expect(suppressedInvites).toHaveLength(1);
-    expect(suppressedInvites[0]?.usedAt).toBeTruthy();
+    expect(activationInvites).toHaveLength(0);
     expect(
       await prisma.auditLog.count({
         where: {
           entity: "Applicant",
           entityId: paid.applicantId,
-          action: "legacy-cohort-activation-invite-suppressed",
+          action: "legacy-cohort-activation-paired-flow-required",
         },
       }),
     ).toBe(1);

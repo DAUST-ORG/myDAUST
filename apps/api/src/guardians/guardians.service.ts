@@ -16,6 +16,7 @@ import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
 import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
 import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
+import { loadEnv } from "../config/env.js";
 import {
   DEFAULT_ACADEMIC_STANDING_RULES,
   DEFAULT_NOT_YET_GRADED_STANDING,
@@ -438,11 +439,17 @@ export class GuardiansService {
     const existing = email
       ? await this.prisma.person.findFirst({
           where: { email: { equals: email, mode: "insensitive" } },
+          include: { student: { select: { id: true } } },
         })
       : null;
     if (existing && existing.kind !== "parent") {
       throw new BadRequestException(
         "That email already belongs to a non-guardian account",
+      );
+    }
+    if (existing?.student) {
+      throw new BadRequestException(
+        "That account cannot be provisioned as a guardian",
       );
     }
 
@@ -532,6 +539,21 @@ export class GuardiansService {
 
   /** Issue (or re-issue) a password-setup token and email it. */
   async issueInvite(guardianId: string, email: string, name: string) {
+    const eligible = await this.prisma.person.findFirst({
+      where: {
+        id: guardianId,
+        kind: "parent",
+        student: { is: null },
+        passwordHash: null,
+        email,
+      },
+      select: { id: true },
+    });
+    if (!eligible) {
+      throw new BadRequestException(
+        "This guardian cannot receive a password-setup invitation",
+      );
+    }
     const token = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 3600_000);
     await this.prisma.guardianInvite.create({
@@ -540,8 +562,7 @@ export class GuardiansService {
 
     // Top level, not /parent/*: everything under the parent area sits behind the
     // authenticated portal layout, and the guardian has no password yet.
-    const origin = process.env.PUBLIC_URL ?? "http://localhost:3000";
-    const link = `${origin}/set-password?token=${token}`;
+    const link = `${loadEnv().PORTAL_ORIGIN}/set-password#token=${encodeURIComponent(token)}`;
     const sent = await this.mail
       .send({
         to: email,
@@ -563,7 +584,7 @@ export class GuardiansService {
 
   async resendInvite(actorId: string, guardianId: string) {
     const guardian = await this.prisma.person.findFirst({
-      where: { id: guardianId, kind: "parent" },
+      where: { id: guardianId, kind: "parent", student: { is: null } },
     });
     if (!guardian) throw new NotFoundException("Guardian not found");
     if (!guardian.email) {
@@ -603,7 +624,7 @@ export class GuardiansService {
   /** Generate or reset one guardian login, returning the temporary password once. */
   async provisionLogin(actorId: string, guardianId: string) {
     const guardian = await this.prisma.person.findFirst({
-      where: { id: guardianId, kind: "parent" },
+      where: { id: guardianId, kind: "parent", student: { is: null } },
     });
     if (!guardian) throw new NotFoundException("Guardian not found");
     if (!guardian.email) {
@@ -614,16 +635,25 @@ export class GuardiansService {
 
     const tempPassword = this.randomTempPassword();
     const provisionedAt = new Date();
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
     await this.prisma.$transaction(async (tx) => {
-      await tx.person.update({
-        where: { id: guardian.id },
+      const updated = await tx.person.updateMany({
+        where: {
+          id: guardian.id,
+          kind: "parent",
+          student: { is: null },
+          email: guardian.email,
+        },
         data: {
-          passwordHash: await bcrypt.hash(tempPassword, 10),
+          passwordHash,
           mustChangePassword: true,
           // Ends any session still holding the replaced password.
           sessionVersion: { increment: 1 },
         },
       });
+      if (updated.count !== 1) {
+        throw new NotFoundException("Guardian not found");
+      }
       // A previously issued setup link must not be able to replace the newly
       // generated password after the registrar has disclosed it.
       await tx.guardianInvite.updateMany({
@@ -651,7 +681,12 @@ export class GuardiansService {
   /** Bulk provision only guardians who do not already have a password. */
   async provisionAllMissing(actorId: string) {
     const guardians = await this.prisma.person.findMany({
-      where: { kind: "parent", email: { not: null }, passwordHash: null },
+      where: {
+        kind: "parent",
+        student: { is: null },
+        email: { not: null },
+        passwordHash: null,
+      },
       select: { id: true },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
@@ -865,10 +900,17 @@ export class GuardiansService {
     // Guardian invite first, then the student invite — one opaque token, one page.
     const gInvite = await this.prisma.guardianInvite.findUnique({
       where: { tokenHash },
-      include: { guardian: true },
+      include: { guardian: { include: { student: true } } },
     });
     if (gInvite) {
-      if (!gInvite.guardian.email) throw invalidInvite();
+      if (
+        !gInvite.guardian.email ||
+        gInvite.guardian.kind !== "parent" ||
+        gInvite.guardian.student !== null ||
+        gInvite.guardian.passwordHash !== null
+      ) {
+        throw invalidInvite();
+      }
       const guardianEmail = gInvite.guardian.email;
       const passwordHash = await bcrypt.hash(password, 10);
       const redeemedAt = new Date();
@@ -885,14 +927,21 @@ export class GuardiansService {
           data: { usedAt: redeemedAt },
         });
         if (claim.count !== 1) throw invalidInvite();
-        await tx.person.update({
-          where: { id: gInvite.guardianId },
+        const updated = await tx.person.updateMany({
+          where: {
+            id: gInvite.guardianId,
+            kind: "parent",
+            student: { is: null },
+            passwordHash: null,
+            email: guardianEmail,
+          },
           data: {
             passwordHash,
             mustChangePassword: false,
             sessionVersion: { increment: 1 },
           },
         });
+        if (updated.count !== 1) throw invalidInvite();
         // Any other outstanding invites for this guardian are now moot.
         await tx.guardianInvite.updateMany({
           where: { guardianId: gInvite.guardianId, usedAt: null },
@@ -915,35 +964,105 @@ export class GuardiansService {
       include: { person: { include: { student: true } } },
     });
     if (sInvite) {
-      if (!sInvite.person.email) throw invalidInvite();
+      if (
+        !sInvite.boundEmailSha256 ||
+        !sInvite.person.email ||
+        this.hashToken(sInvite.person.email) !== sInvite.boundEmailSha256
+      ) {
+        const invalidatedAt = new Date();
+        await this.prisma.$transaction(async (tx) => {
+          const claim = await tx.studentInvite.updateMany({
+            where: { id: sInvite.id, usedAt: null },
+            data: { usedAt: invalidatedAt },
+          });
+          if (claim.count !== 1) return;
+          await tx.studentActivationRequest.updateMany({
+            where: {
+              requestTokenHash: tokenHash,
+              consumedAt: null,
+              invalidatedAt: null,
+            },
+            data: { invalidatedAt },
+          });
+          await tx.auditLog.create({
+            data: {
+              entity: "Person",
+              entityId: sInvite.studentPersonId,
+              action: "student-setup-link-invalidated",
+              actorId: sInvite.studentPersonId,
+              data: { reason: "identity_binding_drift" },
+            },
+          });
+        });
+        throw invalidInvite();
+      }
       const studentEmail = sInvite.person.email;
       const passwordHash = await bcrypt.hash(password, 10);
       const redeemedAt = new Date();
-      await this.prisma.$transaction(async (tx) => {
-        const activeStudent = await tx.student.findFirst({
-          where: {
-            personId: sInvite.studentPersonId,
-            recordStatus: "active",
-          },
-          select: { id: true },
-        });
-        if (!activeStudent) throw invalidInvite();
+      const redeemed = await this.prisma.$transaction(async (tx) => {
         const claim = await tx.studentInvite.updateMany({
           where: {
             id: sInvite.id,
+            studentPersonId: sInvite.studentPersonId,
+            boundEmailSha256: sInvite.boundEmailSha256,
             usedAt: null,
             expiresAt: { gte: redeemedAt },
           },
           data: { usedAt: redeemedAt },
         });
-        if (claim.count !== 1) throw invalidInvite();
-        await tx.person.update({
-          where: { id: sInvite.studentPersonId },
-          data: { passwordHash, sessionVersion: { increment: 1 } },
+        if (claim.count !== 1) return false;
+
+        // The state check is part of the password write, not a prior read. If
+        // email, roles, lifecycle, or password state drifts concurrently, no
+        // password is installed and this claimed capability remains burned.
+        const passwordSet = await tx.person.updateMany({
+          where: {
+            id: sInvite.studentPersonId,
+            email: studentEmail,
+            kind: "student",
+            roles: { equals: ["student"] },
+            status: "active",
+            passwordHash: null,
+            mustChangePassword: false,
+            student: { is: { recordStatus: "active" } },
+          },
+          data: {
+            passwordHash,
+            mustChangePassword: false,
+            sessionVersion: { increment: 1 },
+          },
         });
+        if (passwordSet.count !== 1) {
+          await tx.studentActivationRequest.updateMany({
+            where: {
+              requestTokenHash: tokenHash,
+              consumedAt: null,
+              invalidatedAt: null,
+            },
+            data: { invalidatedAt: redeemedAt },
+          });
+          await tx.auditLog.create({
+            data: {
+              entity: "Person",
+              entityId: sInvite.studentPersonId,
+              action: "student-setup-link-invalidated",
+              actorId: sInvite.studentPersonId,
+              data: { reason: "identity_state_drift" },
+            },
+          });
+          return false;
+        }
         await tx.studentInvite.updateMany({
           where: { studentPersonId: sInvite.studentPersonId, usedAt: null },
           data: { usedAt: redeemedAt },
+        });
+        await tx.studentActivationRequest.updateMany({
+          where: {
+            requestTokenHash: tokenHash,
+            consumedAt: null,
+            invalidatedAt: null,
+          },
+          data: { consumedAt: redeemedAt },
         });
         await tx.auditLog.create({
           data: {
@@ -953,7 +1072,9 @@ export class GuardiansService {
             actorId: sInvite.studentPersonId,
           },
         });
+        return true;
       });
+      if (!redeemed) throw invalidInvite();
       return { ok: true, email: studentEmail };
     }
 

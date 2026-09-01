@@ -61,7 +61,6 @@ describe("what it must not reach", () => {
     ["accept", "creates a Person, a Student, an invoice and a payment link"],
     ["cancelOnboarding", "the undo for accept, and it fails closed once cash is verified"],
     ["rotateOnboardingLinks", "mints a bearer payment link against real receivables"],
-    ["resendStudentInvite", "returns a working set-password link to the caller"],
   ];
 
   for (const [method, why] of forbidden) {

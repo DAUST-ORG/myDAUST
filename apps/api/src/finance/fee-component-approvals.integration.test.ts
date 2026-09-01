@@ -1118,7 +1118,7 @@ describe.skipIf(!DB_URL)("fee component approvals", () => {
       requiredEnrollmentCashXof: 913_750,
       activatedByPaymentId: payment.id,
       activeOnboardingPaymentLinkId: null,
-      studentInviteSentAt: expect.any(Date),
+      studentInviteSentAt: null,
     });
     await expect(
       prisma.student.findUniqueOrThrow({
@@ -1136,7 +1136,7 @@ describe.skipIf(!DB_URL)("fee component approvals", () => {
       prisma.studentInvite.count({
         where: { studentPersonId: fixture.student.personId, usedAt: null },
       }),
-    ).resolves.toBe(1);
+    ).resolves.toBe(0);
   });
 
   it("fails closed for an unreconciled legacy package", async () => {

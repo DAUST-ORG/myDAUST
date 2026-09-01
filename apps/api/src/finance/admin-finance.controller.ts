@@ -35,7 +35,7 @@ const CreatePaymentLinkInput = z.object({
 
 const CreateStudentInput = z.object({
   fullName: z.string().min(1).max(120),
-  dateOfBirth: z.string().min(8).max(10), // YYYY-MM-DD
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   studentNo: z.string().min(1).max(64).optional(),
   email: z.string().email().max(160).optional(),
   programCode: z.string().min(1).max(16).optional(),

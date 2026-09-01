@@ -132,10 +132,7 @@ describe("RegistrarService.decideGradeSubmission", () => {
         async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
       ),
     };
-    const service = new RegistrarService(
-      prisma as never,
-      { send: vi.fn() } as never,
-    );
+    const service = new RegistrarService(prisma as never);
 
     await expect(
       service.decideGradeSubmission(
@@ -269,10 +266,7 @@ describe("RegistrarService.decideGradeSubmission", () => {
           async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
         ),
       };
-      const service = new RegistrarService(
-        prisma as never,
-        { send: vi.fn() } as never,
-      );
+      const service = new RegistrarService(prisma as never);
 
       await expect(
         service.decideGradeSubmission(
@@ -333,10 +327,7 @@ describe("RegistrarService.decideGradeSubmission", () => {
         async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
       ),
     };
-    const service = new RegistrarService(
-      prisma as never,
-      { send: vi.fn() } as never,
-    );
+    const service = new RegistrarService(prisma as never);
 
     await expect(
       service.decideGradeSubmission(

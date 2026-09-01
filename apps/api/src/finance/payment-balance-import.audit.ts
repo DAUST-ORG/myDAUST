@@ -15,8 +15,6 @@ export interface PaymentBalanceImportAuditResult {
   batchAuditRows: number;
   enrollmentActivations: number;
   activationAuditRows: number;
-  activationInvitesSent: number;
-  activationInvitesPending: number;
   reconciledInvoices: number;
 }
 
@@ -73,18 +71,13 @@ export function auditPaymentBalanceActivationEvidence(input: {
   applicants: readonly {
     id: string;
     activatedByPaymentId: string | null;
-    studentInviteSentAt: Date | null;
   }[];
   auditLogs: readonly {
     entityId: string;
     action: string;
     data: unknown;
   }[];
-}): {
-  activationAuditRows: number;
-  activationInvitesSent: number;
-  activationInvitesPending: number;
-} {
+}): { activationAuditRows: number } {
   assert(
     Number.isSafeInteger(input.expectedActivations) &&
       input.expectedActivations >= 0 &&
@@ -93,8 +86,6 @@ export function auditPaymentBalanceActivationEvidence(input: {
   );
 
   let activationAuditRows = 0;
-  let activationInvitesSent = 0;
-  let activationInvitesPending = 0;
   for (const applicant of input.applicants) {
     const activationLogs = input.auditLogs.filter(
       (row) =>
@@ -107,28 +98,8 @@ export function auditPaymentBalanceActivationEvidence(input: {
       "an enrollment activation lacks exact imported-payment audit evidence",
     );
     activationAuditRows += 1;
-
-    if (applicant.studentInviteSentAt) {
-      activationInvitesSent += 1;
-      continue;
-    }
-    const pendingLogs = input.auditLogs.filter(
-      (row) =>
-        row.entityId === applicant.id &&
-        (row.action === "student-invite-delivery-pending" ||
-          row.action === "student-invite-delivery-marker-pending"),
-    );
-    assert(
-      pendingLogs.length >= 1,
-      "an enrollment activation lacks invite delivery or pending audit evidence",
-    );
-    activationInvitesPending += 1;
   }
-  return {
-    activationAuditRows,
-    activationInvitesSent,
-    activationInvitesPending,
-  };
+  return { activationAuditRows };
 }
 
 export async function auditPaymentBalanceImportBatch(
@@ -362,21 +333,11 @@ export async function auditPaymentBalanceImportBatch(
     where: {
       entity: "Applicant",
       entityId: { in: activatedApplicants.map((applicant) => applicant.id) },
-      action: {
-        in: [
-          "onboarding-activated",
-          "student-invite-delivery-pending",
-          "student-invite-delivery-marker-pending",
-        ],
-      },
+      action: "onboarding-activated",
     },
     select: { entityId: true, action: true, data: true },
   });
-  const {
-    activationAuditRows,
-    activationInvitesSent,
-    activationInvitesPending,
-  } = auditPaymentBalanceActivationEvidence({
+  const { activationAuditRows } = auditPaymentBalanceActivationEvidence({
     expectedActivations,
     applicants: activatedApplicants,
     auditLogs: activationEvidence,
@@ -397,8 +358,6 @@ export async function auditPaymentBalanceImportBatch(
     batchAuditRows: batchAuditLogs.length,
     enrollmentActivations: activatedApplicants.length,
     activationAuditRows,
-    activationInvitesSent,
-    activationInvitesPending,
     reconciledInvoices: invoices.length,
   };
 }

@@ -1,10 +1,11 @@
 import bcrypt from "bcryptjs";
+import { createHash } from "node:crypto";
 import {
   BadRequestException,
   ConflictException,
   NotFoundException,
 } from "@nestjs/common";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GuardiansService } from "./guardians.service.js";
 
 function serviceWith(
@@ -18,6 +19,10 @@ function serviceWith(
     {} as never,
   );
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("GuardiansService login management", () => {
   it("reports contact details and a distinct not-provisioned state", async () => {
@@ -90,7 +95,7 @@ describe("GuardiansService login management", () => {
       email: "awa@example.com",
     };
     const tx = {
-      person: { update: vi.fn().mockResolvedValue({}) },
+      person: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       guardianInvite: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     };
@@ -112,7 +117,7 @@ describe("GuardiansService login management", () => {
       email: guardian.email,
     });
     expect(credential.tempPassword).toHaveLength(14);
-    const updateData = tx.person.update.mock.calls[0]![0].data;
+    const updateData = tx.person.updateMany.mock.calls[0]![0].data;
     expect(updateData.mustChangePassword).toBe(true);
     expect(
       await bcrypt.compare(credential.tempPassword, updateData.passwordHash),
@@ -148,7 +153,7 @@ describe("GuardiansService login management", () => {
       ],
     ]);
     const tx = {
-      person: { update: vi.fn().mockResolvedValue({}) },
+      person: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       guardianInvite: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     };
@@ -174,6 +179,7 @@ describe("GuardiansService login management", () => {
       expect.objectContaining({
         where: {
           kind: "parent",
+          student: { is: null },
           email: { not: null },
           passwordHash: null,
         },
@@ -229,6 +235,150 @@ describe("GuardiansService login management", () => {
       serviceWith(prisma).resendInvite("registrar-1", "parent-contact"),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.guardianInvite.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("GuardiansService student invite redemption", () => {
+  const token = "student-setup-token";
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const studentEmail = "student@example.test";
+  const emailHash = createHash("sha256").update(studentEmail).digest("hex");
+
+  function redemptionFixture(options?: {
+    boundEmailSha256?: string | null;
+    currentEmail?: string | null;
+    passwordSetCount?: number;
+  }) {
+    const studentInvite = {
+      id: "student-invite-1",
+      studentPersonId: "student-person-1",
+      boundEmailSha256:
+        options?.boundEmailSha256 === undefined
+          ? emailHash
+          : options.boundEmailSha256,
+      person: {
+        id: "student-person-1",
+        email:
+          options?.currentEmail === undefined
+            ? studentEmail
+            : options.currentEmail,
+        student: { id: "student-1", recordStatus: "active" },
+      },
+    };
+    const tx = {
+      studentInvite: {
+        updateMany: vi
+          .fn()
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValue({ count: 0 }),
+      },
+      person: {
+        updateMany: vi
+          .fn()
+          .mockResolvedValue({ count: options?.passwordSetCount ?? 1 }),
+      },
+      studentActivationRequest: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      guardianInvite: { findUnique: vi.fn().mockResolvedValue(null) },
+      studentInvite: { findUnique: vi.fn().mockResolvedValue(studentInvite) },
+      $transaction: vi.fn(
+        async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+      ),
+    };
+    return { prisma, tx };
+  }
+
+  it("sets a password only through the exact active passwordless student guard", async () => {
+    const { prisma, tx } = redemptionFixture();
+
+    await expect(
+      serviceWith(prisma).redeemInvite(token, "a-secure-password"),
+    ).resolves.toEqual({ ok: true, email: studentEmail });
+
+    expect(tx.studentInvite.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "student-invite-1",
+        studentPersonId: "student-person-1",
+        boundEmailSha256: emailHash,
+        usedAt: null,
+        expiresAt: { gte: expect.any(Date) },
+      },
+      data: { usedAt: expect.any(Date) },
+    });
+    expect(tx.person.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "student-person-1",
+        email: studentEmail,
+        kind: "student",
+        roles: { equals: ["student"] },
+        status: "active",
+        passwordHash: null,
+        mustChangePassword: false,
+        student: { is: { recordStatus: "active" } },
+      },
+      data: {
+        passwordHash: expect.any(String),
+        mustChangePassword: false,
+        sessionVersion: { increment: 1 },
+      },
+    });
+    const installedHash =
+      tx.person.updateMany.mock.calls[0]![0].data.passwordHash;
+    expect(await bcrypt.compare("a-secure-password", installedHash)).toBe(true);
+    expect(tx.studentActivationRequest.updateMany).toHaveBeenCalledWith({
+      where: {
+        requestTokenHash: tokenHash,
+        consumedAt: null,
+        invalidatedAt: null,
+      },
+      data: { consumedAt: expect.any(Date) },
+    });
+    expect(tx.auditLog.create).toHaveBeenCalledOnce();
+  });
+
+  it("burns a claimed invite and returns the generic error when identity state drifts", async () => {
+    const { prisma, tx } = redemptionFixture({ passwordSetCount: 0 });
+
+    await expect(
+      serviceWith(prisma).redeemInvite(token, "a-secure-password"),
+    ).rejects.toThrow("That invitation link is invalid or has expired");
+
+    expect(tx.person.updateMany).toHaveBeenCalledOnce();
+    expect(tx.studentActivationRequest.updateMany).toHaveBeenCalledWith({
+      where: {
+        requestTokenHash: tokenHash,
+        consumedAt: null,
+        invalidatedAt: null,
+      },
+      data: { invalidatedAt: expect.any(Date) },
+    });
+    expect(tx.auditLog.create).toHaveBeenCalledOnce();
+    expect(tx.studentInvite.updateMany).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { label: "a legacy invite without a binding", boundEmailSha256: null },
+    {
+      label: "an invite bound to a prior email",
+      boundEmailSha256: createHash("sha256")
+        .update("prior@example.test")
+        .digest("hex"),
+    },
+  ])("rejects $label before attempting a password write", async (options) => {
+    const { prisma, tx } = redemptionFixture(options);
+
+    await expect(
+      serviceWith(prisma).redeemInvite(token, "a-secure-password"),
+    ).rejects.toThrow("That invitation link is invalid or has expired");
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(tx.person.updateMany).not.toHaveBeenCalled();
+    expect(tx.studentActivationRequest.updateMany).toHaveBeenCalledOnce();
+    expect(tx.auditLog.create).toHaveBeenCalledOnce();
   });
 });
 
@@ -344,6 +494,9 @@ describe("GuardiansService student relationships", () => {
       $transaction: vi.fn(
         async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
       ),
+      person: {
+        findFirst: vi.fn().mockResolvedValue({ id: guardian.id }),
+      },
       guardianInvite: { create: vi.fn().mockResolvedValue({}) },
     };
 
@@ -397,6 +550,9 @@ describe("GuardiansService student relationships", () => {
       $transaction: vi.fn(
         async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
       ),
+      person: {
+        findFirst: vi.fn().mockResolvedValue({ id: guardian.id }),
+      },
       guardianInvite: { create: vi.fn().mockResolvedValue({}) },
     };
 
@@ -451,6 +607,8 @@ describe("GuardiansService student relationships", () => {
   });
 
   it("sends a setup invitation only when staff explicitly requests it", async () => {
+    vi.stubEnv("DATABASE_URL", "postgresql://localhost:5432/mydaust");
+    vi.stubEnv("PORTAL_ORIGIN", "https://my.example.test");
     const guardian = {
       id: "parent-1",
       firstName: "Awa",
@@ -472,6 +630,9 @@ describe("GuardiansService student relationships", () => {
       $transaction: vi.fn(
         async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
       ),
+      person: {
+        findFirst: vi.fn().mockResolvedValue({ id: guardian.id }),
+      },
       guardianInvite: { create: vi.fn().mockResolvedValue({}) },
     };
 

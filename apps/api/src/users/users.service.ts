@@ -19,7 +19,6 @@ import {
 } from "@mydaust/shared";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { FacultyService } from "../faculty/faculty.service.js";
-import { RegistrarService } from "../registrar/registrar.service.js";
 import type { AuthUser } from "../auth/current-user.js";
 import {
   ROLES_NEEDING_A_RECORD,
@@ -41,7 +40,6 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly faculty: FacultyService,
-    private readonly registrar: RegistrarService,
   ) {}
 
   /**
@@ -60,11 +58,13 @@ export class UsersService {
           timeout: 30_000,
         });
       } catch (error) {
+        const candidate = error as {
+          code?: unknown;
+          meta?: { code?: unknown };
+        } | null;
         const retryable =
-          typeof error === "object" &&
-          error !== null &&
-          "code" in error &&
-          error.code === "P2034";
+          candidate?.code === "P2034" ||
+          (candidate?.code === "P2010" && candidate.meta?.code === "40001");
         if (!retryable || attempt === 2) throw error;
       }
     }
@@ -76,7 +76,8 @@ export class UsersService {
     const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
     const bytes = randomBytes(14);
     let out = "";
-    for (let i = 0; i < 14; i += 1) out += alphabet[bytes[i]! % alphabet.length];
+    for (let i = 0; i < 14; i += 1)
+      out += alphabet[bytes[i]! % alphabet.length];
     return out;
   }
 
@@ -127,7 +128,9 @@ export class UsersService {
         { firstName: { contains: q, mode: "insensitive" } },
         { lastName: { contains: q, mode: "insensitive" } },
         { email: { contains: q, mode: "insensitive" } },
-        { student: { is: { studentNo: { contains: q, mode: "insensitive" } } } },
+        {
+          student: { is: { studentNo: { contains: q, mode: "insensitive" } } },
+        },
       ];
     }
 
@@ -182,53 +185,22 @@ export class UsersService {
       throw new ConflictException(`${email} is already in use`);
     }
 
-    if (input.kind === "student") return this.createStudent(actor, input, email);
-    if (input.kind === "faculty") return this.createFaculty(actor, input, email);
-    return this.createStaff(actor, input, email, roles);
-  }
-
-  /**
-   * Delegated so a student is never a bare Person with a student role: createStudent builds
-   * the Student row, the billing assignment and the roster membership every student screen
-   * assumes. Then provisionLogin issues the credential, because createStudent alone leaves
-   * passwordHash null and sends a setup email that cannot arrive -- there is no mailbox behind
-   * a mydaust.com address, and PUBLIC_URL is unset in production.
-   */
-  private async createStudent(
-    actor: AuthUser,
-    input: CreateUserInput,
-    email: string,
-  ) {
-    if (!actor.roles.includes("admin")) {
-      throw new ForbiddenException(
-        "Creating a student record is a registrar action; ask an administrator",
+    if (input.kind === "student") {
+      throw new BadRequestException(
+        "Create student records from the registrar Students page",
       );
     }
-    const s = input.student!;
-    const created = await this.registrar.createStudent(actor.personId, {
-      studentNo: s.studentNo,
-      firstName: input.firstName,
-      lastName: input.lastName,
-      email,
-      programCode: s.programCode,
-      cohort: s.cohort,
-      catalogYear: s.catalogYear,
-      yearLevel: s.yearLevel,
-      dateOfBirth: s.dateOfBirth,
-      phone: s.phone,
-    });
-
-    if (!input.provisionLogin) return { id: created.id, email, tempPassword: null };
-
-    const provisioned = await this.registrar.provisionLogin(
-      actor.personId,
-      created.id,
+    const recordBoundRole = roles.find(
+      (role) => role in ROLES_NEEDING_A_RECORD,
     );
-    return {
-      id: created.id,
-      email: provisioned.email ?? email,
-      tempPassword: provisioned.tempPassword,
-    };
+    if (recordBoundRole) {
+      throw new BadRequestException(
+        `The ${recordBoundRole} role can only be assigned through its dedicated record workflow`,
+      );
+    }
+    if (input.kind === "faculty")
+      return this.createFaculty(actor, input, email);
+    return this.createStaff(actor, input, email, roles);
   }
 
   private async createFaculty(
@@ -245,7 +217,11 @@ export class UsersService {
       },
       actor.personId,
     );
-    return { id: created.id, email: created.email, tempPassword: created.tempPassword };
+    return {
+      id: created.id,
+      email: created.email,
+      tempPassword: created.tempPassword,
+    };
   }
 
   private async createStaff(
@@ -254,7 +230,9 @@ export class UsersService {
     email: string,
     roles: AppRole[],
   ) {
-    const tempPassword = input.provisionLogin ? this.randomTempPassword() : null;
+    const tempPassword = input.provisionLogin
+      ? this.randomTempPassword()
+      : null;
     const person = await this.prisma.$transaction(async (tx) => {
       const created = await tx.person.create({
         data: {
@@ -295,6 +273,20 @@ export class UsersService {
     const roles = normalizeRoles(next);
     const person = await this.mustFind(id);
     this.assertMayAdminister(actor, person.roles);
+    const hasStudentRecord =
+      (await this.prisma.student.count({ where: { personId: id } })) > 0;
+    const isStudentIdentity =
+      person.kind === "student" ||
+      person.roles.includes("student") ||
+      hasStudentRecord;
+    if (
+      (isStudentIdentity && (roles.length !== 1 || roles[0] !== "student")) ||
+      (!isStudentIdentity && roles.includes("student"))
+    ) {
+      throw new BadRequestException(
+        "A student identity must keep exactly the student role",
+      );
+    }
 
     const { added, removed } = roleDelta(person.roles, roles);
     for (const role of [...added, ...removed]) {
@@ -324,11 +316,33 @@ export class UsersService {
     }
 
     return this.serializableTransaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Person" WHERE "id" = ${id} FOR UPDATE`,
+      );
+      const current = await tx.person.findUnique({
+        where: { id },
+        include: { student: { select: { id: true } } },
+      });
+      if (!current) throw new NotFoundException("User not found");
+      this.assertMayAdminister(actor, current.roles);
+      const currentIsStudent =
+        current.kind === "student" ||
+        current.roles.includes("student") ||
+        current.student !== null;
+      if (
+        (currentIsStudent && (roles.length !== 1 || roles[0] !== "student")) ||
+        (!currentIsStudent && roles.includes("student"))
+      ) {
+        throw new BadRequestException(
+          "A student identity must keep exactly the student role",
+        );
+      }
       await this.assertAdminsRemain(tx, id, roles.includes("admin"));
       const updated = await tx.person.update({
         where: { id },
         data: { roles: [...roles] },
       });
+      await this.burnInvites(tx, id);
       await tx.auditLog.create({
         data: {
           entity: "Person",
@@ -373,6 +387,17 @@ export class UsersService {
   async resetPassword(actor: AuthUser, id: string) {
     const person = await this.mustFind(id);
     this.assertMayAdminister(actor, person.roles);
+    const hasStudentRecord =
+      (await this.prisma.student.count({ where: { personId: id } })) > 0;
+    if (
+      person.kind === "student" ||
+      person.roles.includes("student") ||
+      hasStudentRecord
+    ) {
+      throw new BadRequestException(
+        "Student passwords can only be set through the student activation page",
+      );
+    }
     if (!person.email) {
       throw new BadRequestException(
         "This account has no login address, so it has no password to reset",
@@ -381,9 +406,39 @@ export class UsersService {
     const tempPassword = this.randomTempPassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.person.update({
+    const target = await this.serializableTransaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Person" WHERE "id" = ${id} FOR UPDATE`,
+      );
+      const current = await tx.person.findUnique({
         where: { id },
+        include: { student: { select: { id: true } } },
+      });
+      if (!current) throw new NotFoundException("User not found");
+      this.assertMayAdminister(actor, current.roles);
+      if (
+        current.kind === "student" ||
+        current.roles.includes("student") ||
+        current.student !== null
+      ) {
+        throw new BadRequestException(
+          "Student passwords can only be set through the student activation page",
+        );
+      }
+      if (!current.email) {
+        throw new BadRequestException(
+          "This account has no login address, so it has no password to reset",
+        );
+      }
+      const updated = await tx.person.updateMany({
+        where: {
+          id,
+          kind: { not: "student" },
+          roles: { equals: current.roles },
+          NOT: { roles: { has: "student" } },
+          student: { is: null },
+          email: current.email,
+        },
         data: {
           passwordHash,
           mustChangePassword: true,
@@ -391,6 +446,11 @@ export class UsersService {
           sessionVersion: { increment: 1 },
         },
       });
+      if (updated.count !== 1) {
+        throw new BadRequestException(
+          "This account changed while the password reset was being prepared",
+        );
+      }
       await this.burnInvites(tx, id);
       await tx.auditLog.create({
         data: {
@@ -400,15 +460,16 @@ export class UsersService {
           actorId: actor.personId,
           // Never the password. Recorded because a reset hands the actor a working
           // credential for this account, which is a disclosure worth being able to trace.
-          data: { disclosedToActor: true, targetRoles: person.roles },
+          data: { disclosedToActor: true, targetRoles: current.roles },
         },
       });
+      return current;
     });
 
     return {
       id,
-      name: `${person.firstName} ${person.lastName}`.trim(),
-      email: person.email,
+      name: `${target.firstName} ${target.lastName}`.trim(),
+      email: target.email,
       tempPassword,
     };
   }
@@ -501,7 +562,11 @@ export class UsersService {
 
     let email: string | undefined;
     if (input.emailLocal !== undefined && input.emailDomain !== undefined) {
-      email = this.composeEmail(input.emailLocal, input.emailDomain, person.kind);
+      email = this.composeEmail(
+        input.emailLocal,
+        input.emailDomain,
+        person.kind,
+      );
       if (email !== person.email) {
         const clash = await this.prisma.person.findUnique({ where: { email } });
         if (clash) throw new ConflictException(`${email} is already in use`);

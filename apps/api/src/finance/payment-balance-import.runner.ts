@@ -1,7 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@mydaust/db";
-import { MailService } from "../mail/mail.service.js";
-import { deliverStudentActivationInviteAfterCommit } from "./activation-invite-delivery.js";
 import type { EnrollmentActivation } from "./admission-payment-gate.js";
 import { applyHistoricalCashSettlementInTransaction } from "./historical-cash-settlement.js";
 import {
@@ -100,8 +98,6 @@ export interface PaymentBalanceImportResult {
   heldRows: number;
   importedXof: number;
   activations: number;
-  activationInvitesSent: number;
-  activationInvitesPending: number;
 }
 
 interface PaymentBalanceCommittedImport {
@@ -647,8 +643,6 @@ export async function executePaymentBalanceImport(
                 heldRows: plan.heldRows,
                 importedXof: 0,
                 activations: 0,
-                activationInvitesSent: 0,
-                activationInvitesPending: 0,
               },
               activationPayloads: [],
             } satisfies PaymentBalanceCommittedImport;
@@ -866,8 +860,6 @@ export async function executePaymentBalanceImport(
               heldRows: plan.heldRows,
               importedXof: plan.importedDeltaXof,
               activations: activationPayloads.length,
-              activationInvitesSent: 0,
-              activationInvitesPending: 0,
             },
             activationPayloads,
           } satisfies PaymentBalanceCommittedImport;
@@ -879,31 +871,7 @@ export async function executePaymentBalanceImport(
         },
       );
 
-      if (committed.activationPayloads.length === 0) return committed.result;
-
-      // The setup secret exists only in memory after the money transaction commits.
-      // Delivery is best-effort like ordinary Finance settlement: the shared helper
-      // marks successful delivery or writes a durable pending audit for Admissions.
-      const mail = new MailService();
-      const deliveries = await Promise.allSettled(
-        committed.activationPayloads.map((activation) =>
-          deliverStudentActivationInviteAfterCommit(prisma, mail, activation),
-        ),
-      );
-      let activationInvitesSent = 0;
-      let activationInvitesPending = 0;
-      for (const delivery of deliveries) {
-        if (delivery.status === "fulfilled" && delivery.value === "sent") {
-          activationInvitesSent += 1;
-        } else {
-          activationInvitesPending += 1;
-        }
-      }
-      return {
-        ...committed.result,
-        activationInvitesSent,
-        activationInvitesPending,
-      };
+      return committed.result;
     } catch (error) {
       if (
         attempt < MAX_TRANSACTION_ATTEMPTS &&

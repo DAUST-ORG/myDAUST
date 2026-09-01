@@ -525,49 +525,21 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
       payment: { canPay: false, paymentUrl: null },
     });
 
-    const firstInvite = (await admissions.adminResendStudentInvite(
-      actorId,
-      applicant.id,
-    )) as any;
-    const secondInvite = (await admissions.adminResendStudentInvite(
-      actorId,
-      applicant.id,
-    )) as any;
-    expect(secondInvite.studentInvite.inviteUrl).not.toBe(
-      firstInvite.studentInvite.inviteUrl,
-    );
-    expect(secondInvite.studentInvite.delivery).toBe("not_sent");
-    const invites = await prisma.studentInvite.findMany({
-      where: { studentPersonId: beforeRotation.studentId! },
-      orderBy: { createdAt: "asc" },
-    });
-    // studentPersonId is the Person id, not Student id.
     const student = await prisma.student.findUniqueOrThrow({
       where: { id: beforeRotation.studentId! },
     });
     const actualInvites = await prisma.studentInvite.findMany({
       where: { studentPersonId: student.personId },
-      orderBy: { createdAt: "asc" },
     });
-    expect(invites).toHaveLength(0);
-    expect(actualInvites).toHaveLength(2);
-    expect(actualInvites[0]?.usedAt).not.toBeNull();
-    expect(actualInvites[1]?.usedAt).toBeNull();
+    expect(actualInvites).toHaveLength(0);
     expect(
       await prisma.auditLog.count({
         where: {
           entityId: applicant.id,
-          action: "student-invite-resend-not-sent",
+          action: { startsWith: "student-invite-" },
         },
       }),
-    ).toBe(2);
-    expect(
-      (
-        await prisma.applicant.findUniqueOrThrow({
-          where: { id: applicant.id },
-        })
-      ).studentInviteSentAt,
-    ).toBeNull();
+    ).toBe(0);
 
     await prisma.applicant.update({
       where: { id: applicant.id },
