@@ -7,6 +7,8 @@ import { HousingOperationsService } from "./housing-operations.service.js";
 import { StudentActivationPublicController } from "./student-activation.controller.js";
 import { StudentActivationService } from "./student-activation.service.js";
 import { StudentActivationStartThrottleGuard } from "./student-activation-throttle.guard.js";
+import { StudentAccountController } from "./student-account.controller.js";
+import { StudentAccountService } from "./student-account.service.js";
 
 @Module({
   imports: [PrismaModule],
@@ -14,12 +16,14 @@ import { StudentActivationStartThrottleGuard } from "./student-activation-thrott
     RegistrarController,
     HousingOperationsController,
     StudentActivationPublicController,
+    StudentAccountController,
   ],
   providers: [
     RegistrarService,
     HousingOperationsService,
     StudentActivationService,
     StudentActivationStartThrottleGuard,
+    StudentAccountService,
   ],
   // UsersModule delegates student creation and login provisioning here.
   exports: [RegistrarService],

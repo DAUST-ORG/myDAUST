@@ -41,7 +41,6 @@ export function EditStudentModal({
   const [years, setYears] = useState<AcademicYearRow[]>([]);
   const [form, setForm] = useState({
     fullName: student.name,
-    email: student.email,
     programCode: student.programCode ?? "",
     dateOfBirth: student.dateOfBirth ?? "",
     gender: student.gender ?? "",
@@ -58,7 +57,6 @@ export function EditStudentModal({
     preferredName: student.preferredName ?? "",
     nationalId: student.nationalId ?? "",
     maritalStatus: student.maritalStatus ?? "",
-    personalEmail: student.personalEmail ?? "",
     bloodType: student.bloodType ?? "",
     allergies: student.allergies ?? "",
     insurance: student.insurance ?? "",
@@ -93,7 +91,6 @@ export function EditStudentModal({
     }
     const input: UpdateStudentInput = {
       fullName: form.fullName.trim(),
-      email: form.email.trim() || undefined,
       programCode: form.programCode || null,
       dateOfBirth: norm(form.dateOfBirth),
       gender: norm(form.gender),
@@ -110,7 +107,6 @@ export function EditStudentModal({
       preferredName: norm(form.preferredName),
       nationalId: norm(form.nationalId),
       maritalStatus: norm(form.maritalStatus),
-      personalEmail: norm(form.personalEmail),
       bloodType: norm(form.bloodType),
       allergies: norm(form.allergies),
       insurance: norm(form.insurance),
@@ -180,8 +176,6 @@ export function EditStudentModal({
 
         {show("contact") && (
           <Section title="Contact">
-            <Field label="Email"><input value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
-            <Field label="Personal email"><input value={form.personalEmail} onChange={(e) => set("personalEmail", e.target.value)} placeholder="name@example.com" /></Field>
             <Field label="Phone"><input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+221 …" /></Field>
             <Field label="City"><input value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
             <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>

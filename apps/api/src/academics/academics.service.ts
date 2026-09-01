@@ -253,7 +253,6 @@ export interface CatalogCourseInput {
 
 export interface UpdateStudentFields {
   fullName?: string;
-  email?: string;
   programCode?: string | null;
   dateOfBirth?: string | null;
   gender?: string | null;
@@ -270,7 +269,6 @@ export interface UpdateStudentFields {
   preferredName?: string | null;
   nationalId?: string | null;
   maritalStatus?: string | null;
-  personalEmail?: string | null;
   bloodType?: string | null;
   allergies?: string | null;
   insurance?: string | null;
@@ -3415,7 +3413,7 @@ export class AcademicsService {
     return events;
   }
 
-  /** Registrar/admin: update a student's record (person name/email + extended SIS fields). Audited. */
+  /** Registrar/admin: update a student's name and extended SIS fields. Login email is immutable. */
   async updateStudent(
     actorId: string,
     studentId: string,
@@ -3433,18 +3431,12 @@ export class AcademicsService {
     const personData: {
       firstName?: string;
       lastName?: string;
-      email?: string;
     } = {};
     if (input.fullName !== undefined) {
       const parts = input.fullName.replace(/\s+/g, " ").trim().split(" ");
       personData.firstName = parts.shift() ?? student.person.firstName;
       personData.lastName = parts.join(" ") || personData.firstName;
     }
-    if (input.email !== undefined) personData.email = input.email.toLowerCase();
-    const loginEmailChanged =
-      personData.email !== undefined &&
-      personData.email !== student.person.email;
-    const inviteRevokedAt = new Date();
 
     let programId: string | null | undefined;
     if (input.programCode !== undefined) {
@@ -3510,9 +3502,6 @@ export class AcademicsService {
       ...(input.maritalStatus !== undefined
         ? { maritalStatus: input.maritalStatus }
         : {}),
-      ...(input.personalEmail !== undefined
-        ? { personalEmail: input.personalEmail }
-        : {}),
       ...(input.bloodType !== undefined ? { bloodType: input.bloodType } : {}),
       ...(input.allergies !== undefined ? { allergies: input.allergies } : {}),
       ...(input.insurance !== undefined ? { insurance: input.insurance } : {}),
@@ -3546,14 +3535,6 @@ export class AcademicsService {
             this.prisma.person.update({
               where: { id: student.personId },
               data: personData,
-            }),
-          ]
-        : []),
-      ...(loginEmailChanged
-        ? [
-            this.prisma.studentInvite.updateMany({
-              where: { studentPersonId: student.personId, usedAt: null },
-              data: { usedAt: inviteRevokedAt },
             }),
           ]
         : []),

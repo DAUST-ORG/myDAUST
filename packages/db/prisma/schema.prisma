@@ -25,6 +25,14 @@ enum PersonKind {
   parent
 }
 
+/// Why a student password capability was issued. First-time capabilities may
+/// only install the initial password; password-reset capabilities may replace
+/// an existing password when (and only when) the one-time link is redeemed.
+enum StudentInvitePurpose {
+  first_time
+  password_reset
+}
+
 enum PaymentMethod {
   wave
   orange_money
@@ -517,6 +525,9 @@ model Person {
   // Signed into the session JWT at login and compared on every authenticated request.
   // Bump it to end every live session this person holds.
   sessionVersion                Int                                  @default(0)
+  // Operational account metadata. Null means the event predates tracking.
+  lastLoginAt                   DateTime?
+  passwordChangedAt             DateTime?
   createdAt                     DateTime                             @default(now())
   student                       Student?
   taughtSections                Section[]                            @relation("Instructor")
@@ -2760,6 +2771,7 @@ model StudentInvite {
   // Setup invites bind the capability to the reviewed login identity.
   // Nullable keeps the migration additive; null legacy rows fail closed.
   boundEmailSha256  String?
+  purpose           StudentInvitePurpose        @default(first_time)
   expiresAt         DateTime
   usedAt            DateTime?
   createdAt         DateTime                  @default(now())

@@ -252,6 +252,7 @@ describe("GuardiansService student invite redemption", () => {
     const studentInvite = {
       id: "student-invite-1",
       studentPersonId: "student-person-1",
+      purpose: "first_time",
       boundEmailSha256:
         options?.boundEmailSha256 === undefined
           ? emailHash
@@ -267,6 +268,7 @@ describe("GuardiansService student invite redemption", () => {
     };
     const tx = {
       studentInvite: {
+        findMany: vi.fn().mockResolvedValue([]),
         updateMany: vi
           .fn()
           .mockResolvedValueOnce({ count: 1 })
@@ -323,6 +325,7 @@ describe("GuardiansService student invite redemption", () => {
       data: {
         passwordHash: expect.any(String),
         mustChangePassword: false,
+        passwordChangedAt: expect.any(Date),
         sessionVersion: { increment: 1 },
       },
     });
@@ -689,7 +692,12 @@ describe("GuardiansService student relationships", () => {
     };
     const updated = { ...guardian, email: "awa@example.com" };
     const tx = {
-      person: { update: vi.fn().mockResolvedValue(updated) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      person: {
+        findFirst: vi.fn().mockResolvedValue(guardian),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue(updated),
+      },
       guardianInvite: { updateMany: vi.fn() },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
     };
@@ -713,8 +721,12 @@ describe("GuardiansService student relationships", () => {
       { email: "AWA@EXAMPLE.COM" },
     );
 
-    expect(tx.person.update).toHaveBeenCalledWith({
-      where: { id: guardian.id },
+    expect(tx.person.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: guardian.id,
+        kind: "parent",
+        student: { is: null },
+      },
       data: { email: "awa@example.com" },
     });
     expect(prisma.person.findFirst).toHaveBeenNthCalledWith(2, {
@@ -729,6 +741,25 @@ describe("GuardiansService student relationships", () => {
       email: "awa@example.com",
       inviteDelivery: null,
     });
+  });
+
+  it("refuses to rename a malformed Student-backed parent identity", async () => {
+    const prisma = {
+      person: { findFirst: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn(),
+    };
+
+    await expect(
+      serviceWith(prisma).update("registrar-1", "student-person", {
+        email: "renamed@example.com",
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.person.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ student: { is: null } }),
+      }),
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("unlinks only the relationship and records the revocation", async () => {

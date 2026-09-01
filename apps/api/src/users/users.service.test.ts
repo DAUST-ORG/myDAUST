@@ -128,6 +128,40 @@ describe("the identity ceiling", () => {
     expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 
+  it("refuses changing the login email of any Student-backed identity", async () => {
+    const { users, prisma } = serviceWith(TARGET);
+    prisma.student.count.mockResolvedValue(1);
+
+    await expect(
+      users.update(ADMIN, "target-1", {
+        emailLocal: "renamed",
+        emailDomain: "daust.org",
+      }),
+    ).rejects.toMatchObject({
+      message: "A student's DAUST login email cannot be changed",
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.person.update).not.toHaveBeenCalled();
+  });
+
+  it("re-checks the locked row before changing a login email", async () => {
+    const { users, prisma } = serviceWith(TARGET);
+    prisma.person.findUnique
+      .mockResolvedValueOnce({ student: null, ...TARGET })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ student: { id: "student-1" }, ...TARGET });
+
+    await expect(
+      users.update(ADMIN, "target-1", {
+        emailLocal: "renamed",
+        emailDomain: "daust.org",
+      }),
+    ).rejects.toMatchObject({
+      message: "A student's DAUST login email cannot be changed",
+    });
+    expect(prisma.person.update).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the conditional reset write sees later identity drift", async () => {
     const { users, prisma } = serviceWith(TARGET);
     prisma.person.updateMany.mockResolvedValue({ count: 0 });
