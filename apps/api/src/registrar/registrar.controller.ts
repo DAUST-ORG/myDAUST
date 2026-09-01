@@ -145,6 +145,10 @@ const StudentDocumentInput = z.object({
   name: z.string().trim().max(200).nullish(),
 });
 
+const ArchiveStudentInput = z.object({
+  reason: z.string().trim().min(10).max(1000),
+});
+
 @Controller("registrar")
 @Roles("admin", "registrar")
 export class RegistrarController {
@@ -155,6 +159,24 @@ export class RegistrarController {
     return this.registrar.createStudent(
       user.personId,
       CreateStudentInput.parse(body),
+    );
+  }
+
+  /**
+   * Archive the SIS record without deleting academic, financial, guardian, document,
+   * or health history. This is admin-only because it revokes live student access.
+   */
+  @Post("students/:id/archive")
+  @Roles("admin")
+  archiveStudent(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.registrar.archiveStudent(
+      user.personId,
+      id,
+      ArchiveStudentInput.parse(body).reason,
     );
   }
 

@@ -28,6 +28,7 @@ const HANDLERS = Object.getOwnPropertyNames(DiningController.prototype).filter(
 const STUDENT_ROUTES = [
   "myPass",
   "choosePlan",
+  "myPlanOptions",
   "myToday",
   "myEligibility",
   "myOrders",

@@ -16,6 +16,7 @@ import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js
 import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
 import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
+import { paymentDateProjection } from "../finance/payment-cash-recognition.js";
 import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
 import { loadEnv } from "../config/env.js";
 import {
@@ -1495,6 +1496,11 @@ export class GuardiansService {
     };
   }
 
+  async childBillingProfile(guardianId: string, studentId: string) {
+    await this.assertGuardianOf(guardianId, studentId);
+    return this.finance.getBillingProfile(studentId);
+  }
+
   /** Verify the selected child and invoice as one scope before any money moves. */
   private async assertChildInvoice(
     guardianId: string,
@@ -1647,11 +1653,7 @@ export class GuardiansService {
       studentId,
       paymentId,
     );
-    const durable = payment as typeof payment & {
-      source?: string;
-      settledAt?: Date | null;
-      refundedAt?: Date | null;
-    };
+    const durable = payment as typeof payment & { source?: string };
     return {
       id: payment.id,
       invoiceId: payment.invoiceId,
@@ -1660,8 +1662,8 @@ export class GuardiansService {
       status: payment.status,
       providerRef: payment.providerRef,
       source: durable.source ?? "legacy",
-      settledAt: durable.settledAt ?? null,
-      refundedAt: durable.refundedAt ?? null,
+      ...paymentDateProjection(payment),
+      refundedAt: payment.refundedAt,
       createdAt: payment.createdAt,
     };
   }

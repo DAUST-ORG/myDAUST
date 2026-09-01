@@ -50,6 +50,95 @@ export interface RegistrarStudentInput {
   catalogYear?: string | null;
 }
 
+/**
+ * Transaction-level archive primitive shared by the HTTP service and the guarded
+ * workbook cutover. The caller owns transaction isolation and retry policy.
+ */
+export async function archiveStudentInTransaction(
+  tx: Prisma.TransactionClient,
+  actorId: string,
+  studentId: string,
+  reason: string,
+  cutoverAudit?: { batchId: string; sourceRecordId: string },
+) {
+  const normalizedReason = reason.trim();
+  if (normalizedReason.length < 10 || normalizedReason.length > 1000) {
+    throw new BadRequestException(
+      "Archive reason must be between 10 and 1000 characters",
+    );
+  }
+  const student = await tx.student.findUnique({
+    where: { id: studentId },
+    include: { person: true },
+  });
+  if (!student) throw new NotFoundException("Student not found");
+  if (student.recordStatus === "archived") {
+    return {
+      studentId: student.id,
+      personId: student.personId,
+      recordStatus: "archived" as const,
+      personStatus: student.person.status,
+      remainingRoles: student.person.roles,
+      previousSessionVersion: student.person.sessionVersion,
+      alreadyArchived: true,
+    };
+  }
+
+  const remainingRoles = student.person.roles.filter(
+    (role) => role !== "student",
+  );
+  const suspendPerson = remainingRoles.length === 0;
+  const now = new Date();
+  await tx.student.update({
+    where: { id: student.id },
+    data: { recordStatus: "archived" },
+  });
+  await tx.studentInvite.updateMany({
+    where: { studentPersonId: student.personId, usedAt: null },
+    data: { usedAt: now },
+  });
+  const person = await tx.person.update({
+    where: { id: student.personId },
+    data: {
+      roles: remainingRoles,
+      sessionVersion: { increment: 1 },
+      ...(suspendPerson
+        ? {
+            status: "suspended" as const,
+            suspendedAt: now,
+            suspendedById: actorId,
+          }
+        : {}),
+    },
+  });
+  await tx.auditLog.create({
+    data: {
+      entity: "Student",
+      entityId: student.id,
+      action: "student-archived-access-revoked",
+      actorId,
+      data: {
+        reason: normalizedReason,
+        personId: student.personId,
+        removedRole: student.person.roles.includes("student"),
+        remainingRoles,
+        personSuspended: suspendPerson,
+        previousSessionVersion: student.person.sessionVersion,
+        ...(cutoverAudit ?? {}),
+      },
+    },
+  });
+  return {
+    studentId: student.id,
+    personId: student.personId,
+    recordStatus: "archived" as const,
+    personStatus: person.status,
+    remainingRoles,
+    previousSessionVersion: student.person.sessionVersion,
+    alreadyArchived: false,
+  };
+}
+
 @Injectable()
 export class RegistrarService {
   constructor(
@@ -58,6 +147,33 @@ export class RegistrarService {
   ) {}
 
   // --- Students -----------------------------------------------------------
+
+  /**
+   * Revoke the student identity while retaining every dependent record. Replaying the
+   * same archive is a true no-op: it creates neither a mutation nor another audit row.
+   */
+  async archiveStudent(actorId: string, studentId: string, reason: string) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(
+          (tx) => archiveStudentInTransaction(tx, actorId, studentId, reason),
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+            maxWait: 10_000,
+            timeout: 30_000,
+          },
+        );
+      } catch (error) {
+        const retryable =
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "P2034";
+        if (!retryable || attempt === 2) throw error;
+      }
+    }
+    throw new Error("Student archive retry limit exhausted");
+  }
 
   /**
    * Provision a student record and atomically assign the administrator-approved

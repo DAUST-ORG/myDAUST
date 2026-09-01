@@ -21,6 +21,9 @@ import { ApprovalsController } from "./approvals.controller.js";
 import { DirectorController } from "./director.controller.js";
 import { FinanceApprovalsService } from "./finance-approvals.service.js";
 import { OperatingBudgetService } from "./operating-budget.service.js";
+import { BillingProfileService } from "./billing-profile.service.js";
+import { WorkbookCutoverAttestationController } from "./workbook-cutover-attestation.controller.js";
+import { WorkbookCutoverAttestationService } from "./workbook-cutover-attestation.service.js";
 
 @Module({
   controllers: [
@@ -31,9 +34,11 @@ import { OperatingBudgetService } from "./operating-budget.service.js";
     DirectorController,
     PaymentSubmissionsController,
     DirectorPaymentVerificationsController,
+    WorkbookCutoverAttestationController,
   ],
   providers: [
     FinanceService,
+    BillingProfileService,
     FinanceTasks,
     BillThrottleGuard,
     WireProofStorage,
@@ -41,6 +46,7 @@ import { OperatingBudgetService } from "./operating-budget.service.js";
     PaymentSubmissionsService,
     FinanceApprovalsService,
     OperatingBudgetService,
+    WorkbookCutoverAttestationService,
     // PI-SPI remains the automatic request-to-pay rail.
     PiSpiProvider,
     {
@@ -54,6 +60,8 @@ import { OperatingBudgetService } from "./operating-budget.service.js";
   exports: [
     REQUEST_TO_PAY_PROVIDERS,
     FinanceService,
+    BillingProfileService,
+    FinanceApprovalsService,
     OperatingBudgetService,
     PaymentSubmissionsService,
   ],

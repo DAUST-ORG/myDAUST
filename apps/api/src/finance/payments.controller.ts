@@ -7,6 +7,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -43,6 +44,20 @@ export class PaymentsController {
   @Roles("student")
   myBillingSummary(@CurrentUser() user: AuthUser) {
     return this.finance.getStudentBillingSummary(user.studentId!);
+  }
+
+  @Get("my/billing-profile")
+  @Roles("student")
+  myBillingProfile(@CurrentUser() user: AuthUser) {
+    return this.finance.getBillingProfile(user.studentId!);
+  }
+
+  @Get("billing-profile/options")
+  @Roles("bursar", "admin", "registrar", "admissions")
+  billingProfileOptions(
+    @Query("academicYearLabel") academicYearLabel?: string,
+  ) {
+    return this.finance.getBillingProfileOptions(academicYearLabel);
   }
 
   /** Public standalone pay page data. The token is the only credential (unguessable). */

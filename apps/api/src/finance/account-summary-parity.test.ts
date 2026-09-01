@@ -159,6 +159,7 @@ function service(
       }),
     },
     course: { findMany: vi.fn().mockResolvedValue([]) },
+    annualBillingProfile: { findFirst: vi.fn().mockResolvedValue(null) },
   };
   return {
     prisma,

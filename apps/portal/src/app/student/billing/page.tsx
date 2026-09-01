@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, ReceiptText } from "lucide-react";
 import {
   type BillingInvoice,
+  type BillingProfileView,
   type AccountBalanceSummary,
   type MyProfile,
   type PaymentSubmissionSummary,
@@ -12,6 +14,7 @@ import {
   getCurrentTerm,
   getMyBilling,
   getMyBillingSummary,
+  getMyBillingProfile,
   getMyProfile,
   getMyPiSpiRequest,
   getPiSpiConfig,
@@ -21,10 +24,11 @@ import {
   submitMyPaymentProof,
   verifyPiSpiAlias,
 } from "@/lib/api";
-import { Card, EmptyState, PageHeader, Select } from "@/components/ui";
+import { Badge, Card, EmptyState, PageHeader, Select } from "@/components/ui";
 import { PiSpiPayForm } from "@/components/PiSpiPayForm";
 import { ProofPaymentPanel } from "@/components/ProofPaymentPanel";
 import { formatDate, formatXof } from "@/lib/format";
+import { paymentDatePresentation } from "@/lib/payment-dates";
 import {
   AccountStandingBadge,
   accountPresentation,
@@ -34,6 +38,7 @@ import {
   resolveAccountSummary,
   type InstallmentPositionLike,
 } from "@/components/AccountBalance";
+import { BillingProfileSummary } from "@/components/BillingProfileSummary";
 
 interface ChargeRow extends InstallmentPositionLike {
   id: string | null;
@@ -103,6 +108,9 @@ export default function BillingPage() {
   const [billingSummary, setBillingSummary] =
     useState<AccountBalanceSummary | null>(null);
   const [profile, setProfile] = useState<MyProfile | null>(null);
+  const [billingProfile, setBillingProfile] = useState<
+    BillingProfileView | null | undefined
+  >(undefined);
   const [term, setTerm] = useState("");
   const [method, setMethod] = useState("proof");
   const [busy, setBusy] = useState(false);
@@ -124,6 +132,9 @@ export default function BillingPage() {
     getMyBillingSummary()
       .then(setBillingSummary)
       .catch(() => {});
+    getMyBillingProfile()
+      .then(setBillingProfile)
+      .catch(() => setBillingProfile(null));
     getMyProfile()
       .then(setProfile)
       .catch(() => {});
@@ -239,6 +250,23 @@ export default function BillingPage() {
     (attempt) => attempt.invoiceId === nextCharge?.invoiceId,
   );
   const settled = accountSummary.outstandingXof <= 0;
+  const payments = useMemo(
+    () =>
+      invoices
+        .flatMap((invoice) =>
+          invoice.payments.map((payment) => ({
+            ...payment,
+            invoiceLabel: invoice.term,
+            datePresentation: paymentDatePresentation(payment),
+          })),
+        )
+        .sort((left, right) =>
+          right.datePresentation.sortAt.localeCompare(
+            left.datePresentation.sortAt,
+          ),
+        ),
+    [invoices],
+  );
 
   async function refreshBilling() {
     const [nextInvoices, nextSummary] = await Promise.all([
@@ -316,6 +344,10 @@ export default function BillingPage() {
           {error}
         </p>
       )}
+
+      <div style={{ marginBottom: 18 }}>
+        <BillingProfileSummary profile={billingProfile} />
+      </div>
 
       {loaded && invoices.length === 0 ? (
         <EmptyState
@@ -537,6 +569,71 @@ export default function BillingPage() {
                 </div>
               );
             })}
+          </Card>
+        </div>
+      )}
+
+      {payments.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <Card
+            title="Payment history"
+            action={<ReceiptText size={17} aria-hidden="true" />}
+          >
+            <div style={{ display: "grid", gap: 9 }}>
+              {payments.map((payment) => (
+                <div
+                  key={payment.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "32px minmax(0, 1fr) auto",
+                    gap: 10,
+                    alignItems: "center",
+                    paddingBottom: 9,
+                    borderBottom: "1px solid var(--divider)",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "grid",
+                      placeItems: "center",
+                      width: 30,
+                      height: 30,
+                      borderRadius: "50%",
+                      color: "var(--success-500)",
+                      background:
+                        "color-mix(in srgb, var(--success-500) 9%, var(--surface))",
+                    }}
+                  >
+                    <CheckCircle2 size={15} />
+                  </span>
+                  <span style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                    <strong style={{ fontSize: 13 }}>
+                      {formatXof(payment.amount)} · {payment.invoiceLabel}
+                    </strong>
+                    <small className="muted">
+                      {payment.method.replaceAll("_", " ")}
+                      {payment.datePresentation.eventDate
+                        ? ` · ${payment.datePresentation.eventLabel} ${formatDate(payment.datePresentation.eventDate)}`
+                        : ""}
+                      {payment.datePresentation.settlementUnavailable
+                        ? " · Settlement date unavailable"
+                        : ""}
+                    </small>
+                  </span>
+                  <Badge
+                    tone={
+                      payment.status === "success"
+                        ? "success"
+                        : payment.status === "pending"
+                          ? "warning"
+                          : "neutral"
+                    }
+                  >
+                    {payment.status}
+                  </Badge>
+                </div>
+              ))}
+            </div>
           </Card>
         </div>
       )}

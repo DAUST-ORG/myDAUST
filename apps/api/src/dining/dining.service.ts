@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
@@ -15,11 +16,12 @@ import {
   toDakarDateKey,
 } from "@mydaust/shared";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
-import { AcademicsService } from "../academics/academics.service.js";
 import { ENV } from "../config/config.module.js";
 import type { Env } from "../config/env.js";
 import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
 import { signPass, verifyPass } from "./pass-token.js";
+import type { AuthUser } from "../auth/current-user.js";
+import { FinanceApprovalsService } from "../finance/finance-approvals.service.js";
 
 const PERIODS = ["breakfast", "lunch", "dinner"] as const;
 type Period = (typeof PERIODS)[number];
@@ -45,12 +47,16 @@ const DEFAULT_DINING_SETTINGS: DiningSettingsInput = {
 
 @Injectable()
 export class DiningService {
+  private readonly approvals: FinanceApprovalsService;
+
   constructor(
     @Inject(ENV) private readonly env: Env,
     private readonly prisma: PrismaService,
     private readonly paymentSubmissions: PaymentSubmissionsService,
-    private readonly academics: AcademicsService,
-  ) {}
+    @Optional() approvals?: FinanceApprovalsService,
+  ) {
+    this.approvals = approvals ?? new FinanceApprovalsService(prisma);
+  }
 
   private secret() {
     return this.env.SESSION_SECRET;
@@ -65,6 +71,44 @@ export class DiningService {
    */
   private dayOnly(d = new Date()) {
     return new Date(`${toDakarDateKey(d)}T00:00:00.000Z`);
+  }
+
+  /**
+   * Dining access is valid only inside one explicitly date-bounded active
+   * AcademicYear. A status flag without dates, or overlapping active years,
+   * cannot grant cafeteria access.
+   */
+  private async effectiveAcademicYearLabel(at = new Date()) {
+    const date = this.dayOnly(at);
+    const years = await this.prisma.academicYear.findMany({
+      where: {
+        status: "active",
+        startsOn: { lte: date },
+        endsOn: { gte: date },
+      },
+      orderBy: [{ startsOn: "desc" }, { label: "desc" }],
+      take: 2,
+      select: { label: true },
+    });
+    if (years.length === 0) {
+      throw new BadRequestException(
+        "No currently effective academic year is configured for Dining",
+      );
+    }
+    if (years.length !== 1) {
+      throw new BadRequestException(
+        "Dining access is blocked because the effective academic year is ambiguous",
+      );
+    }
+    return years[0]!.label;
+  }
+
+  private currentMealPlan(studentId: string, academicYearLabel: string) {
+    return this.prisma.mealPlan.findUnique({
+      where: {
+        studentId_academicYearLabel: { studentId, academicYearLabel },
+      },
+    });
   }
 
   /**
@@ -140,10 +184,14 @@ export class DiningService {
   // --- Student ---
 
   async myPass(studentId: string) {
-    const student = await this.prisma.student.findUniqueOrThrow({
-      where: { id: studentId },
-      include: { person: true, mealPlan: true },
-    });
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
+    const [student, mealPlan] = await Promise.all([
+      this.prisma.student.findUniqueOrThrow({
+        where: { id: studentId },
+        include: { person: true },
+      }),
+      this.currentMealPlan(studentId, academicYearLabel),
+    ]);
     if (student.recordStatus !== "active") {
       throw new ForbiddenException("Student enrollment is not active");
     }
@@ -151,21 +199,182 @@ export class DiningService {
       token: signPass(studentId, this.secret()),
       studentNo: student.studentNo,
       name: `${student.person.firstName} ${student.person.lastName}`,
-      plan: student.mealPlan?.type ?? "none",
-      active: student.mealPlan?.active ?? false,
+      academicYearLabel,
+      plan: mealPlan?.type ?? "none",
+      active: mealPlan?.active ?? false,
     };
   }
 
-  async choosePlan(studentId: string, type: "none" | "half" | "full") {
+  private async cafeteriaOptions(academicYearLabel: string) {
+    const supportedCodes = ["none", "half", "full"] as const;
+    const rows = await this.prisma.billingServiceOption.findMany({
+      where: {
+        academicYearLabel,
+        kind: "cafeteria",
+        active: true,
+        code: { in: [...supportedCodes] },
+      },
+      orderBy: [{ sortOrder: "asc" }, { code: "asc" }],
+    });
+    return rows
+      .filter(
+        (row) =>
+          row.calculation === "fixed" &&
+          row.amountXof !== null &&
+          (row.code === "none" || row.amountXof > 0),
+      )
+      .map((row) => ({
+        code: row.code as (typeof supportedCodes)[number],
+        label: row.label,
+        description: row.description,
+        amountXof: row.amountXof!,
+      }));
+  }
+
+  async myPlanOptions(studentId: string) {
     await this.requireActiveStudent(studentId);
-    return this.prisma.mealPlan.upsert({
-      where: { studentId },
-      update: { type, active: type !== "none" },
-      create: {
-        studentId,
-        type,
-        term: (await this.academics.currentTerm())?.name ?? "Unassigned",
-        active: type !== "none",
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
+    const profile = await this.prisma.annualBillingProfile.findFirst({
+      where: { studentId, academicYearLabel, status: "active" },
+      include: { selections: true },
+    });
+    if (!profile) {
+      throw new BadRequestException(
+        "Finance must create an annual billing profile before a cafeteria change can be requested",
+      );
+    }
+    const [options, pending] = await Promise.all([
+      this.cafeteriaOptions(profile.academicYearLabel),
+      this.prisma.approvalRequest.findFirst({
+        where: {
+          kind: "billing_profile",
+          targetType: "Student",
+          targetId: studentId,
+          status: "pending",
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, status: true, createdAt: true, afterJson: true },
+      }),
+    ]);
+    const pendingAfter =
+      pending?.afterJson &&
+      typeof pending.afterJson === "object" &&
+      !Array.isArray(pending.afterJson)
+        ? (pending.afterJson as Record<string, unknown>)
+        : null;
+    return {
+      academicYearLabel: profile.academicYearLabel,
+      currentOptionCode:
+        profile.selections.find((selection) => selection.kind === "cafeteria")
+          ?.optionCode ?? "none",
+      options,
+      pendingRequest: pending
+        ? {
+            id: pending.id,
+            status: pending.status,
+            requestedOptionCode:
+              typeof pendingAfter?.cafeteriaOptionCode === "string"
+                ? pendingAfter.cafeteriaOptionCode
+                : null,
+            createdAt: pending.createdAt.toISOString(),
+          }
+        : null,
+    };
+  }
+
+  async choosePlan(
+    studentId: string,
+    actor: AuthUser,
+    type: "none" | "half" | "full",
+  ) {
+    await this.requireActiveStudent(studentId);
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
+    const profile = await this.prisma.annualBillingProfile.findFirst({
+      where: { studentId, academicYearLabel, status: "active" },
+      include: {
+        selections: true,
+        awards: {
+          where: { definitionId: { not: null } },
+          orderBy: { createdAt: "asc" },
+        },
+        invoiceAdjustments: { orderBy: { createdAt: "asc" } },
+      },
+    });
+    if (!profile) {
+      throw new BadRequestException(
+        "Finance must create an annual billing profile before a cafeteria change can be requested",
+      );
+    }
+    const availableOptions = await this.cafeteriaOptions(
+      profile.academicYearLabel,
+    );
+    if (!availableOptions.some((option) => option.code === type)) {
+      throw new BadRequestException(
+        `Cafeteria option ${type} is not active and priced for ${profile.academicYearLabel}`,
+      );
+    }
+    const selection = (
+      kind: "housing" | "cafeteria" | "insurance" | "housing_caution",
+    ) => profile.selections.find((row) => row.kind === kind);
+    const housing = selection("housing");
+    if (!housing) {
+      throw new BadRequestException(
+        "The annual billing profile has no housing selection",
+      );
+    }
+    if (selection("cafeteria")?.optionCode === type) {
+      throw new BadRequestException("This cafeteria plan is already active");
+    }
+    const revisionReference = `billing-profile:${profile.id}:revision:${profile.revision}`;
+    const hasRevisionTaggedAdjustments = profile.invoiceAdjustments.some(
+      (adjustment) =>
+        adjustment.sourceReference?.startsWith(
+          `billing-profile:${profile.id}:revision:`,
+        ) ?? false,
+    );
+    const currentAdjustments = hasRevisionTaggedAdjustments
+      ? profile.invoiceAdjustments.filter(
+          (adjustment) => adjustment.sourceReference === revisionReference,
+        )
+      : profile.invoiceAdjustments;
+    const currentAdjustmentIds = new Set(
+      currentAdjustments.map((adjustment) => adjustment.id),
+    );
+    const currentAwards = profile.awards.filter(
+      (award) =>
+        !award.invoiceAdjustmentId ||
+        currentAdjustmentIds.has(award.invoiceAdjustmentId),
+    );
+    return this.approvals.request(actor, {
+      kind: "billing_profile",
+      targetType: "Student",
+      targetId: studentId,
+      academicYearLabel: profile.academicYearLabel,
+      reason: `Student requested cafeteria plan ${type}`,
+      after: {
+        academicYearLabel: profile.academicYearLabel,
+        expectedRevision: profile.revision,
+        housingOptionCode: housing.optionCode,
+        cafeteriaOptionCode: type,
+        insuranceSelected: (selection("insurance")?.amountXof ?? 0) > 0,
+        cautionSelected: (selection("housing_caution")?.amountXof ?? 0) > 0,
+        awardDefinitionIds: currentAwards.flatMap((award) =>
+          award.definitionId && award.calculation !== "manual"
+            ? [award.definitionId]
+            : [],
+        ),
+        manualAdjustments: currentAdjustments
+          .filter((adjustment) => adjustment.calculation === "manual")
+          .map((adjustment) => ({
+            definitionId: adjustment.definitionId ?? undefined,
+            label: adjustment.label,
+            amountXof:
+              adjustment.effect === "discount"
+                ? -adjustment.amountXof
+                : adjustment.amountXof,
+            reason:
+              adjustment.reason ?? "Carried forward from the approved profile",
+          })),
       },
     });
   }
@@ -287,10 +496,14 @@ export class DiningService {
     const studentId = verifyPass(token, this.secret());
     if (!studentId) return this.refuseUnknown("INVALID", "Invalid pass");
 
-    const student = await this.prisma.student.findUnique({
-      where: { id: studentId },
-      include: { person: true, mealPlan: true, program: true },
-    });
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
+    const [student, mealPlan] = await Promise.all([
+      this.prisma.student.findUnique({
+        where: { id: studentId },
+        include: { person: true, program: true },
+      }),
+      this.currentMealPlan(studentId, academicYearLabel),
+    ]);
     if (!student || student.recordStatus !== "active") {
       return this.refuseUnknown("UNKNOWN", "Unknown student");
     }
@@ -305,8 +518,8 @@ export class DiningService {
     ]);
 
     const verdict = diningEligibility({
-      planType: student.mealPlan?.type ?? null,
-      planActive: student.mealPlan?.active ?? false,
+      planType: mealPlan?.type ?? null,
+      planActive: mealPlan?.active ?? false,
       period,
       overdueXof,
       alreadyServed: existing?.result === "served",
@@ -325,7 +538,7 @@ export class DiningService {
       );
     }
 
-    return this.describe(verdict, student, period);
+    return this.describe(verdict, student, mealPlan, period);
   }
 
   private refuseUnknown(code: DiningVerdict["code"], reason: string) {
@@ -349,9 +562,9 @@ export class DiningService {
       studentNo: string;
       photoUrl: string | null;
       person: { firstName: string; lastName: string };
-      mealPlan: { type: string } | null;
       program?: { code: string } | null;
     },
+    mealPlan: { type: string } | null,
     period: Period,
   ) {
     return {
@@ -362,7 +575,7 @@ export class DiningService {
       name: `${student.person.firstName} ${student.person.lastName}`,
       studentNo: student.studentNo,
       photoUrl: student.photoUrl,
-      plan: student.mealPlan?.type ?? "none",
+      plan: mealPlan?.type ?? "none",
       program: student.program?.code ?? null,
       period,
     };
@@ -371,11 +584,9 @@ export class DiningService {
   /** What the door would say right now, for the student's own screen. */
   async myEligibility(studentId: string, period: Period) {
     await this.requireActiveStudent(studentId);
-    const [student, settings, date] = await Promise.all([
-      this.prisma.student.findUniqueOrThrow({
-        where: { id: studentId },
-        include: { mealPlan: true },
-      }),
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
+    const [mealPlan, settings, date] = await Promise.all([
+      this.currentMealPlan(studentId, academicYearLabel),
       this.settings(),
       Promise.resolve(this.dayOnly()),
     ]);
@@ -387,9 +598,10 @@ export class DiningService {
     ]);
     return {
       period,
+      academicYearLabel,
       ...diningEligibility({
-        planType: student.mealPlan?.type ?? null,
-        planActive: student.mealPlan?.active ?? false,
+        planType: mealPlan?.type ?? null,
+        planActive: mealPlan?.active ?? false,
         period,
         overdueXof,
         alreadyServed: existing?.result === "served",
@@ -406,9 +618,10 @@ export class DiningService {
    * not a scanning problem, so that one cannot be waived.
    */
   async scanOverride(studentNo: string, period: Period, actorPersonId: string) {
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
     const student = await this.prisma.student.findUnique({
       where: { studentNo },
-      include: { person: true, mealPlan: true, program: true },
+      include: { person: true, program: true },
     });
     if (!student || student.recordStatus !== "active") {
       return this.refuseUnknown(
@@ -419,7 +632,8 @@ export class DiningService {
 
     const settings = await this.settings();
     const date = this.dayOnly();
-    const [existing, overdueXof] = await Promise.all([
+    const [mealPlan, existing, overdueXof] = await Promise.all([
+      this.currentMealPlan(student.id, academicYearLabel),
       this.prisma.diningScan.findUnique({
         where: {
           studentId_period_date: { studentId: student.id, period, date },
@@ -431,8 +645,8 @@ export class DiningService {
     ]);
 
     const current = diningEligibility({
-      planType: student.mealPlan?.type ?? null,
-      planActive: student.mealPlan?.active ?? false,
+      planType: mealPlan?.type ?? null,
+      planActive: mealPlan?.active ?? false,
       period,
       overdueXof,
       alreadyServed: existing?.result === "served",
@@ -441,7 +655,7 @@ export class DiningService {
     });
 
     if (!current.serve && !current.overridable) {
-      return this.describe(current, student, period);
+      return this.describe(current, student, mealPlan, period);
     }
 
     const waived = current.serve ? null : current.code;
@@ -479,6 +693,7 @@ export class DiningService {
     return this.describe(
       { code: "OK", reason, serve: true, overridable: false },
       student,
+      mealPlan,
       period,
     );
   }
@@ -531,6 +746,7 @@ export class DiningService {
 
   async adminOverview() {
     const date = this.dayOnly();
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
     const [byPeriod, plans, orders] = await Promise.all([
       this.prisma.diningScan.groupBy({
         by: ["period", "result"],
@@ -539,7 +755,11 @@ export class DiningService {
       }),
       this.prisma.mealPlan.groupBy({
         by: ["type"],
-        where: { active: true, student: { recordStatus: "active" } },
+        where: {
+          academicYearLabel,
+          active: true,
+          student: { recordStatus: "active" },
+        },
         _count: true,
       }),
       this.prisma.diningOrder.findMany({
@@ -559,6 +779,7 @@ export class DiningService {
           ?._count ?? 0,
     }));
     return {
+      academicYearLabel,
       periods,
       activePlans: plans
         .filter((p) => p.type !== "none")
@@ -771,9 +992,13 @@ export class DiningService {
   /** Meal-plan roster: every student holding a plan record + how many meals they scanned today. */
   async adminStudents() {
     const date = this.dayOnly();
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
     const [plans, scans] = await Promise.all([
       this.prisma.mealPlan.findMany({
-        where: { student: { recordStatus: "active" } },
+        where: {
+          academicYearLabel,
+          student: { recordStatus: "active" },
+        },
         include: { student: { include: { person: true } } },
         orderBy: { createdAt: "asc" },
       }),
@@ -790,6 +1015,7 @@ export class DiningService {
       studentNo: p.student.studentNo,
       plan: p.type,
       active: p.active,
+      academicYearLabel: p.academicYearLabel,
       term: p.term,
       scansToday: scansByStudent.get(p.studentId) ?? 0,
     }));
@@ -803,6 +1029,7 @@ export class DiningService {
    */
   async adminReports() {
     const today = this.dayOnly();
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
     const start = new Date(today);
     start.setUTCDate(start.getUTCDate() - 6);
 
@@ -814,7 +1041,7 @@ export class DiningService {
       }),
       this.prisma.mealPlan.groupBy({
         by: ["type"],
-        where: { active: true },
+        where: { academicYearLabel, active: true },
         _count: true,
       }),
       this.prisma.diningOrder.findMany({
@@ -853,6 +1080,7 @@ export class DiningService {
     const nameById = new Map(menuItems.map((m) => [m.id, m.name]));
 
     return {
+      academicYearLabel,
       last7days,
       planMix: plans.map((p) => ({ type: p.type, count: p._count })),
       weekendRevenue: paidOrders.reduce((s, o) => s + o.totalXof, 0),

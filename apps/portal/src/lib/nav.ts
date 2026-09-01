@@ -41,6 +41,7 @@ import {
   ScanLine,
   ShieldCheck,
   ShoppingBag,
+  SlidersHorizontal,
   Stethoscope,
   Table2,
   Target,
@@ -143,9 +144,7 @@ export const STUDENT_NAV: PortalNav = {
       { href: "/student/profile", label: "My Profile", icon: UserRound },
       { href: "/student/documents", label: "Documents", icon: FolderOpen },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -161,9 +160,7 @@ export const PARENT_NAV: PortalNav = {
       { href: "/parent/attendance", label: "Attendance", icon: CheckCheck },
       { href: "/parent/billing", label: "Billing", icon: Wallet },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -207,9 +204,7 @@ export const FACULTY_NAV: PortalNav = {
         icon: ClipboardCheck,
       },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -272,7 +267,13 @@ export const REGISTRAR_NAV: PortalNav = {
       },
     ]),
     g("Administration", [
+      { href: "/admin/housing", label: "Housing", icon: Building2 },
       { href: "/admin/directory", label: "Directory", icon: BookUser },
+      {
+        href: "/admin/workbook-cutover-attestation",
+        label: "Cutover Attestation",
+        icon: ShieldCheck,
+      },
       { href: "/admin/settings", label: "Security & System", icon: Settings },
     ]),
     g("Communication", [
@@ -281,9 +282,7 @@ export const REGISTRAR_NAV: PortalNav = {
     g("Custom Forms", [
       { href: "/admin/forms", label: "Forms", icon: FileText },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -312,10 +311,13 @@ export const DIRECTOR_NAV: PortalNav = {
     ]),
     g("Administration", [
       { href: "/director/users", label: "Users", icon: Users },
+      {
+        href: "/director/workbook-cutover-attestation",
+        label: "Cutover Attestation",
+        icon: ShieldCheck,
+      },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -337,6 +339,11 @@ export const FINANCE_NAV: PortalNav = {
         label: "Fees & Payment Schedule",
         icon: Receipt,
       },
+      {
+        href: "/finance/billing-catalog",
+        label: "Billing Catalog",
+        icon: SlidersHorizontal,
+      },
       { href: "/finance/accounts", label: "Student Accounts", icon: Wallet },
       {
         href: "/finance/payment-reviews",
@@ -349,10 +356,13 @@ export const FINANCE_NAV: PortalNav = {
         icon: ClipboardCheck,
         badgeKey: "approvalRequests",
       },
+      {
+        href: "/finance/workbook-cutover-attestation",
+        label: "Cutover Attestation",
+        icon: ShieldCheck,
+      },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -372,9 +382,7 @@ export const COMMS_NAV: PortalNav = {
       { href: "/comms/assistant", label: "AI Assistant", icon: MessageSquare },
     ]),
     g("Inbox", [{ href: "/comms/messages", label: "Messages", icon: Mail }]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -399,9 +407,7 @@ export const IT_NAV: PortalNav = {
     g("Backlog", [
       { href: "/it/backlog", label: "IT backlog", icon: ClipboardList },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -421,10 +427,13 @@ export const ADMISSIONS_NAV: PortalNav = {
         icon: UserPlus,
         badgeKey: "admissions",
       },
+      {
+        href: "/admissions/workbook-cutover-attestation",
+        label: "Cutover Attestation",
+        icon: ShieldCheck,
+      },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -436,25 +445,43 @@ export const INFIRMARY_NAV: PortalNav = {
       { href: "/infirmary", label: "Dashboard", icon: LayoutDashboard },
     ]),
     g("Clinical", [
-      { href: "/infirmary/consultations", label: "Consultations", icon: Stethoscope },
+      {
+        href: "/infirmary/consultations",
+        label: "Consultations",
+        icon: Stethoscope,
+      },
       { href: "/infirmary/prescriptions", label: "Prescriptions", icon: Pill },
       { href: "/infirmary/medications", label: "Medications", icon: Pill },
-      { href: "/infirmary/appointments", label: "Appointments", icon: CalendarDays },
+      {
+        href: "/infirmary/appointments",
+        label: "Appointments",
+        icon: CalendarDays,
+      },
     ]),
     g("Records", [
       { href: "/infirmary/students", label: "Students", icon: Users },
-      { href: "/infirmary/follow-ups", label: "Follow-ups", icon: ClipboardList },
+      {
+        href: "/infirmary/follow-ups",
+        label: "Follow-ups",
+        icon: ClipboardList,
+      },
       { href: "/infirmary/documents", label: "Documents", icon: FileText },
-      { href: "/infirmary/consultations/flagged", label: "Flagged today", icon: Flag },
+      {
+        href: "/infirmary/consultations/flagged",
+        label: "Flagged today",
+        icon: Flag,
+      },
     ]),
     g("Administration", [
       { href: "/infirmary/forms", label: "Forms", icon: ClipboardList },
-      { href: "/infirmary/analytics", label: "Analytics", icon: ChartNoAxesCombined },
+      {
+        href: "/infirmary/analytics",
+        label: "Analytics",
+        icon: ChartNoAxesCombined,
+      },
       { href: "/infirmary/settings", label: "Settings", icon: Settings },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -482,9 +509,7 @@ export const DINING_NAV: PortalNav = {
       { href: "/dining/reports", label: "Reports", icon: ChartNoAxesCombined },
       { href: "/dining/settings", label: "Settings", icon: Settings },
     ]),
-    g("Support", [
-      { href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy },
-    ]),
+    g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
 };
 
@@ -622,6 +647,14 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Directory",
     crumb: "Faculty & staff directory · Administration",
   },
+  "/admin/housing": {
+    title: "Housing",
+    crumb: "Annual room assignments · Administration",
+  },
+  "/admin/workbook-cutover-attestation": {
+    title: "Reviewer Attestation",
+    crumb: "Workbook cutover · Administration",
+  },
   "/admin/settings": {
     title: "Security & System",
     crumb: "System configuration · Administration",
@@ -647,6 +680,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Fees & Payment Schedule",
     crumb: "Annual charges & payment dates · Finance",
   },
+  "/finance/billing-catalog": {
+    title: "Billing Catalog",
+    crumb: "Services, scholarships & adjustments · Finance",
+  },
   "/finance/budget": {
     title: "Budgeting & Cashflow",
     crumb: "Budget vs actual & cashflow forecast · Finance",
@@ -662,6 +699,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/finance/payment-reviews": {
     title: "Payment Reviews",
     crumb: "Proof review and payment settings · Finance",
+  },
+  "/finance/workbook-cutover-attestation": {
+    title: "Reviewer Attestation",
+    crumb: "Workbook cutover · Finance",
   },
   // communications (site CMS)
   "/comms": { title: "Dashboard", crumb: "Public website · Communications" },
@@ -729,6 +770,14 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Payment Verifications",
     crumb: "Collections assurance · Administration",
   },
+  "/director/workbook-cutover-attestation": {
+    title: "Reviewer Attestation",
+    crumb: "Workbook cutover · Administration",
+  },
+  "/admissions/workbook-cutover-attestation": {
+    title: "Reviewer Attestation",
+    crumb: "Workbook cutover · Admissions",
+  },
   "/finance/requests": {
     title: "My Requests",
     crumb: "Submitted changes · Finance",
@@ -788,7 +837,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Settings",
     crumb: "Clinic configuration · Infirmary",
   },
-  "/infirmary/consultations/flagged": { title: "Flagged today", crumb: "Sick-flagged visits · Infirmary" },
+  "/infirmary/consultations/flagged": {
+    title: "Flagged today",
+    crumb: "Sick-flagged visits · Infirmary",
+  },
   "/helpdesk": {
     title: "Helpdesk",
     crumb: "In-app support tickets",

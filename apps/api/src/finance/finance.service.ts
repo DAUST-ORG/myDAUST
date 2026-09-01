@@ -8,6 +8,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { Prisma } from "@mydaust/db";
 import {
@@ -62,9 +63,11 @@ import {
 import {
   isRunRateEligibleCashRecognition,
   paymentCashRecognition,
+  paymentDateProjection,
 } from "./payment-cash-recognition.js";
 import { externalReferenceFingerprintSha256 } from "./payment-reference.js";
 import { normalizeExternalReference } from "./historical-payment-import.manifest.js";
+import { BillingProfileService } from "./billing-profile.service.js";
 
 // Shared fee constants are bootstrap fallbacks only. Standard billing always reads
 // the current administrator-approved FeeSchedule revision from the database.
@@ -168,13 +171,43 @@ function aggregateAccountReport(
 
 @Injectable()
 export class FinanceService {
+  private readonly billingProfiles: BillingProfileService;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly wireProofs: WireProofStorage,
     @Inject(REQUEST_TO_PAY_PROVIDERS)
     private readonly rtpRails: RequestToPayRegistry,
-  ) {}
+    @Optional() billingProfiles?: BillingProfileService,
+  ) {
+    this.billingProfiles = billingProfiles ?? new BillingProfileService(prisma);
+  }
+
+  getBillingProfile(studentId: string, academicYearLabel?: string) {
+    return this.billingProfiles.get(studentId, academicYearLabel);
+  }
+
+  getBillingProfileOptions(academicYearLabel?: string) {
+    return this.billingProfiles.options(academicYearLabel);
+  }
+
+  getBillingCatalog(academicYearLabel?: string) {
+    return this.billingProfiles.catalog(academicYearLabel);
+  }
+
+  listBillingCatalogYears() {
+    return this.prisma.academicYear.findMany({
+      orderBy: [{ startsOn: "desc" }, { label: "desc" }],
+      select: {
+        id: true,
+        label: true,
+        status: true,
+        startsOn: true,
+        endsOn: true,
+      },
+    });
+  }
 
   /** Retry serializable money mutations when PostgreSQL detects a concurrent write. */
   private async serializableTransaction<T>(
@@ -645,7 +678,7 @@ export class FinanceService {
           transactionReference: p.submission?.bankReference ?? null,
           source: p.source,
           initiatedByEmail: p.initiatedByEmail,
-          settledAt: p.settledAt,
+          ...paymentDateProjection(p),
           refundedAt: p.refundedAt,
           createdAt: p.createdAt,
         })),
@@ -2792,7 +2825,7 @@ export class FinanceService {
       transactionReference: p.submission?.bankReference ?? null,
       source: p.source,
       initiatedByEmail: p.initiatedByEmail,
-      settledAt: p.settledAt,
+      ...paymentDateProjection(p),
       refundedAt: p.refundedAt,
       createdAt: p.createdAt,
     }));
@@ -3010,55 +3043,57 @@ export class FinanceService {
     });
     if (!student) throw new NotFoundException("Student not found");
 
-    const [invoices, activeHolds, pendingPlanChanges] = await Promise.all([
-      this.prisma.invoice.findMany({
-        where: { studentId },
-        orderBy: { createdAt: "desc" },
-        include: {
-          term: true,
-          plan: {
-            include: {
-              installments: {
-                orderBy: { sequence: "asc" },
-                include: {
-                  components: {
-                    include: {
-                      invoiceComponent: {
-                        select: { kind: true, label: true },
+    const [invoices, activeHolds, pendingPlanChanges, billingProfile] =
+      await Promise.all([
+        this.prisma.invoice.findMany({
+          where: { studentId },
+          orderBy: { createdAt: "desc" },
+          include: {
+            term: true,
+            plan: {
+              include: {
+                installments: {
+                  orderBy: { sequence: "asc" },
+                  include: {
+                    components: {
+                      include: {
+                        invoiceComponent: {
+                          select: { kind: true, label: true },
+                        },
                       },
                     },
                   },
                 },
               },
             },
-          },
-          payments: {
-            orderBy: { createdAt: "desc" },
-            include: {
-              submission: { select: { bankReference: true } },
+            payments: {
+              orderBy: { createdAt: "desc" },
+              include: {
+                submission: { select: { bankReference: true } },
+              },
             },
+            paymentSubmissions: { orderBy: { createdAt: "desc" } },
+            components: {
+              include: { allocations: true },
+              orderBy: { kind: "asc" },
+            },
+            componentOverrides: true,
           },
-          paymentSubmissions: { orderBy: { createdAt: "desc" } },
-          components: {
-            include: { allocations: true },
-            orderBy: { kind: "asc" },
+        }),
+        this.prisma.studentHold.findMany({
+          where: { studentId, active: true },
+          orderBy: { placedAt: "asc" },
+        }),
+        this.prisma.approvalRequest.findMany({
+          where: {
+            kind: "payment_plan",
+            status: "pending",
+            targetType: "Invoice",
           },
-          componentOverrides: true,
-        },
-      }),
-      this.prisma.studentHold.findMany({
-        where: { studentId, active: true },
-        orderBy: { placedAt: "asc" },
-      }),
-      this.prisma.approvalRequest.findMany({
-        where: {
-          kind: "payment_plan",
-          status: "pending",
-          targetType: "Invoice",
-        },
-        select: { targetId: true },
-      }),
-    ]);
+          select: { targetId: true },
+        }),
+        this.billingProfiles.get(studentId),
+      ]);
 
     const academicYears = [
       ...new Set(
@@ -3120,6 +3155,7 @@ export class FinanceService {
         remainingXof: position.summary.outstandingXof,
       },
       summary: position.summary,
+      billingProfile,
       specialAccount,
       payableTarget,
       activeHolds: activeHolds.map((hold) => ({
@@ -3247,7 +3283,7 @@ export class FinanceService {
             transactionReference: p.submission?.bankReference ?? null,
             source: p.source,
             initiatedByEmail: p.initiatedByEmail,
-            settledAt: p.settledAt,
+            ...paymentDateProjection(p),
             refundedAt: p.refundedAt,
             createdAt: p.createdAt,
           })),
@@ -4156,6 +4192,18 @@ export class FinanceService {
                     batch: { select: { sourceAsOfDate: true } },
                   },
                 },
+                workbookCutoverRecords: {
+                  select: {
+                    batch: { select: { sourceAsOfDate: true } },
+                  },
+                },
+                workbookReplacementEvents: {
+                  where: { kind: "reconstruction_payment" },
+                  select: {
+                    kind: true,
+                    batch: { select: { sourceAsOfDate: true } },
+                  },
+                },
               },
             },
           },
@@ -4964,6 +5012,7 @@ export class FinanceService {
       },
     });
     if (!p) throw new NotFoundException("Payment not found");
+    const paymentDate = paymentDateProjection(p);
     return {
       id: p.id,
       student: `${p.student.person.firstName} ${p.student.person.lastName}`,
@@ -4975,7 +5024,9 @@ export class FinanceService {
       status: p.status,
       providerRef: p.providerRef,
       transactionReference: p.submission?.bankReference ?? null,
-      paidAt: p.settledAt ?? p.updatedAt,
+      paidAt: p.settledAt,
+      recognizedOn: paymentDate.recognizedOn,
+      dateBasis: paymentDate.dateBasis,
       refundedAt: p.refundedAt,
       source: p.source,
       initiatedByEmail: p.initiatedByEmail,

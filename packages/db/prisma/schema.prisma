@@ -81,6 +81,40 @@ enum PaymentBalanceImportDisposition {
   held
 }
 
+/// Lifecycle of the one authoritative roster-and-billing cutover batch. Exact
+/// plan and manifest hashes make a confirmed replay a database-level no-op.
+enum WorkbookCutoverBatchStatus {
+  planned
+  imported
+  failed
+}
+
+enum WorkbookCutoverSourceKind {
+  workbook_row
+  production_student
+  applicant
+}
+
+/// A disposition is nullable while the review workbook is open. Confirmation
+/// requires every source record to carry one of these reviewed outcomes.
+enum WorkbookCutoverDisposition {
+  link_existing_student
+  create_student
+  reviewed_duplicate
+  link_workbook_row
+  keep_exception
+  archive_student
+  preserve_applicant
+}
+
+enum WorkbookCutoverFinancialEventKind {
+  invoice_void
+  payment_superseded
+  new_invoice
+  reconstruction_payment
+  account_credit
+}
+
 enum PaymentSubmissionStatus {
   awaiting_proof
   submitted
@@ -124,6 +158,64 @@ enum FeeScheduleStatus {
   superseded
 }
 
+enum BillingServiceKind {
+  housing
+  cafeteria
+  insurance
+  housing_caution
+}
+
+enum BillingServiceCalculation {
+  fixed
+  percentage_of_service
+}
+
+enum BillingProfileStatus {
+  draft
+  active
+  archived
+}
+
+enum BillingProfileSourceKind {
+  workbook
+  admissions
+  staff
+}
+
+enum BillingAdjustmentBasis {
+  tuition
+  housing
+  cafeteria
+  insurance
+  housing_caution
+  gross_charges
+  manual
+}
+
+enum BillingAdjustmentCalculation {
+  percentage
+  fixed
+  manual
+}
+
+enum BillingAdjustmentStacking {
+  additive
+  sequential
+  exclusive
+}
+
+enum BillingAdjustmentEffect {
+  discount
+  charge
+}
+
+enum BillingAdjustmentSource {
+  scholarship
+  manual_reconciliation
+  workbook
+  admissions
+}
+
 enum ApprovalRequestStatus {
   pending
   approved
@@ -140,6 +232,8 @@ enum ApprovalRequestKind {
   payment_plan
   discount
   scholarship
+  billing_profile
+  billing_catalog
   operating_budget
   management_actual
   student_enrollment_override
@@ -229,6 +323,7 @@ model CostCenter {
   invoices                Invoice[]
   invoiceComponents       InvoiceComponent[]
   feeScheduleComponents   FeeScheduleComponent[]
+  billingServiceOptions   BillingServiceOption[]
   expenses                Expense[]
   budgets                 Budget[]
   managementActualEntries ManagementActualEntry[]
@@ -403,96 +498,102 @@ model ManagementActualEntry {
 }
 
 model Person {
-  id                            String                       @id @default(uuid())
-  email                         String?                      @unique
+  id                            String                               @id @default(uuid())
+  email                         String?                              @unique
   firstName                     String
   lastName                      String
   kind                          PersonKind
   // App RBAC roles (a person can hold several). Validated against AppRole in code.
-  roles                         String[]                     @default([])
+  roles                         String[]                             @default([])
   // bcrypt hash; null until a password is set.
   passwordHash                  String?
   // Set when a temp password was assigned; forces a change on next login.
-  mustChangePassword            Boolean                      @default(false)
+  mustChangePassword            Boolean                              @default(false)
   // Suspended accounts cannot sign in and their live sessions are ended (see sessionVersion).
   // DB CHECK Person_suspended_has_timestamp keeps status and suspendedAt in agreement.
-  status                        PersonStatus                 @default(active)
+  status                        PersonStatus                         @default(active)
   suspendedAt                   DateTime?
   suspendedById                 String?
   // Signed into the session JWT at login and compared on every authenticated request.
   // Bump it to end every live session this person holds.
-  sessionVersion                Int                          @default(0)
-  createdAt                     DateTime                     @default(now())
+  sessionVersion                Int                                  @default(0)
+  createdAt                     DateTime                             @default(now())
   student                       Student?
-  taughtSections                Section[]                    @relation("Instructor")
+  taughtSections                Section[]                            @relation("Instructor")
   threadParticipations          ThreadParticipant[]
   messagesSent                  Message[]
   projectMemberships            ProjectMember[]
   // --- SIS redesign ---
-  guardianOf                    GuardianStudent[]            @relation("GuardianOf")
+  guardianOf                    GuardianStudent[]                    @relation("GuardianOf")
   guardianProfile               GuardianProfile?
-  guardianInvites               GuardianInvite[]             @relation("GuardianInvites")
-  studentInvites                StudentInvite[]              @relation("StudentInvites")
-  activationRequestsAsStudent   StudentActivationRequest[]   @relation("StudentActivationRequestStudent")
-  activationRequestsApproved    StudentActivationRequest[]   @relation("StudentActivationRequestApprover")
-  studentActivationCards        StudentActivationCard[]      @relation("StudentActivationCardStudent")
-  activationCardBatchesCreated  StudentActivationCardBatch[] @relation("StudentActivationCardBatchCreator")
-  activationCardBatchesRevoked  StudentActivationCardBatch[] @relation("StudentActivationCardBatchRevoker")
-  broadcasts                    Broadcast[]                  @relation("BroadcastSender")
+  guardianInvites               GuardianInvite[]                     @relation("GuardianInvites")
+  studentInvites                StudentInvite[]                      @relation("StudentInvites")
+  activationRequestsAsStudent   StudentActivationRequest[]           @relation("StudentActivationRequestStudent")
+  activationRequestsApproved    StudentActivationRequest[]           @relation("StudentActivationRequestApprover")
+  studentActivationCards        StudentActivationCard[]              @relation("StudentActivationCardStudent")
+  activationCardBatchesCreated  StudentActivationCardBatch[]         @relation("StudentActivationCardBatchCreator")
+  activationCardBatchesRevoked  StudentActivationCardBatch[]         @relation("StudentActivationCardBatchRevoker")
+  broadcasts                    Broadcast[]                          @relation("BroadcastSender")
   // Public website profile for faculty (see FacultyProfile).
   facultyProfile                FacultyProfile?
-  paymentSubmissionsStarted     PaymentSubmission[]          @relation("PaymentSubmissionInitiator")
-  paymentSubmissionsVerified    PaymentSubmission[]          @relation("PaymentSubmissionVerifier")
-  paymentSubmissionsAudited     PaymentSubmission[]          @relation("PaymentSubmissionAuditor")
-  transcriptImportBatches       TranscriptImportBatch[]      @relation("TranscriptImportBatchCreator")
-  paymentImportBatches          PaymentImportBatch[]         @relation("PaymentImportBatchCreator")
-  paymentBalanceImportBatches   PaymentBalanceImportBatch[]  @relation("PaymentBalanceImportBatchCreator")
-  legacyCohortImportBatches     LegacyCohortImportBatch[]    @relation("LegacyCohortImportBatchCreator")
-  transcriptEntriesCreated      TranscriptEntry[]            @relation("TranscriptEntryCreator")
-  transcriptEntriesUpdated      TranscriptEntry[]            @relation("TranscriptEntryUpdater")
-  transcriptEntriesVoided       TranscriptEntry[]            @relation("TranscriptEntryVoider")
-  paymentsInitiated             Payment[]                    @relation("PaymentInitiator")
-  feeSchedulesCreated           FeeSchedule[]                @relation("FeeScheduleCreator")
-  feeSchedulesApproved          FeeSchedule[]                @relation("FeeScheduleApprover")
-  academicCatalogsCreated       AcademicCatalogRevision[]    @relation("AcademicCatalogCreator")
-  academicCatalogsApproved      AcademicCatalogRevision[]    @relation("AcademicCatalogApprover")
-  infirmaryConsultations        Consultation[]               @relation("ConsultationClinician")
-  infirmaryConsultationsFlagged Consultation[]               @relation("ConsultationSickFlagger")
-  attendanceNotedBy             AttendanceRecord[]           @relation("AttendanceNotedBy")
-  infirmaryPrescriptions        Prescription[]               @relation("PrescriptionAuthor")
-  infirmaryDocuments            InfirmaryDocument[]          @relation("DocumentUploader")
-  standingOverridesCreated      StudentStandingOverride[]    @relation("StandingOverrideCreator")
-  standingOverridesUpdated      StudentStandingOverride[]    @relation("StandingOverrideUpdater")
-  standingOverridesCleared      StudentStandingOverride[]    @relation("StandingOverrideClearer")
-  approvalRequestsCreated       ApprovalRequest[]            @relation("ApprovalRequester")
-  approvalRequestsReviewed      ApprovalRequest[]            @relation("ApprovalReviewer")
-  approvalEvents                ApprovalEvent[]              @relation("ApprovalEventActor")
-  operatingBudgetsCreated       OperatingBudget[]            @relation("OperatingBudgetCreator")
-  operatingBudgetsReviewed      OperatingBudget[]            @relation("OperatingBudgetReviewer")
-  managementActualsCreated      ManagementActualEntry[]      @relation("ManagementActualCreator")
-  managementActualsApproved     ManagementActualEntry[]      @relation("ManagementActualApprover")
-  managementActualsVoided       ManagementActualEntry[]      @relation("ManagementActualVoider")
-  expensesApproved              Expense[]                    @relation("ExpenseApprover")
-  expensesVoided                Expense[]                    @relation("ExpenseVoider")
+  paymentSubmissionsStarted     PaymentSubmission[]                  @relation("PaymentSubmissionInitiator")
+  paymentSubmissionsVerified    PaymentSubmission[]                  @relation("PaymentSubmissionVerifier")
+  paymentSubmissionsAudited     PaymentSubmission[]                  @relation("PaymentSubmissionAuditor")
+  transcriptImportBatches       TranscriptImportBatch[]              @relation("TranscriptImportBatchCreator")
+  paymentImportBatches          PaymentImportBatch[]                 @relation("PaymentImportBatchCreator")
+  paymentBalanceImportBatches   PaymentBalanceImportBatch[]          @relation("PaymentBalanceImportBatchCreator")
+  workbookCutoverBatches        WorkbookCutoverBatch[]               @relation("WorkbookCutoverBatchCreator")
+  workbookCutoverReviews        WorkbookCutoverSourceRecord[]        @relation("WorkbookCutoverReviewer")
+  workbookCutoverAttestations   WorkbookCutoverReviewerAttestation[] @relation("WorkbookCutoverAttestationReviewer")
+  workbookCutoverRevocations    WorkbookCutoverReviewerAttestation[] @relation("WorkbookCutoverAttestationRevoker")
+  legacyCohortImportBatches     LegacyCohortImportBatch[]            @relation("LegacyCohortImportBatchCreator")
+  transcriptEntriesCreated      TranscriptEntry[]                    @relation("TranscriptEntryCreator")
+  transcriptEntriesUpdated      TranscriptEntry[]                    @relation("TranscriptEntryUpdater")
+  transcriptEntriesVoided       TranscriptEntry[]                    @relation("TranscriptEntryVoider")
+  paymentsInitiated             Payment[]                            @relation("PaymentInitiator")
+  feeSchedulesCreated           FeeSchedule[]                        @relation("FeeScheduleCreator")
+  feeSchedulesApproved          FeeSchedule[]                        @relation("FeeScheduleApprover")
+  billingProfilesCreated        AnnualBillingProfile[]               @relation("BillingProfileCreator")
+  invoiceAdjustmentsCreated     InvoiceAdjustment[]                  @relation("InvoiceAdjustmentCreator")
+  academicCatalogsCreated       AcademicCatalogRevision[]            @relation("AcademicCatalogCreator")
+  academicCatalogsApproved      AcademicCatalogRevision[]            @relation("AcademicCatalogApprover")
+  infirmaryConsultations        Consultation[]                       @relation("ConsultationClinician")
+  infirmaryConsultationsFlagged Consultation[]                       @relation("ConsultationSickFlagger")
+  attendanceNotedBy             AttendanceRecord[]                   @relation("AttendanceNotedBy")
+  infirmaryPrescriptions        Prescription[]                       @relation("PrescriptionAuthor")
+  infirmaryDocuments            InfirmaryDocument[]                  @relation("DocumentUploader")
+  standingOverridesCreated      StudentStandingOverride[]            @relation("StandingOverrideCreator")
+  standingOverridesUpdated      StudentStandingOverride[]            @relation("StandingOverrideUpdater")
+  standingOverridesCleared      StudentStandingOverride[]            @relation("StandingOverrideClearer")
+  approvalRequestsCreated       ApprovalRequest[]                    @relation("ApprovalRequester")
+  approvalRequestsReviewed      ApprovalRequest[]                    @relation("ApprovalReviewer")
+  approvalEvents                ApprovalEvent[]                      @relation("ApprovalEventActor")
+  operatingBudgetsCreated       OperatingBudget[]                    @relation("OperatingBudgetCreator")
+  operatingBudgetsReviewed      OperatingBudget[]                    @relation("OperatingBudgetReviewer")
+  managementActualsCreated      ManagementActualEntry[]              @relation("ManagementActualCreator")
+  managementActualsApproved     ManagementActualEntry[]              @relation("ManagementActualApprover")
+  managementActualsVoided       ManagementActualEntry[]              @relation("ManagementActualVoider")
+  expensesApproved              Expense[]                            @relation("ExpenseApprover")
+  expensesVoided                Expense[]                            @relation("ExpenseVoider")
   directorWidgetPreference      DirectorWidgetPreference?
   notifications                 Notification[]
-  admissionNotes                AdmissionNote[]              @relation("AdmissionNoteAuthor")
+  admissionNotes                AdmissionNote[]                      @relation("AdmissionNoteAuthor")
   createdForms                  CustomForm[]
-  helpdeskTicketsRequested      HelpdeskTicket[]             @relation("HelpdeskTicketRequester")
-  helpdeskTicketsAssigned       HelpdeskTicket[]             @relation("HelpdeskTicketAssignee")
-  helpdeskCommentsAuthored      HelpdeskComment[]            @relation("HelpdeskCommentAuthor")
-  helpdeskAttachmentsUploaded   HelpdeskAttachment[]         @relation("HelpdeskAttachmentUploader")
+  helpdeskTicketsRequested      HelpdeskTicket[]                     @relation("HelpdeskTicketRequester")
+  helpdeskTicketsAssigned       HelpdeskTicket[]                     @relation("HelpdeskTicketAssignee")
+  helpdeskCommentsAuthored      HelpdeskComment[]                    @relation("HelpdeskCommentAuthor")
+  helpdeskAttachmentsUploaded   HelpdeskAttachment[]                 @relation("HelpdeskAttachmentUploader")
 
   @@index([status])
 }
 
 model Student {
-  id                       String                    @id @default(uuid())
-  personId                 String                    @unique
-  person                   Person                    @relation(fields: [personId], references: [id])
-  studentNo                String                    @unique
+  id                       String                        @id @default(uuid())
+  personId                 String                        @unique
+  person                   Person                        @relation(fields: [personId], references: [id])
+  studentNo                String                        @unique
   programId                String?
-  program                  Program?                  @relation(fields: [programId], references: [id])
+  program                  Program?                      @relation(fields: [programId], references: [id])
   // Date of birth (date only). Second factor for the public bill-payment lookup.
   dateOfBirth              DateTime?
   // Roster photo, resolved to an absolute URL (served from the vitrine bucket).
@@ -532,12 +633,12 @@ model Student {
   enrollmentStatus         String? // full-time | part-time | leave
   catalogYear              String? // requirement set the student is audited against
   catalogYearId            String?
-  catalogAcademicYear      AcademicYear?             @relation("StudentCatalogYear", fields: [catalogYearId], references: [id], onDelete: SetNull)
+  catalogAcademicYear      AcademicYear?                 @relation("StudentCatalogYear", fields: [catalogYearId], references: [id], onDelete: SetNull)
   standing                 String? // Good Standing | Probation | ...
   // Lifecycle of the SIS record itself. Archiving hides a student from active
   // rosters without deleting their academic or financial history.
-  recordStatus             StudentRecordStatus       @default(active)
-  applicant                Applicant?                @relation("ApplicantStudent")
+  recordStatus             StudentRecordStatus           @default(active)
+  applicant                Applicant?                    @relation("ApplicantStudent")
   legacyCohortImport       LegacyCohortImportPerson?
   holds                    StudentHold[]
   alerts                   StudentAlert[]
@@ -546,16 +647,18 @@ model Student {
   invoices                 Invoice[]
   payments                 Payment[]
   paymentBalanceImportRows PaymentBalanceImportRow[]
+  billingProfiles          AnnualBillingProfile[]
+  workbookCutoverRecords   WorkbookCutoverSourceRecord[]
   paymentSubmissions       PaymentSubmission[]
   piSpiRequests            PiSpiRequest[]
   enrollments              Enrollment[]
   transcriptEntries        TranscriptEntry[]
   standingOverrides        StudentStandingOverride[]
   gradeSubmissionItems     GradeSubmissionItem[]
-  mealPlan                 MealPlan?
+  mealPlans                MealPlan[]
   diningOrders             DiningOrder[]
   diningScans              DiningScan[]
-  housing                  HousingAssignment?
+  housingAssignments       HousingAssignment[]
   roommateProfile          RoommateProfile?
   documents                StudentDocument[]
   infirmaryConsultations   Consultation[]
@@ -565,7 +668,7 @@ model Student {
   infirmaryDocuments       InfirmaryDocument[]
   infirmaryFollowUps       FollowUp[]
   infirmaryFormResponses   InfirmaryFormResponse[]
-  createdAt                DateTime                  @default(now())
+  createdAt                DateTime                      @default(now())
 
   @@index([recordStatus])
   @@index([catalogYearId])
@@ -615,42 +718,48 @@ model Term {
 }
 
 model Invoice {
-  id                       String                     @id @default(uuid())
+  id                        String                               @id @default(uuid())
   // Human-readable billing handle shown to staff, e.g. "BILL-2026-001".
-  number                   String?                    @unique
-  studentId                String
-  student                  Student                    @relation(fields: [studentId], references: [id])
-  termId                   String
-  term                     Term                       @relation(fields: [termId], references: [id])
-  totalAmount              Int
-  amountPaid               Int                        @default(0)
-  status                   InvoiceStatus              @default(open)
+  number                    String?                              @unique
+  studentId                 String
+  student                   Student                              @relation(fields: [studentId], references: [id])
+  termId                    String
+  term                      Term                                 @relation(fields: [termId], references: [id])
+  totalAmount               Int
+  amountPaid                Int                                  @default(0)
+  status                    InvoiceStatus                        @default(open)
   // Human label for an ad-hoc charge (e.g. "Lab & technology fee"); null for tuition.
-  description              String?
+  description               String?
   // Revenue dimension for the director dashboard (tuition -> 9100).
-  costCenterCode           String                     @default("9100")
-  costCenter               CostCenter                 @relation(fields: [costCenterCode], references: [code])
-  packageType              InvoicePackageType         @default(custom)
-  academicYearLabel        String?
-  feeScheduleId            String?
-  feeScheduleRevision      Int?
-  feeSchedule              FeeSchedule?               @relation(fields: [feeScheduleId], references: [id], onDelete: SetNull)
+  costCenterCode            String                               @default("9100")
+  costCenter                CostCenter                           @relation(fields: [costCenterCode], references: [code])
+  packageType               InvoicePackageType                   @default(custom)
+  academicYearLabel         String?
+  feeScheduleId             String?
+  feeScheduleRevision       Int?
+  feeSchedule               FeeSchedule?                         @relation(fields: [feeScheduleId], references: [id], onDelete: SetNull)
   /// True only when this invoice has custom installment dates/count. Component
   /// selections use InvoiceComponentOverride and keep inheriting the schedule.
-  paymentPlanOverride      Boolean                    @default(false)
-  revision                 Int                        @default(0)
-  components               InvoiceComponent[]
-  componentOverrides       InvoiceComponentOverride[]
-  plan                     PaymentPlan?
-  payments                 Payment[]
-  paymentSubmissions       PaymentSubmission[]
-  piSpiRequests            PiSpiRequest[]
-  enrollmentForApplicant   Applicant?                 @relation("ApplicantEnrollmentInvoice")
-  legacyCohortImport       LegacyCohortImportPerson?
-  paymentBalanceImportRows PaymentBalanceImportRow[]
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime                   @updatedAt
+  paymentPlanOverride       Boolean                              @default(false)
+  revision                  Int                                  @default(0)
+  components                InvoiceComponent[]
+  componentOverrides        InvoiceComponentOverride[]
+  plan                      PaymentPlan?
+  payments                  Payment[]
+  paymentSubmissions        PaymentSubmission[]
+  piSpiRequests             PiSpiRequest[]
+  enrollmentForApplicant    Applicant?                           @relation("ApplicantEnrollmentInvoice")
+  legacyCohortImport        LegacyCohortImportPerson?
+  paymentBalanceImportRows  PaymentBalanceImportRow[]
+  billingProfile            AnnualBillingProfile?
+  adjustments               InvoiceAdjustment[]
+  workbookCutoverRecords    WorkbookCutoverSourceRecord[]        @relation("WorkbookCutoverCanonicalInvoice")
+  workbookCutoverEvents     WorkbookCutoverFinancialProvenance[] @relation("WorkbookCutoverEventInvoice")
+  workbookReplacementEvents WorkbookCutoverFinancialProvenance[] @relation("WorkbookCutoverReplacementInvoice")
+  createdAt                 DateTime                             @default(now())
+  updatedAt                 DateTime                             @updatedAt
 
+  @@unique([id, studentId, academicYearLabel])
   @@index([studentId])
   @@index([termId])
   @@index([status])
@@ -691,31 +800,31 @@ model Installment {
 }
 
 model Payment {
-  id                                 String                       @id @default(uuid())
+  id                                 String                               @id @default(uuid())
   invoiceId                          String
-  invoice                            Invoice                      @relation(fields: [invoiceId], references: [id])
+  invoice                            Invoice                              @relation(fields: [invoiceId], references: [id])
   studentId                          String
-  student                            Student                      @relation(fields: [studentId], references: [id])
+  student                            Student                              @relation(fields: [studentId], references: [id])
   amount                             Int
   method                             PaymentMethod
-  status                             PaymentStatus                @default(pending)
-  provider                           String                       @default("manual")
+  status                             PaymentStatus                        @default(pending)
+  provider                           String                               @default("manual")
   // Idempotency anchor: the gateway transaction reference is unique.
-  providerRef                        String                       @unique
+  providerRef                        String                               @unique
   /// SHA-256 of payment method + canonical external accounting reference.
   /// Nullable for ordinary gateway payments; reviewed historical imports set it.
-  externalReferenceFingerprintSha256 String?                      @unique
+  externalReferenceFingerprintSha256 String?                              @unique
   /// Durable origin of the payment attempt (student_portal, parent_portal, public_bill, ...).
-  source                             String                       @default("legacy")
+  source                             String                               @default("legacy")
   initiatedById                      String?
-  initiatedBy                        Person?                      @relation("PaymentInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+  initiatedBy                        Person?                              @relation("PaymentInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
   initiatedByEmail                   String?
   settledAt                          DateTime?
   refundedAt                         DateTime?
   /// Present only for reviewed historical-workbook imports. The source row is
   /// immutable provenance; it never replaces the canonical payment ledger.
   importBatchId                      String?
-  importBatch                        PaymentImportBatch?          @relation(fields: [importBatchId], references: [id], onDelete: Restrict)
+  importBatch                        PaymentImportBatch?                  @relation(fields: [importBatchId], references: [id], onDelete: Restrict)
   importRowKey                       String?
   importSheetName                    String?
   importRowNumber                    Int?
@@ -724,16 +833,23 @@ model Payment {
   componentAllocations               PaymentComponentAllocation[]
   submission                         PaymentSubmission?
   piSpiRequest                       PiSpiRequest?
-  activatedApplicant                 Applicant?                   @relation("ApplicantActivationPayment")
+  activatedApplicant                 Applicant?                           @relation("ApplicantActivationPayment")
   legacyCohortRows                   LegacyCohortImportRow[]
   paymentBalanceImportRow            PaymentBalanceImportRow?
-  createdAt                          DateTime                     @default(now())
-  updatedAt                          DateTime                     @updatedAt
+  /// Accounting recognition date for authoritative balance reconstructions.
+  /// It deliberately does not pretend to be the unknown settlement timestamp.
+  recognizedOn                       DateTime?                            @db.Date
+  workbookCutoverRecords             WorkbookCutoverSourceRecord[]        @relation("WorkbookCutoverReconstructionPayment")
+  workbookCutoverEvents              WorkbookCutoverFinancialProvenance[] @relation("WorkbookCutoverEventPayment")
+  workbookReplacementEvents          WorkbookCutoverFinancialProvenance[] @relation("WorkbookCutoverReplacementPayment")
+  createdAt                          DateTime                             @default(now())
+  updatedAt                          DateTime                             @updatedAt
 
   @@unique([importBatchId, importRowKey])
   @@index([invoiceId])
   @@index([status])
   @@index([settledAt])
+  @@index([recognizedOn])
   @@index([initiatedById])
   @@index([importBatchId])
 }
@@ -858,6 +974,165 @@ model PaymentBalanceImportRow {
   @@index([priorImportedRowId])
 }
 
+/// Exhaustive, hash-anchored workbook/roster/applicant cutover. The workbook
+/// hash is intentionally non-unique: a later reviewed manifest may resolve a
+/// prior plan, while both manifest and confirmation-plan digests are replay keys.
+model WorkbookCutoverBatch {
+  id                         String                               @id @default(uuid())
+  sourceFileName             String
+  sourceWorkbookSha256       String
+  sourceExtractionSha256     String
+  identityManifestSha256     String                               @unique
+  rosterSnapshotSha256       String
+  confirmationPlanSha256     String                               @unique
+  status                     WorkbookCutoverBatchStatus           @default(planned)
+  academicYearLabel          String
+  academicYear               AcademicYear                         @relation(fields: [academicYearLabel], references: [label], onDelete: Restrict)
+  sourceAsOfDate             DateTime                             @db.Date
+  workbookRowCount           Int
+  productionStudentCount     Int
+  applicantCount             Int
+  workbookLinkedRows         Int                                  @default(0)
+  workbookCreatedRows        Int                                  @default(0)
+  workbookDuplicateRows      Int                                  @default(0)
+  productionLinkedStudents   Int                                  @default(0)
+  productionKeptStudents     Int                                  @default(0)
+  productionArchivedStudents Int                                  @default(0)
+  preservedApplicants        Int                                  @default(0)
+  sourceBilledXof            BigInt
+  sourcePaidXof              BigInt
+  includedBilledXof          BigInt                               @default(0)
+  includedPaidXof            BigInt                               @default(0)
+  excludedBilledXof          BigInt                               @default(0)
+  excludedPaidXof            BigInt                               @default(0)
+  createdById                String
+  createdBy                  Person                               @relation("WorkbookCutoverBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt                  DateTime                             @default(now())
+  updatedAt                  DateTime                             @updatedAt
+  importedAt                 DateTime?
+  errorSummary               Json?
+  sourceRecords              WorkbookCutoverSourceRecord[]
+  financialProvenance        WorkbookCutoverFinancialProvenance[]
+
+  @@index([sourceWorkbookSha256, createdAt])
+  @@index([rosterSnapshotSha256])
+  @@index([academicYearLabel, status])
+  @@index([createdById, createdAt])
+}
+
+/// Authenticated evidence that one staff Person adopted every offline review
+/// decision bearing their institutional login email in one exact canonical
+/// manifest. The row is append-only except for one terminal revocation.
+model WorkbookCutoverReviewerAttestation {
+  id                      String    @id @default(uuid())
+  manifestSha256          String
+  reviewerId              String
+  reviewer                Person    @relation("WorkbookCutoverAttestationReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  reviewerEmailNormalized String
+  authorizedRoles         String[]
+  statementSha256         String
+  attestedAt              DateTime  @default(now())
+  revokedAt               DateTime?
+  revokedById             String?
+  revokedBy               Person?   @relation("WorkbookCutoverAttestationRevoker", fields: [revokedById], references: [id], onDelete: Restrict)
+  revocationReason        String?
+
+  @@unique([manifestSha256, reviewerId])
+  @@index([manifestSha256, revokedAt])
+  @@index([reviewerId, attestedAt])
+  @@index([revokedById])
+}
+
+/// One immutable source assignment for every workbook row, production Student,
+/// and current Applicant. disposition remains null until a signed review exists.
+model WorkbookCutoverSourceRecord {
+  id                      String                               @id @default(uuid())
+  batchId                 String
+  batch                   WorkbookCutoverBatch                 @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  sourceKind              WorkbookCutoverSourceKind
+  sourceKey               String
+  sourceKeySha256         String
+  sourceFingerprintSha256 String
+  sourceClaimSha256       String?                              @unique
+  sourceSheet             String?
+  sourceRowNumber         Int?
+  sourceStudentClaim      String?
+  sourceBilledXof         BigInt?
+  sourcePaidXof           BigInt?
+  disposition             WorkbookCutoverDisposition?
+  reviewedById            String?
+  reviewedBy              Person?                              @relation("WorkbookCutoverReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewedAt              DateTime?
+  reviewReason            String?
+  reviewSignatureSha256   String?
+  studentId               String?
+  student                 Student?                             @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  applicantId             String?
+  applicant               Applicant?                           @relation(fields: [applicantId], references: [id], onDelete: Restrict)
+  linkedWorkbookRecordId  String?
+  linkedWorkbookRecord    WorkbookCutoverSourceRecord?         @relation("WorkbookCutoverLinkedWorkbook", fields: [linkedWorkbookRecordId], references: [id], onDelete: Restrict)
+  linkedProductionRecords WorkbookCutoverSourceRecord[]        @relation("WorkbookCutoverLinkedWorkbook")
+  duplicateOfRecordId     String?
+  duplicateOfRecord       WorkbookCutoverSourceRecord?         @relation("WorkbookCutoverDuplicate", fields: [duplicateOfRecordId], references: [id], onDelete: Restrict)
+  duplicateRecords        WorkbookCutoverSourceRecord[]        @relation("WorkbookCutoverDuplicate")
+  priorRecordId           String?
+  priorRecord             WorkbookCutoverSourceRecord?         @relation("WorkbookCutoverPriorRecord", fields: [priorRecordId], references: [id], onDelete: Restrict)
+  laterRecords            WorkbookCutoverSourceRecord[]        @relation("WorkbookCutoverPriorRecord")
+  billingProfileId        String?                              @unique
+  billingProfile          AnnualBillingProfile?                @relation(fields: [billingProfileId], references: [id], onDelete: Restrict)
+  canonicalInvoiceId      String?                              @unique
+  canonicalInvoice        Invoice?                             @relation("WorkbookCutoverCanonicalInvoice", fields: [canonicalInvoiceId], references: [id], onDelete: Restrict)
+  reconstructionPaymentId String?                              @unique
+  reconstructionPayment   Payment?                             @relation("WorkbookCutoverReconstructionPayment", fields: [reconstructionPaymentId], references: [id], onDelete: Restrict)
+  financialProvenance     WorkbookCutoverFinancialProvenance[]
+  appliedAt               DateTime?
+  createdAt               DateTime                             @default(now())
+
+  @@unique([batchId, sourceKind, sourceKey])
+  @@unique([batchId, sourceKind, sourceFingerprintSha256])
+  @@index([batchId, sourceKind, disposition])
+  @@index([studentId])
+  @@index([applicantId])
+  @@index([linkedWorkbookRecordId])
+  @@index([duplicateOfRecordId])
+  @@index([priorRecordId])
+}
+
+/// Immutable before/after event evidence. It records original effective state
+/// before supersession and the replacement ledger object without deleting old
+/// invoices, payments, allocations, or their audit trail.
+model WorkbookCutoverFinancialProvenance {
+  id                   String                            @id @default(uuid())
+  batchId              String
+  batch                WorkbookCutoverBatch              @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  sourceRecordId       String
+  sourceRecord         WorkbookCutoverSourceRecord       @relation(fields: [sourceRecordId], references: [id], onDelete: Restrict)
+  kind                 WorkbookCutoverFinancialEventKind
+  invoiceId            String?
+  invoice              Invoice?                          @relation("WorkbookCutoverEventInvoice", fields: [invoiceId], references: [id], onDelete: Restrict)
+  paymentId            String?
+  payment              Payment?                          @relation("WorkbookCutoverEventPayment", fields: [paymentId], references: [id], onDelete: Restrict)
+  replacementInvoiceId String?
+  replacementInvoice   Invoice?                          @relation("WorkbookCutoverReplacementInvoice", fields: [replacementInvoiceId], references: [id], onDelete: Restrict)
+  replacementPaymentId String?
+  replacementPayment   Payment?                          @relation("WorkbookCutoverReplacementPayment", fields: [replacementPaymentId], references: [id], onDelete: Restrict)
+  originalStatus       String?
+  originalAmountXof    BigInt?
+  originalPaidXof      BigInt?
+  recognizedOn         DateTime?                         @db.Date
+  snapshotJson         Json
+  snapshotSha256       String
+  eventClaimSha256     String                            @unique
+  createdAt            DateTime                          @default(now())
+
+  @@index([batchId, kind])
+  @@index([sourceRecordId, kind])
+  @@index([invoiceId])
+  @@index([paymentId])
+  @@index([replacementInvoiceId])
+  @@index([replacementPaymentId])
+}
+
 /// One reviewed, idempotent import of a legacy admissions cohort. The workbook
 /// stays outside the application; immutable coordinates, fingerprints, legacy
 /// IDs, and authoritative record links remain as durable provenance.
@@ -956,9 +1231,14 @@ model InvoiceComponent {
   label               String                       @default("")
   costCenterCode      String
   costCenter          CostCenter                   @relation(fields: [costCenterCode], references: [code])
+  /// Gross service amount before scholarships or reconciliation adjustments.
+  /// Nullable during the backward-compatible rollout; the migration backfills
+  /// every existing row from amountXof. amountXof remains the net authority.
+  grossAmountXof      Int?
   amountXof           Int
   allocations         PaymentComponentAllocation[]
   installments        InstallmentComponent[]
+  adjustments         InvoiceAdjustment[]
   createdAt           DateTime                     @default(now())
   updatedAt           DateTime                     @updatedAt
 
@@ -1217,34 +1497,35 @@ model ContactMessage {
 }
 
 model Applicant {
-  id                            String                    @id @default(uuid())
+  id                            String                        @id @default(uuid())
   firstName                     String
   lastName                      String
   email                         String
   programCode                   String?
-  stage                         String                    @default("submitted") // submitted|review|interview|offer|accepted|rejected
+  stage                         String                        @default("submitted") // submitted|review|interview|offer|accepted|rejected
   // Admissions acceptance and SIS activation are deliberately separate. Existing
   // accepted rows remain not_started until an administrator runs the reviewed flow.
-  onboardingStatus              ApplicantOnboardingStatus @default(not_started)
-  studentId                     String?                   @unique
-  student                       Student?                  @relation("ApplicantStudent", fields: [studentId], references: [id], onDelete: Restrict)
+  onboardingStatus              ApplicantOnboardingStatus     @default(not_started)
+  studentId                     String?                       @unique
+  student                       Student?                      @relation("ApplicantStudent", fields: [studentId], references: [id], onDelete: Restrict)
   admissionAcademicYearId       String?
-  admissionAcademicYear         AcademicYear?             @relation("ApplicantAdmissionAcademicYear", fields: [admissionAcademicYearId], references: [id], onDelete: SetNull)
-  enrollmentInvoiceId           String?                   @unique
-  enrollmentInvoice             Invoice?                  @relation("ApplicantEnrollmentInvoice", fields: [enrollmentInvoiceId], references: [id], onDelete: Restrict)
+  admissionAcademicYear         AcademicYear?                 @relation("ApplicantAdmissionAcademicYear", fields: [admissionAcademicYearId], references: [id], onDelete: SetNull)
+  enrollmentInvoiceId           String?                       @unique
+  enrollmentInvoice             Invoice?                      @relation("ApplicantEnrollmentInvoice", fields: [enrollmentInvoiceId], references: [id], onDelete: Restrict)
+  workbookCutoverRecords        WorkbookCutoverSourceRecord[]
   requiredEnrollmentCashXof     Int?
-  activeOnboardingPaymentLinkId String?                   @unique
-  activeOnboardingPaymentLink   PaymentLink?              @relation("ApplicantActiveOnboardingPaymentLink", fields: [activeOnboardingPaymentLinkId], references: [id], onDelete: SetNull)
-  onboardingPaymentLinks        PaymentLink[]             @relation("ApplicantOnboardingPaymentLinks")
-  activatedByPaymentId          String?                   @unique
-  activatedByPayment            Payment?                  @relation("ApplicantActivationPayment", fields: [activatedByPaymentId], references: [id], onDelete: Restrict)
+  activeOnboardingPaymentLinkId String?                       @unique
+  activeOnboardingPaymentLink   PaymentLink?                  @relation("ApplicantActiveOnboardingPaymentLink", fields: [activeOnboardingPaymentLinkId], references: [id], onDelete: SetNull)
+  onboardingPaymentLinks        PaymentLink[]                 @relation("ApplicantOnboardingPaymentLinks")
+  activatedByPaymentId          String?                       @unique
+  activatedByPayment            Payment?                      @relation("ApplicantActivationPayment", fields: [activatedByPaymentId], references: [id], onDelete: Restrict)
   acceptedAt                    DateTime?
   paymentPendingAt              DateTime?
   enrolledAt                    DateTime?
   onboardingCancelledAt         DateTime?
   // Only hashes are persisted. While payment is pending the capability has no
   // expiry; enrollment makes it read-only and sets an expiry 30 days later.
-  statusTokenHash               String?                   @unique
+  statusTokenHash               String?                       @unique
   statusTokenExpiresAt          DateTime?
   statusTokenRevokedAt          DateTime?
   acceptanceEmailSentAt         DateTime?
@@ -1252,7 +1533,7 @@ model Applicant {
   score                         Int? // BAC score (0–20)
   country                       String?
   // Application fee settles after Finance verifies both payment proofs.
-  feePaid                       Boolean                   @default(false)
+  feePaid                       Boolean                       @default(false)
   // --- Full application intake (SIS redesign; all optional) ---
   phone                         String?
   dateOfBirth                   DateTime?
@@ -1275,7 +1556,7 @@ model Applicant {
   piSpiRequests                 PiSpiRequest[]
   paymentSubmissions            PaymentSubmission[]
   legacyCohortImport            LegacyCohortImportPerson?
-  createdAt                     DateTime                  @default(now())
+  createdAt                     DateTime                      @default(now())
   notes                         AdmissionNote[]
 
   @@index([stage])
@@ -1597,13 +1878,22 @@ enum ScanResult {
 }
 
 model MealPlan {
-  id        String       @id @default(uuid())
-  studentId String       @unique
-  student   Student      @relation(fields: [studentId], references: [id])
-  type      MealPlanType @default(none)
-  term      String
-  active    Boolean      @default(true)
-  createdAt DateTime     @default(now())
+  id                String                @id @default(uuid())
+  studentId         String
+  student           Student               @relation(fields: [studentId], references: [id])
+  academicYearLabel String
+  academicYear      AcademicYear          @relation(fields: [academicYearLabel], references: [label], onDelete: Restrict)
+  billingProfileId  String?
+  billingProfile    AnnualBillingProfile? @relation(fields: [billingProfileId, studentId, academicYearLabel], references: [id, studentId, academicYearLabel], onDelete: Restrict, map: "MealPlan_billing_profile_student_year_fkey")
+  type              MealPlanType          @default(none)
+  /// Retained legacy display text. Annual authority is academicYearLabel.
+  term              String
+  active            Boolean               @default(true)
+  createdAt         DateTime              @default(now())
+
+  @@unique([studentId, academicYearLabel])
+  @@unique([billingProfileId, studentId, academicYearLabel])
+  @@index([academicYearLabel, active, type])
 }
 
 model MenuItem {
@@ -1665,6 +1955,7 @@ model DiningScan {
 enum HousingStatus {
   pending
   assigned
+  unassigned
 }
 
 enum ConductStage {
@@ -1692,15 +1983,24 @@ model Hall {
 }
 
 model HousingAssignment {
-  id        String        @id @default(uuid())
-  studentId String        @unique
-  student   Student       @relation(fields: [studentId], references: [id])
-  hallId    String?
-  hall      Hall?         @relation(fields: [hallId], references: [id])
-  room      String?
-  status    HousingStatus @default(pending)
-  note      String?
-  updatedAt DateTime      @updatedAt
+  id                    String                @id @default(uuid())
+  studentId             String
+  student               Student               @relation(fields: [studentId], references: [id])
+  academicYearLabel     String
+  academicYear          AcademicYear          @relation(fields: [academicYearLabel], references: [label], onDelete: Restrict)
+  billedServiceOptionId String?
+  billedServiceKind     BillingServiceKind    @default(housing)
+  billedServiceOption   BillingServiceOption? @relation("BilledHousingOption", fields: [billedServiceOptionId, academicYearLabel, billedServiceKind], references: [id, academicYearLabel, kind], onDelete: Restrict, map: "HousingAssignment_billed_option_year_kind_fkey")
+  hallId                String?
+  hall                  Hall?                 @relation(fields: [hallId], references: [id])
+  room                  String?
+  status                HousingStatus         @default(pending)
+  note                  String?
+  updatedAt             DateTime              @updatedAt
+
+  @@unique([studentId, academicYearLabel])
+  @@index([academicYearLabel])
+  @@index([billedServiceOptionId])
 }
 
 model RoommateProfile {
@@ -2017,23 +2317,29 @@ enum AcademicCatalogStatus {
 /// Catalog year (e.g. "2026-2027"). Exactly one is `active` at a time; activating
 /// another archives the previous one.
 model AcademicYear {
-  id                        String                    @id @default(uuid())
-  label                     String                    @unique
-  status                    AcademicYearStatus        @default(draft)
-  startsOn                  DateTime?
-  endsOn                    DateTime?
-  terms                     Term[]
-  curricula                 Curriculum[]
-  events                    CalendarEvent[]
-  feeSchedules              FeeSchedule[]
-  operatingBudgets          OperatingBudget[]
-  managementActualEntries   ManagementActualEntry[]
-  expenses                  Expense[]
-  students                  Student[]                 @relation("StudentCatalogYear")
-  admittedApplicants        Applicant[]               @relation("ApplicantAdmissionAcademicYear")
-  legacyCohortImportBatches LegacyCohortImportBatch[]
-  catalogRevisions          AcademicCatalogRevision[]
-  createdAt                 DateTime                  @default(now())
+  id                           String                        @id @default(uuid())
+  label                        String                        @unique
+  status                       AcademicYearStatus            @default(draft)
+  startsOn                     DateTime?
+  endsOn                       DateTime?
+  terms                        Term[]
+  curricula                    Curriculum[]
+  events                       CalendarEvent[]
+  feeSchedules                 FeeSchedule[]
+  billingServiceOptions        BillingServiceOption[]
+  billingAdjustmentDefinitions BillingAdjustmentDefinition[]
+  billingProfiles              AnnualBillingProfile[]
+  workbookCutoverBatches       WorkbookCutoverBatch[]
+  housingAssignments           HousingAssignment[]
+  mealPlans                    MealPlan[]
+  operatingBudgets             OperatingBudget[]
+  managementActualEntries      ManagementActualEntry[]
+  expenses                     Expense[]
+  students                     Student[]                     @relation("StudentCatalogYear")
+  admittedApplicants           Applicant[]                   @relation("ApplicantAdmissionAcademicYear")
+  legacyCohortImportBatches    LegacyCohortImportBatch[]
+  catalogRevisions             AcademicCatalogRevision[]
+  createdAt                    DateTime                      @default(now())
 
   @@index([status])
 }
@@ -2626,8 +2932,10 @@ model FeeSchedule {
   rows              FeePlanInstallment[]
   components        FeeScheduleComponent[]
   invoices          Invoice[]
+  billingProfiles   AnnualBillingProfile[]
 
   @@unique([academicYearLabel, revision])
+  @@unique([id, academicYearLabel])
   @@index([academicYearLabel, status])
 }
 
@@ -2650,6 +2958,206 @@ model FeeScheduleComponent {
 
   @@unique([scheduleId, key])
   @@index([costCenterCode])
+}
+
+/// Academic-year service catalog. A row is deactivated rather than deleted so
+/// annual profile selections can retain an immutable pricing reference.
+model BillingServiceOption {
+  id                        String                    @id @default(uuid())
+  academicYearLabel         String
+  academicYear              AcademicYear              @relation(fields: [academicYearLabel], references: [label], onDelete: Restrict)
+  kind                      BillingServiceKind
+  code                      String
+  label                     String
+  description               String?
+  calculation               BillingServiceCalculation @default(fixed)
+  amountXof                 Int?
+  percentageBasisPoints     Int?
+  basisServiceKind          BillingServiceKind?
+  costCenterCode            String
+  costCenter                CostCenter                @relation(fields: [costCenterCode], references: [code], onDelete: Restrict)
+  refundable                Boolean                   @default(false)
+  defaultSelected           Boolean                   @default(false)
+  active                    Boolean                   @default(true)
+  sortOrder                 Int                       @default(0)
+  selections                BillingProfileSelection[]
+  percentageBasisSelections BillingProfileSelection[] @relation("BillingProfilePercentageBasisOption")
+  housingAssignments        HousingAssignment[]       @relation("BilledHousingOption")
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+
+  @@unique([academicYearLabel, kind, code])
+  @@unique([id, academicYearLabel, kind])
+  @@index([academicYearLabel, kind, active, sortOrder])
+  @@index([costCenterCode])
+}
+
+/// Versioned-by-academic-year award and reconciliation catalog. The definition
+/// controls calculation; every applied award also snapshots these fields.
+model BillingAdjustmentDefinition {
+  id                    String                       @id @default(uuid())
+  academicYearLabel     String
+  academicYear          AcademicYear                 @relation(fields: [academicYearLabel], references: [label], onDelete: Restrict)
+  key                   String
+  label                 String
+  description           String?
+  basis                 BillingAdjustmentBasis
+  calculation           BillingAdjustmentCalculation
+  stacking              BillingAdjustmentStacking
+  effect                BillingAdjustmentEffect      @default(discount)
+  percentageBasisPoints Int?
+  fixedAmountXof        Int?
+  requiresApproval      Boolean                      @default(true)
+  active                Boolean                      @default(true)
+  sortOrder             Int                          @default(0)
+  profileAwards         BillingProfileAward[]
+  invoiceAdjustments    InvoiceAdjustment[]
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  @@unique([academicYearLabel, key])
+  @@index([academicYearLabel, active, sortOrder])
+}
+
+/// One mutable-by-approved-revision annual service profile. Its canonical
+/// invoice remains monetary authority; totals here are reconciliation snapshots.
+model AnnualBillingProfile {
+  id                         String                       @id @default(uuid())
+  studentId                  String
+  student                    Student                      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  academicYearLabel          String
+  academicYear               AcademicYear                 @relation(fields: [academicYearLabel], references: [label], onDelete: Restrict)
+  status                     BillingProfileStatus         @default(draft)
+  revision                   Int                          @default(0)
+  sourceKind                 BillingProfileSourceKind
+  sourceWorkbookSha256       String?
+  sourceSheet                String?
+  sourceRowNumber            Int?
+  sourceRowFingerprintSha256 String?
+  sourceAsOfDate             DateTime?                    @db.Date
+  feeScheduleId              String?
+  feeSchedule                FeeSchedule?                 @relation(fields: [feeScheduleId, academicYearLabel], references: [id, academicYearLabel], onDelete: Restrict, map: "AnnualBillingProfile_fee_schedule_year_fkey")
+  canonicalInvoiceId         String?
+  canonicalInvoice           Invoice?                     @relation(fields: [canonicalInvoiceId, studentId, academicYearLabel], references: [id, studentId, academicYearLabel], onDelete: Restrict, map: "AnnualBillingProfile_invoice_student_year_fkey")
+  grossChargesXof            Int                          @default(0)
+  netBilledXof               Int                          @default(0)
+  mismatchWarnings           Json                         @default("[]")
+  createdById                String?
+  createdBy                  Person?                      @relation("BillingProfileCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  selections                 BillingProfileSelection[]
+  awards                     BillingProfileAward[]
+  invoiceAdjustments         InvoiceAdjustment[]
+  mealPlan                   MealPlan?
+  workbookCutoverRecord      WorkbookCutoverSourceRecord?
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+
+  @@unique([studentId, academicYearLabel])
+  @@unique([id, academicYearLabel])
+  @@unique([id, studentId, academicYearLabel])
+  @@unique([canonicalInvoiceId, studentId, academicYearLabel], map: "AnnualBillingProfile_invoice_student_year_key")
+  @@index([academicYearLabel, status])
+  @@index([feeScheduleId])
+  @@index([createdById])
+}
+
+/// Immutable service-selection snapshot. Option labels and amounts survive a
+/// later catalog rename or deactivation.
+model BillingProfileSelection {
+  id                         String                @id @default(uuid())
+  profileId                  String
+  academicYearLabel          String
+  profile                    AnnualBillingProfile  @relation(fields: [profileId, academicYearLabel], references: [id, academicYearLabel], onDelete: Restrict, map: "BillingProfileSelection_profile_year_fkey")
+  kind                       BillingServiceKind
+  serviceOptionId            String
+  serviceOption              BillingServiceOption  @relation(fields: [serviceOptionId, academicYearLabel, kind], references: [id, academicYearLabel, kind], onDelete: Restrict, map: "BillingProfileSelection_option_year_kind_fkey")
+  optionCode                 String
+  /// For a percentage service, preserve the exact option whose snapshotted
+  /// price supplied the percentage basis. This may differ from the selected
+  /// service (for example, the reviewed workbook caution anomaly).
+  percentageBasisOptionId    String?
+  percentageBasisOptionCode  String?
+  percentageBasisServiceKind BillingServiceKind?
+  percentageBasisOption      BillingServiceOption? @relation("BillingProfilePercentageBasisOption", fields: [percentageBasisOptionId, academicYearLabel, percentageBasisServiceKind], references: [id, academicYearLabel, kind], onDelete: Restrict, map: "BillingProfileSelection_basis_option_year_kind_fkey")
+  label                      String
+  amountXof                  Int
+  refundable                 Boolean               @default(false)
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+
+  @@unique([profileId, kind])
+  @@index([serviceOptionId])
+  @@index([percentageBasisOptionId])
+}
+
+/// Applied award snapshot for the profile view. The linked InvoiceAdjustment
+/// is the monetary provenance and may remain when a definition is deactivated.
+model BillingProfileAward {
+  id                    String                       @id @default(uuid())
+  profileId             String
+  profile               AnnualBillingProfile         @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  definitionId          String?
+  definition            BillingAdjustmentDefinition? @relation(fields: [definitionId], references: [id], onDelete: SetNull)
+  definitionKey         String
+  label                 String
+  source                BillingAdjustmentSource
+  basis                 BillingAdjustmentBasis
+  calculation           BillingAdjustmentCalculation
+  stacking              BillingAdjustmentStacking
+  effect                BillingAdjustmentEffect
+  requiresApproval      Boolean
+  basisAmountXof        Int?
+  percentageBasisPoints Int?
+  amountXof             Int
+  reason                String?
+  approvalRequestId     String?
+  approvalRequest       ApprovalRequest?             @relation(fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  invoiceAdjustmentId   String?                      @unique
+  invoiceAdjustment     InvoiceAdjustment?           @relation(fields: [invoiceAdjustmentId], references: [id], onDelete: SetNull)
+  createdAt             DateTime                     @default(now())
+
+  @@index([profileId, createdAt])
+  @@index([definitionId])
+  @@index([approvalRequestId])
+}
+
+/// Explainable bridge from component gross snapshots to the invoice net bill.
+/// amountXof is always a non-negative magnitude; `effect` supplies its sign.
+model InvoiceAdjustment {
+  id                    String                       @id @default(uuid())
+  invoiceId             String
+  invoice               Invoice                      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  invoiceComponentId    String?
+  invoiceComponent      InvoiceComponent?            @relation(fields: [invoiceComponentId], references: [id], onDelete: SetNull)
+  billingProfileId      String?
+  billingProfile        AnnualBillingProfile?        @relation(fields: [billingProfileId], references: [id], onDelete: SetNull)
+  definitionId          String?
+  definition            BillingAdjustmentDefinition? @relation(fields: [definitionId], references: [id], onDelete: SetNull)
+  code                  String
+  label                 String
+  source                BillingAdjustmentSource
+  basis                 BillingAdjustmentBasis
+  calculation           BillingAdjustmentCalculation
+  stacking              BillingAdjustmentStacking
+  effect                BillingAdjustmentEffect
+  basisAmountXof        Int?
+  percentageBasisPoints Int?
+  amountXof             Int
+  reason                String?
+  sourceReference       String?
+  approvalRequestId     String?
+  approvalRequest       ApprovalRequest?             @relation(fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  createdById           String?
+  createdBy             Person?                      @relation("InvoiceAdjustmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  profileAward          BillingProfileAward?
+  createdAt             DateTime                     @default(now())
+
+  @@index([invoiceId, createdAt])
+  @@index([invoiceComponentId])
+  @@index([billingProfileId])
+  @@index([definitionId])
+  @@index([approvalRequestId])
+  @@index([createdById])
 }
 
 /// Generic, version-checked request for a protected finance mutation.
@@ -2679,6 +3187,8 @@ model ApprovalRequest {
   expenseVoid          Expense?               @relation("ExpenseVoidApproval")
   managementActual     ManagementActualEntry? @relation("ManagementActualApproval")
   managementActualVoid ManagementActualEntry? @relation("ManagementActualVoidApproval")
+  invoiceAdjustments   InvoiceAdjustment[]
+  billingProfileAwards BillingProfileAward[]
 
   @@index([status, createdAt])
   @@index([requestedById, createdAt])

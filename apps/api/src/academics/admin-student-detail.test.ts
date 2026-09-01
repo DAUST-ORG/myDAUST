@@ -52,6 +52,7 @@ describe("AcademicsService admin student detail", () => {
     };
     const prisma = {
       student: { findUnique: vi.fn().mockResolvedValue(student) },
+      annualBillingProfile: { findFirst: vi.fn().mockResolvedValue(null) },
     };
     const service = new AcademicsService(prisma as never);
     const transcriptView = vi.fn();

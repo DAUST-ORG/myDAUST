@@ -31,6 +31,11 @@ import {
   type EnrollmentActivation,
 } from "./admission-payment-gate.js";
 import { FinanceService } from "./finance.service.js";
+import {
+  BillingProfileService,
+  type BillingCatalogChangeInput,
+  type BillingProfileChangeInput,
+} from "./billing-profile.service.js";
 
 export const DIRECTOR_WIDGET_KEYS = [
   "people",
@@ -86,7 +91,7 @@ const DIRECTOR_WIDGET_CATALOG = [
   },
 ] as const;
 
-type ProtectedChange = {
+export type ProtectedChange = {
   kind: ApprovalRequestKind;
   targetType: string;
   targetId?: string;
@@ -100,16 +105,19 @@ type StoredApproval = Prisma.ApprovalRequestGetPayload<Record<string, never>>;
 @Injectable()
 export class FinanceApprovalsService {
   private readonly operatingBudget: OperatingBudgetService;
+  private readonly billingProfiles: BillingProfileService;
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional() operatingBudget?: OperatingBudgetService,
     @Optional() private readonly finance?: FinanceService,
+    @Optional() billingProfiles?: BillingProfileService,
   ) {
     // Unit/integration tests historically instantiate this service directly.
     // Keep that seam while Nest injects the shared provider in the application.
     this.operatingBudget =
       operatingBudget ?? new OperatingBudgetService(prisma);
+    this.billingProfiles = billingProfiles ?? new BillingProfileService(prisma);
   }
 
   private asJson(value: unknown): Prisma.InputJsonValue {
@@ -181,6 +189,20 @@ export class FinanceApprovalsService {
         );
       }
       return { before: schedule, baseRevision: schedule.revision };
+    }
+    if (change.kind === "billing_profile") {
+      if (!change.targetId) {
+        throw new BadRequestException("Missing student target");
+      }
+      return this.billingProfiles.approvalSnapshot(
+        change.targetId,
+        change.after as BillingProfileChangeInput,
+      );
+    }
+    if (change.kind === "billing_catalog") {
+      return this.billingProfiles.catalogApprovalSnapshot(
+        change.after as BillingCatalogChangeInput,
+      );
     }
     if (change.kind === "charge_removal" || change.kind === "payment_plan") {
       if (!change.targetId)
@@ -271,7 +293,9 @@ export class FinanceApprovalsService {
     const request = await this.transaction(async (tx) => {
       if (
         ((change.kind === "payment_plan" ||
-          change.kind === "management_actual") &&
+          change.kind === "management_actual" ||
+          change.kind === "billing_profile" ||
+          change.kind === "billing_catalog") &&
           change.targetId) ||
         change.kind === "operating_budget"
       ) {
@@ -315,13 +339,14 @@ export class FinanceApprovalsService {
         },
       });
       if (change.kind === "operating_budget") {
-        const budgetId = String(after.budgetId ?? change.targetId ?? "");
+        const budgetAfter = after as Record<string, unknown>;
+        const budgetId = String(budgetAfter.budgetId ?? change.targetId ?? "");
         await this.operatingBudget.markSubmitted(
           tx,
           budgetId,
           created.id,
-          Number(after.draftContentVersion),
-          String(after.draftContentHash ?? ""),
+          Number(budgetAfter.draftContentVersion),
+          String(budgetAfter.draftContentHash ?? ""),
         );
       }
       return created;
@@ -546,7 +571,7 @@ export class FinanceApprovalsService {
           "Enrollment override requests are approved through /academics/enrollment-overrides/:id/approve with explicit gate waivers",
         );
       }
-      if (request.status === "approved") {
+      if (request.status !== "pending") {
         throw new BadRequestException(`Request is already ${request.status}`);
       }
       const staleReason = await this.staleReason(tx, request);
@@ -596,6 +621,15 @@ export class FinanceApprovalsService {
       const gateInvoiceIds = new Set<string>();
       if (request.kind === "payment_plan" && request.targetId) {
         gateInvoiceIds.add(request.targetId);
+      } else if (request.kind === "billing_profile") {
+        const invoiceId =
+          result &&
+          typeof result === "object" &&
+          "canonicalInvoiceId" in result &&
+          typeof result.canonicalInvoiceId === "string"
+            ? result.canonicalInvoiceId
+            : null;
+        if (invoiceId) gateInvoiceIds.add(invoiceId);
       } else if (request.kind === "global_fee_schedule") {
         const pending = await tx.applicant.findMany({
           where: {
@@ -768,6 +802,33 @@ export class FinanceApprovalsService {
         ? null
         : "The approved fee schedule changed after this request was submitted";
     }
+    if (request.kind === "billing_profile") {
+      if (!request.targetId || !request.academicYearLabel) {
+        return "The billing profile request is missing its student or academic year";
+      }
+      return this.billingProfiles.staleReason(
+        tx,
+        request.targetId,
+        request.academicYearLabel,
+        request.baseRevision,
+        request.afterJson as BillingProfileChangeInput,
+      );
+    }
+    if (request.kind === "billing_catalog") {
+      const after = request.afterJson as Record<string, unknown>;
+      const academicYearLabel = String(
+        request.academicYearLabel ?? after.academicYearLabel ?? "",
+      );
+      const fingerprint = String(after.expectedCatalogFingerprint ?? "");
+      if (!academicYearLabel || !fingerprint) {
+        return "The billing catalog request is missing its version claim";
+      }
+      return this.billingProfiles.catalogStaleReason(
+        tx,
+        academicYearLabel,
+        fingerprint,
+      );
+    }
     if (request.kind === "payment_plan" || request.kind === "charge_removal") {
       const invoice = request.targetId
         ? await tx.invoice.findUnique({ where: { id: request.targetId } })
@@ -801,6 +862,20 @@ export class FinanceApprovalsService {
           request.targetId!,
           after,
           request.requestedById,
+        );
+      case "billing_profile":
+        return this.billingProfiles.applyApprovedChange(tx, {
+          studentId: request.targetId!,
+          actorId,
+          approvalRequestId: request.id,
+          change: after as BillingProfileChangeInput,
+        });
+      case "billing_catalog":
+        return this.billingProfiles.applyCatalogChange(
+          tx,
+          after as BillingCatalogChangeInput,
+          actorId,
+          request.id,
         );
       case "discount":
       case "scholarship":
@@ -1233,6 +1308,10 @@ export class FinanceApprovalsService {
         packageType: "standard_full",
         status: { not: "void" },
         student: { recordStatus: { in: ["active", "pending_payment"] } },
+        // An annual billing profile freezes the canonical invoice as an
+        // explainable year-specific snapshot. A later institution-wide fee
+        // schedule revision must not validate, mutate, or relink that invoice.
+        billingProfile: { is: null },
       },
       include: {
         plan: {
@@ -1524,6 +1603,7 @@ export class FinanceApprovalsService {
             academicYearLabel: current.academicYearLabel,
             packageType: "standard_full",
             status: { not: "void" },
+            billingProfile: { is: null },
             student: {
               recordStatus: { in: ["active", "pending_payment"] },
             },
@@ -1542,6 +1622,7 @@ export class FinanceApprovalsService {
           invoice: {
             academicYearLabel: current.academicYearLabel,
             packageType: "standard_full",
+            billingProfile: { is: null },
           },
         },
       });

@@ -4,10 +4,12 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { Prisma } from "@mydaust/db";
 import {
   normalizeStudentNumber,
+  scholarshipForBac,
   toDakarDateKey,
   type ApplicationInput,
 } from "@mydaust/shared";
@@ -23,6 +25,11 @@ import {
   verifiedEnrollmentCashXof,
 } from "../finance/admission-payment-gate.js";
 import { loadEnv } from "../config/env.js";
+import {
+  BillingProfileService,
+  type BillingProfileChangeInput,
+  type BillingProfilePricingClaims,
+} from "../finance/billing-profile.service.js";
 
 /** Escape user-supplied text before embedding it in email HTML (applications are anonymous/public). */
 const esc = (s: unknown): string =>
@@ -140,13 +147,17 @@ export interface ApplicantFields {
 @Injectable()
 export class AdmissionsService {
   private readonly logger = new Logger(AdmissionsService.name);
+  private readonly billingProfiles: BillingProfileService;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly appConfig: AppConfigService,
     private readonly paymentSubmissions: PaymentSubmissionsService,
-  ) {}
+    @Optional() billingProfiles?: BillingProfileService,
+  ) {
+    this.billingProfiles = billingProfiles ?? new BillingProfileService(prisma);
+  }
 
   /**
    * Start or resume the proof-based application-fee payment. The applicant id is the
@@ -282,6 +293,38 @@ export class AdmissionsService {
       scholarship,
       onboarding,
     };
+  }
+
+  /** Pricing options for the Applicant's resolved intake, never the caller's active year. */
+  async acceptanceBillingProfileOptions(id: string) {
+    const resolved = await this.serializable(async (tx) => {
+      const applicant = await tx.applicant.findUnique({
+        where: { id },
+        select: {
+          term: true,
+          admissionAcademicYearId: true,
+        },
+      });
+      if (!applicant) throw new NotFoundException("Applicant not found");
+      return this.resolveAdmissionAcademicYear(
+        tx,
+        applicant.term,
+        applicant.admissionAcademicYearId ?? undefined,
+      );
+    });
+    const options = await this.billingProfiles.options(resolved.label);
+    if (
+      options.academicYearId !== resolved.id ||
+      !options.feeScheduleId ||
+      options.feeScheduleRevision <= 0 ||
+      !options.feeScheduleFingerprintSha256 ||
+      !options.billingCatalogFingerprintSha256
+    ) {
+      throw new BadRequestException(
+        `Approved admission pricing is incomplete for ${resolved.label}`,
+      );
+    }
+    return options;
   }
 
   private static readonly STAGES = [
@@ -443,8 +486,34 @@ export class AdmissionsService {
   async adminAcceptApplicant(
     actorId: string,
     id: string,
-    input: { academicYearId?: string },
+    input: {
+      academicYearId: string;
+      academicYearLabel: string;
+      billingProfile: Omit<
+        BillingProfileChangeInput,
+        "academicYearLabel" | "expectedRevision" | "manualAdjustments"
+      > &
+        BillingProfilePricingClaims;
+    },
   ) {
+    if (!input.billingProfile) {
+      throw new BadRequestException(
+        "Housing, cafeteria, insurance and caution selections are required before acceptance",
+      );
+    }
+    const {
+      feeScheduleId,
+      feeScheduleRevision,
+      feeScheduleFingerprintSha256,
+      billingCatalogFingerprintSha256,
+      ...profileSelection
+    } = input.billingProfile;
+    const pricingClaims: BillingProfilePricingClaims = {
+      feeScheduleId,
+      feeScheduleRevision,
+      feeScheduleFingerprintSha256,
+      billingCatalogFingerprintSha256,
+    };
     const createAcceptance = () =>
       this.serializable(async (tx) => {
         const applicant = await tx.applicant.findUnique({ where: { id } });
@@ -455,8 +524,15 @@ export class AdmissionsService {
           applicant.onboardingStatus === "enrolled"
         ) {
           if (
-            input.academicYearId &&
-            applicant.admissionAcademicYearId !== input.academicYearId
+            applicant.admissionAcademicYearId !== input.academicYearId ||
+            (applicant.admissionAcademicYearId &&
+              input.academicYearLabel !==
+                (
+                  await tx.academicYear.findUniqueOrThrow({
+                    where: { id: applicant.admissionAcademicYearId },
+                    select: { label: true },
+                  })
+                ).label)
           ) {
             throw new BadRequestException(
               "This applicant was already accepted for a different academic year",
@@ -508,8 +584,32 @@ export class AdmissionsService {
         const academicYear = await this.resolveAdmissionAcademicYear(
           tx,
           applicant.term,
-          input.academicYearId,
         );
+        if (
+          academicYear.id !== input.academicYearId ||
+          academicYear.label !== input.academicYearLabel
+        ) {
+          throw new BadRequestException(
+            "The applicant intake academic year changed; refresh the billing options before accepting",
+          );
+        }
+        const scholarshipTiers = await tx.scholarshipTier.findMany({
+          orderBy: { minScore: "desc" },
+        });
+        if (scholarshipTiers.length === 0) {
+          throw new BadRequestException(
+            "BAC scholarship tiers must be configured before acceptance",
+          );
+        }
+        const bacAward = scholarshipForBac(applicant.score, scholarshipTiers);
+        if (bacAward.pct > 0 && ![10, 15, 20].includes(bacAward.pct)) {
+          throw new BadRequestException(
+            `The configured ${bacAward.pct}% BAC award has no approved billing adjustment definition`,
+          );
+        }
+        const automaticAwardKey = [10, 15, 20].includes(bacAward.pct)
+          ? `merit_${bacAward.pct}`
+          : null;
         const email = applicant.email.trim().toLowerCase();
         const existingPerson = await tx.person.findFirst({
           where: { email: { equals: email, mode: "insensitive" } },
@@ -569,6 +669,15 @@ export class AdmissionsService {
           actorId,
           academicYear.id,
         );
+        const billingProfile =
+          await this.billingProfiles.createAdmissionProfile(tx, {
+            studentId: student.id,
+            actorId,
+            academicYearLabel: academicYear.label,
+            selection: profileSelection,
+            automaticAwardKey,
+            pricingClaims,
+          });
         const invoice = await tx.invoice.findUnique({
           where: { id: assignment.invoiceId },
           include: {
@@ -633,6 +742,8 @@ export class AdmissionsService {
                 invoiceId: invoice.id,
                 requiredEnrollmentCashXof: firstInstallment.amountDue,
                 paymentLinkId: paymentLink.id,
+                billingProfileId: billingProfile.profileId,
+                billingProfileRevision: billingProfile.revision,
               },
             },
             {

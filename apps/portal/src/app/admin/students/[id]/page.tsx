@@ -50,6 +50,7 @@ import { EditStudentModal, type EditSection } from "./EditStudentModal";
 import { StudentDocuments } from "./StudentDocuments";
 import { StudentGuardians } from "./StudentGuardians";
 import { TranscriptManager } from "./TranscriptManager";
+import { BillingProfileSummary } from "@/components/BillingProfileSummary";
 
 const ENROLL_BADGE: Record<string, string> = {
   enrolled: "enrolled",
@@ -591,6 +592,9 @@ export default function AdminStudentDetailPage() {
 
       {tab === "finance" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <BillingProfileSummary
+            profile={account?.billingProfile ?? s.billingProfile}
+          />
           <div
             style={{
               display: "grid",

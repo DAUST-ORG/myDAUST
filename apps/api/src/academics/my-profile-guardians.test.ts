@@ -36,6 +36,7 @@ describe("AcademicsService.myProfile guardian links", () => {
     });
     const service = new AcademicsService({
       student: { findUnique },
+      annualBillingProfile: { findFirst: vi.fn().mockResolvedValue(null) },
     } as never);
     Object.assign(service as unknown as Record<string, unknown>, {
       transcript: {

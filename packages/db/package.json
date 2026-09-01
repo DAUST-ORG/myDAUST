@@ -36,10 +36,10 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.864.0",
+    "@mydaust/shared": "workspace:*",
     "@prisma/client": "^6.2.1"
   },
   "devDependencies": {
-    "@mydaust/shared": "workspace:*",
     "@mydaust/tsconfig": "workspace:*",
     "@types/bcryptjs": "^2.4.6",
     "bcryptjs": "^2.4.3",
