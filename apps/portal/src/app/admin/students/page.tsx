@@ -2,16 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Check, Pencil, ShieldCheck, UserPlus, X } from "lucide-react";
+import { Pencil, UserPlus, X } from "lucide-react";
 import {
   type AdminStudent,
   type AdminStudentRosterPage,
   type AdminStudentRosterSort,
   createRegistrarStudent,
   getAdminStudentRoster,
-  approveStudentActivation,
-  resolveStudentActivation,
-  type ResolvedStudentActivation,
 } from "@/lib/api";
 import {
   AccountBalanceText,
@@ -95,7 +92,6 @@ export default function AdminStudentsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [approvingActivation, setApprovingActivation] = useState(false);
   const [notice, setNotice] = useState<CreatedNotice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { sort, toggle } = useSort({ key: "name", dir: "asc" });
@@ -209,12 +205,6 @@ export default function AdminStudentsPage() {
         actions={
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button
-              onClick={() => setApprovingActivation(true)}
-              style={{ display: "flex", alignItems: "center", gap: 7 }}
-            >
-              <ShieldCheck size={15} /> Approve activation
-            </button>
-            <button
               className="primary"
               onClick={() => setAdding(true)}
               style={{ display: "flex", alignItems: "center", gap: 7 }}
@@ -242,8 +232,7 @@ export default function AdminStudentsPage() {
             </strong>
             <div className="muted">
               No password or setup link was created. The student can activate at
-              /activate-student while physically present with an authorized
-              registrar.
+              /activate-student with their private one-time activation card.
             </div>
           </div>
           <IconButton label="Dismiss" onClick={() => setNotice(null)}>
@@ -551,217 +540,7 @@ export default function AdminStudentsPage() {
           }}
         />
       )}
-
-      {approvingActivation && (
-        <ApproveActivationModal onClose={() => setApprovingActivation(false)} />
-      )}
     </>
-  );
-}
-
-function ApproveActivationModal({ onClose }: { onClose: () => void }) {
-  const [studentNo, setStudentNo] = useState("");
-  const [approvalCode, setApprovalCode] = useState("");
-  const [resolved, setResolved] = useState<ResolvedStudentActivation | null>(
-    null,
-  );
-  const [approved, setApproved] = useState(false);
-  const [identityVerified, setIdentityVerified] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function resolveRequest() {
-    setBusy(true);
-    setError(null);
-    setResolved(null);
-    setIdentityVerified(false);
-    try {
-      setResolved(
-        await resolveStudentActivation({
-          studentNo: studentNo.trim(),
-          approvalCode,
-        }),
-      );
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "No pending activation request matches those details.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function approve() {
-    if (!resolved || !identityVerified) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await approveStudentActivation(resolved.requestId, approvalCode);
-      setApproved(true);
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "The activation request could not be approved.",
-      );
-      setResolved(null);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const codeReady = /^\d{6}$/.test(approvalCode);
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Approve student activation"
-      width={520}
-      footer={
-        approved ? (
-          <Button variant="primary" onClick={onClose}>
-            Done
-          </Button>
-        ) : resolved ? (
-          <>
-            <Button
-              onClick={() => {
-                setResolved(null);
-                setIdentityVerified(false);
-              }}
-              disabled={busy}
-            >
-              Back
-            </Button>
-            <Button
-              variant="primary"
-              icon={<ShieldCheck size={15} />}
-              onClick={() => void approve()}
-              disabled={busy || !identityVerified}
-            >
-              {busy ? "Approving…" : "Approve activation"}
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button onClick={onClose} disabled={busy}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => void resolveRequest()}
-              disabled={busy || !studentNo.trim() || !codeReady}
-            >
-              {busy ? "Checking…" : "Find exact request"}
-            </Button>
-          </>
-        )
-      }
-    >
-      {approved && resolved ? (
-        <div style={{ display: "grid", gap: 12 }}>
-          <div
-            className="badge"
-            style={{ padding: "9px 12px", color: "var(--success)" }}
-          >
-            <Check size={15} /> Activation approved
-          </div>
-          <p style={{ margin: 0 }}>
-            <strong>{resolved.name}</strong> · {resolved.studentNo}
-          </p>
-          <p
-            className="muted"
-            style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}
-          >
-            The student&apos;s waiting page will now unlock password setup. No
-            link or credential is disclosed to staff.
-          </p>
-        </div>
-      ) : resolved ? (
-        <div style={{ display: "grid", gap: 14 }}>
-          <div className="badge overdue" style={{ padding: "9px 12px" }}>
-            The pairing code identifies this browser request. It is not proof of
-            the student&apos;s identity.
-          </div>
-          <Field label="Matched student">
-            <div>
-              <strong>{resolved.name}</strong> · {resolved.studentNo}
-            </div>
-          </Field>
-          <div className="muted" style={{ fontSize: 12.5 }}>
-            Request expires{" "}
-            {new Date(resolved.requestExpiresAt).toLocaleTimeString()}.
-          </div>
-          <label
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "flex-start",
-              fontSize: 13,
-              lineHeight: 1.45,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={identityVerified}
-              onChange={(event) => setIdentityVerified(event.target.checked)}
-            />
-            <span>
-              I visually checked this physically present person&apos;s official
-              photo credential (government-issued ID or DAUST photo student
-              card) and confirmed the displayed name and Student ID.
-            </span>
-          </label>
-          {error && (
-            <div style={{ color: "var(--danger)", fontSize: 13 }}>{error}</div>
-          )}
-        </div>
-      ) : (
-        <div style={{ display: "grid", gap: 14 }}>
-          <p
-            className="muted"
-            style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}
-          >
-            Ask the student for the Student ID and six-digit code shown on their
-            device. Looking up the code does not approve anything.
-          </p>
-          <Field label="Student ID">
-            <input
-              value={studentNo}
-              onChange={(event) => setStudentNo(event.target.value)}
-              maxLength={40}
-              autoComplete="off"
-              style={{ width: "100%", padding: "10px 12px" }}
-            />
-          </Field>
-          <Field label="Six-digit pairing code">
-            <input
-              value={approvalCode}
-              onChange={(event) =>
-                setApprovalCode(
-                  event.target.value.replace(/\D/g, "").slice(0, 6),
-                )
-              }
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              placeholder="000000"
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                fontFamily: "ui-monospace, monospace",
-                fontSize: 20,
-                letterSpacing: ".16em",
-              }}
-            />
-          </Field>
-          {error && (
-            <div style={{ color: "var(--danger)", fontSize: 13 }}>{error}</div>
-          )}
-        </div>
-      )}
-    </Modal>
   );
 }
 
@@ -833,7 +612,7 @@ function AddStudentModal({
         )}
         <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
           Assign a Student ID and date of birth. The student activates their
-          account later at the registrar desk.
+          account with a private one-time activation card.
         </p>
         <Field label="Student ID" hint="Assigned by the Registrar">
           <input

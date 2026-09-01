@@ -130,8 +130,8 @@ The reviewed manifest must use `notificationPolicy: "suppress_all"`. The
 importer sends no acceptance email, receipt, or account-setup invitation. When
 historical cash activates a student, it creates no password, invite, setup
 secret, or email delivery. The audit records
-`legacy-cohort-activation-paired-flow-required`; the student must later use the
-same public `/activate-student` ID+DOB ceremony and in-person registrar approval
+`legacy-cohort-activation-card-required`; the student must later use the
+same public `/activate-student` page with an individually issued activation card
 as every other student. Exact reruns of a completed batch remain no-ops and
 never send email.
 

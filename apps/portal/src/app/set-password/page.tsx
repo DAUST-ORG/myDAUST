@@ -2,7 +2,15 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, Check, Copy, Eye, EyeOff, Loader2, Lock } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  Loader2,
+  Lock,
+} from "lucide-react";
 import { redeemAccountInvite } from "@/lib/api";
 
 const MIN_LENGTH = 10;
@@ -46,7 +54,8 @@ function SetPasswordForm() {
 
   const tooShort = password.length > 0 && password.length < MIN_LENGTH;
   const mismatch = confirm.length > 0 && confirm !== password;
-  const canSubmit = token && password.length >= MIN_LENGTH && confirm === password && !busy;
+  const canSubmit =
+    token && password.length >= MIN_LENGTH && confirm === password && !busy;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -80,7 +89,9 @@ function SetPasswordForm() {
           Use this login email when you sign in:
         </p>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <code style={{ flex: 1, overflowWrap: "anywhere" }}>{loginEmail}</code>
+          <code style={{ flex: 1, overflowWrap: "anywhere" }}>
+            {loginEmail}
+          </code>
           <button
             type="button"
             onClick={() => {
@@ -94,7 +105,11 @@ function SetPasswordForm() {
             <Copy size={15} /> {copied ? "Copied" : "Copy"}
           </button>
         </div>
-        <a href="/login" className="sis-btn" style={{ justifyContent: "center" }}>
+        <a
+          href="/login"
+          className="sis-btn"
+          style={{ justifyContent: "center" }}
+        >
           Continue to sign in
         </a>
       </div>
@@ -103,18 +118,38 @@ function SetPasswordForm() {
 
   if (!token) {
     return (
-      <p style={{ color: "var(--danger)", display: "flex", gap: 8, alignItems: "center" }}>
-        <AlertCircle size={16} /> This setup link is incomplete. Return to account activation or ask authorized staff for help.
+      <p
+        style={{
+          color: "var(--danger)",
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+        }}
+      >
+        <AlertCircle size={16} /> This setup link is incomplete. Return to
+        account activation or ask authorized staff for help.
       </p>
     );
   }
 
   return (
-    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <form
+      onSubmit={submit}
+      style={{ display: "flex", flexDirection: "column", gap: 14 }}
+    >
       <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>New password</span>
-        <span style={{ position: "relative", display: "flex", alignItems: "center" }}>
-          <Lock size={15} style={{ position: "absolute", left: 12, color: "var(--fg3)" }} />
+        <span
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          <Lock
+            size={15}
+            style={{ position: "absolute", left: 12, color: "var(--fg3)" }}
+          />
           <input
             type={show ? "text" : "password"}
             value={password}
@@ -126,12 +161,25 @@ function SetPasswordForm() {
             type="button"
             onClick={() => setShow((v) => !v)}
             aria-label={show ? "Hide password" : "Show password"}
-            style={{ position: "absolute", right: 8, border: "none", background: "transparent", cursor: "pointer", color: "var(--fg3)" }}
+            style={{
+              position: "absolute",
+              right: 8,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              color: "var(--fg3)",
+            }}
           >
             {show ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
         </span>
-        <span className="muted" style={{ fontSize: 12, color: tooShort ? "var(--danger)" : undefined }}>
+        <span
+          className="muted"
+          style={{
+            fontSize: 12,
+            color: tooShort ? "var(--danger)" : undefined,
+          }}
+        >
           At least {MIN_LENGTH} characters.
         </span>
       </label>
@@ -145,17 +193,41 @@ function SetPasswordForm() {
           autoComplete="new-password"
           style={{ padding: "10px 12px" }}
         />
-        {mismatch && <span style={{ fontSize: 12, color: "var(--danger)" }}>Those passwords do not match.</span>}
+        {mismatch && (
+          <span style={{ fontSize: 12, color: "var(--danger)" }}>
+            Those passwords do not match.
+          </span>
+        )}
       </label>
 
       {error && (
-        <p style={{ color: "var(--danger)", fontSize: 13, display: "flex", gap: 8, alignItems: "center", margin: 0 }}>
-          <AlertCircle size={15} /> {error}
-        </p>
+        <div style={{ display: "grid", gap: 8 }}>
+          <p
+            style={{
+              color: "var(--danger)",
+              fontSize: 13,
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              margin: 0,
+            }}
+          >
+            <AlertCircle size={15} /> {error}
+          </p>
+          <a href="/activate-student" style={{ fontSize: 13 }}>
+            Return to account activation
+          </a>
+        </div>
       )}
 
-      <button type="submit" disabled={!canSubmit} className="sis-btn" style={{ padding: "11px 16px", justifyContent: "center" }}>
-        {busy ? <Loader2 size={15} className="spin" /> : null} {busy ? "Setting password…" : "Set password"}
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="sis-btn"
+        style={{ padding: "11px 16px", justifyContent: "center" }}
+      >
+        {busy ? <Loader2 size={15} className="spin" /> : null}{" "}
+        {busy ? "Setting password…" : "Set password"}
       </button>
     </form>
   );
@@ -163,10 +235,20 @@ function SetPasswordForm() {
 
 export default function SetPasswordPage() {
   return (
-    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--bg-subtle)", padding: 24 }}>
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        background: "var(--bg-subtle)",
+        padding: 24,
+      }}
+    >
       <div className="card" style={{ width: "100%", maxWidth: 420, margin: 0 }}>
         <p className="eyebrow">Account access</p>
-        <h1 className="page-title" style={{ fontSize: 24, marginBottom: 4 }}>Set your password</h1>
+        <h1 className="page-title" style={{ fontSize: 24, marginBottom: 4 }}>
+          Set your password
+        </h1>
         <p className="muted" style={{ fontSize: 13.5, marginBottom: 20 }}>
           Choose a password to finish setting up your myDAUST account.
         </p>

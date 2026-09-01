@@ -1028,61 +1028,18 @@ export interface AdminStudentRosterParams {
   direction?: "asc" | "desc";
 }
 export interface StudentActivationStart {
-  requestToken: string;
-  approvalCode: string;
-  requestExpiresAt: string;
+  accepted: true;
 }
 export const startStudentActivation = (input: {
   studentNo: string;
   dob: string;
+  activationCode: string;
+  requestToken: string;
 }) =>
   request<StudentActivationStart>("/student-activation/requests", {
     method: "POST",
     cache: "no-store",
     body: JSON.stringify(input),
-  });
-export const getStudentActivationStatus = (requestToken: string) =>
-  request<{ status: "pending" | "approved" | "expired" }>(
-    "/student-activation/status",
-    {
-      method: "POST",
-      cache: "no-store",
-      body: JSON.stringify({ requestToken }),
-    },
-  );
-export interface ResolvedStudentActivation {
-  requestId: string;
-  studentId: string;
-  studentNo: string;
-  name: string;
-  requestExpiresAt: string;
-}
-export const resolveStudentActivation = (input: {
-  studentNo: string;
-  approvalCode: string;
-}) =>
-  request<ResolvedStudentActivation>(
-    "/registrar/student-activation-requests/resolve",
-    {
-      method: "POST",
-      cache: "no-store",
-      body: JSON.stringify(input),
-    },
-  );
-export const approveStudentActivation = (
-  requestId: string,
-  approvalCode: string,
-) =>
-  request<{
-    kind: "approved";
-    studentId: string;
-    studentNo: string;
-    name: string;
-    inviteExpiresAt: string;
-  }>(`/registrar/student-activation-requests/${requestId}/approve`, {
-    method: "POST",
-    cache: "no-store",
-    body: JSON.stringify({ approvalCode, identityVerified: true }),
   });
 export interface ProgramRow {
   code: string;

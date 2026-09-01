@@ -644,7 +644,7 @@ describe.skipIf(!DB_URL)("legacy cohort importer", () => {
         where: {
           entity: "Applicant",
           entityId: paid.applicantId,
-          action: "legacy-cohort-activation-paired-flow-required",
+          action: "legacy-cohort-activation-card-required",
         },
       }),
     ).toBe(1);
