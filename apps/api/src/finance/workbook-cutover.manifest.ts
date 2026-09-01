@@ -891,10 +891,10 @@ const DispositionControlsSchema = z
     heldWorkbookRows: z.number().int().nonnegative().max(403),
     heldBilledXof: WholeXofSchema,
     heldPaidXof: WholeXofSchema,
-    linkedProductionStudents: z.number().int().nonnegative().max(417),
-    keptProductionExceptions: z.number().int().nonnegative().max(417),
-    archivedProductionStudents: z.number().int().nonnegative().max(417),
-    heldProductionStudents: z.number().int().nonnegative().max(417),
+    linkedProductionStudents: z.number().int().nonnegative().max(50_000),
+    keptProductionExceptions: z.number().int().nonnegative().max(50_000),
+    archivedProductionStudents: z.number().int().nonnegative().max(50_000),
+    heldProductionStudents: z.number().int().nonnegative().max(50_000),
     preservedApplicants: z.number().int().nonnegative().max(50_000),
   })
   .strict();

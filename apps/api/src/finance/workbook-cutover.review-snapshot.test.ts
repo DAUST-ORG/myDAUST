@@ -26,6 +26,7 @@ import {
 } from "./workbook-cutover.snapshot.js";
 import {
   assertWorkbookCutoverProductionSnapshotBaseline,
+  assertWorkbookCutoverProductionSnapshotControls,
   inWorkbookCutoverReadOnlyRepeatableReadTransaction,
   projectWorkbookCutoverProductionSnapshot,
   writeWorkbookCutoverProductionSnapshotFile,
@@ -64,7 +65,19 @@ describe("workbook cutover production review snapshot", () => {
     expect(projected.applicants).toHaveLength(1);
     expect(() =>
       assertWorkbookCutoverProductionSnapshotBaseline(projected),
-    ).toThrow(/controls drifted/);
+    ).toThrow(/operator-declared live controls/);
+    expect(() =>
+      assertWorkbookCutoverProductionSnapshotControls(
+        projected,
+        projected.controls,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertWorkbookCutoverProductionSnapshotControls(projected, {
+        ...projected.controls,
+        currentApplicants: projected.controls.currentApplicants + 1,
+      }),
+    ).toThrow(/operator-declared live controls/);
   });
 
   it("rejects noncanonical source-record fingerprints", () => {

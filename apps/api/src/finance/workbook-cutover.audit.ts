@@ -606,13 +606,11 @@ function auditSourceConservation(
     "workbook source count differs",
   );
   assert(
-    groups.production.length === batch.productionStudentCount &&
-      groups.production.length === WORKBOOK_CUTOVER_BASELINE.productionStudents,
+    groups.production.length === batch.productionStudentCount,
     "production Student source count differs",
   );
   assert(
-    groups.applicants.length === batch.applicantCount &&
-      groups.applicants.length === WORKBOOK_CUTOVER_BASELINE.currentApplicants,
+    groups.applicants.length === batch.applicantCount,
     "Applicant source count differs",
   );
   assert(

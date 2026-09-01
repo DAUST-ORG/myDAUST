@@ -82,19 +82,26 @@ Build the API, then run the read-only exporter against the intended database:
 ```bash
 DATABASE_URL='postgresql://...' \
 CUTOVER_ACADEMIC_YEAR_LABEL='2026–2027' \
+CUTOVER_EXPECTED_PRODUCTION_STUDENTS=418 \
+CUTOVER_EXPECTED_ACTIVE_STUDENTS=401 \
+CUTOVER_EXPECTED_PENDING_PAYMENT_STUDENTS=17 \
+CUTOVER_EXPECTED_ARCHIVED_STUDENTS=0 \
+CUTOVER_EXPECTED_CURRENT_APPLICANTS=46 \
 CUTOVER_PRODUCTION_SNAPSHOT_OUTPUT_PATH=/private/production-snapshot.json \
 pnpm --filter @mydaust/api run export:workbook-cutover-production-snapshot
 ```
 
 `CUTOVER_PRODUCTION_SNAPSHOT_OUTPUT_PATH` must be absolute and absent. The
 exporter performs all production reads in one PostgreSQL `REPEATABLE READ`
-transaction after issuing `SET TRANSACTION READ ONLY`. It captures the 417
-Students, their Person/access fields and academic-history fingerprints, plus
-the 42 current Applicants; it never writes to the database. It fails closed if
-the active/pending/archived/Applicant controls differ from the signed baseline,
-then exclusive-creates a bounded JSON artifact at mode `0600`. Standard output
-contains counts and SHA-256 digests only, never identities. Do not edit the
-snapshot by hand.
+transaction after issuing `SET TRANSACTION READ ONLY`. It captures every
+Student, their Person/access fields and academic-history fingerprints, plus
+every current Applicant; it never writes to the database. First obtain a
+counts-only live inventory, then pass all five expected controls shown above.
+The exporter fails closed if any count drifts before the coherent snapshot is
+captured. The resulting snapshot digest, not an older hard-coded roster count,
+is the immutable review anchor. It exclusive-creates a bounded JSON artifact
+at mode `0600`. Standard output contains counts and SHA-256 digests only, never
+identities. Do not edit the snapshot by hand.
 
 ## Convert the signed review workbook into a manifest
 
@@ -125,8 +132,8 @@ The output path must not already exist; an exact rebuild to a different private
 path must produce the same canonical manifest digest.
 The `Completion` columns are display formulas only; the builder recomputes every
 gate and rejects formulas in the signed Decision, Evidence/Reason, Reviewer, and
-Review Date cells. All 42 Applicant preservation rows require the same signed
-reason/reviewer/date fields as the roster decisions.
+Review Date cells. All snapshot-declared Applicant preservation rows require
+the same signed reason/reviewer/date fields as the roster decisions.
 
 The workbook supplies four installment due amounts, not calendar dates. The
 final manifest binds those amounts to the already-approved 2026–2027 schedule

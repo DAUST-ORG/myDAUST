@@ -522,7 +522,7 @@ async function fixture() {
     linkedWorkbookRecordId: included.id,
     linkedWorkbookRecord: included,
   };
-  const productionExceptions = Array.from({ length: 416 }, (_, index) => {
+  const productionExceptions = Array.from({ length: 417 }, (_, index) => {
     const exceptionPerson = {
       id: `person-exception-${index + 1}`,
       roles: ["student"],
@@ -550,7 +550,7 @@ async function fixture() {
     applicantId: "applicant-1",
     applicant: { id: "applicant-1" },
   };
-  const additionalApplicants = Array.from({ length: 41 }, (_, index) => {
+  const additionalApplicants = Array.from({ length: 45 }, (_, index) => {
     const applicantId = `applicant-${index + 2}`;
     return {
       ...sourceBase(`applicant:${applicantId}`, "applicant"),
@@ -571,15 +571,15 @@ async function fixture() {
     identityManifestSha256: sha("manifest"),
     confirmationPlanSha256: sha("plan"),
     workbookRowCount: 403,
-    productionStudentCount: 417,
-    applicantCount: 42,
+    productionStudentCount: 418,
+    applicantCount: 46,
     workbookLinkedRows: 1,
     workbookCreatedRows: 0,
     workbookDuplicateRows: 402,
     productionLinkedStudents: 1,
-    productionKeptStudents: 416,
+    productionKeptStudents: 417,
     productionArchivedStudents: 0,
-    preservedApplicants: 42,
+    preservedApplicants: 46,
     sourceBilledXof: 1_514_469_978n,
     sourcePaidXof: 286_551_264n,
     includedBilledXof: 1_514_469_978n,
@@ -621,8 +621,8 @@ async function fixture() {
       heldPaidXof: 0,
       accountCreditXof: 0,
       archiveStudents: 0,
-      keepExceptionStudents: 416,
-      preserveApplicants: 42,
+      keepExceptionStudents: 417,
+      preserveApplicants: 46,
       reconciles: true,
     },
     activations: 0,
@@ -875,15 +875,31 @@ describe("workbook cutover independent post-audit", () => {
     expect(result).toMatchObject({
       ok: true,
       workbookRows: 403,
-      productionStudents: 417,
-      applicants: 42,
+      productionStudents: 418,
+      applicants: 46,
       canonicalInvoices: 1,
       reconstructionPayments: 1,
-      preservedAcademicRecords: 417,
+      preservedAcademicRecords: 418,
       paymentAuditRows: 1,
       reviewerAttestations: 1,
       replayAnchorBatchCount: 1,
     });
+  });
+
+  it("accepts refreshed production and Applicant counts but rejects a persisted Student-count mismatch", async () => {
+    const { prisma, batch } = await fixture();
+    batch.productionStudentCount -= 1;
+    await expect(auditWorkbookCutoverBatch(prisma, "batch-1")).rejects.toThrow(
+      /production Student source count differs/,
+    );
+  });
+
+  it("rejects a persisted Applicant-count mismatch against the exhaustive source records", async () => {
+    const { prisma, batch } = await fixture();
+    batch.applicantCount -= 1;
+    await expect(auditWorkbookCutoverBatch(prisma, "batch-1")).rejects.toThrow(
+      /Applicant source count differs/,
+    );
   });
 
   it("fails closed when imported evidence omits a signed reviewer's attestation", async () => {
@@ -970,9 +986,9 @@ describe("workbook cutover independent post-audit", () => {
       "batch-1",
     );
     expect(result).toMatchObject({
-      productionStudents: 417,
+      productionStudents: 418,
       archivedStudents: 1,
-      preservedAcademicRecords: 417,
+      preservedAcademicRecords: 418,
     });
   });
 
