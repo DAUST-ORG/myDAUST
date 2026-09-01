@@ -738,7 +738,7 @@ async function recordLegacyCohortPairedActivationInTransaction(
     data: {
       entity: "Applicant",
       entityId: activation.applicantId,
-      action: "legacy-cohort-activation-card-required",
+      action: "legacy-cohort-student-activation-required",
       actorId,
       data: {
         batchId,

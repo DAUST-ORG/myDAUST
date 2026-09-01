@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@mydaust/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -26,6 +26,11 @@ const DB_URL = TEST_DATABASE_URL
   : null;
 
 const GENERIC_INVITE_ERROR = "That invitation link is invalid or has expired";
+const DIRECT_DOB = "2002-04-19";
+const TEST_SESSION_SECRET = "student-redemption-integration-secret";
+const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+const ORIGINAL_SESSION_SECRET = process.env.SESSION_SECRET;
 
 let prisma: PrismaClient;
 let guardians: GuardiansService;
@@ -46,6 +51,21 @@ interface SeededIssuedInvite extends SeededInvite {
   activationRequestId: string;
   batchId: string;
   cardId: string;
+}
+
+interface SeededDirectInvite extends SeededInvite {
+  activationRequestId: string;
+  studentId: string;
+  studentNo: string;
+}
+
+function directAccountHash(studentNo: string, dob = DIRECT_DOB): string {
+  return createHmac("sha256", TEST_SESSION_SECRET)
+    .update("mydaust:student-activation-account:v3\0")
+    .update(studentNo.normalize("NFKC").trim().toUpperCase())
+    .update("\0")
+    .update(dob)
+    .digest("hex");
 }
 
 async function seedInvite(
@@ -86,6 +106,7 @@ async function seedInvite(
       personId: person.id,
       studentNo: `INT-${suffix}`,
       recordStatus: "active",
+      dateOfBirth: new Date(`${DIRECT_DOB}T00:00:00.000Z`),
     },
   });
   const invite = await prisma.studentInvite.create({
@@ -104,6 +125,31 @@ async function seedInvite(
     email,
     personId: person.id,
     inviteId: invite.id,
+  };
+}
+
+async function seedDirectInvite(label: string): Promise<SeededDirectInvite> {
+  const seeded = await seedInvite(label);
+  const student = await prisma.student.findUniqueOrThrow({
+    where: { personId: seeded.personId },
+  });
+  const request = await prisma.studentActivationRequest.create({
+    data: {
+      studentPersonId: seeded.personId,
+      accountKeyHash: directAccountHash(student.studentNo),
+      requestTokenHash: sha256(seeded.token),
+      approvalCodeHash: null,
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+      approvedAt: new Date(),
+      verificationMethod: "student_id_dob",
+      studentInviteId: seeded.inviteId,
+    },
+  });
+  return {
+    ...seeded,
+    activationRequestId: request.id,
+    studentId: student.id,
+    studentNo: student.studentNo,
   };
 }
 
@@ -172,6 +218,9 @@ async function redemptionError(token: string, password: string) {
 
 describe.skipIf(!DB_URL)("student invite redemption security", () => {
   beforeAll(async () => {
+    process.env.DATABASE_URL = DB_URL!;
+    process.env.NODE_ENV = "test";
+    process.env.SESSION_SECRET = TEST_SESSION_SECRET;
     execFileSync("pnpm", ["exec", "prisma", "migrate", "deploy"], {
       cwd: new URL("../../../../packages/db", import.meta.url).pathname,
       env: { ...process.env, DATABASE_URL: DB_URL! },
@@ -189,9 +238,19 @@ describe.skipIf(!DB_URL)("student invite redemption security", () => {
   }, 120_000);
 
   afterAll(async () => {
-    if (!prisma) return;
-    await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
-    await prisma.$disconnect();
+    if (prisma) {
+      await prisma.$executeRawUnsafe(
+        `DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`,
+      );
+      await prisma.$disconnect();
+    }
+    if (ORIGINAL_DATABASE_URL === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = ORIGINAL_DATABASE_URL;
+    if (ORIGINAL_NODE_ENV === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+    if (ORIGINAL_SESSION_SECRET === undefined)
+      delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = ORIGINAL_SESSION_SECRET;
   });
 
   it("atomically installs a bcrypt password and records the redemption", async () => {
@@ -250,6 +309,70 @@ describe.skipIf(!DB_URL)("student invite redemption security", () => {
     expect(card.usedAt).toBeInstanceOf(Date);
     expect(request.consumedAt).toBeInstanceOf(Date);
     expect(request.invalidatedAt).toBeNull();
+  });
+
+  it("revalidates and consumes a direct ID-and-DOB activation request", async () => {
+    const seeded = await seedDirectInvite("direct-success");
+
+    await expect(
+      guardians.redeemInvite(seeded.token, seeded.password),
+    ).resolves.toEqual({ ok: true, email: seeded.email });
+
+    const [person, invite, request] = await Promise.all([
+      prisma.person.findUniqueOrThrow({ where: { id: seeded.personId } }),
+      prisma.studentInvite.findUniqueOrThrow({
+        where: { id: seeded.inviteId },
+      }),
+      prisma.studentActivationRequest.findUniqueOrThrow({
+        where: { id: seeded.activationRequestId },
+      }),
+    ]);
+    expect(person.passwordHash).toMatch(/^\$2[aby]\$/);
+    expect(invite.usedAt).toBeInstanceOf(Date);
+    expect(request).toMatchObject({
+      verificationMethod: "student_id_dob",
+      consumedAt: expect.any(Date),
+      invalidatedAt: null,
+    });
+  });
+
+  it("burns a direct invite if the bound ID or birth date drifts", async () => {
+    const seeded = await seedDirectInvite("direct-dob-drift");
+    await prisma.student.update({
+      where: { id: seeded.studentId },
+      data: { dateOfBirth: new Date("2002-04-18T00:00:00.000Z") },
+    });
+
+    const error = await redemptionError(seeded.token, seeded.password);
+    expect(error).toMatchObject({ message: GENERIC_INVITE_ERROR });
+
+    const [person, invite, request, audit] = await Promise.all([
+      prisma.person.findUniqueOrThrow({ where: { id: seeded.personId } }),
+      prisma.studentInvite.findUniqueOrThrow({
+        where: { id: seeded.inviteId },
+      }),
+      prisma.studentActivationRequest.findUniqueOrThrow({
+        where: { id: seeded.activationRequestId },
+      }),
+      prisma.auditLog.findFirstOrThrow({
+        where: {
+          entity: "Person",
+          entityId: seeded.personId,
+          action: "student-setup-link-invalidated",
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+    expect(person.passwordHash).toBeNull();
+    expect(invite.usedAt).toBeInstanceOf(Date);
+    expect(request).toMatchObject({
+      consumedAt: null,
+      invalidatedAt: expect.any(Date),
+    });
+    expect(audit).toMatchObject({
+      actorId: null,
+      data: { reason: "direct_activation_state_drift" },
+    });
   });
 
   it("honors the 30-minute invite after a timely claim crosses card expiry", async () => {

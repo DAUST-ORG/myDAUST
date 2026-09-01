@@ -787,7 +787,7 @@ function CreateUserModal({
         {isStudent ? (
           <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
             Create student records from the Registrar Students page. Students
-            activate in person through the paired activation flow.
+            activate with their Student ID and date of birth.
           </p>
         ) : (
           <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
