@@ -5,5 +5,6 @@ import { UploadsStorage } from "./uploads.storage.js";
 @Module({
   controllers: [UploadsController],
   providers: [UploadsStorage],
+  exports: [UploadsStorage],
 })
 export class UploadsModule {}
