@@ -72,7 +72,7 @@ export default function FormEditPage() {
     }
   }, [id, router]);
 
-  if (loading) return <div style={{ padding: 24, color: "var(--muted)" }}>Loading...</div>;
+  if (loading) return <div style={{ padding: 24, color: "var(--fg3)" }}>Loading...</div>;
   if (error) return <div style={{ padding: 24, color: "var(--danger)" }}>{error}</div>;
   if (!form) return <div style={{ padding: 24 }}>Form not found.</div>;
 
@@ -85,7 +85,7 @@ export default function FormEditPage() {
             <Badge tone={STATUS_TONE[form.status] ?? "neutral"}>
               {form.status}
             </Badge>
-            <span style={{ marginLeft: 8, color: "var(--muted)", fontSize: 13 }}>
+            <span style={{ marginLeft: 8, color: "var(--fg3)", fontSize: 13 }}>
               {form.responseCount} response{form.responseCount !== 1 ? "s" : ""}
             </span>
           </span>
@@ -210,7 +210,7 @@ function ResponseTable({
 
   if (responses.length === 0) {
     return (
-      <p style={{ color: "var(--muted)", padding: 24, textAlign: "center" }}>
+      <p style={{ color: "var(--fg3)", padding: 24, textAlign: "center" }}>
         No responses yet.
       </p>
     );
@@ -220,7 +220,7 @@ function ResponseTable({
     <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
-          <tr style={{ background: "var(--bg-muted)", borderBottom: "1px solid var(--border)" }}>
+          <tr style={{ background: "var(--surface-2)", borderBottom: "1px solid var(--border)" }}>
             <th style={thStyle}>#</th>
             <th style={thStyle}>Respondent</th>
             <th style={thStyle}>Submitted</th>
@@ -238,7 +238,7 @@ function ResponseTable({
                 <td style={tdStyle}>
                   {r.respondentName ?? r.personId ?? "Anonymous"}
                   {r.respondentEmail && (
-                    <div style={{ color: "var(--muted)", fontSize: 11 }}>{r.respondentEmail}</div>
+                    <div style={{ color: "var(--fg3)", fontSize: 11 }}>{r.respondentEmail}</div>
                   )}
                 </td>
                 <td style={tdStyle}>{new Date(r.submittedAt).toLocaleString()}</td>
@@ -268,7 +268,7 @@ const thStyle: React.CSSProperties = {
   fontSize: 11,
   textTransform: "uppercase",
   letterSpacing: "0.05em",
-  color: "var(--muted)",
+  color: "var(--fg3)",
   whiteSpace: "nowrap",
 };
 

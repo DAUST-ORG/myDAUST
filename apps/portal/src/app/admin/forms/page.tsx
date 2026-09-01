@@ -43,7 +43,7 @@ export default function FormsPage() {
           </Button>
         }
       />
-      {loading && <p style={{ color: "var(--muted)" }}>Loading...</p>}
+      {loading && <p style={{ color: "var(--fg3)" }}>Loading...</p>}
       {!loading && forms.length === 0 && (
         <EmptyState
           title="No forms yet"
@@ -62,7 +62,7 @@ export default function FormsPage() {
             <thead>
               <tr
                 style={{
-                  background: "var(--bg-muted)",
+                  background: "var(--surface-2)",
                   borderBottom: "1px solid var(--border)",
                 }}
               >
@@ -82,7 +82,7 @@ export default function FormsPage() {
                   <td style={tdStyle}>
                     <div style={{ fontWeight: 500 }}>{f.title}</div>
                     {f.description && (
-                      <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                      <div style={{ color: "var(--fg3)", fontSize: 12 }}>
                         {f.description.slice(0, 80)}
                         {f.description.length > 80 ? "..." : ""}
                       </div>
@@ -143,7 +143,7 @@ const thStyle: React.CSSProperties = {
   fontSize: 12,
   textTransform: "uppercase",
   letterSpacing: "0.05em",
-  color: "var(--muted)",
+  color: "var(--fg3)",
 };
 
 const tdStyle: React.CSSProperties = {

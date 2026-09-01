@@ -53,7 +53,7 @@ export default function PublicFormPage() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--fg3)" }}>
         Loading form...
       </div>
     );
@@ -64,7 +64,7 @@ export default function PublicFormPage() {
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center" }}>
           <h2 style={{ fontSize: 20, color: "var(--danger)" }}>Form Unavailable</h2>
-          <p style={{ color: "var(--muted)", marginTop: 8 }}>{error ?? "This form could not be found."}</p>
+          <p style={{ color: "var(--fg3)", marginTop: 8 }}>{error ?? "This form could not be found."}</p>
         </div>
       </div>
     );
@@ -74,8 +74,8 @@ export default function PublicFormPage() {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center", maxWidth: 400 }}>
-          <h2 style={{ fontSize: 20, color: "var(--navy)" }}>Thank You!</h2>
-          <p style={{ color: "var(--muted)", marginTop: 8 }}>
+          <h2 style={{ fontSize: 20, color: "var(--daust-navy)" }}>Thank You!</h2>
+          <p style={{ color: "var(--fg3)", marginTop: 8 }}>
             Your response to "{form.title}" has been recorded.
           </p>
         </div>
@@ -87,7 +87,7 @@ export default function PublicFormPage() {
     <div
       style={{
         minHeight: "100vh",
-        background: "var(--bg-muted)",
+        background: "var(--surface-2)",
         padding: "40px 16",
       }}
     >
@@ -102,7 +102,7 @@ export default function PublicFormPage() {
         >
           {/* Identity fields */}
           <div style={{ marginBottom: 20 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: "var(--navy)" }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: "var(--daust-navy)" }}>
               Your Information
             </h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -168,7 +168,7 @@ const labelStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   marginBottom: 4,
-  color: "var(--muted)",
+  color: "var(--fg3)",
 };
 
 const inputStyle: React.CSSProperties = {
