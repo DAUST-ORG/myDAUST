@@ -178,7 +178,7 @@ function FieldInput({
           fontSize: 13,
           fontWeight: 500,
           marginBottom: 4,
-          color: "var(--fg)",
+          color: "var(--fg1)",
         }}
       >
         {field.label}
