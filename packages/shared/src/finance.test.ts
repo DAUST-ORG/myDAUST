@@ -45,6 +45,10 @@ describe("wire payment contracts", () => {
     expect(PaymentMethod.parse("cheque")).toBe("cheque");
   });
 
+  it("recognizes cash for Finance-recorded payments", () => {
+    expect(PaymentMethod.parse("cash")).toBe("cash");
+  });
+
   it("recognizes an explicitly unknown legacy rail only in the ledger schema", () => {
     expect(PaymentMethod.parse("legacy_unknown")).toBe("legacy_unknown");
     expect(
@@ -62,6 +66,16 @@ describe("wire payment contracts", () => {
         invoiceId: "2afba2e0-c43a-4870-845a-c7510faaf110",
         amount: 315_000,
         method: "cheque",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects cash from payer-facing checkout initiation", () => {
+    expect(
+      InitiatePaymentInput.safeParse({
+        invoiceId: "00000000-0000-4000-8000-000000000000",
+        amount: 1000,
+        method: "cash",
       }).success,
     ).toBe(false);
   });

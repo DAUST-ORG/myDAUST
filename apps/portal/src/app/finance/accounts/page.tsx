@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarClock, Check, FilePlus, Pencil } from "lucide-react";
+import { Banknote, CalendarClock, Check, FilePlus, Pencil } from "lucide-react";
 import {
   type AccountInvoice,
   type FeePlan,
+  type StaffRecordedPaymentMethod,
+  type StudentAccount,
   type StudentAccountRow,
   assignStandardPackage,
   getFeePlan,
   getStudentAccount,
   listStudentAccounts,
+  recordStudentPayment,
   restoreStandardPaymentPlan,
   updatePaymentPlan,
 } from "@/lib/api";
@@ -99,6 +102,29 @@ interface BillingDraft {
   rows: DraftRow[];
 }
 
+interface PaymentDraft {
+  studentId: string;
+  studentName: string;
+  studentNo: string;
+  amountInput: string;
+  method: StaffRecordedPaymentMethod;
+  transactionReference: string;
+  idempotencyKey: string;
+  account: StudentAccount | null;
+}
+
+function parseWholeXof(value: string): number | null {
+  const normalized = value.replace(/\s/g, "");
+  if (!/^\d+$/.test(normalized)) return null;
+  const amount = Number(normalized);
+  return Number.isSafeInteger(amount) && amount > 0 ? amount : null;
+}
+
+function paymentMethodLabel(method: StaffRecordedPaymentMethod): string {
+  if (method === "orange_money") return "Orange Money";
+  return method === "wave" ? "Wave" : "Cash";
+}
+
 function BalanceCells({ row }: { row: StudentAccountRow }) {
   const summary = resolveAccountSummary(row.summary, {
     balanceXof: row.remaining ?? row.remainingXof ?? row.balance,
@@ -146,6 +172,11 @@ export default function FinanceAccounts() {
   const [note, setNote] = useState<string | null>(null);
   const [requestReason, setRequestReason] = useState("");
 
+  const [paymentDraft, setPaymentDraft] = useState<PaymentDraft | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+
   const load = useCallback(() => {
     listStudentAccounts()
       .then(setRows)
@@ -157,6 +188,35 @@ export default function FinanceAccounts() {
       .then(setPlan)
       .catch(() => setPlan(null));
   }, []);
+
+  useEffect(() => {
+    if (!paymentDraft) return;
+    const studentId = paymentDraft.studentId;
+    const idempotencyKey = paymentDraft.idempotencyKey;
+    let active = true;
+
+    setPaymentLoading(true);
+    setPaymentError(null);
+    getStudentAccount(studentId)
+      .then((account) => {
+        if (!active) return;
+        setPaymentDraft((current) =>
+          current?.idempotencyKey === idempotencyKey
+            ? { ...current, account }
+            : current,
+        );
+      })
+      .catch((cause: Error) => {
+        if (active) setPaymentError(cause.message);
+      })
+      .finally(() => {
+        if (active) setPaymentLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [paymentDraft?.idempotencyKey]);
 
   const year = plan?.academicYearLabel ?? "";
   const feeRows = useMemo(
@@ -219,6 +279,85 @@ export default function FinanceAccounts() {
     ],
     [rows],
   );
+
+  const paymentAmountXof = paymentDraft
+    ? parseWholeXof(paymentDraft.amountInput)
+    : null;
+  const payableLimitXof =
+    paymentDraft?.account?.payableTarget?.invoicePayableXof ?? 0;
+  const paymentNeedsReference =
+    paymentDraft !== null && paymentDraft.method !== "cash";
+  const paymentReferenceValid =
+    !paymentNeedsReference ||
+    /[a-z0-9]/i.test(paymentDraft?.transactionReference ?? "");
+  const paymentAmountValid =
+    paymentAmountXof !== null &&
+    payableLimitXof > 0 &&
+    paymentAmountXof <= payableLimitXof;
+  const paymentValid =
+    paymentDraft?.account?.payableTarget !== null &&
+    paymentDraft?.account?.payableTarget !== undefined &&
+    paymentAmountValid &&
+    paymentReferenceValid;
+
+  function openRecordPayment(row: StudentAccountRow) {
+    setNote(null);
+    setPaymentError(null);
+    setPaymentDraft({
+      studentId: row.id,
+      studentName: row.name,
+      studentNo: row.studentNo,
+      amountInput: "",
+      method: "cash",
+      transactionReference: "",
+      idempotencyKey: window.crypto.randomUUID(),
+      account: null,
+    });
+  }
+
+  function editPaymentDraft(patch: Partial<PaymentDraft>) {
+    setPaymentError(null);
+    setPaymentDraft((current) =>
+      current ? { ...current, ...patch } : current,
+    );
+  }
+
+  function closePaymentModal() {
+    if (paymentBusy) return;
+    setPaymentDraft(null);
+    setPaymentError(null);
+    setPaymentLoading(false);
+  }
+
+  async function submitPayment() {
+    if (!paymentDraft || !paymentValid || paymentAmountXof === null) return;
+    setPaymentBusy(true);
+    setPaymentError(null);
+    try {
+      const transactionReference = paymentDraft.transactionReference.trim();
+      const result = await recordStudentPayment(paymentDraft.studentId, {
+        amountXof: paymentAmountXof,
+        method: paymentDraft.method,
+        ...(paymentDraft.method === "cash" ? {} : { transactionReference }),
+        idempotencyKey: paymentDraft.idempotencyKey,
+      });
+      setPaymentDraft(null);
+      const receiptReference =
+        result.receipt.transactionReference ?? result.receipt.providerRef;
+      setNote(
+        `${formatXof(paymentAmountXof)} recorded for ${paymentDraft.studentName}. Receipt ${receiptReference}.`,
+      );
+      load();
+    } catch (cause) {
+      setPaymentError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not record the payment.",
+      );
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
 
   /** Seed the schedule from the institution fee plan for the chosen tuition plan. */
   const seedRows = useCallback(
@@ -526,7 +665,7 @@ export default function FinanceAccounts() {
                   <th style={{ width: 230 }}>Plan</th>
                   <th style={{ textAlign: "right", width: 140 }}>Billed</th>
                   <th style={{ textAlign: "right", width: 140 }}>Remaining</th>
-                  <th style={{ textAlign: "right", width: 56 }}>Edit</th>
+                  <th style={{ textAlign: "right", width: 236 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -604,15 +743,41 @@ export default function FinanceAccounts() {
                       />
                     </td>
                     <td style={{ textAlign: "right" }}>
-                      <IconButton
-                        label={`Manage annual charges and payment dates for ${r.name}`}
-                        disabled={
-                          busy || r.specialAccount?.hasPendingPlanChange
-                        }
-                        onClick={() => openEdit(r)}
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "flex-end",
+                          gap: 8,
+                        }}
                       >
-                        <Pencil size={15} />
-                      </IconButton>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          icon={<Banknote size={14} />}
+                          disabled={
+                            paymentBusy ||
+                            (r.remaining ?? r.remainingXof ?? r.balance) <= 0
+                          }
+                          title={
+                            (r.remaining ?? r.remainingXof ?? r.balance) <= 0
+                              ? "This student has no payable balance"
+                              : `Record a payment for ${r.name}`
+                          }
+                          onClick={() => openRecordPayment(r)}
+                        >
+                          Record payment
+                        </Button>
+                        <IconButton
+                          label={`Manage annual charges and payment dates for ${r.name}`}
+                          disabled={
+                            busy || r.specialAccount?.hasPendingPlanChange
+                          }
+                          onClick={() => openEdit(r)}
+                        >
+                          <Pencil size={15} />
+                        </IconButton>
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -685,6 +850,7 @@ export default function FinanceAccounts() {
                     align="right"
                   />
                   <th style={{ textAlign: "right", width: 130 }}>Status</th>
+                  <th style={{ textAlign: "right", width: 170 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -738,12 +904,272 @@ export default function FinanceAccounts() {
                       {r.program ?? "—"}
                     </td>
                     <BalanceCells row={r} />
+                    <td style={{ textAlign: "right" }}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        icon={<Banknote size={14} />}
+                        disabled={
+                          paymentBusy ||
+                          (r.remaining ?? r.remainingXof ?? r.balance) <= 0
+                        }
+                        title={
+                          (r.remaining ?? r.remainingXof ?? r.balance) <= 0
+                            ? "This student has no payable balance"
+                            : `Record a payment for ${r.name}`
+                        }
+                        onClick={() => openRecordPayment(r)}
+                      >
+                        Record payment
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
         </Card>
+      )}
+
+      {paymentDraft && (
+        <Modal
+          open
+          onClose={closePaymentModal}
+          title="Record student payment"
+          width={560}
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                onClick={closePaymentModal}
+                disabled={paymentBusy}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                icon={<Banknote size={15} />}
+                disabled={paymentLoading || paymentBusy || !paymentValid}
+                onClick={submitPayment}
+              >
+                {paymentBusy
+                  ? "Recording…"
+                  : paymentAmountXof
+                    ? `Record ${formatXof(paymentAmountXof)}`
+                    : "Record payment"}
+              </Button>
+            </>
+          }
+        >
+          <div style={{ display: "grid", gap: 18 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                paddingBottom: 14,
+                borderBottom: "1px solid var(--divider)",
+              }}
+            >
+              <Avatar name={paymentDraft.studentName} size={40} />
+              <span style={{ minWidth: 0 }}>
+                <strong style={{ display: "block", fontSize: 15 }}>
+                  {paymentDraft.account?.student.name ??
+                    paymentDraft.studentName}
+                </strong>
+                <span
+                  style={{
+                    display: "block",
+                    marginTop: 2,
+                    color: "var(--fg3)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11.5,
+                  }}
+                >
+                  {paymentDraft.account?.student.studentNo ??
+                    paymentDraft.studentNo}
+                </span>
+              </span>
+              <span style={{ flex: 1 }} />
+              <Badge tone="warning">Posts immediately</Badge>
+            </div>
+
+            {paymentLoading && (
+              <p className="muted" aria-live="polite" style={{ margin: 0 }}>
+                Loading the current payable balance…
+              </p>
+            )}
+
+            {paymentError && (
+              <div
+                role="alert"
+                style={{
+                  padding: "10px 12px",
+                  border: "1px solid var(--danger)",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--surface-2)",
+                  color: "var(--danger)",
+                  fontSize: 12.5,
+                }}
+              >
+                {paymentError}
+              </div>
+            )}
+
+            {!paymentLoading && paymentDraft.account && (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(125px, 1fr))",
+                    gap: 14,
+                  }}
+                >
+                  {[
+                    ["Billed", paymentDraft.account.totals.billed],
+                    ["Paid", paymentDraft.account.totals.paid],
+                    [
+                      "Current payable",
+                      paymentDraft.account.payableTarget?.invoicePayableXof ??
+                        0,
+                    ],
+                  ].map(([label, amount]) => (
+                    <div key={String(label)}>
+                      <span
+                        className="muted"
+                        style={{ display: "block", fontSize: 11.5 }}
+                      >
+                        {label}
+                      </span>
+                      <strong
+                        style={{
+                          display: "block",
+                          marginTop: 3,
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {formatXof(Number(amount))}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+
+                {paymentDraft.account.payableTarget ? (
+                  <>
+                    <Field
+                      label="Amount (FCFA) *"
+                      hint={
+                        paymentDraft.amountInput && !paymentAmountValid
+                          ? `Enter a whole amount from 1 to ${formatXof(payableLimitXof)}.`
+                          : `Maximum for the current payable billing: ${formatXof(payableLimitXof)}.`
+                      }
+                    >
+                      <Input
+                        value={paymentDraft.amountInput}
+                        onChange={(value) =>
+                          editPaymentDraft({
+                            amountInput: value.replace(/[^0-9]/g, ""),
+                          })
+                        }
+                        placeholder="350000"
+                        inputMode="numeric"
+                        align="right"
+                        invalid={
+                          paymentDraft.amountInput.length > 0 &&
+                          !paymentAmountValid
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Payment method *">
+                      <Select
+                        ariaLabel="Payment method"
+                        value={paymentDraft.method}
+                        onChange={(value) => {
+                          const method = value as StaffRecordedPaymentMethod;
+                          editPaymentDraft({
+                            method,
+                            ...(method === "cash"
+                              ? { transactionReference: "" }
+                              : {}),
+                          });
+                        }}
+                        options={[
+                          { value: "cash", label: "Cash" },
+                          { value: "wave", label: "Wave" },
+                          { value: "orange_money", label: "Orange Money" },
+                        ]}
+                      />
+                    </Field>
+
+                    {paymentNeedsReference && (
+                      <Field
+                        label={`${paymentMethodLabel(paymentDraft.method)} transaction reference *`}
+                        hint="Use the reference shown in the mobile-money transaction."
+                      >
+                        <Input
+                          value={paymentDraft.transactionReference}
+                          onChange={(value) =>
+                            editPaymentDraft({
+                              transactionReference: value.slice(0, 160),
+                            })
+                          }
+                          placeholder="Enter the transaction reference"
+                          invalid={
+                            paymentDraft.transactionReference.length > 0 &&
+                            !/[a-z0-9]/i.test(paymentDraft.transactionReference)
+                          }
+                        />
+                      </Field>
+                    )}
+
+                    <div
+                      style={{
+                        padding: "11px 12px",
+                        border: "1px solid var(--border)",
+                        borderRadius: "var(--radius-md)",
+                        background: "var(--surface-2)",
+                      }}
+                    >
+                      <strong style={{ display: "block", fontSize: 12.5 }}>
+                        Due-date-first allocation
+                      </strong>
+                      <p
+                        className="muted"
+                        style={{ margin: "3px 0 0", fontSize: 11.5 }}
+                      >
+                        The payment is recorded now and applied to this
+                        student’s oldest payable charge. The receipt and Finance
+                        user are retained in the audit trail.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div
+                    role="status"
+                    style={{
+                      padding: "12px",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-md)",
+                      background: "var(--surface-2)",
+                    }}
+                  >
+                    <strong style={{ display: "block", fontSize: 13 }}>
+                      No payable balance
+                    </strong>
+                    <p
+                      className="muted"
+                      style={{ margin: "4px 0 0", fontSize: 12 }}
+                    >
+                      This account has no outstanding charge that can receive a
+                      payment.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </Modal>
       )}
 
       {draft && (

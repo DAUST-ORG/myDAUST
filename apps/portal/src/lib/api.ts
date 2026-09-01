@@ -327,6 +327,7 @@ export interface BillingPayment {
   method: string;
   status: string;
   providerRef?: string;
+  transactionReference?: string | null;
   source?: string;
   initiatedByEmail?: string | null;
   settledAt?: string | null;
@@ -2268,6 +2269,33 @@ export interface StudentAccount {
 export const getStudentAccount = (studentId: string) =>
   request<StudentAccount>(`/finance/admin/students/${studentId}/account`);
 
+export type StaffRecordedPaymentMethod = "cash" | "wave" | "orange_money";
+
+export interface RecordStudentPaymentInput {
+  amountXof: number;
+  method: StaffRecordedPaymentMethod;
+  transactionReference?: string;
+  idempotencyKey: string;
+}
+
+export interface RecordStudentPaymentResult {
+  ok: boolean;
+  paymentId: string;
+  receipt: Receipt;
+}
+
+export const recordStudentPayment = (
+  studentId: string,
+  input: RecordStudentPaymentInput,
+) =>
+  request<RecordStudentPaymentResult>(
+    `/finance/admin/students/${encodeURIComponent(studentId)}/payments`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+
 export const assignStandardPackage = (studentId: string) =>
   request<{
     created: boolean;
@@ -2552,7 +2580,19 @@ export const rejectWireTransfer = (id: string, reason: string) =>
     body: JSON.stringify({ reason }),
   });
 
-export interface AdminPaymentSubmission extends PaymentSubmissionSummary {
+export interface AdminPaymentSubmission extends Omit<
+  PaymentSubmissionSummary,
+  "method" | "details"
+> {
+  method: ProofPaymentMethod | StaffRecordedPaymentMethod;
+  details:
+    | PublicProofMethodConfig
+    | {
+        method: "cash";
+        enabled: false;
+        label: "Cash";
+        instructions: string;
+      };
   target: string;
   purpose: string;
   hasPayerProof: boolean;
@@ -2853,6 +2893,7 @@ export interface DirectorPaymentVerification {
   verifiedByName: string | null;
   verifiedByEmail: string | null;
   verifiedAt: string | null;
+  transactionReference?: string | null;
   createdAt: string;
   hasPayerProof?: boolean;
   hasVerificationProof?: boolean;
@@ -2938,6 +2979,7 @@ export interface Receipt {
   method: string;
   status: string;
   providerRef: string;
+  transactionReference?: string | null;
   paidAt: string;
   refundedAt?: string | null;
   source?: string;

@@ -595,7 +595,9 @@ export class PaymentSubmissionsService {
 
   async listForStudent(studentId: string) {
     const rows = await this.prisma.paymentSubmission.findMany({
-      where: { studentId },
+      // Finance-recorded cash/mobile receipts live in the canonical Payment
+      // history; they are audit records, not resumable payer proof attempts.
+      where: { studentId, source: { not: "finance_manual" } },
       orderBy: { createdAt: "desc" },
       include: submissionInclude,
     });

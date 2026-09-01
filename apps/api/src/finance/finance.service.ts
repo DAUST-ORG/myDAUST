@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -63,6 +64,8 @@ import {
   isRunRateEligibleCashRecognition,
   paymentCashRecognition,
 } from "./payment-cash-recognition.js";
+import { externalReferenceFingerprintSha256 } from "./payment-reference.js";
+import { normalizeExternalReference } from "./historical-payment-import.manifest.js";
 
 // Shared fee constants are bootstrap fallbacks only. Standard billing always reads
 // the current administrator-approved FeeSchedule revision from the database.
@@ -588,7 +591,12 @@ export class FinanceService {
             },
           },
         },
-        payments: { orderBy: { createdAt: "desc" } },
+        payments: {
+          orderBy: { createdAt: "desc" },
+          include: {
+            submission: { select: { bankReference: true } },
+          },
+        },
         paymentSubmissions: { orderBy: { createdAt: "desc" } },
       },
     });
@@ -635,13 +643,16 @@ export class FinanceService {
           method: p.method,
           status: p.status,
           providerRef: p.providerRef,
+          transactionReference: p.submission?.bankReference ?? null,
           source: p.source,
           initiatedByEmail: p.initiatedByEmail,
           settledAt: p.settledAt,
           refundedAt: p.refundedAt,
           createdAt: p.createdAt,
         })),
-        wireTransfers: inv.paymentSubmissions.map((w) => this.wireSummary(w)),
+        wireTransfers: inv.paymentSubmissions
+          .filter((submission) => submission.source !== "finance_manual")
+          .map((submission) => this.wireSummary(submission)),
       };
     });
   }
@@ -1084,16 +1095,36 @@ export class FinanceService {
   /**
    * Apply a successful payment: allocate to installments oldest-due-first, roll up the invoice,
    * audit, and email the receipt. Idempotent (no-op when already success). Shared by the IPN
-   * path and the bursar's manual confirm (for verified-but-IPN-lost payments).
+   * path, proof verification, and Finance's direct received-payment workflow.
    */
   private async settlePayment(
     paymentId: string,
     opts: {
-      via: "ipn" | "manual" | "wire" | "pi_spi";
+      via: "ipn" | "manual" | "wire" | "pi_spi" | "finance_manual";
       payload?: object;
       method?: string | null;
       actorId?: string;
       confirmedAmount?: number;
+      /** Create-and-settle keeps a cashier entry atomic and retryable by its UUID. */
+      createPayment?: {
+        invoiceId: string;
+        studentId: string;
+        amount: number;
+        method: "cash" | "wave" | "orange_money";
+        providerRef: string;
+        externalReferenceFingerprintSha256: string | null;
+        source: "finance_manual";
+        initiatedById: string;
+        initiatedByEmail: string | null;
+      };
+      /** Approved review row retained for the Director's post-hoc audit queue. */
+      financeRecord?: {
+        id: string;
+        contactEmail: string;
+        transactionReference: string | null;
+        reviewedByName: string;
+        reviewedByEmail: string;
+      };
       /** A signed provider event is real cash even if its onboarding link was rotated locally. */
       providerConfirmedStaleOnboarding?: boolean;
       /** Set when a request-to-pay settled, so the rail row and link flip with the money. */
@@ -1122,10 +1153,36 @@ export class FinanceService {
     const runSettlement = () =>
       this.prisma.$transaction(
         async (tx) => {
-          const payment = await tx.payment.findUnique({
+          let payment = await tx.payment.findUnique({
             where: { id: paymentId },
           });
+          if (!payment && opts.createPayment) {
+            payment = await tx.payment.create({
+              data: {
+                id: paymentId,
+                ...opts.createPayment,
+                status: "pending",
+                provider: "finance_manual",
+                ...(opts.payload ? { ipnPayload: opts.payload as never } : {}),
+              },
+            });
+          }
           if (!payment) throw new NotFoundException("Payment not found");
+          if (
+            opts.createPayment &&
+            (payment.invoiceId !== opts.createPayment.invoiceId ||
+              payment.studentId !== opts.createPayment.studentId ||
+              payment.amount !== opts.createPayment.amount ||
+              payment.method !== opts.createPayment.method ||
+              payment.providerRef !== opts.createPayment.providerRef ||
+              payment.source !== opts.createPayment.source ||
+              payment.externalReferenceFingerprintSha256 !==
+                opts.createPayment.externalReferenceFingerprintSha256)
+          ) {
+            throw new BadRequestException(
+              "That payment request was already used with different details",
+            );
+          }
           if (payment.status === "success") {
             return { didSettle: false, activation: null };
           }
@@ -1215,7 +1272,7 @@ export class FinanceService {
               "Payment accounting target no longer exists",
             );
           }
-          if (opts.via === "wire") {
+          if (opts.via === "wire" || opts.via === "finance_manual") {
             this.requirePayableTarget(account, amount, payment.invoiceId);
           }
 
@@ -1227,6 +1284,15 @@ export class FinanceService {
               method: (opts.method ?? payment.method) as typeof payment.method,
               settledAt: new Date(),
               ...(opts.payload ? { ipnPayload: opts.payload } : {}),
+              ...(opts.wireReview?.bankReference
+                ? {
+                    externalReferenceFingerprintSha256:
+                      externalReferenceFingerprintSha256(
+                        opts.wireReview.method ?? opts.method ?? payment.method,
+                        opts.wireReview.bankReference,
+                      ),
+                  }
+                : {}),
             },
           });
           if (claimed.count === 0) {
@@ -1392,7 +1458,9 @@ export class FinanceService {
                     ? "wire-confirmed"
                     : opts.via === "pi_spi"
                       ? "pi-spi-settled"
-                      : "manually-confirmed",
+                      : opts.via === "finance_manual"
+                        ? "received-and-recorded"
+                        : "manually-confirmed",
               actorId: opts.actorId,
               data: {
                 amount,
@@ -1403,6 +1471,8 @@ export class FinanceService {
                 directAppliedXof,
                 creditMemoXof,
                 creditMemoInvoiceId: creditMemo?.id ?? null,
+                transactionReference:
+                  opts.financeRecord?.transactionReference ?? null,
               },
             },
           });
@@ -1480,6 +1550,58 @@ export class FinanceService {
               },
             });
           }
+          if (opts.financeRecord) {
+            const method = (opts.method ?? payment.method) as
+              "cash" | "wave" | "orange_money";
+            await tx.paymentSubmission.create({
+              data: {
+                id: opts.financeRecord.id,
+                status: "approved",
+                method,
+                source: "finance_manual",
+                studentId: payment.studentId,
+                invoiceId: payment.invoiceId,
+                paymentId: payment.id,
+                submittedAmountXof: amount,
+                confirmedAmountXof: amount,
+                contactEmail: opts.financeRecord.contactEmail,
+                submittedById: opts.actorId,
+                submittedByEmail: opts.financeRecord.reviewedByEmail,
+                bankSnapshot: {
+                  method,
+                  enabled: false,
+                  label:
+                    method === "cash"
+                      ? "Cash"
+                      : method === "wave"
+                        ? "Wave"
+                        : "Orange Money",
+                  instructions: "Recorded directly by Finance",
+                },
+                bankReference: opts.financeRecord.transactionReference,
+                reviewedById: opts.actorId,
+                reviewedByName: opts.financeRecord.reviewedByName,
+                reviewedByEmail: opts.financeRecord.reviewedByEmail,
+                reviewedAt: new Date(),
+              },
+            });
+            await tx.auditLog.create({
+              data: {
+                entity: "PaymentSubmission",
+                entityId: opts.financeRecord.id,
+                action: "recorded-by-finance",
+                actorId: opts.actorId,
+                data: {
+                  paymentId: payment.id,
+                  studentId: payment.studentId,
+                  invoiceId: payment.invoiceId,
+                  amountXof: amount,
+                  method,
+                  transactionReference: opts.financeRecord.transactionReference,
+                },
+              },
+            });
+          }
           const gate = await syncEnrollmentGateInTransaction(tx, {
             invoiceId: originalInvoice.id,
             paymentId: payment.id,
@@ -1538,12 +1660,29 @@ export class FinanceService {
         result = await runSettlement();
         break;
       } catch (error) {
-        const retryable =
+        const code =
           typeof error === "object" &&
           error !== null &&
           "code" in error &&
-          error.code === "P2034";
-        if (!retryable || attempt === 2) throw error;
+          typeof error.code === "string"
+            ? error.code
+            : null;
+        if (code === "P2002" && opts.createPayment && attempt < 2) continue;
+        if (
+          code === "P2002" &&
+          (opts.createPayment?.externalReferenceFingerprintSha256 ||
+            opts.wireReview?.bankReference)
+        ) {
+          throw new ConflictException(
+            "This payment reference has already been recorded",
+          );
+        }
+        if (code === "P2002" && opts.createPayment) {
+          throw new ConflictException(
+            "This payment request is already being processed; retry it shortly",
+          );
+        }
+        if (code !== "P2034" || attempt === 2) throw error;
       }
     }
 
@@ -1576,6 +1715,11 @@ export class FinanceService {
       size: number;
     };
   }) {
+    await this.assertFinanceReferenceAvailable(
+      input.method,
+      input.transactionReference,
+      input.paymentId,
+    );
     await this.settlePayment(input.paymentId, {
       via: "manual",
       actorId: input.reviewer.personId,
@@ -2589,10 +2733,13 @@ export class FinanceService {
         student: { include: { person: true } },
         invoice: { include: { term: true } },
         initiatedBy: { select: { firstName: true, lastName: true } },
+        submission: { select: { bankReference: true } },
       },
     });
     if (!p) return;
     const studentEmail = requirePersonEmail(p.student.person.email, "Student");
+    const receiptReference =
+      p.submission?.bankReference?.trim() || p.providerRef;
     await this.mail.send({
       to: studentEmail,
       subject: `Payment receipt — ${p.invoice.term.name}`,
@@ -2602,7 +2749,7 @@ export class FinanceService {
         <table cellpadding="6">
           <tr><td><strong>Amount</strong></td><td>${p.amount.toLocaleString("en-US")} XOF</td></tr>
           <tr><td><strong>Method</strong></td><td>${p.method}</td></tr>
-          <tr><td><strong>Reference</strong></td><td>${p.providerRef}</td></tr>
+          <tr><td><strong>Reference</strong></td><td>${escapeHtml(receiptReference)}</td></tr>
           <tr><td><strong>Term</strong></td><td>${p.invoice.term.name}</td></tr>
         </table>
         <p>View the full receipt anytime in your myDAUST billing page.</p>`,
@@ -2625,7 +2772,7 @@ export class FinanceService {
           <table cellpadding="6">
             <tr><td><strong>Amount</strong></td><td>${p.amount.toLocaleString("en-US")} XOF</td></tr>
             <tr><td><strong>Method</strong></td><td>${p.method}</td></tr>
-            <tr><td><strong>Reference</strong></td><td>${p.providerRef}</td></tr>
+            <tr><td><strong>Reference</strong></td><td>${escapeHtml(receiptReference)}</td></tr>
             <tr><td><strong>Term</strong></td><td>${p.invoice.term.name}</td></tr>
           </table>
           <p>You can review this receipt in the parent billing portal.</p>`,
@@ -2643,6 +2790,7 @@ export class FinanceService {
       include: {
         invoice: { include: { term: true } },
         student: { include: { person: true } },
+        submission: { select: { bankReference: true } },
       },
     });
     return payments.map((p) => ({
@@ -2654,6 +2802,7 @@ export class FinanceService {
       method: p.method,
       status: p.status,
       providerRef: p.providerRef,
+      transactionReference: p.submission?.bankReference ?? null,
       source: p.source,
       initiatedByEmail: p.initiatedByEmail,
       settledAt: p.settledAt,
@@ -2896,7 +3045,12 @@ export class FinanceService {
               },
             },
           },
-          payments: { orderBy: { createdAt: "desc" } },
+          payments: {
+            orderBy: { createdAt: "desc" },
+            include: {
+              submission: { select: { bankReference: true } },
+            },
+          },
           paymentSubmissions: { orderBy: { createdAt: "desc" } },
           components: {
             include: { allocations: true },
@@ -3103,13 +3257,16 @@ export class FinanceService {
             method: p.method,
             status: p.status,
             providerRef: p.providerRef,
+            transactionReference: p.submission?.bankReference ?? null,
             source: p.source,
             initiatedByEmail: p.initiatedByEmail,
             settledAt: p.settledAt,
             refundedAt: p.refundedAt,
             createdAt: p.createdAt,
           })),
-          wireTransfers: inv.paymentSubmissions.map((w) => this.wireSummary(w)),
+          wireTransfers: inv.paymentSubmissions
+            .filter((submission) => submission.source !== "finance_manual")
+            .map((submission) => this.wireSummary(submission)),
           availableComponents: [...availableByKey.values()].sort(
             (a, b) => a.sortOrder - b.sortOrder || a.key.localeCompare(b.key),
           ),
@@ -3135,6 +3292,191 @@ export class FinanceService {
           }),
         };
       }),
+    };
+  }
+
+  private async assertFinanceReferenceAvailable(
+    method: "wave" | "orange_money" | "wire",
+    transactionReference: string,
+    paymentId: string,
+  ) {
+    const fingerprint = externalReferenceFingerprintSha256(
+      method,
+      transactionReference,
+    );
+    if (!fingerprint) {
+      throw new BadRequestException(
+        "Transaction reference must contain at least one letter or number",
+      );
+    }
+    const fingerprintMatch = await this.prisma.payment.findUnique({
+      where: { externalReferenceFingerprintSha256: fingerprint },
+      select: { id: true },
+    });
+    if (fingerprintMatch && fingerprintMatch.id !== paymentId) {
+      throw new ConflictException(
+        "This payment reference has already been recorded",
+      );
+    }
+
+    // References verified before the fingerprint column was populated remain
+    // authoritative evidence. Compare their normalized values before posting.
+    const normalized = normalizeExternalReference(transactionReference)!;
+    const legacyRows = await this.prisma.paymentSubmission.findMany({
+      where: {
+        method,
+        status: "approved",
+        bankReference: { not: null },
+      },
+      select: { paymentId: true, bankReference: true },
+    });
+    const legacyMatch = legacyRows.find(
+      (row) => normalizeExternalReference(row.bankReference) === normalized,
+    );
+    if (legacyMatch && legacyMatch.paymentId !== paymentId) {
+      throw new ConflictException(
+        "This payment reference has already been recorded",
+      );
+    }
+    return fingerprint;
+  }
+
+  /**
+   * Post money already received by a named Finance staff member. The browser UUID
+   * makes retries idempotent; mobile references independently prevent double entry.
+   */
+  async recordStudentPayment(input: {
+    studentId: string;
+    amountXof: number;
+    method: "cash" | "wave" | "orange_money";
+    transactionReference?: string;
+    idempotencyKey: string;
+    actor: { personId: string; email: string; name: string };
+  }) {
+    const paymentId = input.idempotencyKey.toLowerCase();
+    const providerRef = `FINANCE-MANUAL-${paymentId}`;
+    const transactionReference =
+      input.method === "cash"
+        ? null
+        : input.transactionReference?.trim() || null;
+    if (input.method === "cash" && input.transactionReference?.trim()) {
+      throw new BadRequestException(
+        "Cash payments do not use a transaction reference",
+      );
+    }
+    if (input.method !== "cash" && !transactionReference) {
+      throw new BadRequestException(
+        "A transaction reference is required for mobile money",
+      );
+    }
+    if (!Number.isSafeInteger(input.amountXof) || input.amountXof <= 0) {
+      throw new BadRequestException(
+        "Amount must be a positive whole number of XOF",
+      );
+    }
+
+    const expectedFingerprint = transactionReference
+      ? externalReferenceFingerprintSha256(input.method, transactionReference)
+      : null;
+    if (transactionReference && !expectedFingerprint) {
+      throw new BadRequestException(
+        "Transaction reference must contain at least one letter or number",
+      );
+    }
+    const existing = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: {
+        id: true,
+        invoiceId: true,
+        studentId: true,
+        amount: true,
+        method: true,
+        status: true,
+        source: true,
+        providerRef: true,
+        externalReferenceFingerprintSha256: true,
+      },
+    });
+    if (
+      existing &&
+      (existing.studentId !== input.studentId ||
+        existing.amount !== input.amountXof ||
+        existing.method !== input.method ||
+        existing.source !== "finance_manual" ||
+        existing.providerRef !== providerRef ||
+        existing.externalReferenceFingerprintSha256 !== expectedFingerprint)
+    ) {
+      throw new BadRequestException(
+        "That payment request was already used with different details",
+      );
+    }
+    if (existing?.status === "success") {
+      return {
+        ok: true,
+        paymentId,
+        receipt: await this.getReceipt(paymentId),
+      };
+    }
+    if (existing && existing.status !== "pending") {
+      throw new BadRequestException(`Payment is ${existing.status}`);
+    }
+
+    const student = await this.prisma.student.findUnique({
+      where: { id: input.studentId },
+      include: { person: true },
+    });
+    if (!student) throw new NotFoundException("Student not found");
+    const studentEmail = requirePersonEmail(student.person.email, "Student");
+
+    let invoiceId = existing?.invoiceId;
+    if (!invoiceId) {
+      const account = await this.loadPayableAccount(input.studentId);
+      invoiceId = this.requirePayableTarget(account, input.amountXof).invoice
+        .id;
+    }
+    let fingerprint: string | null = null;
+    if (
+      transactionReference &&
+      (input.method === "wave" || input.method === "orange_money")
+    ) {
+      fingerprint = await this.assertFinanceReferenceAvailable(
+        input.method,
+        transactionReference,
+        paymentId,
+      );
+    }
+
+    await this.settlePayment(paymentId, {
+      via: "finance_manual",
+      actorId: input.actor.personId,
+      method: input.method,
+      confirmedAmount: input.amountXof,
+      payload: transactionReference
+        ? { externalReference: transactionReference, recordedByFinance: true }
+        : { recordedByFinance: true },
+      createPayment: {
+        invoiceId,
+        studentId: input.studentId,
+        amount: input.amountXof,
+        method: input.method,
+        providerRef,
+        externalReferenceFingerprintSha256: fingerprint,
+        source: "finance_manual",
+        initiatedById: input.actor.personId,
+        initiatedByEmail: null,
+      },
+      financeRecord: {
+        id: randomUUID(),
+        contactEmail: studentEmail,
+        transactionReference,
+        reviewedByName: input.actor.name,
+        reviewedByEmail: input.actor.email,
+      },
+    });
+    return {
+      ok: true,
+      paymentId,
+      receipt: await this.getReceipt(paymentId),
     };
   }
 
@@ -4626,6 +4968,7 @@ export class FinanceService {
         student: { include: { person: true } },
         invoice: { include: { term: true } },
         allocations: { include: { installment: true } },
+        submission: { select: { bankReference: true } },
       },
     });
     if (!p) throw new NotFoundException("Payment not found");
@@ -4639,6 +4982,7 @@ export class FinanceService {
       method: p.method,
       status: p.status,
       providerRef: p.providerRef,
+      transactionReference: p.submission?.bankReference ?? null,
       paidAt: p.settledAt ?? p.updatedAt,
       refundedAt: p.refundedAt,
       source: p.source,
@@ -4989,9 +5333,9 @@ export class FinanceService {
       pendingWires: hideAnnualAccount
         ? []
         : invoices.flatMap((invoice) =>
-            invoice.paymentSubmissions.map((wire) =>
-              this.publicWireSummary(wire),
-            ),
+            invoice.paymentSubmissions
+              .filter((submission) => submission.source !== "finance_manual")
+              .map((submission) => this.publicWireSummary(submission)),
           ),
     };
   }
