@@ -321,9 +321,8 @@ function StatusView({ data }: { data: PublicApplicationStatus }) {
               <div>
                 <strong>Your student record is active</strong>
                 <span>
-                  Use the private activation card issued to you to open student
-                  account activation and set your password. This page is now
-                  read-only.
+                  Use your Student ID and date of birth to open student account
+                  activation and set your password. This page is now read-only.
                 </span>
                 <Link href="/activate-student">Activate student account</Link>
               </div>

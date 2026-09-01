@@ -6,15 +6,12 @@ import {
   HttpStatus,
   Injectable,
 } from "@nestjs/common";
-import {
-  normalizeStudentActivationCode,
-  normalizeStudentNumber,
-} from "@mydaust/shared";
+import { normalizeStudentNumber } from "@mydaust/shared";
 import type { Request } from "express";
 
 const START_WINDOW_MS = 15 * 60_000;
 const START_ACCOUNT_MAX = 5;
-const START_CODE_MAX = 5;
+const START_STUDENT_ID_MAX = 20;
 const START_GLOBAL_WINDOW_MS = 60_000;
 const START_GLOBAL_MAX = 300;
 export const ACTIVATION_RATE_BUCKET_MAX_KEYS = 10_000;
@@ -26,22 +23,20 @@ class DigestRateBuckets {
   private readonly global: number[] = [];
 
   hit(
-    inputs: string[],
+    inputs: Array<{ value: string; max: number; windowMs: number }>,
     now: number,
     limits: {
-      keyMax: number;
-      keyWindowMs: number;
       globalMax: number;
       globalWindowMs: number;
     },
   ) {
     this.hitList(this.global, now, limits.globalMax, limits.globalWindowMs);
     for (const input of inputs) {
-      const key = createHash("sha256").update(input).digest("hex");
+      const key = createHash("sha256").update(input.value).digest("hex");
       const recent = (this.byKey.get(key) ?? []).filter(
-        (timestamp) => now - timestamp < limits.keyWindowMs,
+        (timestamp) => now - timestamp < input.windowMs,
       );
-      if (recent.length >= limits.keyMax) this.tooMany();
+      if (recent.length >= input.max) this.tooMany();
       recent.push(now);
       // Refresh insertion order for an O(1)-amortized bounded LRU. Never scan
       // attacker-controlled code or student-number buckets on the request path.
@@ -70,11 +65,11 @@ class DigestRateBuckets {
 }
 
 /**
- * The account bucket is keyed by normalized student number plus a strict
- * calendar DOB. This prevents arbitrary wrong-code traffic against a public
- * roster ID from locking out the student's real ID+DOB pair. An independent
- * code bucket still prevents DOB variation from bypassing possession-factor
- * limits, while the process-global bucket bounds distributed guessing.
+ * The narrow account bucket is keyed by normalized student number plus a
+ * strict calendar DOB, while the wider student-ID-only bucket bounds DOB
+ * variation. The latter necessarily permits a targeted temporary denial of
+ * service; this endpoint has no possession factor. The process-global bucket
+ * bounds distributed guessing.
  * Counters assume the current single API task; use a shared store before
  * scale-out.
  */
@@ -99,22 +94,21 @@ export class StudentActivationStartThrottleGuard implements CanActivate {
       parsedDob.toISOString().slice(0, 10) === rawDob
         ? rawDob
         : "__invalid__";
-    const rawCode =
-      typeof body.activationCode === "string"
-        ? body.activationCode.slice(0, 64)
-        : "";
-    const normalizedCode =
-      normalizeStudentActivationCode(rawCode) ?? "__invalid__";
-
     this.buckets.hit(
       [
-        `student-start-account-v3\0${normalizedStudentNo}\0${normalizedDob}`,
-        `student-start-code-v2\0${normalizedCode}`,
+        {
+          value: `student-start-id-v1\0${normalizedStudentNo}`,
+          max: START_STUDENT_ID_MAX,
+          windowMs: START_WINDOW_MS,
+        },
+        {
+          value: `student-start-account-v4\0${normalizedStudentNo}\0${normalizedDob}`,
+          max: START_ACCOUNT_MAX,
+          windowMs: START_WINDOW_MS,
+        },
       ],
       Date.now(),
       {
-        keyMax: Math.min(START_ACCOUNT_MAX, START_CODE_MAX),
-        keyWindowMs: START_WINDOW_MS,
         globalMax: START_GLOBAL_MAX,
         globalWindowMs: START_GLOBAL_WINDOW_MS,
       },

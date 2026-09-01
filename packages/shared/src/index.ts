@@ -19,4 +19,3 @@ export * from "./guardian-import.js";
 export * from "./student-number.js";
 export * from "./infirmary.js";
 export * from "./forms.js";
-export * from "./student-activation-code.js";

@@ -6,7 +6,6 @@ import {
   METHOD_METADATA,
 } from "@nestjs/common/constants";
 import { describe, expect, it, vi } from "vitest";
-import { encodeStudentActivationCode } from "@mydaust/shared";
 import { IS_PUBLIC_KEY } from "../auth/decorators.js";
 import { StudentActivationPublicController } from "./student-activation.controller.js";
 import {
@@ -32,12 +31,6 @@ function expectRateLimited(action: () => unknown) {
 }
 
 const TOKEN = "t".repeat(43);
-
-function cardCode(index: number): string {
-  const bytes = new Uint8Array(10);
-  new DataView(bytes.buffer).setUint32(6, index);
-  return encodeStudentActivationCode(bytes);
-}
 
 describe("student activation controller and throttle", () => {
   it("exposes one no-store public POST and no staff approval routes", () => {
@@ -90,7 +83,6 @@ describe("student activation controller and throttle", () => {
     const input = {
       studentNo: "F2026001",
       dob: "2002-04-19",
-      activationCode: "ABCD2345EFGH6789",
       requestToken: TOKEN,
     };
 
@@ -102,7 +94,7 @@ describe("student activation controller and throttle", () => {
     ).toThrow();
   });
 
-  it("does not let wrong-DOB traffic consume the real normalized ID+DOB bucket", () => {
+  it("normalizes the ID and DOB into one narrow account bucket", () => {
     const guard = new StudentActivationStartThrottleGuard();
     const idVariants = [
       " f2026001 ",
@@ -111,13 +103,12 @@ describe("student activation controller and throttle", () => {
       "Ｆ２０２６００１",
       "F2026001",
     ];
-    for (const [index, studentNo] of idVariants.entries()) {
+    for (const studentNo of idVariants) {
       expect(
         guard.canActivate(
           context({
             studentNo,
             dob: "2002-04-18",
-            activationCode: cardCode(index),
             requestToken: TOKEN,
           }),
         ),
@@ -128,7 +119,6 @@ describe("student activation controller and throttle", () => {
         context({
           studentNo: "F2026001",
           dob: "2002-04-19",
-          activationCode: cardCode(50),
           requestToken: TOKEN,
         }),
       ),
@@ -138,7 +128,6 @@ describe("student activation controller and throttle", () => {
         context({
           studentNo: "F2026001",
           dob: "2002-04-18",
-          activationCode: cardCode(51),
           requestToken: TOKEN,
         }),
       ),
@@ -148,29 +137,20 @@ describe("student activation controller and throttle", () => {
         context({
           studentNo: "F2026002",
           dob: "1999-01-01",
-          activationCode: cardCode(52),
           requestToken: TOKEN,
         }),
       ),
     ).toBe(true);
   });
 
-  it("also limits repeated attempts with one normalized card code", () => {
+  it("limits DOB variation against one normalized student ID", () => {
     const guard = new StudentActivationStartThrottleGuard();
-    const variants = [
-      "abcd-2345-efgh-6789",
-      "ABCD2345EFGH6789",
-      "ＡＢＣＤ２３４５ＥＦＧＨ６７８９",
-      "ABCD 2345 EFGH 6789",
-      "abcd2345efgh6789",
-    ];
-    for (let index = 0; index < variants.length; index += 1) {
+    for (let index = 0; index < 20; index += 1) {
       expect(
         guard.canActivate(
           context({
-            studentNo: `F-CODE-${index}`,
-            dob: `2002-04-${String(index + 10).padStart(2, "0")}`,
-            activationCode: variants[index],
+            studentNo: "F2026001",
+            dob: `2002-04-${String((index % 28) + 1).padStart(2, "0")}`,
             requestToken: TOKEN,
           }),
         ),
@@ -179,9 +159,8 @@ describe("student activation controller and throttle", () => {
     expectRateLimited(() =>
       guard.canActivate(
         context({
-          studentNo: "F-CODE-OVERFLOW",
-          dob: "2002-04-20",
-          activationCode: "ABCD-2345-EFGH-6789",
+          studentNo: "F2026001",
+          dob: "2002-05-20",
           requestToken: TOKEN,
         }),
       ),
@@ -200,7 +179,6 @@ describe("student activation controller and throttle", () => {
             context({
               studentNo: `MEMORY-${index}`,
               dob: "2002-04-19",
-              activationCode: cardCode(index),
               requestToken: TOKEN,
             }),
           ),
@@ -221,7 +199,6 @@ describe("student activation controller and throttle", () => {
           context({
             studentNo: `GLOBAL-${index}`,
             dob: `2002-04-${String((index % 28) + 1).padStart(2, "0")}`,
-            activationCode: cardCode(index),
             requestToken: TOKEN,
           }),
         ),
@@ -232,7 +209,6 @@ describe("student activation controller and throttle", () => {
         context({
           studentNo: "GLOBAL-OVERFLOW",
           dob: "2002-05-01",
-          activationCode: cardCode(999),
           requestToken: TOKEN,
         }),
       ),

@@ -1,27 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, KeyRound, Loader2, ShieldCheck } from "lucide-react";
-import {
-  normalizeStudentActivationCode,
-  STUDENT_ACTIVATION_CODE_LENGTH,
-} from "@mydaust/shared";
+import { AlertCircle, Loader2, ShieldCheck } from "lucide-react";
 import { ApiError, startStudentActivation } from "@/lib/api";
-
-function cleanPartialCardCode(value: string): string {
-  return value
-    .normalize("NFKC")
-    .toUpperCase()
-    .replace(/[\s-]/g, "")
-    .replace(/O/g, "0")
-    .replace(/[IL]/g, "1")
-    .replace(/[^0-9A-HJKMNP-TV-Z]/g, "")
-    .slice(0, STUDENT_ACTIVATION_CODE_LENGTH);
-}
-
-function formatCardCode(value: string): string {
-  return cleanPartialCardCode(value).replace(/(.{4})(?=.)/g, "$1-");
-}
 
 function createRequestToken(): string {
   const bytes = window.crypto.getRandomValues(new Uint8Array(32));
@@ -37,16 +18,11 @@ function createRequestToken(): string {
 export default function ActivateStudentPage() {
   const [studentNo, setStudentNo] = useState("");
   const [dob, setDob] = useState("");
-  const [activationCode, setActivationCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingRequestToken, setPendingRequestToken] = useState<string | null>(
     null,
   );
-
-  const canonicalActivationCode =
-    normalizeStudentActivationCode(activationCode);
-  const codeReady = canonicalActivationCode !== null;
 
   function continueToPasswordSetup(requestToken: string) {
     // The server stores only this token's hash. Keep the plaintext in the URL
@@ -58,19 +34,18 @@ export default function ActivateStudentPage() {
 
   async function begin(event: React.FormEvent) {
     event.preventDefault();
-    if (!studentNo.trim() || !dob || !codeReady || busy) return;
+    if (!studentNo.trim() || !dob || busy) return;
     setBusy(true);
     setError(null);
     const requestToken = createRequestToken();
     const input = {
       studentNo: studentNo.trim(),
       dob,
-      activationCode: canonicalActivationCode!,
       requestToken,
     };
     let failure: unknown = null;
-    // A dropped response is ambiguous: the server may already have claimed the
-    // card. Retry once with the exact same browser token, never a new one.
+    // A dropped response is ambiguous: the server may already have created the
+    // request. Retry once with the exact same browser token, never a new one.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         await startStudentActivation(input);
@@ -87,9 +62,10 @@ export default function ActivateStudentPage() {
       continueToPasswordSetup(requestToken);
       return;
     }
-    setPendingRequestToken(requestToken);
     setError(
-      `${failure.message} If the request completed before the error, continue with this same activation attempt.`,
+      failure.status === 429
+        ? "Too many attempts. Please wait 15 minutes and try again."
+        : failure.message,
     );
     setBusy(false);
   }
@@ -131,19 +107,26 @@ export default function ActivateStudentPage() {
           className="muted"
           style={{ fontSize: 13.5, lineHeight: 1.55, marginBottom: 22 }}
         >
-          Enter your Student ID, date of birth, and the private activation code
-          on your card. You will choose your password on the next screen.
+          Enter your Student ID and date of birth. You will choose your password
+          on the next screen.
         </p>
 
-        <form onSubmit={begin} style={{ display: "grid", gap: 15 }}>
+        <form
+          onSubmit={begin}
+          aria-busy={busy}
+          style={{ display: "grid", gap: 15 }}
+        >
           <label style={{ display: "grid", gap: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 650 }}>Student ID</span>
             <input
               value={studentNo}
               onChange={(event) => setStudentNo(event.target.value)}
               autoComplete="username"
+              autoCapitalize="characters"
+              spellCheck={false}
               maxLength={40}
               placeholder="Enter your student ID"
+              required
               disabled={busy || pendingRequestToken !== null}
               style={{ padding: "11px 12px" }}
             />
@@ -155,61 +138,11 @@ export default function ActivateStudentPage() {
               value={dob}
               onChange={(event) => setDob(event.target.value)}
               autoComplete="bday"
+              required
               disabled={busy || pendingRequestToken !== null}
               style={{ padding: "11px 12px" }}
             />
           </label>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 650 }}>
-              Activation code
-            </span>
-            <input
-              value={formatCardCode(activationCode)}
-              onChange={(event) => setActivationCode(event.target.value)}
-              autoComplete="one-time-code"
-              autoCapitalize="characters"
-              spellCheck={false}
-              inputMode="text"
-              maxLength={19}
-              placeholder="XXXX-XXXX-XXXX-XXXX"
-              disabled={busy || pendingRequestToken !== null}
-              style={{
-                padding: "11px 12px",
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                fontSize: 16,
-                letterSpacing: ".08em",
-              }}
-            />
-          </label>
-
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "flex-start",
-              padding: "11px 12px",
-              borderRadius: 12,
-              background: "var(--surface-2)",
-              border: "1px solid var(--border)",
-            }}
-          >
-            <KeyRound
-              size={16}
-              style={{
-                color: "var(--daust-navy)",
-                marginTop: 2,
-                flex: "0 0 auto",
-              }}
-            />
-            <p
-              className="muted"
-              style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5 }}
-            >
-              Your activation code works once and expires at the time printed on
-              your card. Keep it private until your password is set.
-            </p>
-          </div>
-
           {error && <ActivationError>{error}</ActivationError>}
           {pendingRequestToken && (
             <button
@@ -224,11 +157,7 @@ export default function ActivateStudentPage() {
             type="submit"
             className="sis-btn"
             disabled={
-              busy ||
-              pendingRequestToken !== null ||
-              !studentNo.trim() ||
-              !dob ||
-              !codeReady
+              busy || pendingRequestToken !== null || !studentNo.trim() || !dob
             }
             style={{ justifyContent: "center", padding: "11px 16px" }}
           >
@@ -248,6 +177,8 @@ export default function ActivateStudentPage() {
 function ActivationError({ children }: { children: React.ReactNode }) {
   return (
     <div
+      role="alert"
+      aria-live="polite"
       style={{
         display: "flex",
         gap: 8,

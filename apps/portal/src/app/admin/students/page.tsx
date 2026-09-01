@@ -232,7 +232,7 @@ export default function AdminStudentsPage() {
             </strong>
             <div className="muted">
               No password or setup link was created. The student can activate at
-              /activate-student with their private one-time activation card.
+              /activate-student with their Student ID and date of birth.
             </div>
           </div>
           <IconButton label="Dismiss" onClick={() => setNotice(null)}>
@@ -612,7 +612,7 @@ function AddStudentModal({
         )}
         <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
           Assign a Student ID and date of birth. The student activates their
-          account with a private one-time activation card.
+          account with those details.
         </p>
         <Field label="Student ID" hint="Assigned by the Registrar">
           <input

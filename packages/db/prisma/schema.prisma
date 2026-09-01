@@ -2458,15 +2458,16 @@ model StudentInvite {
 }
 
 /// Public student activation begins as a short-lived request. Historical rows
-/// may record named approval; self-service rows bind a verified issued card.
-/// Every public capability is stored only as a hash/HMAC.
+/// may record named approval; newer self-service rows use either a historical
+/// issued card or the permanent student-ID-and-DOB path. Browser capabilities
+/// are stored only as hashes/HMACs.
 model StudentActivationRequest {
   id                      String                 @id @default(uuid())
   studentPersonId         String?
   studentPerson           Person?                @relation("StudentActivationRequestStudent", fields: [studentPersonId], references: [id], onDelete: Cascade)
   accountKeyHash          String
   requestTokenHash        String                 @unique
-  approvalCodeHash        String
+  approvalCodeHash        String?
   expiresAt               DateTime
   approvedAt              DateTime?
   approvedById            String?

@@ -1033,7 +1033,6 @@ export interface StudentActivationStart {
 export const startStudentActivation = (input: {
   studentNo: string;
   dob: string;
-  activationCode: string;
   requestToken: string;
 }) =>
   request<StudentActivationStart>("/student-activation/requests", {
