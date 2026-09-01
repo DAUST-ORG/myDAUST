@@ -48,7 +48,7 @@ import {
   isValidHelpdeskStatusTransition,
 } from "@mydaust/shared";
 import type { AuthUser } from "../auth/current-user.js";
-import type { PrismaService } from "../prisma/prisma.service.js";
+import { PrismaService } from "../prisma/prisma.service.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { MailDelivery } from "../notifications/mail-delivery.js";
 import {
