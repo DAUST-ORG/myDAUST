@@ -137,7 +137,7 @@ the same signed reason/reviewer/date fields as the roster decisions.
 
 The workbook supplies four installment due amounts, not calendar dates. The
 final manifest binds those amounts to the already-approved 2026–2027 schedule
-dates: `2026-08-25`, `2026-11-05`, `2027-01-05`, and `2027-03-05`. It does not
+dates: `2026-09-05`, `2026-11-05`, `2027-01-05`, and `2027-03-05`. It does not
 create or supersede a fee-schedule revision. Each row's four due amounts remain
 the exact workbook values. Comparison row 306 is deliberately retained
 as an operational warning: the workbook selects a 68,000 XOF refundable caution
