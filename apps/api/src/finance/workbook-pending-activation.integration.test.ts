@@ -35,6 +35,7 @@ let studentIds: string[];
 let applicantIds: string[];
 let linkIds: string[];
 let invoiceIds: string[];
+let historicalLinkId: string;
 
 run("workbook pending-payment activation PostgreSQL transaction", () => {
   beforeAll(async () => {
@@ -97,7 +98,7 @@ run("workbook pending-payment activation PostgreSQL transaction", () => {
         academicYearLabel: academicYear.label,
         sourceAsOfDate: new Date("2026-08-29T00:00:00.000Z"),
         workbookRowCount: 9,
-        productionStudentCount: 9,
+        productionStudentCount: 446,
         applicantCount: 0,
         workbookLinkedRows: 9,
         productionLinkedStudents: 9,
@@ -237,6 +238,61 @@ run("workbook pending-payment activation PostgreSQL transaction", () => {
       invoiceIds.push(invoice.id);
     }
 
+    const historicalInvoice = await prisma.invoice.create({
+      data: {
+        studentId: studentIds[0]!,
+        termId: term.id,
+        number: `HISTORICAL-INV-${randomUUID()}`,
+        totalAmount: 250_000,
+        amountPaid: 0,
+        status: "void",
+        costCenterCode: "9100",
+        packageType: "standard_full",
+        academicYearLabel: academicYear.label,
+      },
+    });
+    const historicalLink = await prisma.paymentLink.create({
+      data: {
+        token: `historical-link-${randomUUID()}`,
+        amountXof: 250_000,
+        purpose: "Cancelled historical enrollment attempt",
+        payeeName: "Historical Pending Student",
+        studentId: studentIds[0]!,
+        invoiceId: historicalInvoice.id,
+        costCenterCode: "9100",
+        status: "cancelled",
+      },
+    });
+    const historicalPayment = await prisma.payment.create({
+      data: {
+        studentId: studentIds[0]!,
+        invoiceId: historicalInvoice.id,
+        amount: 250_000,
+        method: "wire",
+        status: "cancelled",
+        provider: "historical-proof-test",
+        providerRef: `historical-proof-${randomUUID()}`,
+        source: "payment_link",
+      },
+    });
+    await prisma.paymentSubmission.create({
+      data: {
+        status: "cancelled",
+        method: "wire",
+        source: "payment_link",
+        studentId: studentIds[0]!,
+        invoiceId: historicalInvoice.id,
+        paymentId: historicalPayment.id,
+        paymentLinkId: historicalLink.id,
+        applicantId: applicantIds[0]!,
+        submittedAmountXof: 250_000,
+        contactEmail: "historical@test.local",
+        bankSnapshot: {},
+        createdAt: new Date("2026-09-02T11:40:00.000Z"),
+      },
+    });
+    historicalLinkId = historicalLink.id;
+
     const fillerPeople = Array.from({ length: 437 }, (_, index) => ({
       id: randomUUID(),
       email: `roster-control-${index}-${randomUUID()}@test.local`,
@@ -246,13 +302,46 @@ run("workbook pending-payment activation PostgreSQL transaction", () => {
       roles: index < 391 ? ["student"] : [],
     }));
     await prisma.person.createMany({ data: fillerPeople });
-    await prisma.student.createMany({
-      data: fillerPeople.map((person, index) => ({
-        personId: person.id,
-        studentNo: `ROSTER-CONTROL-${randomUUID()}`,
-        recordStatus: index < 391 ? ("active" as const) : ("archived" as const),
-        enrolledAt: index < 391 ? new Date("2026-08-01T00:00:00.000Z") : null,
+    const fillerStudents = fillerPeople.map((person, index) => ({
+      id: randomUUID(),
+      personId: person.id,
+      studentNo: `ROSTER-CONTROL-${randomUUID()}`,
+      recordStatus: index < 391 ? ("active" as const) : ("archived" as const),
+      enrolledAt: index < 391 ? new Date("2026-08-01T00:00:00.000Z") : null,
+      createdAt: new Date("2026-09-02T11:00:00.000Z"),
+    }));
+    await prisma.student.createMany({ data: fillerStudents });
+    await prisma.workbookCutoverSourceRecord.createMany({
+      data: fillerStudents.map((student, index) => ({
+        batchId,
+        sourceKind: "production_student" as const,
+        sourceKey: `roster-control:${index}`,
+        sourceKeySha256: sha(`roster-control:${index}`),
+        sourceFingerprintSha256: sha(`roster-control-fingerprint:${index}`),
+        disposition:
+          student.recordStatus === "active"
+            ? ("keep_exception" as const)
+            : ("archive_student" as const),
+        studentId: student.id,
+        appliedAt: new Date("2026-09-02T11:44:00.000Z"),
       })),
+    });
+    const postCutoverPerson = await prisma.person.create({
+      data: {
+        email: `post-cutover-pending-${randomUUID()}@test.local`,
+        firstName: "PostCutover",
+        lastName: "Pending",
+        kind: "student",
+        roles: [],
+      },
+    });
+    await prisma.student.create({
+      data: {
+        personId: postCutoverPerson.id,
+        studentNo: `POST-CUTOVER-${randomUUID()}`,
+        recordStatus: "pending_payment",
+        createdAt: new Date("2026-09-02T12:00:00.000Z"),
+      },
     });
   }, 120_000);
 
@@ -283,7 +372,96 @@ run("workbook pending-payment activation PostgreSQL transaction", () => {
       activePiSpiCount: 0,
       pendingPaymentCount: 0,
       refundPendingCount: 0,
+      globalStudentCounts: {
+        physical: 447,
+        active: 391,
+        pendingPayment: 10,
+        archived: 46,
+        postCutoverNonTarget: {
+          physical: 1,
+          active: 0,
+          pendingPayment: 1,
+          archived: 0,
+        },
+      },
     });
+
+    const sparsePayment = await prisma.payment.create({
+      data: {
+        studentId: studentIds[0]!,
+        invoiceId: invoiceIds[0]!,
+        amount: 50_000,
+        method: "wire",
+        status: "cancelled",
+        provider: "sparse-payment-proof-test",
+        providerRef: `sparse-payment-${randomUUID()}`,
+        source: "payment_link",
+      },
+    });
+    const [sparseLinkProof, sparsePaymentProof, sparseLinkPiSpi] =
+      await Promise.all([
+        prisma.paymentSubmission.create({
+          data: {
+            resumeToken: `sparse-link-resume-${randomUUID()}`,
+            activeKey: `sparse-link-active-${randomUUID()}`,
+            status: "awaiting_proof",
+            method: "wire",
+            source: "payment_link",
+            paymentLinkId: historicalLinkId,
+            submittedAmountXof: 50_000,
+            contactEmail: "sparse-link@test.local",
+            bankSnapshot: {},
+            createdAt: new Date("2026-09-02T11:40:00.000Z"),
+          },
+        }),
+        prisma.paymentSubmission.create({
+          data: {
+            resumeToken: `sparse-payment-resume-${randomUUID()}`,
+            activeKey: `sparse-payment-active-${randomUUID()}`,
+            status: "awaiting_proof",
+            method: "wire",
+            source: "payment_link",
+            paymentId: sparsePayment.id,
+            submittedAmountXof: 50_000,
+            contactEmail: "sparse-payment@test.local",
+            bankSnapshot: {},
+            createdAt: new Date("2026-09-02T11:40:00.000Z"),
+          },
+        }),
+        prisma.piSpiRequest.create({
+          data: {
+            txId: `sparse-link-pispi-${randomUUID()}`,
+            status: "sent",
+            source: "payment_link",
+            payerAlias: "+221770000000",
+            amountXof: 50_000,
+            motif: "Sparse historical link regression",
+            paymentLinkId: historicalLinkId,
+            createdAt: new Date("2026-09-02T11:40:00.000Z"),
+          },
+        }),
+      ]);
+    const sparseAttemptPlan = await planWorkbookPendingActivationFromDatabase(
+      prisma,
+      invocation,
+    );
+    expect(sparseAttemptPlan).toMatchObject({
+      confirmBlocked: true,
+      proofDraftCount: 2,
+      activePiSpiCount: 1,
+    });
+    expect(sparseAttemptPlan.blockers.map((row) => row.code)).toEqual(
+      expect.arrayContaining([
+        "active_payment_proof_attempt",
+        "active_pispi_attempt",
+        "payment_attempt_ownership_drift",
+      ]),
+    );
+    await prisma.paymentSubmission.deleteMany({
+      where: { id: { in: [sparseLinkProof.id, sparsePaymentProof.id] } },
+    });
+    await prisma.piSpiRequest.delete({ where: { id: sparseLinkPiSpi.id } });
+    await prisma.payment.delete({ where: { id: sparsePayment.id } });
 
     const inFlightPayment = await prisma.payment.create({
       data: {
@@ -358,7 +536,7 @@ run("workbook pending-payment activation PostgreSQL transaction", () => {
     ).rejects.toBeInstanceOf(WorkbookPendingActivationBlockedError);
     await expect(
       prisma.student.count({ where: { recordStatus: "pending_payment" } }),
-    ).resolves.toBe(9);
+    ).resolves.toBe(10);
 
     await prisma.$executeRawUnsafe(`
       CREATE OR REPLACE FUNCTION "${SCHEMA}"."fail_pending_activation_audit"()
@@ -384,7 +562,7 @@ run("workbook pending-payment activation PostgreSQL transaction", () => {
     ).rejects.toThrow(/forced activation audit failure/);
     await expect(
       prisma.student.count({ where: { recordStatus: "pending_payment" } }),
-    ).resolves.toBe(9);
+    ).resolves.toBe(10);
     await expect(
       prisma.applicant.count({
         where: { onboardingStatus: "payment_pending" },
@@ -431,11 +609,11 @@ run("workbook pending-payment activation PostgreSQL transaction", () => {
     ).resolves.toBe(400);
     await expect(
       prisma.student.count({ where: { recordStatus: "pending_payment" } }),
-    ).resolves.toBe(0);
+    ).resolves.toBe(1);
     await expect(
       prisma.student.count({ where: { recordStatus: "archived" } }),
     ).resolves.toBe(46);
-    await expect(prisma.student.count()).resolves.toBe(446);
+    await expect(prisma.student.count()).resolves.toBe(447);
     const studentPeople = await prisma.student.findMany({
       where: { id: { in: studentIds } },
       select: {
@@ -472,9 +650,9 @@ run("workbook pending-payment activation PostgreSQL transaction", () => {
           row.statusTokenRevokedAt !== null,
       ),
     ).toBe(true);
-    await expect(prisma.paymentSubmission.count()).resolves.toBe(0);
+    await expect(prisma.paymentSubmission.count()).resolves.toBe(1);
     await expect(prisma.piSpiRequest.count()).resolves.toBe(0);
-    await expect(prisma.payment.count()).resolves.toBe(0);
+    await expect(prisma.payment.count()).resolves.toBe(1);
     expect(
       await prisma.invoice.findMany({
         where: { id: { in: invoiceIds } },

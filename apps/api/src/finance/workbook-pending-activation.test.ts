@@ -116,6 +116,27 @@ function state(): WorkbookPendingActivationCapturedState {
       active: 391,
       pendingPayment: 9,
       archived: 46,
+      batchAnchored: {
+        physical: 446,
+        active: 391,
+        pendingPayment: 9,
+        archived: 46,
+        fingerprintSha256: "d".repeat(64),
+      },
+      postCutoverNonTarget: {
+        physical: 0,
+        active: 0,
+        pendingPayment: 0,
+        archived: 0,
+        fingerprintSha256: "e".repeat(64),
+      },
+      preCutoverUnanchored: {
+        physical: 0,
+        active: 0,
+        pendingPayment: 0,
+        archived: 0,
+        fingerprintSha256: "f".repeat(64),
+      },
     },
     targets: Array.from(
       { length: WORKBOOK_PENDING_ACTIVATION_TARGET_COUNT },
@@ -157,6 +178,12 @@ describe("workbook pending-payment activation plan", () => {
         active: 391,
         pendingPayment: 9,
         archived: 46,
+        postCutoverNonTarget: {
+          physical: 0,
+          active: 0,
+          pendingPayment: 0,
+          archived: 0,
+        },
       },
     });
     expect(first.planSha256).toBe(second.planSha256);
@@ -171,18 +198,96 @@ describe("workbook pending-payment activation plan", () => {
     expect(blockerCodes(plan)).toContain("pending_target_count_mismatch");
   });
 
-  it("binds the exact pre-activation global roster baseline", () => {
+  it("fails closed when global status counts disagree with roster slices", () => {
     const input = state();
     input.globalStudentCounts.active = 392;
     input.globalStudentCounts.pendingPayment = 8;
     const plan = buildWorkbookPendingActivationPlan(input, "batch-1");
     expect(plan.confirmBlocked).toBe(true);
-    expect(blockerCodes(plan)).toEqual(
-      expect.arrayContaining([
-        "active_student_count_mismatch",
-        "pending_payment_student_count_mismatch",
-      ]),
+    expect(blockerCodes(plan)).toContain(
+      "student_roster_classification_mismatch",
     );
+  });
+
+  it("keeps the exact 46 archived batch Students as an immutable anchor", () => {
+    const input = state();
+    input.globalStudentCounts.active = 392;
+    input.globalStudentCounts.archived = 45;
+    input.globalStudentCounts.batchAnchored.active = 392;
+    input.globalStudentCounts.batchAnchored.archived = 45;
+    const plan = buildWorkbookPendingActivationPlan(input, "batch-1");
+    expect(blockerCodes(plan)).toContain("archived_student_count_mismatch");
+  });
+
+  it("allows a fingerprinted post-cutover pending Student outside the protected nine", () => {
+    const input = state();
+    input.globalStudentCounts.physical = 447;
+    input.globalStudentCounts.pendingPayment = 10;
+    input.globalStudentCounts.postCutoverNonTarget = {
+      physical: 1,
+      active: 0,
+      pendingPayment: 1,
+      archived: 0,
+      fingerprintSha256: "f".repeat(64),
+    };
+    const plan = buildWorkbookPendingActivationPlan(input, "batch-1");
+    expect(plan.confirmBlocked).toBe(false);
+    expect(plan.globalStudentCounts).toEqual(input.globalStudentCounts);
+  });
+
+  it("does not use a post-cutover classification to hide baseline or archive drift", () => {
+    const input = state();
+    input.globalStudentCounts.physical = 447;
+    input.globalStudentCounts.archived = 47;
+    input.globalStudentCounts.postCutoverNonTarget = {
+      physical: 1,
+      active: 0,
+      pendingPayment: 0,
+      archived: 1,
+      fingerprintSha256: "f".repeat(64),
+    };
+    const plan = buildWorkbookPendingActivationPlan(input, "batch-1");
+    expect(blockerCodes(plan)).toContain(
+      "post_cutover_archived_student_requires_review",
+    );
+  });
+
+  it("blocks every pre-cutover Student without a batch source anchor", () => {
+    const input = state();
+    input.globalStudentCounts.physical = 447;
+    input.globalStudentCounts.active = 392;
+    input.globalStudentCounts.preCutoverUnanchored = {
+      physical: 1,
+      active: 1,
+      pendingPayment: 0,
+      archived: 0,
+      fingerprintSha256: "1".repeat(64),
+    };
+    const plan = buildWorkbookPendingActivationPlan(input, "batch-1");
+    expect(blockerCodes(plan)).toContain(
+      "pre_cutover_unanchored_student_requires_review",
+    );
+  });
+
+  it("changes the confirmation digest when the allowed post-cutover roster changes", () => {
+    const firstInput = state();
+    firstInput.globalStudentCounts.physical = 447;
+    firstInput.globalStudentCounts.pendingPayment = 10;
+    firstInput.globalStudentCounts.postCutoverNonTarget = {
+      physical: 1,
+      active: 0,
+      pendingPayment: 1,
+      archived: 0,
+      fingerprintSha256: "2".repeat(64),
+    };
+    const secondInput = structuredClone(firstInput);
+    secondInput.globalStudentCounts.postCutoverNonTarget.fingerprintSha256 =
+      "3".repeat(64);
+    const first = buildWorkbookPendingActivationPlan(firstInput, "batch-1");
+    const second = buildWorkbookPendingActivationPlan(secondInput, "batch-1");
+    expect(first.confirmBlocked).toBe(false);
+    expect(second.confirmBlocked).toBe(false);
+    expect(first.planSha256).not.toBe(second.planSha256);
   });
 
   it("blocks existing credentials, invites, activation requests, and login collisions", () => {
@@ -224,6 +329,7 @@ describe("workbook pending-payment activation plan", () => {
       paymentLinkId: null,
       paymentId: "direct-payment",
       status: "submitted",
+      createdAt: "2026-09-02T11:40:00.000Z",
       activeKeySha256: "1".repeat(64),
       resumeTokenSha256: "2".repeat(64),
     });
@@ -240,6 +346,153 @@ describe("workbook pending-payment activation plan", () => {
     expect(blockerCodes(plan)).toContain("pending_payment_attempt");
   });
 
+  it("retains coherent cancelled proof history on an older target-owned invoice", () => {
+    const input = state();
+    const first = input.targets[0]!;
+    const oldInvoiceId = "old-invoice-01";
+    const oldLinkId = "old-link-01";
+    const oldPaymentId = "old-payment-01";
+    first.invoices.push({
+      id: oldInvoiceId,
+      studentId: first.student.id,
+      status: "void",
+      totalAmount: 250_000,
+      amountPaid: 0,
+      revision: 1,
+      updatedAt: "2026-09-02T11:40:00.000Z",
+    });
+    first.links.push({
+      id: oldLinkId,
+      onboardingApplicantId: null,
+      studentId: first.student.id,
+      invoiceId: oldInvoiceId,
+      status: "cancelled",
+      amountXof: 250_000,
+      tokenSha256: "4".repeat(64),
+    });
+    first.payments.push({
+      id: oldPaymentId,
+      studentId: first.student.id,
+      invoiceId: oldInvoiceId,
+      status: "cancelled",
+      amount: 250_000,
+      updatedAt: "2026-09-02T11:40:00.000Z",
+    });
+    first.submissions.push({
+      id: "cancelled-old-proof",
+      applicantId: first.applicant!.id,
+      studentId: first.student.id,
+      invoiceId: oldInvoiceId,
+      paymentLinkId: oldLinkId,
+      paymentId: oldPaymentId,
+      status: "cancelled",
+      createdAt: "2026-09-02T11:40:00.000Z",
+      activeKeySha256: null,
+      resumeTokenSha256: null,
+    });
+    const plan = buildWorkbookPendingActivationPlan(input, "batch-1");
+    expect(plan.confirmBlocked).toBe(false);
+    expect(blockerCodes(plan)).not.toContain("payment_attempt_ownership_drift");
+  });
+
+  it("accepts every type-specific terminal status on coherent old ownership", () => {
+    const input = state();
+    const first = input.targets[0]!;
+    const oldInvoiceId = "terminal-old-invoice-01";
+    first.invoices.push({
+      id: oldInvoiceId,
+      studentId: first.student.id,
+      status: "void",
+      totalAmount: 250_000,
+      amountPaid: 0,
+      revision: 1,
+      updatedAt: "2026-09-02T11:40:00.000Z",
+    });
+    for (const status of ["approved", "rejected", "cancelled"]) {
+      first.submissions.push({
+        id: `terminal-proof-${status}`,
+        applicantId: first.applicant!.id,
+        studentId: first.student.id,
+        invoiceId: oldInvoiceId,
+        paymentLinkId: null,
+        paymentId: null,
+        status,
+        createdAt: "2026-09-02T11:40:00.000Z",
+        activeKeySha256: null,
+        resumeTokenSha256: null,
+      });
+    }
+    for (const status of ["settled", "cancelled", "rejected", "expired"]) {
+      first.piSpiRequests.push({
+        id: `terminal-pispi-${status}`,
+        applicantId: first.applicant!.id,
+        studentId: first.student.id,
+        invoiceId: oldInvoiceId,
+        paymentLinkId: null,
+        paymentId: null,
+        status,
+        createdAt: "2026-09-02T11:40:00.000Z",
+        amountXof: 250_000,
+      });
+    }
+    const plan = buildWorkbookPendingActivationPlan(input, "batch-1");
+    expect(plan.confirmBlocked).toBe(false);
+    expect(blockerCodes(plan)).not.toContain("payment_attempt_ownership_drift");
+  });
+
+  it("blocks a live proof attempt even when its historical ownership is coherent", () => {
+    const input = state();
+    const first = input.targets[0]!;
+    const oldInvoiceId = "old-live-invoice-01";
+    first.invoices.push({
+      id: oldInvoiceId,
+      studentId: first.student.id,
+      status: "void",
+      totalAmount: 250_000,
+      amountPaid: 0,
+      revision: 1,
+      updatedAt: "2026-09-02T11:40:00.000Z",
+    });
+    first.submissions.push({
+      id: "submitted-old-proof",
+      applicantId: first.applicant!.id,
+      studentId: first.student.id,
+      invoiceId: oldInvoiceId,
+      paymentLinkId: null,
+      paymentId: null,
+      status: "submitted",
+      createdAt: "2026-09-02T11:40:00.000Z",
+      activeKeySha256: "5".repeat(64),
+      resumeTokenSha256: "6".repeat(64),
+    });
+    const plan = buildWorkbookPendingActivationPlan(input, "batch-1");
+    expect(blockerCodes(plan)).toEqual(
+      expect.arrayContaining([
+        "active_payment_proof_attempt",
+        "payment_attempt_ownership_drift",
+      ]),
+    );
+  });
+
+  it("blocks target payment-attempt activity created after the cutover", () => {
+    const input = state();
+    const first = input.targets[0]!;
+    first.submissions.push({
+      id: "post-cutover-cancelled-proof",
+      applicantId: first.applicant!.id,
+      studentId: first.student.id,
+      invoiceId: first.linkedWorkbookRecord!.canonicalInvoiceId,
+      paymentLinkId: first.links[0]!.id,
+      paymentId: null,
+      status: "cancelled",
+      createdAt: "2026-09-02T11:45:00.000Z",
+      activeKeySha256: null,
+      resumeTokenSha256: null,
+    });
+    const plan = buildWorkbookPendingActivationPlan(input, "batch-1");
+    expect(blockerCodes(plan)).toContain("payment_attempt_ownership_drift");
+  });
+
   it("blocks cross-linked attempt relationship fields and duplicate target assignment", () => {
     const input = state();
     const first = input.targets[0]!;
@@ -252,6 +505,7 @@ describe("workbook pending-payment activation plan", () => {
       paymentLinkId: first.links[0]!.id,
       paymentId: null,
       status: "cancelled",
+      createdAt: "2026-09-02T11:40:00.000Z",
       activeKeySha256: null,
       resumeTokenSha256: null,
     };
@@ -278,6 +532,7 @@ describe("workbook pending-payment activation plan", () => {
         paymentLinkId: linkId,
         paymentId: null,
         status: "awaiting_proof",
+        createdAt: "2026-09-02T11:40:00.000Z",
         activeKeySha256: "3".repeat(64),
         resumeTokenSha256: "4".repeat(64),
       },
@@ -289,6 +544,7 @@ describe("workbook pending-payment activation plan", () => {
         paymentLinkId: linkId,
         paymentId: "submitted-payment",
         status: "submitted",
+        createdAt: "2026-09-02T11:40:00.000Z",
         activeKeySha256: "5".repeat(64),
         resumeTokenSha256: "6".repeat(64),
       },
@@ -301,6 +557,7 @@ describe("workbook pending-payment activation plan", () => {
       paymentLinkId: linkId,
       paymentId: "pispi-payment",
       status: "sent",
+      createdAt: "2026-09-02T11:40:00.000Z",
       amountXof: 100_000,
     });
     first.payments.push(
