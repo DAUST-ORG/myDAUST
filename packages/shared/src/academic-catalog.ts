@@ -66,16 +66,68 @@ export const AcademicNotYetGradedStandingInput = z.object({
   tone: AcademicStandingToneInput,
 });
 
-export const AcademicCatalogProgramInput = z.object({
-  programId: z.string().uuid(),
-  programCode: z.string().trim().min(1).max(40),
-  programName: z.string().trim().min(1).max(160),
-  progressionMode: z.enum(["default", "custom"]),
-  customLevels: z.array(AcademicCatalogLevelInput).max(40),
-  requirements: z.array(AcademicCatalogRequirementInput).max(80),
-  standingMode: z.enum(["default", "custom"]).default("default"),
-  customStandingRules: z.array(AcademicStandingRuleInput).max(20).default([]),
+export const AcademicCatalogSemesterInput = z.enum([
+  "Fall",
+  "Spring",
+  "Summer",
+]);
+
+export const MAX_ACADEMIC_CATALOG_PLAN_YEARS = 8;
+
+export const AcademicCatalogCurriculumEntryInput = z.object({
+  courseId: z.string().uuid(),
+  courseCode: z.string().trim().min(1).max(40),
+  yearIndex: z.number().int().min(1).max(MAX_ACADEMIC_CATALOG_PLAN_YEARS),
+  semester: AcademicCatalogSemesterInput,
+  position: z.number().int().min(0).max(999),
 });
+
+export const AcademicCatalogProgramInput = z
+  .object({
+    programId: z.string().uuid(),
+    programCode: z.string().trim().min(1).max(40),
+    programName: z.string().trim().min(1).max(160),
+    progressionMode: z.enum(["default", "custom"]),
+    customLevels: z.array(AcademicCatalogLevelInput).max(40),
+    requirements: z.array(AcademicCatalogRequirementInput).max(80),
+    curriculum: z.array(AcademicCatalogCurriculumEntryInput).max(500),
+    standingMode: z.enum(["default", "custom"]).default("default"),
+    customStandingRules: z.array(AcademicStandingRuleInput).max(20).default([]),
+  })
+  .superRefine((program, ctx) => {
+    const courseIds = new Set<string>();
+    const courseCodes = new Set<string>();
+    program.curriculum.forEach((entry, index) => {
+      if (courseIds.has(entry.courseId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "A course can appear only once in a programme curriculum",
+          path: ["curriculum", index, "courseId"],
+        });
+      }
+      courseIds.add(entry.courseId);
+
+      const courseCode = entry.courseCode.toLocaleUpperCase();
+      if (courseCodes.has(courseCode)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "A course code can appear only once in a programme curriculum",
+          path: ["curriculum", index, "courseCode"],
+        });
+      }
+      courseCodes.add(courseCode);
+
+      if (entry.position !== index) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Curriculum positions must be contiguous and match their array order",
+          path: ["curriculum", index, "position"],
+        });
+      }
+    });
+  });
 
 function validateLevels(
   levels: AcademicCatalogLevel[],
@@ -243,6 +295,22 @@ export const AcademicCatalogDraftInput = z
         program.progressionMode === "custom"
           ? program.customLevels
           : value.defaultLevels;
+      const configuredPlanYears = Math.ceil(levels.length / 2);
+      program.curriculum.forEach((entry, curriculumIndex) => {
+        if (entry.yearIndex > configuredPlanYears) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Curriculum year ${entry.yearIndex} exceeds the configured ${configuredPlanYears}-year progression plan`,
+            path: [
+              "programs",
+              index,
+              "curriculum",
+              curriculumIndex,
+              "yearIndex",
+            ],
+          });
+        }
+      });
       if (total > 0 && (levels.at(-1)?.creditCeiling ?? 0) < total) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -256,6 +324,12 @@ export const AcademicCatalogDraftInput = z
 export type AcademicCatalogLevel = z.infer<typeof AcademicCatalogLevelInput>;
 export type AcademicCatalogRequirement = z.infer<
   typeof AcademicCatalogRequirementInput
+>;
+export type AcademicCatalogSemester = z.infer<
+  typeof AcademicCatalogSemesterInput
+>;
+export type AcademicCatalogCurriculumEntry = z.infer<
+  typeof AcademicCatalogCurriculumEntryInput
 >;
 export type AcademicCatalogProgram = z.infer<
   typeof AcademicCatalogProgramInput

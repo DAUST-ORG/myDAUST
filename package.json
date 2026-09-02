@@ -23,6 +23,15 @@
     "typescript": "^5.7.3"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["@prisma/client", "@prisma/engines", "prisma", "esbuild"]
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild"
+    ],
+    "overrides": {
+      "brace-expansion@1.1.15": "1.1.18",
+      "uuid@<11.1.1": "11.1.1"
+    }
   }
 }

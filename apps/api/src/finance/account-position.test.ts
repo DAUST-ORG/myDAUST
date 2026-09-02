@@ -119,6 +119,16 @@ describe("API account-position adapter", () => {
     ).toBe("overdue");
   });
 
+  it("marks a zero-value installment paid when no position line is emitted", () => {
+    expect(
+      projectedInstallmentStatus({
+        dueDate: "2026-09-05",
+        amountDue: 0,
+        amountPaid: 0,
+      }),
+    ).toBe("paid");
+  });
+
   it("ignores stale stored installment status in favor of the Dakar due date", () => {
     const records = [
       {

@@ -273,6 +273,26 @@ export class OperatingBudgetService {
                 },
               },
             },
+            { recognizedOn: { gte: start, lt: dateEndExclusive } },
+            {
+              workbookCutoverRecords: {
+                some: {
+                  batch: {
+                    sourceAsOfDate: { gte: start, lt: dateEndExclusive },
+                  },
+                },
+              },
+            },
+            {
+              workbookReplacementEvents: {
+                some: {
+                  kind: "reconstruction_payment",
+                  batch: {
+                    sourceAsOfDate: { gte: start, lt: dateEndExclusive },
+                  },
+                },
+              },
+            },
           ],
         },
         include: {
@@ -290,6 +310,18 @@ export class OperatingBudgetService {
           },
           paymentBalanceImportRow: {
             select: {
+              batch: { select: { sourceAsOfDate: true } },
+            },
+          },
+          workbookCutoverRecords: {
+            select: {
+              batch: { select: { sourceAsOfDate: true } },
+            },
+          },
+          workbookReplacementEvents: {
+            where: { kind: "reconstruction_payment" },
+            select: {
+              kind: true,
               batch: { select: { sourceAsOfDate: true } },
             },
           },
@@ -346,7 +378,7 @@ export class OperatingBudgetService {
           : ("payment" as const);
       const recognitionDescription = (description: string) =>
         recognitionInRange?.basis === "source_as_of_balance"
-          ? `Paid-to-date balance as of ${toDakarDateKey(
+          ? `Balance reconstruction as of ${toDakarDateKey(
               recognitionInRange.occurredOn,
             )} · ${description}`
           : description;
@@ -1216,10 +1248,10 @@ export class OperatingBudgetService {
                 ).size,
                 amountXof: sumXof(
                   balanceReconciliations.map((record) => record.amountXof),
-                  "Paid-to-date balance reconciliation total",
+                  "Balance reconstruction total",
                 ),
                 message:
-                  "Paid-to-date workbook deltas are recognized on the reviewed source-as-of date. Individual settlement timestamps remain unknown and were not invented.",
+                  "Workbook balance reconstructions are recognized on the reviewed source-as-of date. Individual settlement timestamps remain unknown and were not invented.",
               },
             ]
           : []),

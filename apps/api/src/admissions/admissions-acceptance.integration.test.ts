@@ -2,7 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@mydaust/db";
-import { SCHOLARSHIP_TIERS } from "@mydaust/shared";
+import {
+  INITIAL_BILLING_ADJUSTMENT_DEFINITIONS,
+  INITIAL_BILLING_SERVICE_OPTIONS,
+  SCHOLARSHIP_TIERS,
+} from "@mydaust/shared";
 import { AppConfigService } from "../app-config/app-config.service.js";
 import { FinanceService } from "../finance/finance.service.js";
 import { AdmissionsService } from "./admissions.service.js";
@@ -23,6 +27,32 @@ let admissions: AdmissionsService;
 let actorId: string;
 let programCode: string;
 let academicYearId: string;
+const BILLING_PROFILE_SELECTION = {
+  housingOptionCode: "none",
+  cafeteriaOptionCode: "none",
+  insuranceSelected: false,
+  cautionSelected: false,
+  awardDefinitionIds: [],
+};
+
+async function acceptanceRequest(
+  applicantId: string,
+  selection: Partial<typeof BILLING_PROFILE_SELECTION> = {},
+) {
+  const options = await admissions.acceptanceBillingProfileOptions(applicantId);
+  return {
+    academicYearId: options.academicYearId,
+    academicYearLabel: options.academicYearLabel,
+    billingProfile: {
+      ...BILLING_PROFILE_SELECTION,
+      ...selection,
+      feeScheduleId: options.feeScheduleId!,
+      feeScheduleRevision: options.feeScheduleRevision,
+      feeScheduleFingerprintSha256: options.feeScheduleFingerprintSha256!,
+      billingCatalogFingerprintSha256: options.billingCatalogFingerprintSha256!,
+    },
+  };
+}
 
 async function createApplicant(overrides: Record<string, unknown> = {}) {
   return prisma.applicant.create({
@@ -59,7 +89,11 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     );
 
     await prisma.costCenter.createMany({
-      data: [{ code: "9100", name: "Tuition", type: "revenue" }],
+      data: [
+        { code: "9100", name: "Tuition", type: "revenue" },
+        { code: "3700", name: "Housing", type: "auxiliary" },
+        { code: "3600", name: "Cafeteria", type: "auxiliary" },
+      ],
       skipDuplicates: true,
     });
     const actor = await prisma.person.create({
@@ -136,6 +170,20 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
         },
       },
     });
+    await prisma.billingServiceOption.createMany({
+      data: INITIAL_BILLING_SERVICE_OPTIONS.map((option) => ({
+        ...option,
+        academicYearLabel: academicYear.label,
+        active: true,
+      })),
+    });
+    await prisma.billingAdjustmentDefinition.createMany({
+      data: INITIAL_BILLING_ADJUSTMENT_DEFINITIONS.map((definition) => ({
+        ...definition,
+        academicYearLabel: academicYear.label,
+        active: true,
+      })),
+    });
 
     for (const studentNo of ["S20261XX", "S202630YY"]) {
       const person = await prisma.person.create({
@@ -179,15 +227,27 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     );
   });
 
+  it("returns intake-bound pricing claims for list and detail acceptance entry points", async () => {
+    const applicant = await createApplicant();
+    const options = await admissions.acceptanceBillingProfileOptions(
+      applicant.id,
+    );
+    expect(options).toMatchObject({
+      academicYearId,
+      academicYearLabel: "2026-2027",
+      feeScheduleId: expect.any(String),
+      feeScheduleRevision: 1,
+      feeScheduleFingerprintSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      billingCatalogFingerprintSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+  });
+
   it("concurrently accepts once and resumes both requests idempotently", async () => {
     const applicant = await createApplicant();
+    const request = await acceptanceRequest(applicant.id);
     const results = await Promise.allSettled([
-      admissions.adminAcceptApplicant(actorId, applicant.id, {
-        academicYearId,
-      }),
-      admissions.adminAcceptApplicant(actorId, applicant.id, {
-        academicYearId,
-      }),
+      admissions.adminAcceptApplicant(actorId, applicant.id, request),
+      admissions.adminAcceptApplicant(actorId, applicant.id, request),
     ]);
 
     expect(
@@ -216,7 +276,7 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     ).toMatchObject({ roles: [], passwordHash: null });
     await expect(
       admissions.adminAcceptApplicant(actorId, applicant.id, {
-        academicYearId,
+        ...request,
       }),
     ).resolves.toMatchObject({
       stage: "accepted",
@@ -269,12 +329,179 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     });
   }, 30_000);
 
-  it("rolls back every provisional record when required identity is missing", async () => {
-    const applicant = await createApplicant({ dateOfBirth: null });
+  it("requires an explicit billing profile before creating admission records", async () => {
+    const applicant = await createApplicant();
     await expect(
       admissions.adminAcceptApplicant(actorId, applicant.id, {
         academicYearId,
+        academicYearLabel: "2026-2027",
+      } as never),
+    ).rejects.toThrow("selections are required");
+    await expect(
+      prisma.applicant.findUniqueOrThrow({ where: { id: applicant.id } }),
+    ).resolves.toMatchObject({
+      stage: "offer",
+      studentId: null,
+      enrollmentInvoiceId: null,
+    });
+  });
+
+  it("applies the configured BAC award before creating the payment link", async () => {
+    const applicant = await createApplicant({ score: 12 });
+    await admissions.adminAcceptApplicant(
+      actorId,
+      applicant.id,
+      await acceptanceRequest(applicant.id),
+    );
+    const accepted = await prisma.applicant.findUniqueOrThrow({
+      where: { id: applicant.id },
+      include: {
+        enrollmentInvoice: true,
+        activeOnboardingPaymentLink: true,
+        student: {
+          include: {
+            billingProfiles: { include: { awards: true } },
+          },
+        },
+      },
+    });
+    expect(accepted.enrollmentInvoice?.totalAmount).toBe(3_600_004);
+    expect(accepted.activeOnboardingPaymentLink?.amountXof).toBe(900_001);
+    expect(accepted.student?.billingProfiles[0]?.awards).toEqual([
+      expect.objectContaining({
+        definitionKey: "merit_10",
+        amountXof: 400_000,
+        source: "admissions",
       }),
+    ]);
+  });
+
+  it("derives the BAC award from the Applicant row inside the acceptance transaction", async () => {
+    const applicant = await createApplicant({ score: null });
+    const request = await acceptanceRequest(applicant.id);
+    await prisma.applicant.update({
+      where: { id: applicant.id },
+      data: { score: 12 },
+    });
+
+    await admissions.adminAcceptApplicant(actorId, applicant.id, request);
+
+    const award = await prisma.billingProfileAward.findFirstOrThrow({
+      where: { profile: { student: { applicant: { id: applicant.id } } } },
+    });
+    expect(award).toMatchObject({
+      definitionKey: "merit_10",
+      amountXof: 400_000,
+      source: "admissions",
+    });
+  });
+
+  it("rejects stale approved fee-schedule and catalog fingerprints without partial rows", async () => {
+    const scheduleApplicant = await createApplicant();
+    const staleScheduleRequest = await acceptanceRequest(scheduleApplicant.id);
+    const schedule = await prisma.feeSchedule.findUniqueOrThrow({
+      where: { id: staleScheduleRequest.billingProfile.feeScheduleId },
+    });
+    await prisma.feeSchedule.update({
+      where: { id: schedule.id },
+      data: { reason: `${schedule.reason} drift` },
+    });
+    await expect(
+      admissions.adminAcceptApplicant(
+        actorId,
+        scheduleApplicant.id,
+        staleScheduleRequest,
+      ),
+    ).rejects.toThrow("pricing changed");
+    await prisma.feeSchedule.update({
+      where: { id: schedule.id },
+      data: { reason: schedule.reason },
+    });
+
+    const catalogApplicant = await createApplicant();
+    const staleCatalogRequest = await acceptanceRequest(catalogApplicant.id);
+    const housing = await prisma.billingServiceOption.findUniqueOrThrow({
+      where: {
+        academicYearLabel_kind_code: {
+          academicYearLabel: "2026-2027",
+          kind: "housing",
+          code: "double",
+        },
+      },
+    });
+    await prisma.billingServiceOption.update({
+      where: { id: housing.id },
+      data: { amountXof: housing.amountXof! + 1 },
+    });
+    await expect(
+      admissions.adminAcceptApplicant(
+        actorId,
+        catalogApplicant.id,
+        staleCatalogRequest,
+      ),
+    ).rejects.toThrow("pricing changed");
+    await prisma.billingServiceOption.update({
+      where: { id: housing.id },
+      data: { amountXof: housing.amountXof },
+    });
+
+    for (const applicant of [scheduleApplicant, catalogApplicant]) {
+      await expect(
+        prisma.applicant.findUniqueOrThrow({ where: { id: applicant.id } }),
+      ).resolves.toMatchObject({
+        stage: "offer",
+        onboardingStatus: "not_started",
+        studentId: null,
+      });
+      await expect(
+        prisma.person.count({ where: { email: applicant.email } }),
+      ).resolves.toBe(0);
+    }
+  });
+
+  it("rejects direct admission awards that require Finance approval", async () => {
+    const applicant = await createApplicant({ score: null });
+    const definition =
+      await prisma.billingAdjustmentDefinition.findUniqueOrThrow({
+        where: {
+          academicYearLabel_key: {
+            academicYearLabel: "2026-2027",
+            key: "family",
+          },
+        },
+      });
+    expect(definition.requiresApproval).toBe(true);
+
+    await expect(
+      admissions.adminAcceptApplicant(
+        actorId,
+        applicant.id,
+        await acceptanceRequest(applicant.id, {
+          awardDefinitionIds: [definition.id],
+        }),
+      ),
+    ).rejects.toThrow("Finance approval workflow");
+    await expect(
+      prisma.applicant.findUniqueOrThrow({ where: { id: applicant.id } }),
+    ).resolves.toMatchObject({
+      stage: "offer",
+      onboardingStatus: "not_started",
+      studentId: null,
+      enrollmentInvoiceId: null,
+    });
+    await expect(
+      prisma.person.count({ where: { email: applicant.email } }),
+    ).resolves.toBe(0);
+  });
+
+  it("rolls back every provisional record when required identity is missing", async () => {
+    const applicant = await createApplicant({ dateOfBirth: null });
+    await expect(
+      admissions.adminAcceptApplicant(
+        actorId,
+        applicant.id,
+        await acceptanceRequest(applicant.id),
+      ),
     ).rejects.toThrow("date of birth");
     const unchanged = await prisma.applicant.findUniqueOrThrow({
       where: { id: applicant.id },
@@ -290,34 +517,42 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     ).toBe(0);
   });
 
-  it("rejects missing program, unknown year and unapproved schedule without partial rows", async () => {
+  it("rejects missing program, a stale intake year and an unapproved schedule without partial rows", async () => {
     const notOffered = await createApplicant({ stage: "review" });
     await expect(
-      admissions.adminAcceptApplicant(actorId, notOffered.id, {
-        academicYearId,
-      }),
+      admissions.adminAcceptApplicant(
+        actorId,
+        notOffered.id,
+        await acceptanceRequest(notOffered.id),
+      ),
     ).rejects.toThrow("Only an offered applicant");
     const missingProgram = await createApplicant({ programCode: null });
     await expect(
-      admissions.adminAcceptApplicant(actorId, missingProgram.id, {
-        academicYearId,
-      }),
+      admissions.adminAcceptApplicant(
+        actorId,
+        missingProgram.id,
+        await acceptanceRequest(missingProgram.id),
+      ),
     ).rejects.toThrow("program");
     const futureBirthDate = await createApplicant({
       dateOfBirth: new Date("2099-01-01T00:00:00Z"),
     });
     await expect(
-      admissions.adminAcceptApplicant(actorId, futureBirthDate.id, {
-        academicYearId,
-      }),
+      admissions.adminAcceptApplicant(
+        actorId,
+        futureBirthDate.id,
+        await acceptanceRequest(futureBirthDate.id),
+      ),
     ).rejects.toThrow("date of birth");
 
     const unknownYear = await createApplicant();
+    const wrongYearRequest = await acceptanceRequest(unknownYear.id);
     await expect(
       admissions.adminAcceptApplicant(actorId, unknownYear.id, {
+        ...wrongYearRequest,
         academicYearId: randomUUID(),
       }),
-    ).rejects.toThrow("Unknown academic year");
+    ).rejects.toThrow("intake academic year changed");
 
     const yearWithoutSchedule = await prisma.academicYear.create({
       data: {
@@ -326,10 +561,26 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
         startsOn: new Date("2028-08-01T00:00:00Z"),
       },
     });
-    const noSchedule = await createApplicant();
+    await prisma.term.create({
+      data: {
+        name: "Fall 2028",
+        startDate: new Date("2028-08-01T00:00:00Z"),
+        endDate: new Date("2028-12-31T00:00:00Z"),
+        academicYearId: yearWithoutSchedule.id,
+      },
+    });
+    const noSchedule = await createApplicant({ term: "Fall 2028" });
     await expect(
       admissions.adminAcceptApplicant(actorId, noSchedule.id, {
         academicYearId: yearWithoutSchedule.id,
+        academicYearLabel: yearWithoutSchedule.label,
+        billingProfile: {
+          ...BILLING_PROFILE_SELECTION,
+          feeScheduleId: randomUUID(),
+          feeScheduleRevision: 1,
+          feeScheduleFingerprintSha256: "0".repeat(64),
+          billingCatalogFingerprintSha256: "0".repeat(64),
+        },
       }),
     ).rejects.toThrow("approved fee schedule");
 
@@ -366,9 +617,11 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
       },
     });
     await expect(
-      admissions.adminAcceptApplicant(actorId, caseConflict.id, {
-        academicYearId,
-      }),
+      admissions.adminAcceptApplicant(
+        actorId,
+        caseConflict.id,
+        await acceptanceRequest(caseConflict.id),
+      ),
     ).rejects.toThrow("existing account");
     expect(
       await prisma.applicant.findUniqueOrThrow({
@@ -386,7 +639,7 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     const accepted = (await admissions.adminAcceptApplicant(
       actorId,
       applicant.id,
-      { academicYearId },
+      await acceptanceRequest(applicant.id),
     )) as any;
     const firstToken = String(accepted.onboarding.statusUrl).split("/").at(-1)!;
     await expect(
@@ -555,7 +808,7 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     const accepted = (await admissions.adminAcceptApplicant(
       actorId,
       applicant.id,
-      { academicYearId },
+      await acceptanceRequest(applicant.id),
     )) as any;
     const statusToken = String(accepted.onboarding.statusUrl)
       .split("/")
@@ -750,9 +1003,11 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
 
   it("fails closed while proof, provider settlement or refund activity is in flight", async () => {
     const applicant = await createApplicant();
-    await admissions.adminAcceptApplicant(actorId, applicant.id, {
-      academicYearId,
-    });
+    await admissions.adminAcceptApplicant(
+      actorId,
+      applicant.id,
+      await acceptanceRequest(applicant.id),
+    );
     const pending = await prisma.applicant.findUniqueOrThrow({
       where: { id: applicant.id },
     });
@@ -920,9 +1175,11 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
 
   it("rejects cancellation after any verified enrollment cash", async () => {
     const applicant = await createApplicant();
-    await admissions.adminAcceptApplicant(actorId, applicant.id, {
-      academicYearId,
-    });
+    await admissions.adminAcceptApplicant(
+      actorId,
+      applicant.id,
+      await acceptanceRequest(applicant.id),
+    );
     const pending = await prisma.applicant.findUniqueOrThrow({
       where: { id: applicant.id },
     });
@@ -970,9 +1227,11 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
       data: { personId: person.id, studentNo: "S202650ZZ" },
     });
     const applicant = await createApplicant();
-    await admissions.adminAcceptApplicant(actorId, applicant.id, {
-      academicYearId,
-    });
+    await admissions.adminAcceptApplicant(
+      actorId,
+      applicant.id,
+      await acceptanceRequest(applicant.id),
+    );
     const accepted = await prisma.applicant.findUniqueOrThrow({
       where: { id: applicant.id },
       include: { student: true },

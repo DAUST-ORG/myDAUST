@@ -9,12 +9,14 @@ import {
   ReceiptText,
 } from "lucide-react";
 import {
+  type BillingProfileView,
   type PiSpiRequestSummary,
   type PaymentSubmissionSummary,
   type ProofPaymentMethod,
   type Receipt,
   type StudentAccount,
   getChildAccount,
+  getChildBillingProfile,
   getChildPaymentAttempts,
   getChildPiSpiRequest,
   getChildReceipt,
@@ -26,6 +28,7 @@ import {
   verifyPiSpiAlias,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
+import { paymentDatePresentation } from "@/lib/payment-dates";
 import {
   AccountStandingBadge,
   InstallmentStandingBadge,
@@ -38,6 +41,7 @@ import {
 } from "@/components/AccountBalance";
 import { PiSpiPayForm } from "@/components/PiSpiPayForm";
 import { ProofPaymentPanel } from "@/components/ProofPaymentPanel";
+import { BillingProfileSummary } from "@/components/BillingProfileSummary";
 import {
   Badge,
   Button,
@@ -130,6 +134,9 @@ function fallbackPaymentTarget(account: StudentAccount) {
 export default function ParentBilling() {
   const { children, active, activeId, select, error } = useChildren();
   const [account, setAccount] = useState<StudentAccount | null>(null);
+  const [billingProfile, setBillingProfile] = useState<
+    BillingProfileView | null | undefined
+  >(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [method, setMethod] = useState("proof");
@@ -169,12 +176,14 @@ export default function ParentBilling() {
       const requestId = ++accountRequest.current;
       if (isCurrentChild(snapshot)) setLoadError(null);
       try {
-        const [next, attempts] = await Promise.all([
+        const [next, attempts, nextProfile] = await Promise.all([
           getChildAccount(snapshot.studentId),
           getChildPaymentAttempts(snapshot.studentId),
+          getChildBillingProfile(snapshot.studentId).catch(() => null),
         ]);
         if (requestId === accountRequest.current && isCurrentChild(snapshot)) {
           setAccount(next);
+          setBillingProfile(nextProfile ?? next.billingProfile ?? null);
           setPaymentAttempt(
             attempts.find((attempt) =>
               ["awaiting_proof", "submitted"].includes(attempt.status),
@@ -207,6 +216,7 @@ export default function ParentBilling() {
     const context = activeChildContext.current;
     accountRequest.current += 1;
     setAccount(null);
+    setBillingProfile(undefined);
     setReceipt(null);
     setPiSpiRequest(null);
     setPaymentAttempt(null);
@@ -254,15 +264,12 @@ export default function ParentBilling() {
             ...payment,
             term: invoice.term,
             invoiceLabel: invoice.description ?? invoice.term,
-            eventAt:
-              payment.status === "refunded"
-                ? (payment.refundedAt ?? payment.createdAt)
-                : payment.status === "success"
-                  ? (payment.settledAt ?? payment.createdAt)
-                  : payment.createdAt,
+            datePresentation: paymentDatePresentation(payment),
           })),
         )
-        .sort((a, b) => b.eventAt.localeCompare(a.eventAt)),
+        .sort((a, b) =>
+          b.datePresentation.sortAt.localeCompare(a.datePresentation.sortAt),
+        ),
     [account],
   );
 
@@ -563,6 +570,10 @@ export default function ParentBilling() {
             </section>
           </div>
 
+          <div style={{ marginBottom: 18 }}>
+            <BillingProfileSummary profile={billingProfile} />
+          </div>
+
           <Card title="Charges and installment schedule">
             {account.invoices.length === 0 ? (
               <EmptyState title="No charges yet" />
@@ -654,8 +665,13 @@ export default function ParentBilling() {
                         <strong>{formatXof(payment.amount)}</strong>
                         <small>
                           {payment.invoiceLabel} ·{" "}
-                          {payment.method.replaceAll("_", " ")} ·{" "}
-                          {formatDate(payment.eventAt)}
+                          {payment.method.replaceAll("_", " ")}
+                          {payment.datePresentation.eventDate
+                            ? ` · ${payment.datePresentation.eventLabel} ${formatDate(payment.datePresentation.eventDate)}`
+                            : ""}
+                          {payment.datePresentation.settlementUnavailable
+                            ? " · Settlement date unavailable"
+                            : ""}
                         </small>
                       </span>
                       <Badge tone={paymentTone(payment.status)}>
@@ -759,10 +775,24 @@ export default function ParentBilling() {
                     <span>Status</span>
                     <strong>{receipt.status}</strong>
                   </div>
-                  <div>
-                    <span>Recorded</span>
-                    <strong>{formatDate(receipt.paidAt)}</strong>
-                  </div>
+                  {receipt.dateBasis === "source_as_of_balance" &&
+                    receipt.recognizedOn && (
+                      <div>
+                        <span>Balance recognized</span>
+                        <strong>{formatDate(receipt.recognizedOn)}</strong>
+                      </div>
+                    )}
+                  {receipt.paidAt ? (
+                    <div>
+                      <span>Paid</span>
+                      <strong>{formatDate(receipt.paidAt)}</strong>
+                    </div>
+                  ) : (
+                    <div>
+                      <span>Settlement</span>
+                      <strong>Settlement date unavailable</strong>
+                    </div>
+                  )}
                   {receipt.refundedAt && (
                     <div>
                       <span>Refunded</span>

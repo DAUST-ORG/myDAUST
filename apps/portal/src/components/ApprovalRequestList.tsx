@@ -32,6 +32,8 @@ const KIND_LABEL: Record<ApprovalRequestRow["kind"], string> = {
   operating_budget: "Operating budget",
   management_actual: "Management actual",
   student_enrollment_override: "Enrollment override",
+  billing_profile: "Annual billing profile",
+  billing_catalog: "Billing catalog",
 };
 
 const STATUS_TONE = {
@@ -371,10 +373,16 @@ export function ApprovalRequestList({
   function start(next: "approve" | "reject" | "cancel") {
     setNote("");
     setError(null);
-    if (next === "approve" && selected?.kind === "student_enrollment_override") {
-      const failures = (selected.afterJson as { failures?: { gate: string }[] } | null)
-        ?.failures;
-      setWaivedGates(Array.isArray(failures) ? failures.map((f) => f.gate) : []);
+    if (
+      next === "approve" &&
+      selected?.kind === "student_enrollment_override"
+    ) {
+      const failures = (
+        selected.afterJson as { failures?: { gate: string }[] } | null
+      )?.failures;
+      setWaivedGates(
+        Array.isArray(failures) ? failures.map((f) => f.gate) : [],
+      );
     } else {
       setWaivedGates([]);
     }
@@ -406,7 +414,10 @@ export function ApprovalRequestList({
       } else {
         result =
           decision === "approve"
-            ? await approveApprovalRequest(selected.id, note.trim() || undefined)
+            ? await approveApprovalRequest(
+                selected.id,
+                note.trim() || undefined,
+              )
             : decision === "reject"
               ? await rejectApprovalRequest(selected.id, note.trim())
               : await cancelApprovalRequest(

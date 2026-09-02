@@ -5,6 +5,8 @@ import { QrCode } from "@/components/QrCode";
 import {
   type DiningOrder,
   type DiningEligibility,
+  type DiningPlanCode,
+  type DiningPlanOptions,
   type DiningToday,
   type DiningPass,
   type MenuItem,
@@ -16,6 +18,7 @@ import {
   fileUrl,
   getDiningPass,
   getDiningEligibility,
+  getDiningPlanOptions,
   getDiningToday,
   getMenu,
   getMyDiningOrders,
@@ -89,19 +92,6 @@ function currentPeriod(now = new Date()) {
   if (h < 17) return "lunch";
   return "dinner";
 }
-const PLANS = [
-  {
-    type: "full",
-    label: "Full pension",
-    note: "Breakfast · lunch · dinner, every weekday",
-  },
-  {
-    type: "half",
-    label: "Half pension",
-    note: "Breakfast · lunch (no dinner)",
-  },
-  { type: "none", label: "No plan", note: "Pay per weekend order only" },
-];
 const STATUS_BADGE: Record<string, string> = {
   cart: "pending",
   paid: "partial",
@@ -124,6 +114,15 @@ export default function StudentDiningPage() {
   const [attempts, setAttempts] = useState<PaymentSubmissionSummary[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedOrderAmount, setSelectedOrderAmount] = useState(0);
+  const [planOptions, setPlanOptions] = useState<DiningPlanOptions | null>(
+    null,
+  );
+  const [planLoading, setPlanLoading] = useState(true);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [planNotice, setPlanNotice] = useState<string | null>(null);
+  const [submittingPlan, setSubmittingPlan] = useState<DiningPlanCode | null>(
+    null,
+  );
 
   const load = useCallback(() => {
     getDiningPass()
@@ -145,7 +144,50 @@ export default function StudentDiningPage() {
       .then(setAttempts)
       .catch(() => {});
   }, []);
-  useEffect(() => load(), [load]);
+  const loadPlanOptions = useCallback(async () => {
+    setPlanLoading(true);
+    setPlanError(null);
+    try {
+      setPlanOptions(await getDiningPlanOptions());
+    } catch (cause) {
+      setPlanOptions(null);
+      setPlanError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not load the annual cafeteria options.",
+      );
+    } finally {
+      setPlanLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+    void loadPlanOptions();
+  }, [load, loadPlanOptions]);
+
+  async function requestPlanChange(code: DiningPlanCode) {
+    if (submittingPlan || planOptions?.pendingRequest) return;
+    setSubmittingPlan(code);
+    setPlanError(null);
+    setPlanNotice(null);
+    try {
+      const result = await chooseMealPlan(code);
+      setPlanNotice(
+        result.applied
+          ? "The approved cafeteria change is now active."
+          : "Request submitted. Your current plan stays active until an administrator approves the change.",
+      );
+      await Promise.all([loadPlanOptions(), getDiningPass().then(setPass)]);
+    } catch (cause) {
+      setPlanError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not submit the cafeteria plan request.",
+      );
+    } finally {
+      setSubmittingPlan(null);
+    }
+  }
 
   const cartTotal = Object.entries(cart).reduce(
     (s, [id, q]) => s + (menu.find((m) => m.id === id)?.priceXof ?? 0) * q,
@@ -588,46 +630,148 @@ export default function StudentDiningPage() {
       {tab === "My plan" && (
         <>
           <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-            Choosing a plan sets which meals your pass covers. Billing is
-            handled by the Finance office — cafeteria is charged with tuition
-            and housing.
+            Request a cafeteria option for the active annual billing profile.
+            Prices below come from the approved Finance catalog. Your current
+            plan remains active until an administrator approves the request.
           </p>
-          <div className="row">
-            {PLANS.map((p) => (
-              <div
-                key={p.type}
-                className="card"
-                style={{
-                  flex: 1,
-                  borderTop:
-                    pass?.plan === p.type
-                      ? "3px solid var(--daust-orange)"
-                      : undefined,
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: "var(--font-display)",
-                    fontWeight: 700,
-                    fontSize: 18,
-                  }}
-                >
-                  {p.label}
-                </div>
-                <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-                  {p.note}
-                </p>
-                <button
-                  className={pass?.plan === p.type ? "" : "primary"}
-                  disabled={pass?.plan === p.type}
-                  onClick={() => chooseMealPlan(p.type).then(load)}
-                  style={{ marginTop: 12 }}
-                >
-                  {pass?.plan === p.type ? "Current plan" : "Choose"}
-                </button>
+          {planError && (
+            <div
+              className="card"
+              role="alert"
+              style={{
+                marginBottom: 12,
+                padding: "11px 14px",
+                borderLeft: "3px solid var(--danger)",
+                color: "var(--danger)",
+                fontSize: 13,
+              }}
+            >
+              {planError}
+            </div>
+          )}
+          {planNotice && (
+            <div
+              className="card"
+              role="status"
+              aria-live="polite"
+              style={{
+                marginBottom: 12,
+                padding: "11px 14px",
+                borderLeft: "3px solid var(--success)",
+                fontSize: 13,
+              }}
+            >
+              {planNotice}
+            </div>
+          )}
+          {planOptions?.pendingRequest && (
+            <div
+              className="card"
+              role="status"
+              style={{
+                marginBottom: 12,
+                padding: "11px 14px",
+                borderLeft: "3px solid var(--warning)",
+                fontSize: 13,
+              }}
+            >
+              A change to{" "}
+              <strong>
+                {planOptions.options.find(
+                  (option) =>
+                    option.code ===
+                    planOptions.pendingRequest?.requestedOptionCode,
+                )?.label ?? "another cafeteria option"}
+              </strong>{" "}
+              is awaiting administrator approval. You cannot submit another
+              request yet.
+            </div>
+          )}
+          {planLoading && !planOptions && (
+            <div className="card" aria-busy="true">
+              <p className="muted" style={{ margin: 0 }}>
+                Loading annual cafeteria options…
+              </p>
+            </div>
+          )}
+          {planOptions && (
+            <>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                Academic year {planOptions.academicYearLabel}
               </div>
-            ))}
-          </div>
+              <div className="row" style={{ alignItems: "stretch" }}>
+                {planOptions.options.map((option) => {
+                  const current = planOptions.currentOptionCode === option.code;
+                  const pending =
+                    planOptions.pendingRequest?.requestedOptionCode ===
+                    option.code;
+                  return (
+                    <div
+                      key={option.code}
+                      className="card"
+                      style={{
+                        flex: 1,
+                        minWidth: 230,
+                        borderTop: current
+                          ? "3px solid var(--daust-orange)"
+                          : undefined,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: "var(--font-display)",
+                          fontWeight: 700,
+                          fontSize: 18,
+                        }}
+                      >
+                        {option.label}
+                      </div>
+                      <p
+                        className="muted"
+                        style={{ fontSize: 13, marginTop: 4 }}
+                      >
+                        {option.description ||
+                          "Annual cafeteria service option"}
+                      </p>
+                      <div
+                        style={{
+                          fontFamily: "var(--font-display)",
+                          fontSize: 20,
+                          fontWeight: 700,
+                          color: "var(--daust-navy)",
+                          marginTop: 14,
+                        }}
+                      >
+                        {xof(option.amountXof)}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        annual price
+                      </div>
+                      <button
+                        type="button"
+                        className={current ? "" : "primary"}
+                        disabled={
+                          current ||
+                          Boolean(planOptions.pendingRequest) ||
+                          submittingPlan !== null
+                        }
+                        onClick={() => void requestPlanChange(option.code)}
+                        style={{ marginTop: 12 }}
+                      >
+                        {current
+                          ? "Current plan"
+                          : pending
+                            ? "Approval pending"
+                            : submittingPlan === option.code
+                              ? "Submitting…"
+                              : "Request this plan"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </>
       )}
     </>

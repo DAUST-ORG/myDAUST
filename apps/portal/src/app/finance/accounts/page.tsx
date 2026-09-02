@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Banknote, CalendarClock, Check, FilePlus, Pencil } from "lucide-react";
+import {
+  Banknote,
+  CalendarClock,
+  Check,
+  FilePlus,
+  Pencil,
+  WalletCards,
+} from "lucide-react";
 import {
   type AccountInvoice,
   type FeePlan,
@@ -17,6 +24,7 @@ import {
   updatePaymentPlan,
 } from "@/lib/api";
 import { InvoiceComponentManager } from "@/components/InvoiceComponentManager";
+import { BillingProfileEditor } from "@/components/BillingProfileEditor";
 import { formatXof } from "@/lib/format";
 import {
   AccountBalanceText,
@@ -176,6 +184,11 @@ export default function FinanceAccounts() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [profileStudent, setProfileStudent] = useState<{
+    id: string;
+    name: string;
+    studentNo: string;
+  } | null>(null);
 
   const load = useCallback(() => {
     listStudentAccounts()
@@ -665,7 +678,7 @@ export default function FinanceAccounts() {
                   <th style={{ width: 230 }}>Plan</th>
                   <th style={{ textAlign: "right", width: 140 }}>Billed</th>
                   <th style={{ textAlign: "right", width: 140 }}>Remaining</th>
-                  <th style={{ textAlign: "right", width: 236 }}>Actions</th>
+                  <th style={{ textAlign: "right", width: 340 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -751,6 +764,20 @@ export default function FinanceAccounts() {
                           gap: 8,
                         }}
                       >
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          icon={<WalletCards size={14} />}
+                          onClick={() =>
+                            setProfileStudent({
+                              id: r.id,
+                              name: r.name,
+                              studentNo: r.studentNo,
+                            })
+                          }
+                        >
+                          Annual profile
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -850,7 +877,7 @@ export default function FinanceAccounts() {
                     align="right"
                   />
                   <th style={{ textAlign: "right", width: 130 }}>Status</th>
-                  <th style={{ textAlign: "right", width: 170 }}>Actions</th>
+                  <th style={{ textAlign: "right", width: 276 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -905,23 +932,45 @@ export default function FinanceAccounts() {
                     </td>
                     <BalanceCells row={r} />
                     <td style={{ textAlign: "right" }}>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        icon={<Banknote size={14} />}
-                        disabled={
-                          paymentBusy ||
-                          (r.remaining ?? r.remainingXof ?? r.balance) <= 0
-                        }
-                        title={
-                          (r.remaining ?? r.remainingXof ?? r.balance) <= 0
-                            ? "This student has no payable balance"
-                            : `Record a payment for ${r.name}`
-                        }
-                        onClick={() => openRecordPayment(r)}
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          justifyContent: "flex-end",
+                          gap: 8,
+                        }}
                       >
-                        Record payment
-                      </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          icon={<WalletCards size={14} />}
+                          onClick={() =>
+                            setProfileStudent({
+                              id: r.id,
+                              name: r.name,
+                              studentNo: r.studentNo,
+                            })
+                          }
+                        >
+                          Profile
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          icon={<Banknote size={14} />}
+                          disabled={
+                            paymentBusy ||
+                            (r.remaining ?? r.remainingXof ?? r.balance) <= 0
+                          }
+                          title={
+                            (r.remaining ?? r.remainingXof ?? r.balance) <= 0
+                              ? "This student has no payable balance"
+                              : `Record a payment for ${r.name}`
+                          }
+                          onClick={() => openRecordPayment(r)}
+                        >
+                          Record payment
+                        </Button>
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -1170,6 +1219,17 @@ export default function FinanceAccounts() {
             )}
           </div>
         </Modal>
+      )}
+
+      {profileStudent && (
+        <BillingProfileEditor
+          student={profileStudent}
+          onClose={() => setProfileStudent(null)}
+          onSubmitted={(message) => {
+            setNote(message);
+            load();
+          }}
+        />
       )}
 
       {draft && (

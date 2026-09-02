@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import type { Prisma } from "@mydaust/db";
 import { deriveAcademicStanding, type AcademicStanding } from "@mydaust/shared";
@@ -21,6 +22,24 @@ import {
   AcademicStandingService,
   type StandingOverrideInput,
 } from "../academic-catalog/academic-standing.service.js";
+import { BillingProfileService } from "../finance/billing-profile.service.js";
+import {
+  acquireRegistrationConfigurationReadLock,
+  admissionAcademicYearStart,
+  academicYearStart,
+  normalizeRegistrationSemester,
+  readRegistrationConfiguration,
+  registrationClosedReason,
+  type RegistrationClosedReason,
+  type RegistrationSemester,
+} from "./registration-configuration.js";
+import {
+  deriveCourseRecommendations,
+  earliestIncompleteSameSemester,
+  type ApprovedCurriculumEntry,
+  type RecommendationBasis,
+  type RecommendationStatus,
+} from "./course-recommendations.js";
 
 export const GRADE_POINTS: Record<string, number> = {
   "A+": 4.0,
@@ -185,6 +204,73 @@ export const STANDING_RANK: Record<string, number> = {
   senior: 4,
 };
 
+function approvedCurriculumEntries(
+  program: unknown,
+): ApprovedCurriculumEntry[] {
+  if (!program || typeof program !== "object") return [];
+  const raw = (program as { curriculum?: unknown }).curriculum;
+  if (!Array.isArray(raw)) return [];
+  const parsed: ApprovedCurriculumEntry[] = [];
+  for (const value of raw) {
+    if (!value || typeof value !== "object") return [];
+    const entry = value as Record<string, unknown>;
+    const semester = normalizeRegistrationSemester(
+      typeof entry.semester === "string" ? entry.semester : null,
+    );
+    if (
+      typeof entry.courseId !== "string" ||
+      typeof entry.courseCode !== "string" ||
+      typeof entry.yearIndex !== "number" ||
+      !Number.isInteger(entry.yearIndex) ||
+      entry.yearIndex < 1 ||
+      !semester
+    ) {
+      return [];
+    }
+    parsed.push({
+      courseId: entry.courseId,
+      courseCode: entry.courseCode,
+      yearIndex: entry.yearIndex,
+      semester,
+      position:
+        typeof entry.position === "number" && Number.isInteger(entry.position)
+          ? entry.position
+          : 0,
+    });
+  }
+  return parsed;
+}
+
+function presentStudentRegistrationTerm(
+  term: {
+    id: string;
+    name: string;
+    semester: string | null;
+    status: string | null;
+    academicYearId: string | null;
+    startDate: Date;
+    endDate: Date;
+    addDeadline: Date | null;
+    dropDeadline: Date | null;
+    academicYear: { label: string } | null;
+  } | null,
+) {
+  return term
+    ? {
+        id: term.id,
+        name: term.name,
+        status: term.status,
+        semester: normalizeRegistrationSemester(term.semester),
+        academicYearId: term.academicYearId,
+        academicYearLabel: term.academicYear?.label ?? null,
+        startDate: term.startDate,
+        endDate: term.endDate,
+        addDeadline: term.addDeadline,
+        dropDeadline: term.dropDeadline,
+      }
+    : null;
+}
+
 /**
  * Expand a meeting-day string into day tokens. Two-letter days must be matched
  * before single letters, otherwise "TTh" reads as T,T,H.
@@ -219,6 +305,14 @@ export interface MeetingLike {
   endTime: string;
 }
 
+type CourseWithEnrollmentRules = Prisma.CourseGetPayload<{
+  include: {
+    prereqRules: { include: { prereqCourse: true } };
+    coreqRules: { include: { coreqCourse: true } };
+    rule: true;
+  };
+}>;
+
 /**
  * True when two sections meet on a shared day with overlapping times.
  * Touching blocks (one ends exactly when the other starts) do not conflict.
@@ -251,7 +345,6 @@ export interface CatalogCourseInput {
 
 export interface UpdateStudentFields {
   fullName?: string;
-  email?: string;
   programCode?: string | null;
   dateOfBirth?: string | null;
   gender?: string | null;
@@ -268,7 +361,6 @@ export interface UpdateStudentFields {
   preferredName?: string | null;
   nationalId?: string | null;
   maritalStatus?: string | null;
-  personalEmail?: string | null;
   bloodType?: string | null;
   allergies?: string | null;
   insurance?: string | null;
@@ -288,10 +380,12 @@ export class AcademicsService {
   private readonly transcript: TranscriptService;
   private readonly catalogs: AcademicCatalogService;
   private readonly standings: AcademicStandingService;
+  private readonly billingProfiles: BillingProfileService;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications?: NotificationsService,
+    @Optional() billingProfiles?: BillingProfileService,
   ) {
     this.catalogs = new AcademicCatalogService(prisma);
     this.standings = new AcademicStandingService(prisma, this.catalogs);
@@ -300,6 +394,7 @@ export class AcademicsService {
       this.catalogs,
       this.standings,
     );
+    this.billingProfiles = billingProfiles ?? new BillingProfileService(prisma);
   }
 
   /** The active/upcoming term (the one registration targets). */
@@ -327,6 +422,7 @@ export class AcademicsService {
     });
     return sections.map((s) => ({
       id: s.id,
+      courseId: s.courseId,
       courseCode: s.course.code,
       title: s.course.title,
       credits: s.course.credits,
@@ -350,20 +446,103 @@ export class AcademicsService {
   }
 
   /**
-   * Enroll a student into a section. Seat-safe under concurrency: a row-level lock on the
-   * Section (SELECT ... FOR UPDATE) inside an interactive transaction serializes racing
-   * enrollments so the last seat can't be oversold. Also checks prerequisites + duplicates.
+   * Enroll a student into a section through the same atomic path used for
+   * reciprocal/transitive corequisite bundles.
    */
   async enroll(studentId: string, sectionId: string) {
+    const [enrollment] = await this.enrollSections(studentId, [sectionId]);
+    return enrollment;
+  }
+
+  async enrollBundle(studentId: string, sectionIds: string[]) {
+    const enrollments = await this.enrollSections(studentId, sectionIds);
+    return {
+      enrollmentIds: enrollments.map((enrollment) => enrollment.id),
+      sectionIds: [...sectionIds],
+    };
+  }
+
+  /**
+   * Seat-safe, all-or-nothing self-service enrollment. Section locks are taken
+   * in stable id order to prevent both overselling and bundle deadlocks. Every
+   * gate is evaluated before the first Enrollment or AuditLog write.
+   */
+  private async enrollSections(studentId: string, sectionIds: string[]) {
+    if (sectionIds.length === 0 || sectionIds.length > 30) {
+      throw new BadRequestException(
+        "Choose between 1 and 30 sections to enroll",
+      );
+    }
+    if (new Set(sectionIds).size !== sectionIds.length) {
+      throw new BadRequestException(
+        "Each section may appear only once in an enrollment bundle",
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<
-        { id: string; capacity: number; courseId: string; termId: string }[]
-      >`SELECT id, capacity, "courseId", "termId" FROM "Section" WHERE id = ${sectionId} FOR UPDATE`;
-      const section = locked[0];
-      if (!section) throw new NotFoundException("Section not found");
+      await acquireRegistrationConfigurationReadLock(tx);
+      type LockedSection = {
+        id: string;
+        capacity: number;
+        courseId: string;
+        termId: string;
+      };
+      const lockedById = new Map<string, LockedSection>();
+      for (const sectionId of [...sectionIds].sort()) {
+        const rows = await tx.$queryRaw<LockedSection[]>`
+          SELECT id, capacity, "courseId", "termId"
+          FROM "Section"
+          WHERE id = ${sectionId}
+          FOR UPDATE
+        `;
+        const section = rows[0];
+        if (!section) throw new NotFoundException("Section not found");
+        lockedById.set(sectionId, section);
+      }
+      const lockedSections = sectionIds.map((sectionId) =>
+        lockedById.get(sectionId)!,
+      );
+      const lockedStudent = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id
+        FROM "Student"
+        WHERE id = ${studentId}
+        FOR UPDATE
+      `;
+      if (!lockedStudent[0]) throw new NotFoundException("Student not found");
+
+      const registrationConfiguration = await readRegistrationConfiguration(tx);
+      if (registrationConfiguration.state === "invalid") {
+        throw new ForbiddenException(
+          "Self-service registration is unavailable because its configuration is invalid",
+        );
+      }
+      if (registrationConfiguration.state === "valid") {
+        if (registrationConfiguration.termId === null) {
+          throw new ForbiddenException(
+            "Self-service course registration is closed",
+          );
+        }
+        if (
+          lockedSections.some(
+            (section) => registrationConfiguration.termId !== section.termId,
+          )
+        ) {
+          throw new ForbiddenException(
+            "A selected section is not in the designated self-service registration term",
+          );
+        }
+      }
+
+      const termIds = new Set(lockedSections.map((section) => section.termId));
+      if (termIds.size !== 1) {
+        throw new BadRequestException(
+          "All enrollment bundle sections must be in the same term",
+        );
+      }
+      const termId = lockedSections[0]!.termId;
 
       const term = await tx.term.findUniqueOrThrow({
-        where: { id: section.termId },
+        where: { id: termId },
       });
       if (term.endDate.getTime() < Date.now()) {
         throw new BadRequestException("Registration is closed for this term");
@@ -375,27 +554,42 @@ export class AcademicsService {
         );
       }
 
-      const existing = await tx.enrollment.findUnique({
-        where: { studentId_sectionId: { studentId, sectionId } },
-      });
-      if (existing?.status === "enrolled")
-        throw new ConflictException("Already enrolled");
-
-      const taken = await tx.enrollment.count({
-        where: { sectionId, status: "enrolled" },
-      });
-      if (taken >= section.capacity)
-        throw new ConflictException("Section is full");
-
-      // A registrar-closed section is not offered, regardless of remaining seats.
-      const full = await tx.section.findUniqueOrThrow({
-        where: { id: sectionId },
-      });
-      if (full.status === "closed") {
-        throw new ConflictException("This section is closed for registration");
+      const existingBySectionId = new Map<
+        string,
+        Awaited<ReturnType<typeof tx.enrollment.findUnique>>
+      >();
+      for (const sectionId of sectionIds) {
+        const existing = await tx.enrollment.findUnique({
+          where: { studentId_sectionId: { studentId, sectionId } },
+        });
+        if (existing?.status === "enrolled") {
+          throw new ConflictException("Already enrolled");
+        }
+        existingBySectionId.set(sectionId, existing);
       }
 
-      // An active financial or advising hold blocks all registration.
+      const fullById = new Map<
+        string,
+        Awaited<ReturnType<typeof tx.section.findUniqueOrThrow>>
+      >();
+      for (const section of lockedSections) {
+        const taken = await tx.enrollment.count({
+          where: { sectionId: section.id, status: "enrolled" },
+        });
+        if (taken >= section.capacity) {
+          throw new ConflictException("Section is full");
+        }
+        const full = await tx.section.findUniqueOrThrow({
+          where: { id: section.id },
+        });
+        if (full.status === "closed") {
+          throw new ConflictException(
+            "This section is closed for registration",
+          );
+        }
+        fullById.set(section.id, full);
+      }
+
       const holds = await tx.studentHold.findMany({
         where: { studentId, active: true },
       });
@@ -406,14 +600,26 @@ export class AcademicsService {
         );
       }
 
-      const course = await tx.course.findUniqueOrThrow({
-        where: { id: section.courseId },
-        include: {
-          prereqRules: { include: { prereqCourse: true } },
-          coreqRules: { include: { coreqCourse: true } },
-          rule: true,
-        },
-      });
+      const selectedCourseIds = new Set(
+        lockedSections.map((section) => section.courseId),
+      );
+      if (selectedCourseIds.size !== lockedSections.length) {
+        throw new ConflictException(
+          "Choose only one section for each course in an enrollment bundle",
+        );
+      }
+      const courseById = new Map<string, CourseWithEnrollmentRules>();
+      for (const courseId of selectedCourseIds) {
+        const course = await tx.course.findUniqueOrThrow({
+          where: { id: courseId },
+          include: {
+            prereqRules: { include: { prereqCourse: true } },
+            coreqRules: { include: { coreqCourse: true } },
+            rule: true,
+          },
+        });
+        courseById.set(courseId, course);
+      }
 
       // Official transcript entries are the publication gate. Faculty drafts
       // and submitted-but-unapproved enrollment grades never satisfy a prereq.
@@ -431,21 +637,30 @@ export class AcademicsService {
       });
       const bestGrade = bestPointsByCourse(completed);
 
-      const unmet: string[] = [];
-      for (const pr of course.prereqRules) {
-        if (meetsPrerequisite(bestGrade, pr.prereqCourseId, pr.minGrade)) {
-          continue;
+      for (const section of lockedSections) {
+        const course = courseById.get(section.courseId)!;
+        const unmet: string[] = [];
+        for (const prerequisite of course.prereqRules) {
+          if (
+            meetsPrerequisite(
+              bestGrade,
+              prerequisite.prereqCourseId,
+              prerequisite.minGrade,
+            )
+          ) {
+            continue;
+          }
+          unmet.push(
+            prerequisite.minGrade
+              ? `${prerequisite.prereqCourse.code} (min ${prerequisite.minGrade})`
+              : prerequisite.prereqCourse.code,
+          );
         }
-        unmet.push(
-          pr.minGrade
-            ? `${pr.prereqCourse.code} (min ${pr.minGrade})`
-            : pr.prereqCourse.code,
-        );
-      }
-      if (unmet.length > 0) {
-        throw new BadRequestException(
-          `Missing prerequisite(s): ${unmet.join(", ")}`,
-        );
+        if (unmet.length > 0) {
+          throw new BadRequestException(
+            `Missing prerequisite(s) for ${course.code}: ${unmet.join(", ")}`,
+          );
+        }
       }
 
       // Sections the student already holds this term — the basis for the
@@ -454,45 +669,73 @@ export class AcademicsService {
         where: {
           studentId,
           status: "enrolled",
-          section: { termId: section.termId },
+          section: { termId },
         },
         include: { section: { include: { course: true } } },
       });
 
-      if (course.coreqRules.length > 0) {
-        const heldCourseIds = new Set(
-          termEnrollments.map((e) => e.section.courseId),
+      const heldCourseIds = new Set(
+        termEnrollments.map((enrollment) => enrollment.section.courseId),
+      );
+      const duplicateHeldCourse = lockedSections.find((section) =>
+        heldCourseIds.has(section.courseId),
+      );
+      if (duplicateHeldCourse) {
+        throw new ConflictException(
+          `Already enrolled in ${courseById.get(duplicateHeldCourse.courseId)!.code}`,
         );
+      }
+
+      for (const section of lockedSections) {
+        const course = courseById.get(section.courseId)!;
         const missingCoreq = course.coreqRules
           .filter(
-            (c) =>
-              !heldCourseIds.has(c.coreqCourseId) &&
-              !bestGrade.has(c.coreqCourseId),
+            (corequisite) =>
+              !heldCourseIds.has(corequisite.coreqCourseId) &&
+              !selectedCourseIds.has(corequisite.coreqCourseId) &&
+              !bestGrade.has(corequisite.coreqCourseId),
           )
-          .map((c) => c.coreqCourse.code);
+          .map((corequisite) => corequisite.coreqCourse.code);
         if (missingCoreq.length > 0) {
           throw new BadRequestException(
-            `Must be taken with (or after) ${missingCoreq.join(", ")}`,
+            `${course.code} must be taken with (or after) ${missingCoreq.join(", ")}`,
           );
         }
       }
 
-      const clash = termEnrollments.find((e) =>
-        meetingsOverlap(e.section, full),
-      );
-      if (clash) {
-        throw new ConflictException(
-          `Time conflict with ${clash.section.course.code} (${clash.section.days} ${clash.section.startTime}-${clash.section.endTime})`,
+      for (let index = 0; index < lockedSections.length; index += 1) {
+        const section = lockedSections[index]!;
+        const full = fullById.get(section.id)!;
+        const clash = termEnrollments.find((enrollment) =>
+          meetingsOverlap(enrollment.section, full),
         );
+        if (clash) {
+          throw new ConflictException(
+            `Time conflict with ${clash.section.course.code} (${clash.section.days} ${clash.section.startTime}-${clash.section.endTime})`,
+          );
+        }
+        for (let prior = 0; prior < index; prior += 1) {
+          const otherSection = lockedSections[prior]!;
+          const otherFull = fullById.get(otherSection.id)!;
+          if (meetingsOverlap(otherFull, full)) {
+            throw new ConflictException(
+              `Time conflict between ${courseById.get(otherSection.courseId)!.code} and ${courseById.get(section.courseId)!.code}`,
+            );
+          }
+        }
       }
 
       const currentCredits = termEnrollments.reduce(
-        (s, e) => s + e.section.course.credits,
+        (sum, enrollment) => sum + enrollment.section.course.credits,
         0,
       );
-      if (currentCredits + course.credits > MAX_CREDITS_PER_TERM) {
+      const addedCredits = lockedSections.reduce(
+        (sum, section) => sum + courseById.get(section.courseId)!.credits,
+        0,
+      );
+      if (currentCredits + addedCredits > MAX_CREDITS_PER_TERM) {
         throw new BadRequestException(
-          `Over the ${MAX_CREDITS_PER_TERM}-credit limit for this term (${currentCredits} enrolled + ${course.credits})`,
+          `Over the ${MAX_CREDITS_PER_TERM}-credit limit for this term (${currentCredits} enrolled + ${addedCredits})`,
         );
       }
 
@@ -506,61 +749,69 @@ export class AcademicsService {
         );
       }
 
-      if (course.rule?.standingRequired) {
-        const firstWord =
-          course.rule.standingRequired.trim().split(/\s+/)[0] ?? "";
-        const needed = STANDING_RANK[firstWord.toLowerCase()];
-        const yr = student.yearLevel ?? 0;
-        if (needed !== undefined && yr > 0 && yr < needed) {
-          throw new ForbiddenException(
-            `${course.code} requires ${course.rule.standingRequired}`,
-          );
+      for (const section of lockedSections) {
+        const course = courseById.get(section.courseId)!;
+        if (course.rule?.standingRequired) {
+          const firstWord =
+            course.rule.standingRequired.trim().split(/\s+/)[0] ?? "";
+          const needed = STANDING_RANK[firstWord.toLowerCase()];
+          const yr = student.yearLevel ?? 0;
+          if (needed !== undefined && yr > 0 && yr < needed) {
+            throw new ForbiddenException(
+              `${course.code} requires ${course.rule.standingRequired}`,
+            );
+          }
+        }
+
+        if (course.rule?.majorRestriction) {
+          const allowed = course.rule.majorRestriction.toLowerCase();
+          const mine = (
+            student.major ??
+            student.program?.name ??
+            ""
+          ).toLowerCase();
+          const tokens = allowed
+            .split(/[/,]/)
+            .map((token) => token.trim())
+            .filter(Boolean);
+          const head = (token: string) => token.split(/\s+/)[0] ?? token;
+          if (
+            mine &&
+            tokens.length > 0 &&
+            !tokens.some((token) => mine.includes(head(token)))
+          ) {
+            throw new ForbiddenException(
+              `${course.code} is restricted to ${course.rule.majorRestriction}`,
+            );
+          }
         }
       }
 
-      if (course.rule?.majorRestriction) {
-        const allowed = course.rule.majorRestriction.toLowerCase();
-        const mine = (
-          student.major ??
-          student.program?.name ??
-          ""
-        ).toLowerCase();
-        // Restriction strings are human-authored lists ("Computer / Electrical Eng."),
-        // so match loosely on any token rather than demanding an exact equality.
-        const tokens = allowed
-          .split(/[/,]/)
-          .map((t) => t.trim())
-          .filter(Boolean);
-        const head = (t: string) => t.split(/\s+/)[0] ?? t;
-        if (
-          mine &&
-          tokens.length > 0 &&
-          !tokens.some((t) => mine.includes(head(t)))
-        ) {
-          throw new ForbiddenException(
-            `${course.code} is restricted to ${course.rule.majorRestriction}`,
-          );
-        }
+      const enrollments = [];
+      for (const sectionId of sectionIds) {
+        const existing = existingBySectionId.get(sectionId);
+        const enrollment = existing
+          ? await tx.enrollment.update({
+              where: { id: existing.id },
+              data: { status: "enrolled", enrolledAt: new Date() },
+            })
+          : await tx.enrollment.create({
+              data: { studentId, sectionId, status: "enrolled" },
+            });
+        await tx.auditLog.create({
+          data: {
+            entity: "Enrollment",
+            entityId: enrollment.id,
+            action: "enrolled",
+            actorId: studentId,
+            ...(sectionIds.length > 1
+              ? { data: { bundleSectionIds: sectionIds } }
+              : {}),
+          },
+        });
+        enrollments.push(enrollment);
       }
-
-      const enrollment = existing
-        ? await tx.enrollment.update({
-            where: { id: existing.id },
-            data: { status: "enrolled", enrolledAt: new Date() },
-          })
-        : await tx.enrollment.create({
-            data: { studentId, sectionId, status: "enrolled" },
-          });
-
-      await tx.auditLog.create({
-        data: {
-          entity: "Enrollment",
-          entityId: enrollment.id,
-          action: "enrolled",
-          actorId: studentId,
-        },
-      });
-      return enrollment;
+      return enrollments;
     });
   }
 
@@ -602,16 +853,116 @@ export class AcademicsService {
    * is or is not available. The same rules are re-checked in enroll() — this is
    * the UX-facing preview, never the gate.
    */
-  async registrationCatalog(studentId: string, termId: string) {
-    const [sections, enrollments, completed, holds, student] =
+  async registrationCatalog(
+    studentId: string,
+    requestedTermId?: string,
+    evaluateDisabledRecommendations = false,
+  ) {
+    const [configuration, student, holds] = await Promise.all([
+      readRegistrationConfiguration(this.prisma),
+      this.prisma.student.findUnique({
+        where: { id: studentId },
+        include: {
+          program: true,
+          catalogAcademicYear: {
+            select: { id: true, label: true, startsOn: true },
+          },
+        },
+      }),
+      this.prisma.studentHold.findMany({
+        where: { studentId, active: true },
+      }),
+    ]);
+    if (!student) throw new NotFoundException("Student not found");
+    if (student.recordStatus !== "active") {
+      throw new ForbiddenException("Student enrollment is not active");
+    }
+
+    if (
+      configuration.state === "valid" &&
+      requestedTermId &&
+      requestedTermId !== configuration.termId
+    ) {
+      throw new BadRequestException(
+        "The requested term does not match the designated registration term",
+      );
+    }
+
+    const emptyResponse = (
+      closedReason: RegistrationClosedReason,
+      recommendationsEnabled: boolean,
+    ) => ({
+      term: null,
+      registration: {
+        mode: configuration.mode,
+        open: false,
+        closedReason,
+        recommendationsEnabled,
+      },
+      recommendationContext: {
+        status: "disabled" as RecommendationStatus,
+        basis: null as RecommendationBasis | null,
+        targetYearIndex: null,
+        semester: null as RegistrationSemester | null,
+        catalogAcademicYearId: student.catalogYearId,
+        catalogLabel:
+          student.catalogAcademicYear?.label ?? student.catalogYear ?? null,
+        catalogRevision: null,
+      },
+      recommendations: [],
+      maxCredits: MAX_CREDITS_PER_TERM,
+      currentCredits: 0,
+      holds: holds.map((hold) => ({ type: hold.type, reason: hold.reason })),
+      catalogYear:
+        student.catalogAcademicYear?.label ?? student.catalogYear ?? null,
+      sections: [],
+    });
+
+    if (configuration.state === "invalid") {
+      return emptyResponse("configuration_invalid", false);
+    }
+    if (configuration.state === "valid" && configuration.termId === null) {
+      return emptyResponse(
+        "closed_by_registrar",
+        configuration.recommendationsEnabled,
+      );
+    }
+
+    const targetTermId =
+      configuration.state === "valid"
+        ? configuration.termId
+        : requestedTermId?.trim() || null;
+    const legacyTerm =
+      configuration.state === "absent" && !targetTermId
+        ? await this.currentTerm()
+        : null;
+    const termId = targetTermId ?? legacyTerm?.id ?? null;
+    if (!termId) return emptyResponse("no_term_available", false);
+    const term = await this.prisma.term.findUnique({
+      where: { id: termId },
+      include: {
+        academicYear: { select: { id: true, label: true, startsOn: true } },
+      },
+    });
+    if (!term) {
+      if (configuration.state === "valid") {
+        return emptyResponse("configuration_invalid", false);
+      }
+      throw new NotFoundException("Registration term not found");
+    }
+
+    const closedReason = registrationClosedReason(term);
+    const registrationOpen = closedReason === null;
+    const [sections, enrollments, completed, inProgressEnrollments] =
       await Promise.all([
         this.prisma.section.findMany({
-          where: { termId, status: "open" },
+          where: { termId },
           orderBy: [{ course: { code: "asc" } }, { sectionCode: "asc" }],
           include: {
             course: {
               include: {
                 prereqRules: { include: { prereqCourse: true } },
+                coreqRules: { include: { coreqCourse: true } },
                 rule: true,
               },
             },
@@ -637,15 +988,17 @@ export class AcademicsService {
             countsTowardCredits: true,
           },
         }),
-        this.prisma.studentHold.findMany({
-          where: { studentId, active: true },
+        this.prisma.enrollment.findMany({
+          where: {
+            studentId,
+            status: "enrolled",
+            section: { termId: { not: termId } },
+          },
+          include: {
+            section: { include: { term: true } },
+          },
         }),
-        this.prisma.student.findUnique({ where: { id: studentId } }),
       ]);
-    if (!student) throw new NotFoundException("Student not found");
-    if (student.recordStatus !== "active") {
-      throw new ForbiddenException("Student enrollment is not active");
-    }
 
     const bestGrade = bestPointsByCourse(completed);
 
@@ -669,25 +1022,85 @@ export class AcademicsService {
             : pr.prereqCourse.code,
         );
 
+      const missingCoreqs = s.course.coreqRules
+        .filter(
+          (corequisite) =>
+            !enrolledCourseIds.has(corequisite.coreqCourseId) &&
+            !bestGrade.has(corequisite.coreqCourseId),
+        )
+        .map((corequisite) => corequisite.coreqCourse.code);
+
       const clash = enrollments.find((e) => meetingsOverlap(e.section, s));
 
-      // First blocking reason wins, so the UI shows one clear explanation.
-      const blockedReason = enrolledCourseIds.has(s.courseId)
+      let standingReason: string | null = null;
+      if (s.course.rule?.standingRequired) {
+        const firstWord =
+          s.course.rule.standingRequired.trim().split(/\s+/)[0] ?? "";
+        const needed = STANDING_RANK[firstWord.toLowerCase()];
+        const yearLevel = student.yearLevel ?? 0;
+        if (needed !== undefined && yearLevel > 0 && yearLevel < needed) {
+          standingReason = `${s.course.code} requires ${s.course.rule.standingRequired}`;
+        }
+      }
+
+      let majorReason: string | null = null;
+      if (s.course.rule?.majorRestriction) {
+        const allowed = s.course.rule.majorRestriction.toLowerCase();
+        const mine = (
+          student.major ??
+          student.program?.name ??
+          ""
+        ).toLowerCase();
+        const tokens = allowed
+          .split(/[/,]/)
+          .map((token) => token.trim())
+          .filter(Boolean);
+        const head = (token: string) => token.split(/\s+/)[0] ?? token;
+        if (
+          mine &&
+          tokens.length > 0 &&
+          !tokens.some((token) => mine.includes(head(token)))
+        ) {
+          majorReason = `${s.course.code} is restricted to ${s.course.rule.majorRestriction}`;
+        }
+      }
+
+      // A corequisite-only block is bundle-resolvable by the registration UI.
+      // Put every hard block first so a clash/full/hold is never accidentally
+      // hidden behind the guided-bundle message.
+      const hardBlockedReason = enrolledCourseIds.has(s.courseId)
         ? "Already enrolled"
-        : seatsLeft <= 0
-          ? "Section is full"
-          : unmetPrereqs.length > 0
-            ? `Needs ${unmetPrereqs.join(", ")}`
-            : clash
-              ? `Clashes with ${clash.section.course.code}`
-              : null;
+        : closedReason === "term_ended"
+          ? "Registration is closed for this term"
+          : closedReason === "add_deadline_passed"
+            ? `The add period closed on ${term.addDeadline!.toISOString().slice(0, 10)}`
+            : holds.length > 0
+              ? "Registration is blocked by an active hold"
+              : s.status !== "open"
+                ? "This section is closed for registration"
+                : seatsLeft <= 0
+                  ? "Section is full"
+                  : unmetPrereqs.length > 0
+                    ? `Needs ${unmetPrereqs.join(", ")}`
+                    : clash
+                      ? `Clashes with ${clash.section.course.code}`
+                      : currentCredits + s.course.credits > MAX_CREDITS_PER_TERM
+                        ? `Over the ${MAX_CREDITS_PER_TERM}-credit limit`
+                        : (standingReason ?? majorReason);
+      const blockedReason =
+        hardBlockedReason ??
+        (missingCoreqs.length > 0
+          ? `Must be taken with (or after) ${missingCoreqs.join(", ")}`
+          : null);
 
       return {
         sectionId: s.id,
+        courseId: s.courseId,
         courseCode: s.course.code,
         title: s.course.title,
         credits: s.course.credits,
         sectionCode: s.sectionCode,
+        status: s.status,
         instructor: s.instructor
           ? `${s.instructor.firstName} ${s.instructor.lastName}`
           : null,
@@ -703,13 +1116,192 @@ export class AcademicsService {
       };
     });
 
+    const recommendationsEnabled =
+      configuration.state === "valid" && configuration.recommendationsEnabled;
+    const evaluateRecommendations =
+      recommendationsEnabled ||
+      (evaluateDisabledRecommendations && configuration.state === "valid");
+    const semester = normalizeRegistrationSemester(term.semester);
+    let recommendationStatus: RecommendationStatus = "disabled";
+    let recommendationBasis: RecommendationBasis | null = null;
+    let targetYearIndex: number | null = null;
+    let catalogAcademicYearId: string | null = student.catalogYearId;
+    let catalogLabel: string | null =
+      student.catalogAcademicYear?.label ?? student.catalogYear;
+    let catalogRevision: number | null = null;
+    let recommendations: ReturnType<typeof deriveCourseRecommendations> = [];
+
+    if (evaluateRecommendations) {
+      if (!student.programId) {
+        recommendationStatus = "missing_program";
+      } else if (!student.catalogYearId) {
+        recommendationStatus = "missing_catalog_year";
+      } else if (!semester) {
+        recommendationStatus = "unmapped_term";
+      } else {
+        const effective = await this.catalogs.effectiveConfiguration({
+          programId: student.programId,
+          catalogYearId: student.catalogYearId,
+          catalogYearLabel: student.catalogYear,
+        });
+        if (
+          !effective ||
+          effective.fallback ||
+          effective.academicYearId !== student.catalogYearId ||
+          !effective.program
+        ) {
+          recommendationStatus = "missing_approved_catalog";
+        } else {
+          catalogAcademicYearId = effective.academicYearId;
+          catalogLabel = effective.label;
+          catalogRevision = effective.revision;
+          const curriculum = approvedCurriculumEntries(effective.program);
+          if (curriculum.length === 0) {
+            recommendationStatus = "missing_curriculum";
+          } else {
+            const completedCourseIds = new Set(bestGrade.keys());
+            const effectiveLevels =
+              effective.program.progressionMode === "custom"
+                ? effective.program.customLevels
+                : effective.defaultLevels;
+            const configuredPlanYears = Math.ceil(effectiveLevels.length / 2);
+            const planSlots = new Set(
+              curriculum.map((entry) => `${entry.yearIndex}:${entry.semester}`),
+            );
+            const isApplicablePlanYear = (
+              year: number | null,
+            ): year is number =>
+              year !== null &&
+              Number.isInteger(year) &&
+              year > 0 &&
+              year <= configuredPlanYears;
+            let placementHasNoSemesterSlot = false;
+            if (
+              typeof student.yearLevel === "number" &&
+              isApplicablePlanYear(student.yearLevel)
+            ) {
+              if (planSlots.has(`${student.yearLevel}:${semester}`)) {
+                targetYearIndex = student.yearLevel;
+                recommendationBasis = "student_year_level";
+              } else {
+                placementHasNoSemesterSlot = true;
+              }
+            }
+            if (targetYearIndex === null && !placementHasNoSemesterSlot) {
+              const studentYearStart =
+                academicYearStart(student.catalogAcademicYear) ??
+                admissionAcademicYearStart(student.admitTerm);
+              const targetYearStart = academicYearStart(term.academicYear);
+              const chronologicalYear =
+                studentYearStart !== null && targetYearStart !== null
+                  ? targetYearStart - studentYearStart + 1
+                  : null;
+              if (isApplicablePlanYear(chronologicalYear)) {
+                if (planSlots.has(`${chronologicalYear}:${semester}`)) {
+                  targetYearIndex = chronologicalYear;
+                  recommendationBasis = "catalog_chronology";
+                } else {
+                  placementHasNoSemesterSlot = true;
+                }
+              }
+            }
+            if (targetYearIndex === null && !placementHasNoSemesterSlot) {
+              targetYearIndex = earliestIncompleteSameSemester(
+                curriculum,
+                semester,
+                completedCourseIds,
+                enrolledCourseIds,
+              );
+              if (targetYearIndex !== null) {
+                recommendationBasis = "earliest_incomplete_same_semester";
+              }
+            }
+
+            if (targetYearIndex === null) {
+              recommendationStatus = "missing_plan_position";
+            } else {
+              const courses = await this.prisma.course.findMany({
+                include: {
+                  prereqRules: { include: { prereqCourse: true } },
+                  coreqRules: { include: { coreqCourse: true } },
+                },
+              });
+              recommendations = deriveCourseRecommendations({
+                semester,
+                targetYearIndex,
+                targetTermStart: term.startDate,
+                registrationOpen,
+                curriculum,
+                courses: courses.map((course) => ({
+                  id: course.id,
+                  code: course.code,
+                  title: course.title,
+                  credits: course.credits,
+                  prerequisites: course.prereqRules.map((prerequisite) => ({
+                    courseId: prerequisite.prereqCourseId,
+                    courseCode: prerequisite.prereqCourse.code,
+                    minGrade: prerequisite.minGrade,
+                  })),
+                  corequisites: course.coreqRules.map((corequisite) => ({
+                    courseId: corequisite.coreqCourseId,
+                    courseCode: corequisite.coreqCourse.code,
+                  })),
+                })),
+                sections: rows.map((section) => ({
+                  sectionId: section.sectionId,
+                  courseId: section.courseId,
+                  blockedReason: section.blockedReason,
+                })),
+                targetEnrolledCourseIds: enrolledCourseIds,
+                inProgressCourses: inProgressEnrollments.map((enrollment) => ({
+                  courseId: enrollment.section.courseId,
+                  termStartDate: enrollment.section.term.startDate,
+                  termEndDate: enrollment.section.term.endDate,
+                })),
+                satisfies: (courseId, minGrade) =>
+                  meetsPrerequisite(bestGrade, courseId, minGrade),
+              });
+              recommendationStatus = "ready";
+            }
+          }
+        }
+      }
+    }
+
     return {
+      term: presentStudentRegistrationTerm(term),
+      registration: {
+        mode: configuration.mode,
+        open: registrationOpen,
+        closedReason,
+        recommendationsEnabled,
+      },
+      recommendationContext: {
+        status: recommendationStatus,
+        basis: recommendationBasis,
+        targetYearIndex,
+        semester,
+        catalogAcademicYearId,
+        catalogLabel,
+        catalogRevision,
+      },
+      recommendations,
       maxCredits: MAX_CREDITS_PER_TERM,
       currentCredits,
-      holds: holds.map((h) => ({ type: h.type, reason: h.reason })),
-      catalogYear: student.catalogYear ?? null,
+      holds: holds.map((hold) => ({ type: hold.type, reason: hold.reason })),
+      catalogYear:
+        student.catalogAcademicYear?.label ?? student.catalogYear ?? null,
       sections: rows,
     };
+  }
+
+  /**
+   * Read-only readiness audits need to evaluate data before the registrar turns
+   * the recommendation feature on. This deliberately bypasses only the display
+   * toggle; configured-term selection and every data/readiness rule stay intact.
+   */
+  registrationCatalogForReadinessAudit(studentId: string) {
+    return this.registrationCatalog(studentId, undefined, true);
   }
 
   /**
@@ -910,7 +1502,10 @@ export class AcademicsService {
       throw new ForbiddenException("Student enrollment is not active");
     }
 
-    const transcript = await this.transcript.view(studentId);
+    const [transcript, billingProfile] = await Promise.all([
+      this.transcript.view(studentId),
+      this.billingProfiles.get(studentId),
+    ]);
     const gpa = transcript.totals.gpa ?? 0;
     const completedCredits = transcript.totals.earnedCredits;
 
@@ -921,6 +1516,7 @@ export class AcademicsService {
       program: s.program?.name ?? null,
       gpa,
       completedCredits,
+      billingProfile,
       academicProgress: transcript.academicProgress,
       standing: transcript.academicStanding.label,
       academicStanding: transcript.academicStanding,
@@ -974,11 +1570,14 @@ export class AcademicsService {
 
   /** The signed-in student's housing assignment, if any. */
   async myHousing(studentId: string) {
-    const assignment = await this.prisma.housingAssignment.findUnique({
-      where: { studentId },
+    const assignment = await this.prisma.housingAssignment.findFirst({
+      where: { studentId, academicYear: { status: "active" } },
+      orderBy: { academicYearLabel: "desc" },
       include: { hall: true },
     });
-    if (!assignment) return { assigned: false as const };
+    if (!assignment || assignment.status !== "assigned") {
+      return { assigned: false as const };
+    }
 
     // Anyone else assigned to the same room is a roommate.
     const roommates = assignment.room
@@ -986,7 +1585,9 @@ export class AcademicsService {
           where: {
             hallId: assignment.hallId,
             room: assignment.room,
+            academicYearLabel: assignment.academicYearLabel,
             studentId: { not: studentId },
+            status: "assigned",
           },
           include: { student: { include: { person: true } } },
         })
@@ -1082,8 +1683,12 @@ export class AcademicsService {
       grade: e.status === "completed" ? e.grade : null,
     });
     return {
-      current: rows.filter((e) => term && e.section.termId === term.id).map(shape),
-      past: rows.filter((e) => !term || e.section.termId !== term.id).map(shape),
+      current: rows
+        .filter((e) => term && e.section.termId === term.id)
+        .map(shape),
+      past: rows
+        .filter((e) => !term || e.section.termId !== term.id)
+        .map(shape),
     };
   }
 
@@ -1418,8 +2023,12 @@ export class AcademicsService {
     >();
     for (const r of records) {
       const key = r.date.toISOString().slice(0, 10);
-      const row =
-        byDate.get(key) ?? { date: key, present: 0, late: 0, absent: 0 };
+      const row = byDate.get(key) ?? {
+        date: key,
+        present: 0,
+        late: 0,
+        absent: 0,
+      };
       if (r.status === "present") row.present += 1;
       else if (r.status === "late") row.late += 1;
       else if (r.status === "absent") row.absent += 1;
@@ -2089,7 +2698,10 @@ export class AcademicsService {
   }
 
   private adminStudentRosterWhere(
-    query: Pick<AdminStudentRosterQuery, "search" | "program" | "gender" | "nationality">,
+    query: Pick<
+      AdminStudentRosterQuery,
+      "search" | "program" | "gender" | "nationality"
+    >,
   ): Prisma.StudentWhereInput {
     const searchTokens =
       query.search?.trim().split(/\s+/).filter(Boolean) ?? [];
@@ -2735,16 +3347,20 @@ export class AcademicsService {
   }
 
   /** Replace a course's corequisites (shared with the Rule Engine's coreq rows). */
-  private async setCoreqs(courseId: string, codes: string[] | undefined) {
+  private async setCoreqs(
+    courseId: string,
+    codes: string[] | undefined,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
     if (codes === undefined) return;
-    const coreqs = await this.prisma.course.findMany({
+    const coreqs = await client.course.findMany({
       where: { code: { in: codes.filter(Boolean) } },
       select: { id: true },
     });
-    await this.prisma.courseCorequisite.deleteMany({ where: { courseId } });
+    await client.courseCorequisite.deleteMany({ where: { courseId } });
     for (const c of coreqs) {
       if (c.id === courseId) continue;
-      await this.prisma.courseCorequisite.create({
+      await client.courseCorequisite.create({
         data: { courseId, coreqCourseId: c.id },
       });
     }
@@ -2828,52 +3444,95 @@ export class AcademicsService {
 
   /** Registrar/admin: update a course's catalog fields + prerequisites. Audited. (`code` is immutable.) */
   async updateCourse(actorId: string, code: string, input: CatalogCourseInput) {
-    const course = await this.prisma.course.findUnique({ where: { code } });
-    if (!course) throw new NotFoundException("Course not found");
-    if (input.departmentId !== undefined) {
-      const dept = await this.prisma.department.findUnique({
-        where: { id: input.departmentId },
-      });
-      if (!dept) throw new BadRequestException("Unknown department");
-    }
-    let prereqSet: { id: string }[] | undefined;
-    if (input.prerequisiteCodes !== undefined) {
-      const prereqs = await this.prisma.course.findMany({
-        where: {
-          code: { in: input.prerequisiteCodes.filter((c) => c !== code) },
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id
+        FROM "Course"
+        WHERE code = ${code}
+        FOR UPDATE
+      `;
+      if (!locked[0]) throw new NotFoundException("Course not found");
+      const course = await tx.course.findUnique({ where: { code } });
+      if (!course) throw new NotFoundException("Course not found");
+
+      if (input.credits !== undefined && input.credits !== course.credits) {
+        const approved = await tx.academicCatalogRevision.findMany({
+          where: { status: { in: ["approved", "superseded"] } },
+          select: { programConfigurations: true },
+        });
+        const referenced = approved.some((revision) =>
+          Array.isArray(revision.programConfigurations)
+            ? revision.programConfigurations.some((program) => {
+                if (!program || typeof program !== "object") return false;
+                const curriculum = (program as { curriculum?: unknown })
+                  .curriculum;
+                return Array.isArray(curriculum)
+                  ? curriculum.some(
+                      (entry) =>
+                        entry !== null &&
+                        typeof entry === "object" &&
+                        (entry as { courseId?: unknown }).courseId ===
+                          course.id,
+                    )
+                  : false;
+              })
+            : false,
+        );
+        if (referenced) {
+          throw new BadRequestException(
+            "Credits are frozen for courses referenced by an approved academic catalog. Create a versioned course and update a new Academic Years revision instead.",
+          );
+        }
+      }
+      if (input.departmentId !== undefined) {
+        const department = await tx.department.findUnique({
+          where: { id: input.departmentId },
+        });
+        if (!department) throw new BadRequestException("Unknown department");
+      }
+      let prereqSet: { id: string }[] | undefined;
+      if (input.prerequisiteCodes !== undefined) {
+        const prerequisites = await tx.course.findMany({
+          where: {
+            code: {
+              in: input.prerequisiteCodes.filter((item) => item !== code),
+            },
+          },
+          select: { id: true },
+        });
+        prereqSet = prerequisites.map((prerequisite) => ({
+          id: prerequisite.id,
+        }));
+      }
+      const updated = await tx.course.update({
+        where: { code },
+        data: {
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.credits !== undefined ? { credits: input.credits } : {}),
+          ...(input.departmentId !== undefined
+            ? { departmentId: input.departmentId }
+            : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+          ...(input.semestersOffered !== undefined
+            ? { semestersOffered: input.semestersOffered.join(",") || null }
+            : {}),
+          ...(prereqSet ? { prerequisites: { set: prereqSet } } : {}),
         },
-        select: { id: true },
       });
-      prereqSet = prereqs.map((p) => ({ id: p.id }));
-    }
-    const updated = await this.prisma.course.update({
-      where: { code },
-      data: {
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.credits !== undefined ? { credits: input.credits } : {}),
-        ...(input.departmentId !== undefined
-          ? { departmentId: input.departmentId }
-          : {}),
-        ...(input.status !== undefined ? { status: input.status } : {}),
-        ...(input.description !== undefined
-          ? { description: input.description }
-          : {}),
-        ...(input.semestersOffered !== undefined
-          ? { semestersOffered: input.semestersOffered.join(",") || null }
-          : {}),
-        ...(prereqSet ? { prerequisites: { set: prereqSet } } : {}),
-      },
+      await this.setCoreqs(course.id, input.corequisiteCodes, tx);
+      await tx.auditLog.create({
+        data: {
+          entity: "Course",
+          entityId: course.id,
+          action: "course-updated",
+          actorId,
+        },
+      });
+      return updated;
     });
-    await this.setCoreqs(course.id, input.corequisiteCodes);
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "Course",
-        entityId: course.id,
-        action: "course-updated",
-        actorId,
-      },
-    });
-    return updated;
   }
 
   /** Delete a course — refused while any section (and thus enrollments) still exists. Audited. */
@@ -3193,11 +3852,12 @@ export class AcademicsService {
     });
     if (!student) throw new NotFoundException("Student not found");
 
-    const [transcriptView, standingPolicy] = await Promise.all([
+    const [transcriptView, standingPolicy, billingProfile] = await Promise.all([
       student.recordStatus === "pending_payment"
         ? Promise.resolve(null)
         : this.transcript.view(studentId),
       this.standings.policyForStudent(studentId),
+      this.billingProfiles.get(studentId),
     ]);
     const { gpa, completedCredits } = summarizeTranscriptRows(
       student.transcriptEntries,
@@ -3256,6 +3916,7 @@ export class AcademicsService {
       recordStatus: student.recordStatus,
       balance: summary.balanceXof,
       summary,
+      billingProfile,
       hasActiveHold: student.holds.length > 0,
       activeHoldCount: student.holds.length,
       activeHolds: student.holds.map((hold) => ({
@@ -3388,7 +4049,7 @@ export class AcademicsService {
     return events;
   }
 
-  /** Registrar/admin: update a student's record (person name/email + extended SIS fields). Audited. */
+  /** Registrar/admin: update a student's name and extended SIS fields. Login email is immutable. */
   async updateStudent(
     actorId: string,
     studentId: string,
@@ -3406,18 +4067,12 @@ export class AcademicsService {
     const personData: {
       firstName?: string;
       lastName?: string;
-      email?: string;
     } = {};
     if (input.fullName !== undefined) {
       const parts = input.fullName.replace(/\s+/g, " ").trim().split(" ");
       personData.firstName = parts.shift() ?? student.person.firstName;
       personData.lastName = parts.join(" ") || personData.firstName;
     }
-    if (input.email !== undefined) personData.email = input.email.toLowerCase();
-    const loginEmailChanged =
-      personData.email !== undefined &&
-      personData.email !== student.person.email;
-    const inviteRevokedAt = new Date();
 
     let programId: string | null | undefined;
     if (input.programCode !== undefined) {
@@ -3483,9 +4138,6 @@ export class AcademicsService {
       ...(input.maritalStatus !== undefined
         ? { maritalStatus: input.maritalStatus }
         : {}),
-      ...(input.personalEmail !== undefined
-        ? { personalEmail: input.personalEmail }
-        : {}),
       ...(input.bloodType !== undefined ? { bloodType: input.bloodType } : {}),
       ...(input.allergies !== undefined ? { allergies: input.allergies } : {}),
       ...(input.insurance !== undefined ? { insurance: input.insurance } : {}),
@@ -3519,14 +4171,6 @@ export class AcademicsService {
             this.prisma.person.update({
               where: { id: student.personId },
               data: personData,
-            }),
-          ]
-        : []),
-      ...(loginEmailChanged
-        ? [
-            this.prisma.studentInvite.updateMany({
-              where: { studentPersonId: student.personId, usedAt: null },
-              data: { usedAt: inviteRevokedAt },
             }),
           ]
         : []),
@@ -3817,7 +4461,6 @@ export class AcademicsService {
       atRisk,
     };
   }
-
 
   /** Faculty teaching sections for the schedule grid (with day/time fields). */
   async mySchedule(instructorPersonId: string) {

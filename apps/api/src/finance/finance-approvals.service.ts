@@ -31,6 +31,12 @@ import {
   type EnrollmentActivation,
 } from "./admission-payment-gate.js";
 import { FinanceService } from "./finance.service.js";
+import {
+  BillingProfileService,
+  type BillingCatalogChangeInput,
+  type BillingProfileChangeInput,
+} from "./billing-profile.service.js";
+import { validateCanonicalAcademicCatalog } from "../academic-catalog/academic-catalog.service.js";
 
 export const DIRECTOR_WIDGET_KEYS = [
   "people",
@@ -86,7 +92,7 @@ const DIRECTOR_WIDGET_CATALOG = [
   },
 ] as const;
 
-type ProtectedChange = {
+export type ProtectedChange = {
   kind: ApprovalRequestKind;
   targetType: string;
   targetId?: string;
@@ -97,19 +103,71 @@ type ProtectedChange = {
 
 type StoredApproval = Prisma.ApprovalRequestGetPayload<Record<string, never>>;
 
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, canonicalJson(item)]),
+    );
+  }
+  return value;
+}
+
+export function academicCatalogApprovalPayloadMatches(
+  afterJson: unknown,
+  revision: {
+    id: string;
+    academicYearId: string;
+    revision: number;
+    yearLabel: string;
+    startsOn: Date | null;
+    endsOn: Date | null;
+    defaultLevels: unknown;
+    defaultStandingRules: unknown;
+    notYetGradedStanding: unknown;
+    programConfigurations: unknown;
+    reason: string | null;
+    activateYear: boolean;
+  },
+) {
+  const current = {
+    id: revision.id,
+    academicYearId: revision.academicYearId,
+    revision: revision.revision,
+    yearLabel: revision.yearLabel,
+    startsOn: revision.startsOn?.toISOString().slice(0, 10) ?? null,
+    endsOn: revision.endsOn?.toISOString().slice(0, 10) ?? null,
+    defaultLevels: revision.defaultLevels,
+    defaultStandingRules: revision.defaultStandingRules,
+    notYetGradedStanding: revision.notYetGradedStanding,
+    programs: revision.programConfigurations,
+    reason: revision.reason,
+    activateYear: revision.activateYear,
+  };
+  return (
+    JSON.stringify(canonicalJson(afterJson)) ===
+    JSON.stringify(canonicalJson(current))
+  );
+}
+
 @Injectable()
 export class FinanceApprovalsService {
   private readonly operatingBudget: OperatingBudgetService;
+  private readonly billingProfiles: BillingProfileService;
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional() operatingBudget?: OperatingBudgetService,
     @Optional() private readonly finance?: FinanceService,
+    @Optional() billingProfiles?: BillingProfileService,
   ) {
     // Unit/integration tests historically instantiate this service directly.
     // Keep that seam while Nest injects the shared provider in the application.
     this.operatingBudget =
       operatingBudget ?? new OperatingBudgetService(prisma);
+    this.billingProfiles = billingProfiles ?? new BillingProfileService(prisma);
   }
 
   private asJson(value: unknown): Prisma.InputJsonValue {
@@ -181,6 +239,20 @@ export class FinanceApprovalsService {
         );
       }
       return { before: schedule, baseRevision: schedule.revision };
+    }
+    if (change.kind === "billing_profile") {
+      if (!change.targetId) {
+        throw new BadRequestException("Missing student target");
+      }
+      return this.billingProfiles.approvalSnapshot(
+        change.targetId,
+        change.after as BillingProfileChangeInput,
+      );
+    }
+    if (change.kind === "billing_catalog") {
+      return this.billingProfiles.catalogApprovalSnapshot(
+        change.after as BillingCatalogChangeInput,
+      );
     }
     if (change.kind === "charge_removal" || change.kind === "payment_plan") {
       if (!change.targetId)
@@ -271,7 +343,9 @@ export class FinanceApprovalsService {
     const request = await this.transaction(async (tx) => {
       if (
         ((change.kind === "payment_plan" ||
-          change.kind === "management_actual") &&
+          change.kind === "management_actual" ||
+          change.kind === "billing_profile" ||
+          change.kind === "billing_catalog") &&
           change.targetId) ||
         change.kind === "operating_budget"
       ) {
@@ -315,13 +389,14 @@ export class FinanceApprovalsService {
         },
       });
       if (change.kind === "operating_budget") {
-        const budgetId = String(after.budgetId ?? change.targetId ?? "");
+        const budgetAfter = after as Record<string, unknown>;
+        const budgetId = String(budgetAfter.budgetId ?? change.targetId ?? "");
         await this.operatingBudget.markSubmitted(
           tx,
           budgetId,
           created.id,
-          Number(after.draftContentVersion),
-          String(after.draftContentHash ?? ""),
+          Number(budgetAfter.draftContentVersion),
+          String(budgetAfter.draftContentHash ?? ""),
         );
       }
       return created;
@@ -546,8 +621,11 @@ export class FinanceApprovalsService {
           "Enrollment override requests are approved through /academics/enrollment-overrides/:id/approve with explicit gate waivers",
         );
       }
-      if (request.status === "approved") {
+      if (request.status !== "pending") {
         throw new BadRequestException(`Request is already ${request.status}`);
+      }
+      if (request.kind === "academic_catalog" && request.targetId) {
+        await this.lockAcademicCatalogYear(tx, request.targetId);
       }
       const staleReason = await this.staleReason(tx, request);
       if (staleReason) {
@@ -596,6 +674,15 @@ export class FinanceApprovalsService {
       const gateInvoiceIds = new Set<string>();
       if (request.kind === "payment_plan" && request.targetId) {
         gateInvoiceIds.add(request.targetId);
+      } else if (request.kind === "billing_profile") {
+        const invoiceId =
+          result &&
+          typeof result === "object" &&
+          "canonicalInvoiceId" in result &&
+          typeof result.canonicalInvoiceId === "string"
+            ? result.canonicalInvoiceId
+            : null;
+        if (invoiceId) gateInvoiceIds.add(invoiceId);
       } else if (request.kind === "global_fee_schedule") {
         const pending = await tx.applicant.findMany({
           where: {
@@ -739,6 +826,9 @@ export class FinanceApprovalsService {
       if (!revision || revision.status !== "pending") {
         return "The academic catalog draft is no longer awaiting approval";
       }
+      if (!academicCatalogApprovalPayloadMatches(request.afterJson, revision)) {
+        return "The pending academic catalog payload changed after it was submitted";
+      }
       const approved = await tx.academicCatalogRevision.findFirst({
         where: {
           academicYearId: revision.academicYearId,
@@ -767,6 +857,33 @@ export class FinanceApprovalsService {
       return schedule?.revision === request.baseRevision
         ? null
         : "The approved fee schedule changed after this request was submitted";
+    }
+    if (request.kind === "billing_profile") {
+      if (!request.targetId || !request.academicYearLabel) {
+        return "The billing profile request is missing its student or academic year";
+      }
+      return this.billingProfiles.staleReason(
+        tx,
+        request.targetId,
+        request.academicYearLabel,
+        request.baseRevision,
+        request.afterJson as BillingProfileChangeInput,
+      );
+    }
+    if (request.kind === "billing_catalog") {
+      const after = request.afterJson as Record<string, unknown>;
+      const academicYearLabel = String(
+        request.academicYearLabel ?? after.academicYearLabel ?? "",
+      );
+      const fingerprint = String(after.expectedCatalogFingerprint ?? "");
+      if (!academicYearLabel || !fingerprint) {
+        return "The billing catalog request is missing its version claim";
+      }
+      return this.billingProfiles.catalogStaleReason(
+        tx,
+        academicYearLabel,
+        fingerprint,
+      );
     }
     if (request.kind === "payment_plan" || request.kind === "charge_removal") {
       const invoice = request.targetId
@@ -802,6 +919,20 @@ export class FinanceApprovalsService {
           after,
           request.requestedById,
         );
+      case "billing_profile":
+        return this.billingProfiles.applyApprovedChange(tx, {
+          studentId: request.targetId!,
+          actorId,
+          approvalRequestId: request.id,
+          change: after as BillingProfileChangeInput,
+        });
+      case "billing_catalog":
+        return this.billingProfiles.applyCatalogChange(
+          tx,
+          after as BillingCatalogChangeInput,
+          actorId,
+          request.id,
+        );
       case "discount":
       case "scholarship":
         return this.applyCredit(tx, after, request.kind);
@@ -821,6 +952,7 @@ export class FinanceApprovalsService {
         "Academic catalog revision target is missing",
       );
     }
+    await this.lockAcademicCatalogYear(tx, request.targetId);
     const revision = await tx.academicCatalogRevision.findUnique({
       where: { id: request.targetId },
     });
@@ -829,7 +961,12 @@ export class FinanceApprovalsService {
         "Academic catalog revision is no longer awaiting approval",
       );
     }
-    const parsed = AcademicCatalogDraftInput.parse({
+    if (!academicCatalogApprovalPayloadMatches(request.afterJson, revision)) {
+      throw new BadRequestException(
+        "The pending academic catalog payload changed after it was submitted",
+      );
+    }
+    const draft = AcademicCatalogDraftInput.parse({
       yearLabel: revision.yearLabel,
       startsOn: revision.startsOn?.toISOString().slice(0, 10) ?? null,
       endsOn: revision.endsOn?.toISOString().slice(0, 10) ?? null,
@@ -840,6 +977,22 @@ export class FinanceApprovalsService {
       reason: revision.reason,
       activateYear: revision.activateYear,
     });
+    const referencedCourseIds = [
+      ...new Set(
+        draft.programs.flatMap((program) =>
+          program.curriculum.map((entry) => entry.courseId),
+        ),
+      ),
+    ].sort();
+    for (const courseId of referencedCourseIds) {
+      await tx.$queryRaw<{ id: string }[]>`
+        SELECT id
+        FROM "Course"
+        WHERE id = ${courseId}
+        FOR SHARE
+      `;
+    }
+    const parsed = await validateCanonicalAcademicCatalog(tx, draft);
     const currentPrograms = await tx.program.findMany({
       select: { id: true },
     });
@@ -916,9 +1069,54 @@ export class FinanceApprovalsService {
     if (requirementRows.length > 0) {
       await tx.programRequirement.createMany({ data: requirementRows });
     }
+    let curriculumEntries = 0;
+    for (const program of parsed.programs) {
+      const curriculum = await tx.curriculum.upsert({
+        where: {
+          programId_academicYearId: {
+            programId: program.programId,
+            academicYearId: year.id,
+          },
+        },
+        update: {},
+        create: {
+          programId: program.programId,
+          academicYearId: year.id,
+        },
+      });
+      await tx.curriculumEntry.deleteMany({
+        where: { curriculumId: curriculum.id },
+      });
+      if (program.curriculum.length > 0) {
+        await tx.curriculumEntry.createMany({
+          data: program.curriculum.map((entry) => ({
+            curriculumId: curriculum.id,
+            courseId: entry.courseId,
+            yearIndex: entry.yearIndex,
+            semester: entry.semester,
+            position: entry.position,
+          })),
+        });
+      }
+      curriculumEntries += program.curriculum.length;
+    }
     await tx.student.updateMany({
       where: { catalogYearId: year.id },
       data: { catalogYear: year.label },
+    });
+    await tx.auditLog.create({
+      data: {
+        entity: "AcademicCatalogRevision",
+        entityId: revision.id,
+        action: "approved-curricula-synced",
+        actorId,
+        data: {
+          approvalRequestId: request.id,
+          academicYearId: year.id,
+          programs: parsed.programs.length,
+          curriculumEntries,
+        },
+      },
     });
     return {
       academicYearId: year.id,
@@ -926,7 +1124,34 @@ export class FinanceApprovalsService {
       revision: revision.revision,
       levels: parsed.defaultLevels.length,
       programs: parsed.programs.length,
+      curriculumEntries,
     };
+  }
+
+  private async lockAcademicCatalogYear(
+    tx: Prisma.TransactionClient,
+    revisionId: string,
+  ) {
+    const candidate = await tx.academicCatalogRevision.findUnique({
+      where: { id: revisionId },
+      select: { academicYearId: true },
+    });
+    if (!candidate) {
+      throw new BadRequestException(
+        "Academic catalog revision is no longer awaiting approval",
+      );
+    }
+    const lockedYear = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id
+      FROM "AcademicYear"
+      WHERE id = ${candidate.academicYearId}
+      FOR UPDATE
+    `;
+    if (!lockedYear[0]) {
+      throw new BadRequestException(
+        "The academic year for this catalog revision no longer exists",
+      );
+    }
   }
 
   private normalizedLegacyScheduleRow(
@@ -1233,6 +1458,10 @@ export class FinanceApprovalsService {
         packageType: "standard_full",
         status: { not: "void" },
         student: { recordStatus: { in: ["active", "pending_payment"] } },
+        // An annual billing profile freezes the canonical invoice as an
+        // explainable year-specific snapshot. A later institution-wide fee
+        // schedule revision must not validate, mutate, or relink that invoice.
+        billingProfile: { is: null },
       },
       include: {
         plan: {
@@ -1524,6 +1753,7 @@ export class FinanceApprovalsService {
             academicYearLabel: current.academicYearLabel,
             packageType: "standard_full",
             status: { not: "void" },
+            billingProfile: { is: null },
             student: {
               recordStatus: { in: ["active", "pending_payment"] },
             },
@@ -1542,6 +1772,7 @@ export class FinanceApprovalsService {
           invoice: {
             academicYearLabel: current.academicYearLabel,
             packageType: "standard_full",
+            billingProfile: { is: null },
           },
         },
       });

@@ -52,6 +52,7 @@ describe("AcademicsService admin student detail", () => {
     };
     const prisma = {
       student: { findUnique: vi.fn().mockResolvedValue(student) },
+      annualBillingProfile: { findFirst: vi.fn().mockResolvedValue(null) },
     };
     const service = new AcademicsService(prisma as never);
     const transcriptView = vi.fn();
@@ -93,7 +94,7 @@ describe("AcademicsService admin student detail", () => {
   });
 });
 
-describe("AcademicsService student login email changes", () => {
+describe("AcademicsService student profile changes", () => {
   function updateFixture() {
     const student = {
       id: "student-1",
@@ -112,9 +113,6 @@ describe("AcademicsService student login email changes", () => {
         update: vi.fn().mockResolvedValue(student),
       },
       person: { update: vi.fn().mockResolvedValue(student.person) },
-      studentInvite: {
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
       auditLog: { create: vi.fn().mockResolvedValue({}) },
       $transaction: vi.fn(async (work: Promise<unknown>[]) =>
         Promise.all(work),
@@ -127,31 +125,24 @@ describe("AcademicsService student login email changes", () => {
     return { prisma, service, student };
   }
 
-  it("burns outstanding student setup links in the email update transaction", async () => {
+  it("updates profile fields without changing the DAUST login identity", async () => {
     const { prisma, service, student } = updateFixture();
 
     await service.updateStudent("registrar-1", student.id, {
-      email: "new@example.test",
+      fullName: "Awa Updated",
     });
 
     expect(prisma.person.update).toHaveBeenCalledWith({
       where: { id: student.personId },
-      data: { email: "new@example.test" },
-    });
-    expect(prisma.studentInvite.updateMany).toHaveBeenCalledWith({
-      where: { studentPersonId: student.personId, usedAt: null },
-      data: { usedAt: expect.any(Date) },
+      data: { firstName: "Awa", lastName: "Updated" },
     });
     expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 
-  it("does not revoke a setup link when the login email is unchanged", async () => {
-    const { prisma, service, student } = updateFixture();
-
-    await service.updateStudent("registrar-1", student.id, {
-      email: student.person.email,
-    });
-
-    expect(prisma.studentInvite.updateMany).not.toHaveBeenCalled();
+  it("does not expose login email as an update field", () => {
+    const input: Parameters<AcademicsService["updateStudent"]>[2] = {
+      fullName: "Awa Updated",
+    };
+    expect(input).not.toHaveProperty("email");
   });
 });

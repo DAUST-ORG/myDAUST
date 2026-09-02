@@ -34,16 +34,22 @@ describe("session revocation coverage", () => {
       ...grep("^ *passwordHash,$"),
     ].filter((line) => !line.includes(".test.ts"));
 
-    expect(writes.length, "found no password writes at all — has the idiom changed?")
-      .toBeGreaterThan(3);
+    expect(
+      writes.length,
+      "found no password writes at all — has the idiom changed?",
+    ).toBeGreaterThan(3);
 
     const missing = writes.filter((hit) => {
       const [file, lineNo] = hit.split(":");
       if (!file || !lineNo) return false;
       const from = Math.max(1, Number(lineNo) - 8);
-      const body = execFileSync("sed", ["-n", `${from},${Number(lineNo) + 8}p`, file], {
-        encoding: "utf8",
-      });
+      const body = execFileSync(
+        "sed",
+        ["-n", `${from},${Number(lineNo) + 8}p`, file],
+        {
+          encoding: "utf8",
+        },
+      );
       return !body.includes("sessionVersion") && !body.includes(SESSION_EXEMPT);
     });
 
@@ -51,5 +57,21 @@ describe("session revocation coverage", () => {
       missing,
       `password writes with neither a sessionVersion bump nor a "${SESSION_EXEMPT}" note:\n${missing.join("\n")}`,
     ).toEqual([]);
+  });
+
+  it("timestamps the password installed for workbook-created students", () => {
+    const source = execFileSync(
+      "sed",
+      [
+        "-n",
+        "/^async function createNewStudent(/,/^}/p",
+        "src/finance/workbook-cutover.runner.ts",
+      ],
+      { encoding: "utf8" },
+    );
+    expect(source).toMatch(
+      /passwordHash,\s+mustChangePassword: true,\s+passwordChangedAt: createdAt/,
+    );
+    expect(source).toMatch(/createdAt,\s+student:/);
   });
 });

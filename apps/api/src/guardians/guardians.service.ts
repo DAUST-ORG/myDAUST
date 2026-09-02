@@ -16,6 +16,7 @@ import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js
 import { TranscriptService } from "../transcript/transcript.service.js";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
 import { PaymentSubmissionsService } from "../finance/payment-submissions.service.js";
+import { paymentDateProjection } from "../finance/payment-cash-recognition.js";
 import { AcademicCatalogService } from "../academic-catalog/academic-catalog.service.js";
 import { loadEnv } from "../config/env.js";
 import {
@@ -89,6 +90,17 @@ export class GuardiansService {
       .update("\0")
       .update(dateOfBirth.toISOString().slice(0, 10))
       .digest("hex");
+  }
+
+  private registrarStudentAccountHash(
+    personId: string,
+    email: string,
+    sessionVersion: number,
+    purpose: "first_time" | "password_reset",
+  ): string {
+    return this.hashToken(
+      `mydaust:registrar-student-credential:v1\0${personId}\0${email}\0${sessionVersion}\0${purpose}`,
+    );
   }
 
   private splitName(full: string): { firstName: string; lastName: string } {
@@ -765,7 +777,7 @@ export class GuardiansService {
     },
   ) {
     const guardian = await this.prisma.person.findFirst({
-      where: { id: guardianId, kind: "parent" },
+      where: { id: guardianId, kind: "parent", student: { is: null } },
       include: {
         guardianInvites: {
           where: { usedAt: null },
@@ -799,17 +811,35 @@ export class GuardiansService {
       }
       data.email = email;
     }
-    const emailChanged =
-      data.email !== undefined && data.email !== guardian.email;
-    const invalidateInvites =
-      emailChanged &&
-      !guardian.passwordHash &&
-      guardian.guardianInvites.length > 0;
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const person = await tx.person.update({
-        where: { id: guardianId },
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Person" WHERE "id" = ${guardianId} FOR UPDATE`,
+      );
+      const current = await tx.person.findFirst({
+        where: { id: guardianId, kind: "parent", student: { is: null } },
+        include: {
+          guardianInvites: {
+            where: { usedAt: null },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      });
+      if (!current) throw new NotFoundException("Guardian not found");
+      const emailChanged =
+        data.email !== undefined && data.email !== current.email;
+      const invalidateInvites =
+        emailChanged &&
+        !current.passwordHash &&
+        current.guardianInvites.length > 0;
+      const changed = await tx.person.updateMany({
+        where: { id: guardianId, kind: "parent", student: { is: null } },
         data,
       });
+      if (changed.count !== 1)
+        throw new NotFoundException("Guardian not found");
+      const person = await tx.person.findUnique({ where: { id: guardianId } });
+      if (!person) throw new NotFoundException("Guardian not found");
       if (invalidateInvites) {
         // An invite sent to the old mailbox is a credential. Once the account's
         // email changes it must stop working immediately, even if it has not expired.
@@ -844,26 +874,26 @@ export class GuardiansService {
           actorId,
           data: {
             email: person.email,
-            previousEmail: emailChanged ? guardian.email : undefined,
+            previousEmail: emailChanged ? current.email : undefined,
             outstandingInvitesInvalidated: invalidateInvites,
           },
         },
       });
-      return person;
+      return { person, invalidateInvites };
     });
 
     const replacementInvite =
-      invalidateInvites && updated.email
+      result.invalidateInvites && result.person.email
         ? await this.issueInvite(
-            updated.id,
-            updated.email,
-            `${updated.firstName} ${updated.lastName}`,
+            result.person.id,
+            result.person.email,
+            `${result.person.firstName} ${result.person.lastName}`,
           )
         : null;
     return {
-      id: updated.id,
-      name: `${updated.firstName} ${updated.lastName}`,
-      email: updated.email,
+      id: result.person.id,
+      name: `${result.person.firstName} ${result.person.lastName}`,
+      email: result.person.email,
       inviteDelivery: replacementInvite
         ? replacementInvite.sent
           ? "sent"
@@ -1028,9 +1058,154 @@ export class GuardiansService {
         sInvite.activationRequest?.verificationMethod === "student_id_dob"
           ? sInvite.activationRequest
           : null;
+      const registrarRequest =
+        sInvite.activationRequest?.verificationMethod === "registrar_issued"
+          ? sInvite.activationRequest
+          : null;
       const passwordHash = await bcrypt.hash(password, 10);
       const redeemedAt = new Date();
       const redeemed = await this.prisma.$transaction(async (tx) => {
+        // Registrar-issued setup and reset links are bound to the exact login
+        // identity and session version present when they were disclosed. A
+        // password change, reset, sign-out-all, role change, or lifecycle drift
+        // therefore burns the stale capability rather than overwriting newer
+        // account state.
+        if (registrarRequest) {
+          const expectedStudent = sInvite.person.student;
+          const lockedStudents = expectedStudent
+            ? await tx.$queryRaw<
+                Array<{
+                  id: string;
+                  personId: string;
+                  recordStatus: string;
+                }>
+              >(Prisma.sql`
+                SELECT "id", "personId", "recordStatus"
+                FROM "Student"
+                WHERE "id" = ${expectedStudent.id}
+                  AND "personId" = ${sInvite.studentPersonId}
+                FOR UPDATE
+              `)
+            : [];
+          const lockedStudent = lockedStudents[0];
+          const lockedPeople = await tx.$queryRaw<
+            Array<{
+              id: string;
+              email: string | null;
+              kind: string;
+              roles: string[];
+              status: string;
+              passwordHash: string | null;
+              mustChangePassword: boolean;
+              sessionVersion: number;
+            }>
+          >(Prisma.sql`
+            SELECT "id", "email", "kind", "roles", "status", "passwordHash",
+                   "mustChangePassword", "sessionVersion"
+            FROM "Person"
+            WHERE "id" = ${sInvite.studentPersonId}
+            FOR UPDATE
+          `);
+          const lockedPerson = lockedPeople[0];
+          const lockedRequests = await tx.$queryRaw<
+            Array<{
+              id: string;
+              studentPersonId: string | null;
+              studentInviteId: string | null;
+              requestTokenHash: string;
+              accountKeyHash: string;
+              approvalCodeHash: string | null;
+              verificationMethod: string | null;
+              studentActivationCardId: string | null;
+              approvedAt: Date | null;
+              approvedById: string | null;
+              expiresAt: Date;
+              consumedAt: Date | null;
+              invalidatedAt: Date | null;
+            }>
+          >(Prisma.sql`
+            SELECT "id", "studentPersonId", "studentInviteId", "requestTokenHash",
+                   "accountKeyHash", "approvalCodeHash", "verificationMethod",
+                   "studentActivationCardId", "approvedAt", "approvedById",
+                   "expiresAt", "consumedAt", "invalidatedAt"
+            FROM "StudentActivationRequest"
+            WHERE "id" = ${registrarRequest.id}
+            FOR UPDATE
+          `);
+          const lockedRequest = lockedRequests[0];
+          const uniqueEmailCount = lockedPerson?.email
+            ? await tx.person.count({
+                where: {
+                  email: { equals: lockedPerson.email, mode: "insensitive" },
+                },
+              })
+            : 0;
+          const expectedPasswordState =
+            sInvite.purpose === "password_reset"
+              ? lockedPerson?.passwordHash !== null
+              : lockedPerson?.passwordHash === null &&
+                lockedPerson?.mustChangePassword === false;
+          const validRegistrarProof =
+            !!lockedStudent &&
+            !!lockedPerson &&
+            !!lockedRequest &&
+            lockedStudent.personId === sInvite.studentPersonId &&
+            lockedStudent.recordStatus === "active" &&
+            lockedPerson.id === sInvite.studentPersonId &&
+            lockedPerson.email === studentEmail &&
+            this.hashToken(lockedPerson.email) === sInvite.boundEmailSha256 &&
+            uniqueEmailCount === 1 &&
+            lockedPerson.kind === "student" &&
+            lockedPerson.roles.length === 1 &&
+            lockedPerson.roles[0] === "student" &&
+            lockedPerson.status === "active" &&
+            expectedPasswordState &&
+            lockedRequest.studentPersonId === sInvite.studentPersonId &&
+            lockedRequest.studentInviteId === sInvite.id &&
+            lockedRequest.requestTokenHash === tokenHash &&
+            lockedRequest.accountKeyHash ===
+              this.registrarStudentAccountHash(
+                lockedPerson.id,
+                lockedPerson.email,
+                lockedPerson.sessionVersion,
+                sInvite.purpose,
+              ) &&
+            lockedRequest.approvalCodeHash === null &&
+            lockedRequest.studentActivationCardId === null &&
+            lockedRequest.verificationMethod === "registrar_issued" &&
+            lockedRequest.approvedAt !== null &&
+            lockedRequest.approvedById !== null &&
+            lockedRequest.expiresAt.getTime() >= redeemedAt.getTime() &&
+            lockedRequest.consumedAt === null &&
+            lockedRequest.invalidatedAt === null;
+          if (!validRegistrarProof) {
+            const burned = await tx.studentInvite.updateMany({
+              where: { id: sInvite.id, usedAt: null },
+              data: { usedAt: redeemedAt },
+            });
+            if (burned.count === 1) {
+              await tx.studentActivationRequest.updateMany({
+                where: {
+                  id: registrarRequest.id,
+                  consumedAt: null,
+                  invalidatedAt: null,
+                },
+                data: { invalidatedAt: redeemedAt },
+              });
+              await tx.auditLog.create({
+                data: {
+                  entity: "Person",
+                  entityId: sInvite.studentPersonId,
+                  action: "student-setup-link-invalidated",
+                  actorId: null,
+                  data: { reason: "registrar_issued_state_drift" },
+                },
+              });
+            }
+            return false;
+          }
+        }
+
         // The static student-ID-and-DOB check has no possession factor. Re-lock
         // and revalidate every current identity and lifecycle binding before
         // the browser capability can install a password.
@@ -1103,6 +1278,7 @@ export class GuardiansService {
               })
             : 0;
           const validDirectProof =
+            sInvite.purpose === "first_time" &&
             !!lockedStudent &&
             !!lockedPerson &&
             !!lockedRequest &&
@@ -1220,6 +1396,7 @@ export class GuardiansService {
           `);
           const lockedRequest = lockedRequests[0];
           const validIssuedProof =
+            sInvite.purpose === "first_time" &&
             !!expectedCard &&
             !!lockedCard &&
             !!lockedBatch &&
@@ -1282,6 +1459,8 @@ export class GuardiansService {
         // The state check is part of the password write, not a prior read. If
         // email, roles, lifecycle, or password state drifts concurrently, no
         // password is installed and this claimed capability remains burned.
+        const replacesExistingPassword =
+          registrarRequest !== null && sInvite.purpose === "password_reset";
         const passwordSet = await tx.person.updateMany({
           where: {
             id: sInvite.studentPersonId,
@@ -1289,13 +1468,14 @@ export class GuardiansService {
             kind: "student",
             roles: { equals: ["student"] },
             status: "active",
-            passwordHash: null,
-            mustChangePassword: false,
+            passwordHash: replacesExistingPassword ? { not: null } : null,
+            ...(replacesExistingPassword ? {} : { mustChangePassword: false }),
             student: { is: { recordStatus: "active" } },
           },
           data: {
             passwordHash,
             mustChangePassword: false,
+            passwordChangedAt: redeemedAt,
             sessionVersion: { increment: 1 },
           },
         });
@@ -1368,10 +1548,45 @@ export class GuardiansService {
           });
           if (requestConsumed.count !== 1) throw invalidInvite();
         }
-        await tx.studentInvite.updateMany({
+        if (registrarRequest) {
+          const requestConsumed = await tx.studentActivationRequest.updateMany({
+            where: {
+              id: registrarRequest.id,
+              studentPersonId: sInvite.studentPersonId,
+              studentInviteId: sInvite.id,
+              requestTokenHash: tokenHash,
+              approvalCodeHash: null,
+              studentActivationCardId: null,
+              verificationMethod: "registrar_issued",
+              approvedAt: { not: null },
+              approvedById: { not: null },
+              expiresAt: { gte: redeemedAt },
+              consumedAt: null,
+              invalidatedAt: null,
+            },
+            data: { consumedAt: redeemedAt },
+          });
+          if (requestConsumed.count !== 1) throw invalidInvite();
+        }
+        const otherInvites = await tx.studentInvite.findMany({
           where: { studentPersonId: sInvite.studentPersonId, usedAt: null },
-          data: { usedAt: redeemedAt },
+          select: { id: true },
         });
+        if (otherInvites.length > 0) {
+          const otherInviteIds = otherInvites.map((invite) => invite.id);
+          await tx.studentInvite.updateMany({
+            where: { id: { in: otherInviteIds }, usedAt: null },
+            data: { usedAt: redeemedAt },
+          });
+          await tx.studentActivationRequest.updateMany({
+            where: {
+              studentInviteId: { in: otherInviteIds },
+              consumedAt: null,
+              invalidatedAt: null,
+            },
+            data: { invalidatedAt: redeemedAt },
+          });
+        }
         await tx.studentActivationRequest.updateMany({
           where: {
             requestTokenHash: tokenHash,
@@ -1386,6 +1601,7 @@ export class GuardiansService {
             entityId: sInvite.studentPersonId,
             action: "student-password-set",
             actorId: sInvite.studentPersonId,
+            data: { purpose: sInvite.purpose },
           },
         });
         return true;
@@ -1493,6 +1709,11 @@ export class GuardiansService {
         }),
       })),
     };
+  }
+
+  async childBillingProfile(guardianId: string, studentId: string) {
+    await this.assertGuardianOf(guardianId, studentId);
+    return this.finance.getBillingProfile(studentId);
   }
 
   /** Verify the selected child and invoice as one scope before any money moves. */
@@ -1647,11 +1868,7 @@ export class GuardiansService {
       studentId,
       paymentId,
     );
-    const durable = payment as typeof payment & {
-      source?: string;
-      settledAt?: Date | null;
-      refundedAt?: Date | null;
-    };
+    const durable = payment as typeof payment & { source?: string };
     return {
       id: payment.id,
       invoiceId: payment.invoiceId,
@@ -1660,8 +1877,8 @@ export class GuardiansService {
       status: payment.status,
       providerRef: payment.providerRef,
       source: durable.source ?? "legacy",
-      settledAt: durable.settledAt ?? null,
-      refundedAt: durable.refundedAt ?? null,
+      ...paymentDateProjection(payment),
+      refundedAt: payment.refundedAt,
       createdAt: payment.createdAt,
     };
   }

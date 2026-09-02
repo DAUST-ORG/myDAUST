@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from "@nestjs/common";
 import {
   CreateAssignmentInput,
   DropInput,
@@ -16,7 +26,9 @@ import { AcademicsService } from "./academics.service.js";
 const CreateMaterialInput = z.object({
   title: z.string().min(1).max(200),
   kind: z.string().min(1).max(40),
-  category: z.enum(["syllabus", "lecture_notes", "assignments", "quizzes", "resources"]).optional(),
+  category: z
+    .enum(["syllabus", "lecture_notes", "assignments", "quizzes", "resources"])
+    .optional(),
   fileUrl: z.string().min(1).optional(),
   fileName: z.string().min(1).optional(),
 });
@@ -95,9 +107,15 @@ const UpdateSectionInput = z.object({
 
 const UpdateStudentInput = z.object({
   fullName: z.string().min(1).max(120).optional(),
-  email: z.string().email().optional(),
+  // The DAUST sign-in identity is read-only account metadata. Reject legacy
+  // clients that still attempt to alter it through profile edits.
+  email: z.never().optional(),
   programCode: z.string().max(20).nullable().optional(),
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
   gender: z.string().max(20).nullable().optional(),
   phone: z.string().max(40).nullable().optional(),
   address: z.string().max(200).nullable().optional(),
@@ -112,7 +130,9 @@ const UpdateStudentInput = z.object({
   preferredName: z.string().max(80).nullish(),
   nationalId: z.string().max(60).nullish(),
   maritalStatus: z.string().max(30).nullish(),
-  personalEmail: z.string().email().nullish(),
+  // Contact email is managed exclusively through the account-management tab,
+  // which applies lifecycle guards and a dedicated audit event.
+  personalEmail: z.never().optional(),
   bloodType: z.string().max(8).nullish(),
   allergies: z.string().max(300).nullish(),
   insurance: z.string().max(120).nullish(),
@@ -129,9 +149,13 @@ const UpdateStudentInput = z.object({
 
 const AdminStudentRosterQueryInput = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().refine((value) => [25, 50, 100].includes(value), {
-    message: "pageSize must be 25, 50, or 100",
-  }).default(50),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .refine((value) => [25, 50, 100].includes(value), {
+      message: "pageSize must be 25, 50, or 100",
+    })
+    .default(50),
   search: z.string().trim().max(100).optional(),
   program: z.string().trim().max(20).optional(),
   // Academic level is a derived value (see AcademicsService.adminStudentRoster). We
@@ -144,7 +168,9 @@ const AdminStudentRosterQueryInput = z.object({
   // Student.nationality is free-text country names typed by registrars. Same shape
   // as `gender`.
   nationality: z.string().trim().max(40).optional(),
-  sort: z.enum(["name", "program", "level", "gpa", "balance", "status"]).default("name"),
+  sort: z
+    .enum(["name", "program", "level", "gpa", "balance", "status"])
+    .default("name"),
   direction: z.enum(["asc", "desc"]).default("asc"),
 });
 
@@ -157,6 +183,22 @@ const StandingOverrideInput = z.object({
 const ClearStandingOverrideInput = z.object({
   reason: z.string().trim().min(1).max(1000),
 });
+
+const RegistrationTermQuery = z.string().uuid().optional();
+const EnrollBundleInput = z
+  .object({
+    sectionIds: z.array(z.string().uuid()).min(1).max(30),
+  })
+  .strict()
+  .superRefine(({ sectionIds }, ctx) => {
+    if (new Set(sectionIds).size !== sectionIds.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Each section may appear only once",
+        path: ["sectionIds"],
+      });
+    }
+  });
 
 @Controller("academics")
 export class AcademicsController {
@@ -198,8 +240,14 @@ export class AcademicsController {
 
   @Get("my/registration")
   @Roles("student")
-  myRegistration(@CurrentUser() user: AuthUser, @Query("termId") termId: string) {
-    return this.academics.registrationCatalog(user.studentId!, termId);
+  myRegistration(
+    @CurrentUser() user: AuthUser,
+    @Query("termId") termId?: string,
+  ) {
+    return this.academics.registrationCatalog(
+      user.studentId!,
+      RegistrationTermQuery.parse(termId),
+    );
   }
 
   @Get("my/degree")
@@ -245,10 +293,15 @@ export class AcademicsController {
     return this.academics.adminStudentRoster({
       ...parsed,
       search: parsed.search || undefined,
-      program: parsed.program && parsed.program !== "all" ? parsed.program : undefined,
+      program:
+        parsed.program && parsed.program !== "all" ? parsed.program : undefined,
       level: parsed.level && parsed.level !== "all" ? parsed.level : undefined,
-      gender: parsed.gender && parsed.gender !== "all" ? parsed.gender : undefined,
-      nationality: parsed.nationality && parsed.nationality !== "all" ? parsed.nationality : undefined,
+      gender:
+        parsed.gender && parsed.gender !== "all" ? parsed.gender : undefined,
+      nationality:
+        parsed.nationality && parsed.nationality !== "all"
+          ? parsed.nationality
+          : undefined,
     });
   }
 
@@ -272,7 +325,11 @@ export class AcademicsController {
 
   @Patch("admin/students/:id")
   @Roles("admin", "registrar")
-  updateStudent(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  updateStudent(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = UpdateStudentInput.parse(body);
     return this.academics.updateStudent(user.personId, id, input);
   }
@@ -339,7 +396,11 @@ export class AcademicsController {
 
   @Patch("admin/programs/:code")
   @Roles("admin", "registrar")
-  updateProgram(@CurrentUser() user: AuthUser, @Param("code") code: string, @Body() body: unknown) {
+  updateProgram(
+    @CurrentUser() user: AuthUser,
+    @Param("code") code: string,
+    @Body() body: unknown,
+  ) {
     const input = UpdateProgramInput.parse(body);
     return this.academics.updateProgram(user.personId, code, input);
   }
@@ -359,7 +420,11 @@ export class AcademicsController {
 
   @Patch("admin/courses/:code")
   @Roles("admin", "registrar")
-  updateCourse(@CurrentUser() user: AuthUser, @Param("code") code: string, @Body() body: unknown) {
+  updateCourse(
+    @CurrentUser() user: AuthUser,
+    @Param("code") code: string,
+    @Body() body: unknown,
+  ) {
     const input = UpdateCourseInput.parse(body);
     return this.academics.updateCourse(user.personId, code, input);
   }
@@ -379,7 +444,11 @@ export class AcademicsController {
 
   @Patch("admin/sections/:id")
   @Roles("admin", "registrar")
-  updateSection(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  updateSection(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = UpdateSectionInput.parse(body);
     return this.academics.updateSection(user.personId, id, input);
   }
@@ -416,6 +485,13 @@ export class AcademicsController {
     return this.academics.enroll(user.studentId!, sectionId);
   }
 
+  @Post("my/enrollments/bundle")
+  @Roles("student")
+  enrollBundle(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const { sectionIds } = EnrollBundleInput.parse(body);
+    return this.academics.enrollBundle(user.studentId!, sectionIds);
+  }
+
   @Post("my/drop")
   @Roles("student")
   drop(@CurrentUser() user: AuthUser, @Body() body: unknown) {
@@ -441,30 +517,50 @@ export class AcademicsController {
     return this.academics.mySchedule(user.personId);
   }
 
-
   @Get("sections/:id/insights")
   @Roles("faculty", "admin")
   sectionInsights(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.academics.sectionInsights(id, user.personId, user.roles.includes("admin"));
+    return this.academics.sectionInsights(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Get("sections/:id/roster")
   @Roles("faculty", "admin")
   roster(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.academics.roster(id, user.personId, user.roles.includes("admin"));
+    return this.academics.roster(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Get("sections/:id/gradebook")
   @Roles("faculty", "admin")
   gradebook(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.academics.getGradebook(id, user.personId, user.roles.includes("admin"));
+    return this.academics.getGradebook(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Post("sections/:id/grades")
   @Roles("faculty", "admin")
-  submitGrades(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  submitGrades(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = SubmitGradesInput.parse(body);
-    return this.academics.submitGrades(id, input, user.personId, user.roles.includes("admin"));
+    return this.academics.submitGrades(
+      id,
+      input,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Get("sections/:id/attendance")
@@ -474,7 +570,12 @@ export class AcademicsController {
     @Param("id") id: string,
     @Query("date") date: string,
   ) {
-    return this.academics.getAttendance(id, date, user.personId, user.roles.includes("admin"));
+    return this.academics.getAttendance(
+      id,
+      date,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Get("sections/:id/attendance/sessions")
@@ -489,9 +590,18 @@ export class AcademicsController {
 
   @Post("sections/:id/attendance")
   @Roles("faculty", "admin")
-  markAttendance(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  markAttendance(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = MarkAttendanceInput.parse(body);
-    return this.academics.markAttendance(id, input, user.personId, user.roles.includes("admin"));
+    return this.academics.markAttendance(
+      id,
+      input,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   // --- Assignments + submissions (faculty) ---
@@ -499,27 +609,56 @@ export class AcademicsController {
   @Get("sections/:id/assignments")
   @Roles("faculty", "admin")
   sectionAssignments(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.academics.listSectionAssignments(id, user.personId, user.roles.includes("admin"));
+    return this.academics.listSectionAssignments(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Post("sections/:id/assignments")
   @Roles("faculty", "admin")
-  createAssignment(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  createAssignment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = CreateAssignmentInput.parse(body);
-    return this.academics.createAssignment(id, input, user.personId, user.roles.includes("admin"));
+    return this.academics.createAssignment(
+      id,
+      input,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Get("assignments/:id/submissions")
   @Roles("faculty", "admin")
-  assignmentSubmissions(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.academics.getAssignmentSubmissions(id, user.personId, user.roles.includes("admin"));
+  assignmentSubmissions(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+  ) {
+    return this.academics.getAssignmentSubmissions(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Post("submissions/:id/grade")
   @Roles("faculty", "admin")
-  gradeSubmission(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  gradeSubmission(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = GradeSubmissionInput.parse(body);
-    return this.academics.gradeSubmission(id, input, user.personId, user.roles.includes("admin"));
+    return this.academics.gradeSubmission(
+      id,
+      input,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   // --- Course materials + class posts (faculty) ---
@@ -527,26 +666,53 @@ export class AcademicsController {
   @Get("sections/:id/materials")
   @Roles("faculty", "admin")
   sectionMaterials(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.academics.listSectionMaterials(id, user.personId, user.roles.includes("admin"));
+    return this.academics.listSectionMaterials(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Post("sections/:id/materials")
   @Roles("faculty", "admin")
-  createSectionMaterial(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  createSectionMaterial(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = CreateMaterialInput.parse(body);
-    return this.academics.createSectionMaterial(id, input, user.personId, user.roles.includes("admin"));
+    return this.academics.createSectionMaterial(
+      id,
+      input,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Post("materials/:id/toggle")
   @Roles("faculty", "admin")
-  toggleSectionMaterial(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.academics.toggleSectionMaterial(id, user.personId, user.roles.includes("admin"));
+  toggleSectionMaterial(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+  ) {
+    return this.academics.toggleSectionMaterial(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Delete("materials/:id")
   @Roles("faculty", "admin")
-  deleteSectionMaterial(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.academics.deleteSectionMaterial(id, user.personId, user.roles.includes("admin"));
+  deleteSectionMaterial(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+  ) {
+    return this.academics.deleteSectionMaterial(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Patch("sections/:id/materials/reorder")
@@ -557,10 +723,13 @@ export class AcademicsController {
     @Body() body: unknown,
   ) {
     const input = ReorderMaterialsInput.parse(body);
-    return this.academics.reorderSectionMaterials(id, input.orderedIds, user.personId, user.roles.includes("admin"));
+    return this.academics.reorderSectionMaterials(
+      id,
+      input.orderedIds,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
-
-
 
   // --- Assignments (student) ---
 
@@ -572,7 +741,11 @@ export class AcademicsController {
 
   @Post("my/assignments/:id/submit")
   @Roles("student")
-  submitAssignment(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  submitAssignment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = SubmitAssignmentInput.parse(body);
     return this.academics.submitAssignment(user.studentId!, id, input);
   }

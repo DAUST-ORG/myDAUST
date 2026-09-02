@@ -314,5 +314,10 @@ export function projectedInstallmentStatus(
     ],
     asOfDate: toDakarDateKey(now),
   });
-  return legacyInstallmentStatus(projection.installments[0]!);
+  const line = projection.installments[0];
+  if (!line) {
+    if (input.amountDue === 0 && input.amountPaid === 0) return "paid";
+    throw new Error("Installment status projection did not produce a line");
+  }
+  return legacyInstallmentStatus(line);
 }

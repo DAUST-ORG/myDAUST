@@ -425,6 +425,347 @@ describe.skipIf(!DB_URL)("fee component approvals", () => {
     ]);
   });
 
+  it("freezes profile-backed canonical invoices while propagating a later schedule to ordinary invoices", async () => {
+    const fixture = await createFixture("profile-canonical-freeze", {
+      optionalComponent: true,
+    });
+    const componentByKey = new Map(
+      fixture.schedule.components.map((component) => [
+        component.key,
+        component,
+      ]),
+    );
+
+    const createStudent = async (name: string) => {
+      const person = await prisma.person.create({
+        data: {
+          email: `${name}-${randomUUID()}@test.local`,
+          firstName: "Canonical",
+          lastName: name,
+          kind: "student",
+          roles: ["student"],
+        },
+      });
+      return prisma.student.create({
+        data: {
+          personId: person.id,
+          studentNo: `CAN-${randomUUID().slice(0, 8).toUpperCase()}`,
+        },
+      });
+    };
+
+    const workbookStudent = await createStudent("Workbook");
+    const workbookComponentAmounts = [
+      {
+        scheduleComponentId: componentByKey.get("tuition")!.id,
+        kind: "tuition",
+        label: "Tuition",
+        costCenterCode: "9100",
+        grossAmountXof: 2_975_000,
+        amountXof: 2_940_000,
+      },
+      {
+        scheduleComponentId: componentByKey.get("housing")!.id,
+        kind: "housing",
+        label: "Double housing",
+        costCenterCode: "3700",
+        grossAmountXof: 680_000,
+        amountXof: 680_000,
+      },
+      {
+        scheduleComponentId: componentByKey.get("cafeteria")!.id,
+        kind: "cafeteria",
+        label: "Full cafeteria plan",
+        costCenterCode: "3600",
+        grossAmountXof: 630_000,
+        amountXof: 630_000,
+      },
+      {
+        scheduleComponentId: null,
+        kind: "insurance",
+        label: "Annual insurance",
+        costCenterCode: "9100",
+        grossAmountXof: 10_000,
+        amountXof: 10_000,
+      },
+      {
+        scheduleComponentId: componentByKey.get("technology_lab")!.id,
+        kind: "technology_lab",
+        label: "Technology lab",
+        costCenterCode: "9100",
+        grossAmountXof: 80_000,
+        amountXof: 80_000,
+      },
+    ];
+    const workbookInvoice = await prisma.invoice.create({
+      data: {
+        number: `WB-FREEZE-${randomUUID()}`,
+        studentId: workbookStudent.id,
+        termId: fixture.invoice.termId,
+        totalAmount: 4_340_000,
+        packageType: "standard_full",
+        academicYearLabel: fixture.label,
+        feeScheduleId: fixture.schedule.id,
+        feeScheduleRevision: fixture.schedule.revision,
+        paymentPlanOverride: true,
+        revision: 1,
+        description: "Workbook-backed annual baseline",
+        costCenterCode: "9100",
+        components: { create: workbookComponentAmounts },
+        componentOverrides: {
+          create: {
+            componentKey: "technology_lab",
+            included: true,
+            createdById: admin.personId,
+          },
+        },
+        plan: {
+          create: {
+            createdById: admin.personId,
+            installments: {
+              create: fixture.schedule.rows.map((row) => ({
+                sequence: row.sequence,
+                label: `Workbook installment ${row.sequence}`,
+                dueDate: row.dueOn!,
+                amountDue: 1_085_000,
+              })),
+            },
+          },
+        },
+      },
+    });
+    const workbookProfile = await prisma.annualBillingProfile.create({
+      data: {
+        studentId: workbookStudent.id,
+        academicYearLabel: fixture.label,
+        status: "active",
+        revision: 1,
+        sourceKind: "workbook",
+        sourceWorkbookSha256: "a".repeat(64),
+        sourceSheet: "Students & Billing",
+        sourceRowNumber: 159,
+        sourceRowFingerprintSha256: "b".repeat(64),
+        sourceAsOfDate: new Date("2026-08-29T00:00:00.000Z"),
+        feeScheduleId: fixture.schedule.id,
+        canonicalInvoiceId: workbookInvoice.id,
+        grossChargesXof: 4_375_000,
+        netBilledXof: 4_340_000,
+        mismatchWarnings: ["reviewed_manual_adjustment"],
+        createdById: admin.personId,
+      },
+    });
+    const workbookRows = await prisma.invoice.findUniqueOrThrow({
+      where: { id: workbookInvoice.id },
+      include: {
+        components: { orderBy: { kind: "asc" } },
+        plan: {
+          include: { installments: { orderBy: { sequence: "asc" } } },
+        },
+      },
+    });
+    const workbookAmountsByKind = new Map(
+      workbookComponentAmounts.map((component) => [
+        component.kind,
+        component.amountXof / 4,
+      ]),
+    );
+    await prisma.installmentComponent.createMany({
+      data: workbookRows.plan!.installments.flatMap((installment) =>
+        workbookRows.components.map((component) => ({
+          installmentId: installment.id,
+          invoiceComponentId: component.id,
+          amountDue: workbookAmountsByKind.get(component.kind)!,
+        })),
+      ),
+    });
+    const workbookTuition = workbookRows.components.find(
+      (component) => component.kind === "tuition",
+    )!;
+    await prisma.invoiceAdjustment.create({
+      data: {
+        invoiceId: workbookInvoice.id,
+        invoiceComponentId: workbookTuition.id,
+        billingProfileId: workbookProfile.id,
+        code: "reviewed_manual_adjustment",
+        label: "Reviewed workbook reconciliation",
+        source: "workbook",
+        basis: "manual",
+        calculation: "manual",
+        stacking: "additive",
+        effect: "discount",
+        amountXof: 35_000,
+        reason: "Signed workbook reconciliation",
+        sourceReference: `row:${159}`,
+        createdById: admin.personId,
+      },
+    });
+
+    const admissionsStudent = await createStudent("Admissions");
+    const admissionsInvoice = await prisma.invoice.create({
+      data: {
+        number: `ADM-FREEZE-${randomUUID()}`,
+        studentId: admissionsStudent.id,
+        termId: fixture.invoice.termId,
+        totalAmount: 4_285_000,
+        packageType: "standard_full",
+        academicYearLabel: fixture.label,
+        feeScheduleId: fixture.schedule.id,
+        feeScheduleRevision: fixture.schedule.revision,
+        description: "Admissions annual package",
+        costCenterCode: "9100",
+        components: {
+          create: fixture.schedule.components
+            .filter((component) => component.defaultSelected)
+            .map((component) => ({
+              scheduleComponentId: component.id,
+              kind: component.key,
+              label: component.label,
+              costCenterCode: component.costCenterCode,
+              grossAmountXof: component.annualAmountXof,
+              amountXof: component.annualAmountXof,
+            })),
+        },
+        componentOverrides: {
+          create: {
+            componentKey: "technology_lab",
+            included: false,
+            createdById: admin.personId,
+          },
+        },
+        plan: {
+          create: {
+            createdById: admin.personId,
+            installments: {
+              create: fixture.schedule.rows.map((row) => ({
+                sequence: row.sequence,
+                label: row.label,
+                dueDate: row.dueOn!,
+                amountDue: row.amountFullXof,
+              })),
+            },
+          },
+        },
+      },
+    });
+    await prisma.annualBillingProfile.create({
+      data: {
+        studentId: admissionsStudent.id,
+        academicYearLabel: fixture.label,
+        status: "active",
+        revision: 1,
+        sourceKind: "admissions",
+        feeScheduleId: fixture.schedule.id,
+        canonicalInvoiceId: admissionsInvoice.id,
+        grossChargesXof: 4_285_000,
+        netBilledXof: 4_285_000,
+        createdById: admin.personId,
+      },
+    });
+
+    const invoiceSnapshot = (invoiceId: string) =>
+      prisma.invoice.findUniqueOrThrow({
+        where: { id: invoiceId },
+        include: {
+          billingProfile: {
+            include: {
+              selections: { orderBy: { kind: "asc" } },
+              awards: { orderBy: { createdAt: "asc" } },
+            },
+          },
+          components: { orderBy: { kind: "asc" } },
+          componentOverrides: { orderBy: { componentKey: "asc" } },
+          adjustments: { orderBy: { code: "asc" } },
+          plan: {
+            include: {
+              installments: {
+                orderBy: { sequence: "asc" },
+                include: {
+                  components: { orderBy: { invoiceComponentId: "asc" } },
+                },
+              },
+            },
+          },
+        },
+      });
+    const [workbookBefore, admissionsBefore] = await Promise.all([
+      invoiceSnapshot(workbookInvoice.id),
+      invoiceSnapshot(admissionsInvoice.id),
+    ]);
+
+    const current = await prisma.feeSchedule.findUniqueOrThrow({
+      where: { id: fixture.schedule.id },
+      include: {
+        rows: { orderBy: { sequence: "asc" } },
+        components: { orderBy: { sortOrder: "asc" } },
+      },
+    });
+    const after = schedulePayload(current);
+    after.components = [
+      ...after.components
+        .filter((component) => component.key !== "technology_lab")
+        .map((component) =>
+          component.key === "tuition"
+            ? { ...component, annualAmountXof: 3_000_000 }
+            : component,
+        ),
+      {
+        id: "",
+        key: "digital_resources",
+        label: "Digital resources",
+        description: "Annual digital learning resources",
+        costCenterCode: "9100",
+        annualAmountXof: 80_000,
+        defaultSelected: true,
+        sortOrder: 3,
+      },
+    ];
+    const global = await approvals.request(admin, {
+      kind: "global_fee_schedule",
+      targetType: "FeeSchedule",
+      targetId: current.id,
+      academicYearLabel: fixture.label,
+      reason: "Approve a later institutional schedule",
+      after,
+    });
+    expect(global).toMatchObject({
+      applied: true,
+      result: { revision: 2, linkedPlansUpdated: 1 },
+    });
+
+    const [workbookAfter, admissionsAfter, ordinaryAfter] = await Promise.all([
+      invoiceSnapshot(workbookInvoice.id),
+      invoiceSnapshot(admissionsInvoice.id),
+      prisma.invoice.findUniqueOrThrow({
+        where: { id: fixture.invoice.id },
+        include: {
+          components: { orderBy: { kind: "asc" } },
+          plan: {
+            include: { installments: { orderBy: { sequence: "asc" } } },
+          },
+        },
+      }),
+    ]);
+    expect(workbookAfter).toEqual(workbookBefore);
+    expect(admissionsAfter).toEqual(admissionsBefore);
+    expect(ordinaryAfter).toMatchObject({
+      totalAmount: 4_390_000,
+      feeScheduleRevision: 2,
+      revision: 1,
+    });
+    expect(ordinaryAfter.feeScheduleId).not.toBe(fixture.schedule.id);
+    expect(ordinaryAfter.components).toMatchObject([
+      { kind: "cafeteria", amountXof: 630_000 },
+      { kind: "digital_resources", amountXof: 80_000 },
+      { kind: "housing", amountXof: 680_000 },
+      { kind: "tuition", amountXof: 3_000_000 },
+    ]);
+    expect(
+      ordinaryAfter.plan!.installments.map(
+        (installment) => installment.amountDue,
+      ),
+    ).toEqual([1_097_500, 1_097_500, 1_097_500, 1_097_500]);
+  });
+
   it("stores a separate per-student component grid and isolates it from global amounts", async () => {
     const fixture = await createFixture("individual-grid");
     const before = await prisma.invoice.findUniqueOrThrow({

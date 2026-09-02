@@ -39,8 +39,15 @@ export class DiningController {
   choosePlan(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     return this.dining.choosePlan(
       user.studentId!,
+      user,
       ChoosePlanInput.parse(body).type,
     );
+  }
+
+  @Get("my/plan-options")
+  @Roles("student")
+  myPlanOptions(@CurrentUser() user: AuthUser) {
+    return this.dining.myPlanOptions(user.studentId!);
   }
 
   @Get("menu")

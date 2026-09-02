@@ -1,0 +1,322 @@
+.registrationPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(360px, 1.05fr);
+  gap: 0;
+  margin-bottom: 26px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.registrationStatus,
+.registrationForm {
+  padding: 22px;
+}
+
+.registrationStatus {
+  border-right: 1px solid var(--divider);
+  background: var(--bg-subtle);
+}
+
+.registrationHeading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.registrationHeading h2,
+.sectionHeading h2 {
+  margin: 2px 0 0;
+  font: 750 19px/1.25 var(--font-display);
+}
+
+.registrationIcon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--bg-tint);
+  color: var(--daust-navy);
+}
+
+.registrationStatus > p {
+  max-width: 58ch;
+  margin: 12px 0 0;
+  color: var(--fg2);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.registrationDates,
+.termDates {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.registrationDates div,
+.termDates div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.registrationDates dt,
+.termDates dt {
+  color: var(--fg3);
+  font-size: 11.5px;
+}
+
+.registrationDates dd,
+.termDates dd {
+  margin: 0;
+  color: var(--fg1);
+  font-size: 11.5px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.registrationForm {
+  display: grid;
+  gap: 14px;
+}
+
+.recommendationToggle {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.recommendationToggle > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.switchTrack {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--gray-200);
+  transition: background 140ms ease;
+}
+
+.switchTrack::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--shadow-xs);
+  content: "";
+  transition: transform 140ms ease;
+}
+
+.recommendationToggle > input:checked + .switchTrack {
+  background: var(--daust-navy);
+}
+
+.recommendationToggle > input:checked + .switchTrack::after {
+  transform: translateX(16px);
+}
+
+.recommendationToggle > input:focus-visible + .switchTrack {
+  outline: 3px solid color-mix(in srgb, var(--daust-orange) 30%, transparent);
+  outline-offset: 2px;
+}
+
+.recommendationToggle > input:disabled ~ * {
+  opacity: 0.55;
+}
+
+.recommendationToggle > span:last-child {
+  display: grid;
+  gap: 3px;
+}
+
+.recommendationToggle strong {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--fg1);
+  font-size: 12.5px;
+}
+
+.recommendationToggle small {
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.registrationActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.notice,
+.registrationError,
+.mappingWarning {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px 13px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.notice {
+  background: color-mix(in srgb, var(--success) 9%, var(--surface));
+  color: var(--success);
+}
+
+.registrationError {
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  color: var(--danger);
+}
+
+.mappingWarning {
+  margin: -4px 0 0;
+  background: color-mix(in srgb, var(--warning-500) 9%, var(--surface));
+  color: var(--warning);
+}
+
+.sectionHeading {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin: 0 0 12px;
+}
+
+.sectionHeading p {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--fg3);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.termGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.currentTerm {
+  border-radius: calc(var(--radius-lg) + 2px);
+  outline: 2px solid var(--daust-navy);
+  outline-offset: 2px;
+}
+
+.termBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.termDates {
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
+}
+
+.dateFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.tableScroll {
+  overflow-x: auto;
+}
+
+.tableScroll table {
+  min-width: 700px;
+}
+
+.closeWarning {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  color: var(--danger);
+}
+
+.closeWarning svg {
+  flex: 0 0 auto;
+}
+
+.closeWarning p {
+  margin: 5px 0 9px;
+  color: var(--fg2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.closeWarning small {
+  color: var(--fg3);
+}
+
+@media (max-width: 860px) {
+  .registrationPanel {
+    grid-template-columns: 1fr;
+  }
+
+  .registrationStatus {
+    border-right: 0;
+    border-bottom: 1px solid var(--divider);
+  }
+}
+
+@media (max-width: 600px) {
+  .registrationStatus,
+  .registrationForm {
+    padding: 17px 15px;
+  }
+
+  .registrationActions,
+  .registrationActions > * {
+    width: 100%;
+  }
+
+  .sectionHeading {
+    display: grid;
+  }
+
+  .sectionHeading p {
+    text-align: left;
+  }
+
+  .termGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dateFields {
+    grid-template-columns: 1fr;
+  }
+}

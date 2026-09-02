@@ -1,4 +1,9 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import {
+  INITIAL_BILLING_ADJUSTMENT_DEFINITIONS,
+  INITIAL_BILLING_CATALOG_ACADEMIC_YEAR,
+  INITIAL_BILLING_SERVICE_OPTIONS,
+} from "@mydaust/shared";
 
 /**
  * SIS reference data: grading scales, catalogue years, degree-audit requirement
@@ -158,7 +163,7 @@ const CATEGORY_BY_PREFIX: [RegExp, string][] = [
 
 /** The official DAUST payment plan: 4,285,000 full / 2,975,000 tuition-only a year. */
 const FEE_PLAN: [string, string, number, string][] = [
-  ["Fall", "Inscription", 1, "2026-08-25"],
+  ["Fall", "Inscription", 1, "2026-09-05"],
   ["Fall", "2nd installment", 2, "2026-11-05"],
   ["Spring", "3rd installment", 3, "2027-01-05"],
   ["Spring", "4th installment", 4, "2027-03-05"],
@@ -246,11 +251,100 @@ export async function seedSisReference(
   }
 
   for (const [label, status] of years) {
+    const isWorkbookCutoverYear =
+      label === INITIAL_BILLING_CATALOG_ACADEMIC_YEAR;
     await prisma.academicYear.upsert({
       where: { label },
-      update: { status },
-      create: { label, status },
+      update: {
+        status,
+        ...(isWorkbookCutoverYear
+          ? {
+              startsOn: new Date("2026-08-25T00:00:00.000Z"),
+              endsOn: new Date("2027-03-05T00:00:00.000Z"),
+            }
+          : {}),
+      },
+      create: {
+        label,
+        status,
+        ...(isWorkbookCutoverYear
+          ? {
+              startsOn: new Date("2026-08-25T00:00:00.000Z"),
+              endsOn: new Date("2027-03-05T00:00:00.000Z"),
+            }
+          : {}),
+      },
     });
+  }
+
+  const workbookCutoverYear = await prisma.academicYear.findUnique({
+    where: { label: INITIAL_BILLING_CATALOG_ACADEMIC_YEAR },
+    select: { id: true },
+  });
+  if (workbookCutoverYear) {
+    await prisma.term.upsert({
+      where: { name: "2026–2027 annual workbook billing" },
+      update: {
+        startDate: new Date("2026-08-25T00:00:00.000Z"),
+        endDate: new Date("2027-03-05T00:00:00.000Z"),
+        addDeadline: null,
+        dropDeadline: null,
+        academicYearId: workbookCutoverYear.id,
+        semester: "Annual",
+        status: "planning",
+      },
+      create: {
+        name: "2026–2027 annual workbook billing",
+        startDate: new Date("2026-08-25T00:00:00.000Z"),
+        endDate: new Date("2027-03-05T00:00:00.000Z"),
+        academicYearId: workbookCutoverYear.id,
+        semester: "Annual",
+        status: "planning",
+      },
+    });
+
+    // On an empty database the migration runs before reference AcademicYears
+    // exist, so its cutover-year INSERT ... SELECT intentionally has no rows to
+    // target. The deployment reference loader is therefore the second,
+    // idempotent bootstrap point. Existing catalog rows are never rewritten or
+    // reactivated here; subsequent changes belong to the approval workflow.
+    await prisma.billingServiceOption.createMany({
+      data: INITIAL_BILLING_SERVICE_OPTIONS.map((option) => ({
+        ...option,
+        academicYearLabel: INITIAL_BILLING_CATALOG_ACADEMIC_YEAR,
+        active: true,
+      })),
+      skipDuplicates: true,
+    });
+    await prisma.billingAdjustmentDefinition.createMany({
+      data: INITIAL_BILLING_ADJUSTMENT_DEFINITIONS.map((definition) => ({
+        ...definition,
+        academicYearLabel: INITIAL_BILLING_CATALOG_ACADEMIC_YEAR,
+        active: true,
+      })),
+      skipDuplicates: true,
+    });
+
+    const [serviceOptionCount, adjustmentDefinitionCount] = await Promise.all([
+      prisma.billingServiceOption.count({
+        where: {
+          academicYearLabel: INITIAL_BILLING_CATALOG_ACADEMIC_YEAR,
+        },
+      }),
+      prisma.billingAdjustmentDefinition.count({
+        where: {
+          academicYearLabel: INITIAL_BILLING_CATALOG_ACADEMIC_YEAR,
+        },
+      }),
+    ]);
+    if (
+      serviceOptionCount < INITIAL_BILLING_SERVICE_OPTIONS.length ||
+      adjustmentDefinitionCount < INITIAL_BILLING_ADJUSTMENT_DEFINITIONS.length
+    ) {
+      throw new Error(
+        "Billing catalog preflight failed for the workbook cutover year",
+      );
+    }
   }
 
   for (const [key, label, kind, sortOrder] of MANAGEMENT_CATEGORIES) {

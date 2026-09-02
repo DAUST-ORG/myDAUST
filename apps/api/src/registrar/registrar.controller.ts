@@ -89,6 +89,14 @@ const TermPatch = z.object({
   dropDeadline: z.string().min(8).nullish(),
 });
 
+const RegistrationConfigurationInput = z
+  .object({
+    termId: z.string().uuid().nullable(),
+    recommendationsEnabled: z.boolean(),
+    reason: z.string().trim().min(5).max(500),
+  })
+  .strict();
+
 const CurriculumInput = z.object({
   programCode: z.string().min(1).max(20),
   academicYearId: z.string().min(1).max(64),
@@ -145,6 +153,10 @@ const StudentDocumentInput = z.object({
   name: z.string().trim().max(200).nullish(),
 });
 
+const ArchiveStudentInput = z.object({
+  reason: z.string().trim().min(10).max(1000),
+});
+
 @Controller("registrar")
 @Roles("admin", "registrar")
 export class RegistrarController {
@@ -155,6 +167,24 @@ export class RegistrarController {
     return this.registrar.createStudent(
       user.personId,
       CreateStudentInput.parse(body),
+    );
+  }
+
+  /**
+   * Archive the SIS record without deleting academic, financial, guardian, document,
+   * or health history. This is admin-only because it revokes live student access.
+   */
+  @Post("students/:id/archive")
+  @Roles("admin")
+  archiveStudent(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.registrar.archiveStudent(
+      user.personId,
+      id,
+      ArchiveStudentInput.parse(body).reason,
     );
   }
 
@@ -389,6 +419,24 @@ export class RegistrarController {
   @Get("terms")
   terms() {
     return this.registrar.listTerms();
+  }
+
+  @Get("registration-configuration")
+  @Roles("admin", "registrar")
+  registrationConfiguration() {
+    return this.registrar.registrationConfiguration();
+  }
+
+  @Patch("registration-configuration")
+  @Roles("admin", "registrar")
+  updateRegistrationConfiguration(
+    @CurrentUser() user: AuthUser,
+    @Body() body: unknown,
+  ) {
+    return this.registrar.updateRegistrationConfiguration(
+      user.personId,
+      RegistrationConfigurationInput.parse(body),
+    );
   }
 
   @Patch("terms/:id")
