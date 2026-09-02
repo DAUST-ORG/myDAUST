@@ -215,7 +215,7 @@ export const REGISTRAR_NAV: PortalNav = {
     g("Overview", [
       { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
       {
-        href: "/admissions",
+        href: "/admin/admissions",
         label: "Admissions",
         icon: UserPlus,
         badgeKey: "admissions",
@@ -555,6 +555,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/admissions": {
     title: "Applicants",
     crumb: "Application pipeline · Admissions",
+  },
+  "/admin/admissions": {
+    title: "Applicants",
+    crumb: "Application pipeline · Registrar",
   },
   "/director/users": {
     title: "Users",

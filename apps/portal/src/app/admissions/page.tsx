@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { FilePlus2 } from "lucide-react";
 import {
@@ -27,6 +27,7 @@ import {
 import { useAuth } from "@/lib/use-auth";
 import { ApplicationModal, type ProgramOption } from "./ApplicationModal";
 import { ApplicantBillingAcceptanceModal } from "./[id]/ApplicantBillingAcceptanceModal";
+import { admissionsWorkspacePath } from "./workspace-path";
 
 /**
  * How long ago an application landed. Sits under the timestamp because "3 hours ago" is
@@ -96,6 +97,7 @@ const STAGE_ACTION: Record<string, StageAction> = {
 
 export default function AdmissionsPage() {
   const router = useRouter();
+  const basePath = admissionsWorkspacePath(usePathname());
   const { me } = useAuth();
   const isAdmin = me?.roles.includes("admin") ?? false;
   const [d, setD] = useState<Admissions | null>(null);
@@ -460,7 +462,7 @@ export default function AdmissionsPage() {
                     <tr
                       key={a.id}
                       style={{ cursor: "pointer" }}
-                      onClick={() => router.push(`/admissions/${a.id}`)}
+                      onClick={() => router.push(`${basePath}/${a.id}`)}
                     >
                       <td>
                         <div
@@ -613,7 +615,7 @@ export default function AdmissionsPage() {
           mode="create"
           programs={programOptions}
           onClose={() => setAdding(false)}
-          onSaved={(id) => router.push(`/admissions/${id}`)}
+          onSaved={(id) => router.push(`${basePath}/${id}`)}
         />
       )}
       {pendingAcceptance && isAdmin && (

@@ -19,6 +19,7 @@ import type {
   ManagedUser,
   ManagedUserPage,
 } from "@mydaust/shared";
+import { parseSuccessfulApiResponse } from "./api-response";
 export type {
   AccountBalanceSummary,
   AcademicCatalogDraft,
@@ -107,9 +108,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) throw await toApiError(res);
   const ct = res.headers.get("content-type") ?? "";
-  return (
-    ct.includes("application/json") ? res.json() : res.text()
-  ) as Promise<T>;
+  return parseSuccessfulApiResponse<T>(await res.text(), ct);
 }
 
 async function multipartRequest<T>(path: string, form: FormData): Promise<T> {
@@ -363,6 +362,11 @@ export interface BillingInvoice {
   id: string;
   /** Additive canonical tie-breaker; absent while an older API task drains. */
   createdAt?: string;
+  /** Student-facing description; annual workbook baselines use the normal schedule label. */
+  label?: string;
+  description?: string | null;
+  packageType?: InvoicePackageType;
+  academicYearLabel?: string | null;
   term: string;
   total: number;
   paid: number;
@@ -1284,6 +1288,8 @@ export interface AdminStudentDirectoryRow {
 }
 export type AdminStudentRosterSort =
   "name" | "program" | "level" | "gpa" | "balance" | "status";
+export type AdminStudentLoginFilter =
+  "all" | "active" | "must_change" | "not_activated";
 export interface AdminStudentRosterPage {
   items: AdminStudent[];
   page: number;
@@ -1312,6 +1318,9 @@ export interface AdminStudentRosterParams {
   level?: string;
   gender?: string;
   nationality?: string;
+  /** Approved-catalog standing code, for example `good_standing`. */
+  standing?: string;
+  login?: AdminStudentLoginFilter;
   sort?: AdminStudentRosterSort;
   direction?: "asc" | "desc";
 }
@@ -1545,6 +1554,12 @@ export const getAdminStudentRoster = (
   }
   if (params.nationality && params.nationality !== "all") {
     query.set("nationality", params.nationality);
+  }
+  if (params.standing && params.standing !== "all") {
+    query.set("standing", params.standing);
+  }
+  if (params.login && params.login !== "all") {
+    query.set("login", params.login);
   }
   if (params.sort) query.set("sort", params.sort);
   if (params.direction) query.set("direction", params.direction);
