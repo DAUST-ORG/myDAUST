@@ -635,59 +635,69 @@ export class FinanceService {
     });
     const position = deriveApiAccountPosition(invoices);
     const derived = derivedInstallmentsById(position);
-    return invoices.map((inv) => {
-      const summary = invoicePositionSummary(position, inv.id);
-      return {
-        id: inv.id,
-        createdAt: inv.createdAt,
-        term: inv.term.name,
-        packageType: inv.packageType,
-        academicYearLabel: inv.academicYearLabel,
-        feeScheduleRevision: inv.feeScheduleRevision,
-        total: inv.totalAmount,
-        paid: inv.amountPaid,
-        balance: inv.status === "void" ? 0 : inv.totalAmount - inv.amountPaid,
-        status:
-          inv.status === "void"
-            ? "void"
-            : inv.totalAmount - inv.amountPaid <= 0
-              ? "paid"
-              : inv.amountPaid > 0
-                ? "partial"
-                : "open",
-        summary,
-        effectiveOutstandingXof: summary.outstandingXof,
-        effectiveStatus: summary.standing,
-        installments: (inv.plan?.installments ?? []).map((installment) => ({
-          ...decorateInstallment(installment, derived),
-          components: (installment.components ?? []).map((component) => ({
-            id: component.id,
-            invoiceComponentId: component.invoiceComponentId,
-            componentKey: component.invoiceComponent.kind,
-            label:
-              component.invoiceComponent.label ||
-              displayFeeComponentLabel(component.invoiceComponent.kind),
-            amountXof: component.amountDue,
+    // Voided invoices remain in the Finance ledger and cutover provenance, but
+    // they are not a second student payment schedule. This projection is the
+    // student-facing current account only.
+    return invoices
+      .filter((inv) => inv.status !== "void")
+      .map((inv) => {
+        const summary = invoicePositionSummary(position, inv.id);
+        return {
+          id: inv.id,
+          createdAt: inv.createdAt,
+          label:
+            inv.packageType === "standard_full"
+              ? "Annual fee schedule"
+              : inv.description?.trim() || `${inv.term.name} charges`,
+          description: inv.description,
+          term: inv.term.name,
+          packageType: inv.packageType,
+          academicYearLabel: inv.academicYearLabel,
+          feeScheduleRevision: inv.feeScheduleRevision,
+          total: inv.totalAmount,
+          paid: inv.amountPaid,
+          balance: inv.status === "void" ? 0 : inv.totalAmount - inv.amountPaid,
+          status:
+            inv.status === "void"
+              ? "void"
+              : inv.totalAmount - inv.amountPaid <= 0
+                ? "paid"
+                : inv.amountPaid > 0
+                  ? "partial"
+                  : "open",
+          summary,
+          effectiveOutstandingXof: summary.outstandingXof,
+          effectiveStatus: summary.standing,
+          installments: (inv.plan?.installments ?? []).map((installment) => ({
+            ...decorateInstallment(installment, derived),
+            components: (installment.components ?? []).map((component) => ({
+              id: component.id,
+              invoiceComponentId: component.invoiceComponentId,
+              componentKey: component.invoiceComponent.kind,
+              label:
+                component.invoiceComponent.label ||
+                displayFeeComponentLabel(component.invoiceComponent.kind),
+              amountXof: component.amountDue,
+            })),
           })),
-        })),
-        payments: inv.payments.map((p) => ({
-          id: p.id,
-          amount: p.amount,
-          method: p.method,
-          status: p.status,
-          providerRef: p.providerRef,
-          transactionReference: p.submission?.bankReference ?? null,
-          source: p.source,
-          initiatedByEmail: p.initiatedByEmail,
-          ...paymentDateProjection(p),
-          refundedAt: p.refundedAt,
-          createdAt: p.createdAt,
-        })),
-        wireTransfers: inv.paymentSubmissions
-          .filter((submission) => submission.source !== "finance_manual")
-          .map((submission) => this.wireSummary(submission)),
-      };
-    });
+          payments: inv.payments.map((p) => ({
+            id: p.id,
+            amount: p.amount,
+            method: p.method,
+            status: p.status,
+            providerRef: p.providerRef,
+            transactionReference: p.submission?.bankReference ?? null,
+            source: p.source,
+            initiatedByEmail: p.initiatedByEmail,
+            ...paymentDateProjection(p),
+            refundedAt: p.refundedAt,
+            createdAt: p.createdAt,
+          })),
+          wireTransfers: inv.paymentSubmissions
+            .filter((submission) => submission.source !== "finance_manual")
+            .map((submission) => this.wireSummary(submission)),
+        };
+      });
   }
 
   /** Additive account summary for the student portal; keeps `/my/billing` array-compatible. */

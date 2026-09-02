@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -41,6 +41,7 @@ import { Avatar, Badge, type BadgeTone, Modal, Tabs } from "@/components/ui";
 import { useAuth } from "@/lib/use-auth";
 import { ApplicationModal, type ProgramOption } from "../ApplicationModal";
 import { ApplicantBillingAcceptanceModal } from "./ApplicantBillingAcceptanceModal";
+import { admissionsWorkspacePath } from "../workspace-path";
 
 const STAGES = ["submitted", "review", "interview", "offer", "accepted"];
 const STAGE_TONE: Record<string, BadgeTone> = {
@@ -88,6 +89,7 @@ const ADVANCE_LABEL: Record<string, string> = {
 
 export default function ApplicantDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const basePath = admissionsWorkspacePath(usePathname());
   const { me } = useAuth();
   const isAdmin = me?.roles.includes("admin") ?? false;
   // Rotating a payment link and opening the student record
@@ -225,7 +227,7 @@ export default function ApplicantDetailPage() {
         }}
       >
         <Link
-          href="/admissions"
+          href={basePath}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -238,7 +240,7 @@ export default function ApplicantDetailPage() {
           <ArrowLeft size={16} /> All applicants
         </Link>
         <Link
-          href={`/admissions/${a.id}/notes`}
+          href={`${basePath}/${a.id}/notes`}
           style={{
             display: "inline-flex",
             alignItems: "center",
