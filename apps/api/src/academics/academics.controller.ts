@@ -172,6 +172,10 @@ const AdminStudentRosterQueryInput = z.object({
   // Student.nationality is free-text country names typed by registrars. Same shape
   // as `gender`.
   nationality: z.string().trim().max(40).optional(),
+  // Standing is derived from the approved academic catalog after transcript
+  // totals are calculated, so the service applies this filter after hydration.
+  standing: z.string().trim().max(40).optional(),
+  login: z.enum(["active", "must_change", "not_activated"]).optional(),
   sort: z
     .enum(["name", "program", "level", "gpa", "balance", "status"])
     .default("name"),
@@ -306,6 +310,11 @@ export class AcademicsController {
         parsed.nationality && parsed.nationality !== "all"
           ? parsed.nationality
           : undefined,
+      standing:
+        parsed.standing && parsed.standing !== "all"
+          ? parsed.standing
+          : undefined,
+      login: parsed.login,
     });
   }
 

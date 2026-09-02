@@ -29,6 +29,7 @@ import {
   academicYearStart,
   normalizeRegistrationSemester,
   readRegistrationConfiguration,
+  REGISTRATION_SEMESTERS,
   registrationClosedReason,
   type RegistrationClosedReason,
   type RegistrationSemester,
@@ -106,6 +107,10 @@ export interface AdminStudentRosterQuery {
   // Free-text on Student.gender / Student.nationality. Case-insensitive contains.
   gender?: string;
   nationality?: string;
+  /** Approved-catalog academic standing code; derived after transcript hydration. */
+  standing?: string;
+  /** Account activation state, pushed down to the related Person row. */
+  login?: "active" | "must_change" | "not_activated";
   sort: "name" | "program" | "level" | "gpa" | "balance" | "status";
   direction: "asc" | "desc";
 }
@@ -397,15 +402,33 @@ export class AcademicsService {
     this.billingProfiles = billingProfiles ?? new BillingProfileService(prisma);
   }
 
-  /** The active/upcoming term (the one registration targets). */
+  /**
+   * The active/upcoming teaching term.
+   *
+   * Annual billing periods also use the Term table so one invoice can span all
+   * workbook installments. They are not teaching terms and have no sections;
+   * without this boundary an earlier billing period can hide every real class
+   * from registration, schedules, and faculty workspaces.
+   */
   async currentTerm() {
     const now = new Date();
+    const teachingTermWhere: Prisma.TermWhereInput = {
+      OR: [
+        { semester: { in: [...REGISTRATION_SEMESTERS] } },
+        // Preserve legacy teaching terms created before semester was stored.
+        { sections: { some: {} } },
+      ],
+    };
     const upcoming = await this.prisma.term.findFirst({
-      where: { endDate: { gte: now } },
+      where: { ...teachingTermWhere, endDate: { gte: now } },
       orderBy: { startDate: "asc" },
     });
     return (
-      upcoming ?? this.prisma.term.findFirst({ orderBy: { startDate: "desc" } })
+      upcoming ??
+      this.prisma.term.findFirst({
+        where: teachingTermWhere,
+        orderBy: { startDate: "desc" },
+      })
     );
   }
 
@@ -2775,7 +2798,7 @@ export class AcademicsService {
   private adminStudentRosterWhere(
     query: Pick<
       AdminStudentRosterQuery,
-      "search" | "program" | "gender" | "nationality"
+      "search" | "program" | "gender" | "nationality" | "login"
     >,
   ): Prisma.StudentWhereInput {
     const searchTokens =
@@ -2795,6 +2818,21 @@ export class AcademicsService {
       ...(trimmedNationality
         ? { nationality: { contains: trimmedNationality, mode: "insensitive" } }
         : {}),
+      ...(query.login === "active"
+        ? {
+            person: {
+              is: { passwordHash: { not: null }, mustChangePassword: false },
+            },
+          }
+        : query.login === "must_change"
+          ? { person: { is: { mustChangePassword: true } } }
+          : query.login === "not_activated"
+            ? {
+                person: {
+                  is: { passwordHash: null, mustChangePassword: false },
+                },
+              }
+            : {}),
       ...(searchTokens.length > 0
         ? {
             AND: searchTokens.map((token) => ({
@@ -2853,7 +2891,10 @@ export class AcademicsService {
     const derivedSort = ["level", "gpa", "balance", "status"].includes(
       query.sort,
     );
-    const fetchAll = derivedSort || Boolean(query.level?.trim());
+    const fetchAll =
+      derivedSort ||
+      Boolean(query.level?.trim()) ||
+      Boolean(query.standing?.trim());
     const recordsPromise = fetchAll
       ? this.prisma.student.findMany({
           where,
@@ -2960,9 +3001,18 @@ export class AcademicsService {
         !!code && code.toUpperCase() === requestedLevel.toUpperCase();
       items = items.filter((row) => matchesLevel(row.academicLevel?.code));
     }
+    const requestedStanding = query.standing?.trim();
+    if (requestedStanding) {
+      items = items.filter(
+        (row) =>
+          row.academicStanding?.code.toLocaleLowerCase() ===
+          requestedStanding.toLocaleLowerCase(),
+      );
+    }
     // Counted BEFORE paginating. Reading items.length after the slice caps the total at
     // pageSize, which collapses totalPages to 1 and strands every student past page one.
-    const filteredTotal = requestedLevel ? items.length : total;
+    const filteredTotal =
+      requestedLevel || requestedStanding ? items.length : total;
     if (fetchAll) {
       const direction = query.direction === "asc" ? 1 : -1;
       // Only a derived sort belongs in the comparator below: its fallback branch orders by

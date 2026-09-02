@@ -54,6 +54,15 @@ interface ChargeRow extends InstallmentPositionLike {
   status: string;
 }
 
+function billingInvoiceLabel(invoice: BillingInvoice): string {
+  return (
+    invoice.label ??
+    (invoice.packageType === "standard_full"
+      ? "Annual fee schedule"
+      : invoice.description?.trim() || invoice.term)
+  );
+}
+
 function statusStyle(charge: ChargeRow): {
   bg: string;
   fg: string;
@@ -149,13 +158,21 @@ export default function BillingPage() {
       .catch(() => {});
   }, []);
 
+  // Mixed-version compatibility: the current API omits voided ledger history,
+  // while an older task may still return it during rollout.
+  const currentInvoices = useMemo(
+    () => invoices.filter((invoice) => invoice.status !== "void"),
+    [invoices],
+  );
+
   const charges: ChargeRow[] = useMemo(
     () =>
-      invoices
+      currentInvoices
         .flatMap((inv, invoiceIndex) => {
           // `/my/billing` is returned newest-first. The index keeps the portal
           // compatible with an older API task while `createdAt` rolls out.
-          const invoiceOrder = invoices.length - 1 - invoiceIndex;
+          const invoiceOrder = currentInvoices.length - 1 - invoiceIndex;
+          const scheduleLabel = billingInvoiceLabel(inv);
           const scheduled = inv.installments.map<ChargeRow>((i) => ({
             ...i,
             id: i.id,
@@ -163,16 +180,16 @@ export default function BillingPage() {
             invoiceCreatedAt: inv.createdAt ?? null,
             invoiceOrder,
             sequence: i.sequence,
-            description: `Installment ${i.sequence} — ${inv.term}`,
+            description: `${scheduleLabel} · Installment ${i.sequence}`,
             note:
               i.components && i.components.length > 0
-                ? i.components
+                ? `${inv.term} · ${i.components
                     .map(
                       (component) =>
                         `${component.label}: ${formatXof(component.amountXof)}`,
                     )
-                    .join(" · ")
-                : `Installment ${i.sequence} of ${inv.installments.length}`,
+                    .join(" · ")}`
+                : `${inv.term} · Installment ${i.sequence} of ${inv.installments.length}`,
             amount: i.amountDue,
             outstanding: installmentOutstanding(i),
             dueDate: i.dueDate,
@@ -229,14 +246,14 @@ export default function BillingPage() {
             (a.id ?? "").localeCompare(b.id ?? "")
           );
         }),
-    [invoices],
+    [currentInvoices],
   );
 
-  const balance = invoices.reduce((s, i) => s + i.balance, 0);
+  const balance = currentInvoices.reduce((s, i) => s + i.balance, 0);
   const accountSummary = resolveAccountSummary(billingSummary, {
     balanceXof: balance,
-    billedXof: invoices.reduce((sum, invoice) => sum + invoice.total, 0),
-    installments: invoices.flatMap((invoice) => invoice.installments),
+    billedXof: currentInvoices.reduce((sum, invoice) => sum + invoice.total, 0),
+    installments: currentInvoices.flatMap((invoice) => invoice.installments),
   });
   const accountMeta = accountPresentation(accountSummary);
   const nextCharge = charges.find((c) => c.outstanding > 0);
@@ -252,20 +269,22 @@ export default function BillingPage() {
   const settled = accountSummary.outstandingXof <= 0;
   const payments = useMemo(
     () =>
-      invoices
+      currentInvoices
         .flatMap((invoice) =>
-          invoice.payments.map((payment) => ({
-            ...payment,
-            invoiceLabel: invoice.term,
-            datePresentation: paymentDatePresentation(payment),
-          })),
+          invoice.payments
+            .filter((payment) => payment.status !== "cancelled")
+            .map((payment) => ({
+              ...payment,
+              invoiceLabel: billingInvoiceLabel(invoice),
+              datePresentation: paymentDatePresentation(payment),
+            })),
         )
         .sort((left, right) =>
           right.datePresentation.sortAt.localeCompare(
             left.datePresentation.sortAt,
           ),
         ),
-    [invoices],
+    [currentInvoices],
   );
 
   async function refreshBilling() {
@@ -349,7 +368,7 @@ export default function BillingPage() {
         <BillingProfileSummary profile={billingProfile} />
       </div>
 
-      {loaded && invoices.length === 0 ? (
+      {loaded && currentInvoices.length === 0 ? (
         <EmptyState
           title="No invoices yet"
           note="Charges appear here once the bursar issues them."
@@ -608,7 +627,7 @@ export default function BillingPage() {
                   </span>
                   <span style={{ display: "grid", gap: 2, minWidth: 0 }}>
                     <strong style={{ fontSize: 13 }}>
-                      {formatXof(payment.amount)} · {payment.invoiceLabel}
+                      {payment.invoiceLabel}
                     </strong>
                     <small className="muted">
                       {payment.method.replaceAll("_", " ")}
@@ -620,17 +639,53 @@ export default function BillingPage() {
                         : ""}
                     </small>
                   </span>
-                  <Badge
-                    tone={
-                      payment.status === "success"
-                        ? "success"
-                        : payment.status === "pending"
-                          ? "warning"
-                          : "neutral"
-                    }
+                  <span
+                    style={{
+                      display: "grid",
+                      gap: 1,
+                      justifyItems: "end",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    {payment.status}
-                  </Badge>
+                    <small
+                      className="muted"
+                      style={{
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        letterSpacing: ".055em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Payment amount
+                    </small>
+                    <strong
+                      style={{
+                        color: "var(--daust-navy)",
+                        fontFamily: "var(--font-display)",
+                        fontSize: 16,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {formatXof(payment.amount)}
+                    </strong>
+                    <Badge
+                      tone={
+                        payment.status === "success"
+                          ? "success"
+                          : payment.status === "pending"
+                            ? "warning"
+                            : "neutral"
+                      }
+                    >
+                      {payment.status === "success"
+                        ? "Paid"
+                        : payment.status === "pending"
+                          ? "Pending"
+                          : payment.status === "refunded"
+                            ? "Refunded"
+                            : payment.status.replaceAll("_", " ")}
+                    </Badge>
+                  </span>
                 </div>
               ))}
             </div>

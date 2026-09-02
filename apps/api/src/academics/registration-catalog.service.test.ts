@@ -160,6 +160,67 @@ function configuredPrisma(options?: {
 }
 
 describe("AcademicsService.registrationCatalog", () => {
+  it("selects a teaching term instead of an annual billing-only period in legacy mode", async () => {
+    const findFirst = vi.fn(async () => term());
+    const prisma = {
+      appSetting: { findUnique: vi.fn(async () => null) },
+      student: { findUnique: vi.fn(async () => student()) },
+      studentHold: { findMany: vi.fn(async () => []) },
+      term: {
+        findFirst,
+        findUnique: vi.fn(async () => term()),
+      },
+      section: { findMany: vi.fn(async () => [section()]) },
+      enrollment: { findMany: vi.fn(async () => []) },
+      transcriptEntry: { findMany: vi.fn(async () => []) },
+    };
+
+    const result = await new AcademicsService(
+      prisma as never,
+    ).registrationCatalog("student-1");
+
+    expect(result).toMatchObject({
+      term: { id: termId, semester: "Fall" },
+      registration: { mode: "legacy", open: true },
+      sections: [expect.objectContaining({ courseCode: "CSC 101" })],
+    });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        endDate: { gte: expect.any(Date) },
+        OR: [
+          { semester: { in: ["Fall", "Spring", "Summer"] } },
+          { sections: { some: {} } },
+        ],
+      },
+      orderBy: { startDate: "asc" },
+    });
+  });
+
+  it("keeps the teaching-term boundary when falling back to the latest historical term", async () => {
+    const historical = term({
+      name: "Spring 2028",
+      semester: "Spring",
+      startDate: new Date("2028-01-10T00:00:00.000Z"),
+      endDate: new Date("2028-05-20T00:00:00.000Z"),
+    });
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(historical);
+    const service = new AcademicsService({ term: { findFirst } } as never);
+
+    await expect(service.currentTerm()).resolves.toEqual(historical);
+    expect(findFirst).toHaveBeenNthCalledWith(2, {
+      where: {
+        OR: [
+          { semester: { in: ["Fall", "Spring", "Summer"] } },
+          { sections: { some: {} } },
+        ],
+      },
+      orderBy: { startDate: "desc" },
+    });
+  });
+
   it("rejects a requested term that differs from the designated term", async () => {
     const prisma = {
       appSetting: {
