@@ -52,7 +52,7 @@ const SEMESTERS = z.array(z.enum(["fall", "spring", "summer"]));
 const CreateCourseInput = z.object({
   code: z.string().min(1).max(20),
   title: z.string().min(1).max(160),
-  credits: z.number().int().min(1).max(12),
+  credits: z.number().int().min(1).max(30),
   departmentId: z.string().min(1),
   status: z.enum(["active", "draft"]).optional(),
   description: z.string().max(2000).nullish(),
@@ -72,7 +72,7 @@ const UpdateProgramInput = z.object({
 
 const UpdateCourseInput = z.object({
   title: z.string().min(1).max(160).optional(),
-  credits: z.number().int().min(1).max(12).optional(),
+  credits: z.number().int().min(1).max(30).optional(),
   departmentId: z.string().min(1).optional(),
   status: z.enum(["active", "draft"]).optional(),
   description: z.string().max(2000).nullish(),
