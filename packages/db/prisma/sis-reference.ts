@@ -163,7 +163,7 @@ const CATEGORY_BY_PREFIX: [RegExp, string][] = [
 
 /** The official DAUST payment plan: 4,285,000 full / 2,975,000 tuition-only a year. */
 const FEE_PLAN: [string, string, number, string][] = [
-  ["Fall", "Inscription", 1, "2026-08-25"],
+  ["Fall", "Inscription", 1, "2026-09-05"],
   ["Fall", "2nd installment", 2, "2026-11-05"],
   ["Spring", "3rd installment", 3, "2027-01-05"],
   ["Spring", "4th installment", 4, "2027-03-05"],
