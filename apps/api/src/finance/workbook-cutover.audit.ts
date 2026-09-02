@@ -73,6 +73,16 @@ export interface WorkbookCutoverBatchAuditResult {
   replayAnchorManifestCount: 1;
 }
 
+/**
+ * The cutover audit is strict by default. A later, independently reviewed
+ * lifecycle operation may protect a narrower Student set while allowing
+ * ordinary payment activity that was created after the cutover for other
+ * Students. Cutover evidence and reconstruction rows remain strict globally.
+ */
+export interface WorkbookCutoverBatchAuditOptions {
+  protectedPaymentActivityStudentIds?: readonly string[];
+}
+
 type AcademicClient = Pick<PrismaClient, "student">;
 
 type AcademicEvidence = WorkbookCutoverAcademicFingerprint & {
@@ -2634,6 +2644,7 @@ async function auditApplicantRemovals(input: {
 export async function auditWorkbookCutoverBatch(
   prisma: PrismaClient,
   batchId: string,
+  options: WorkbookCutoverBatchAuditOptions = {},
 ): Promise<WorkbookCutoverBatchAuditResult> {
   const batch = await prisma.workbookCutoverBatch.findUnique({
     where: { id: batchId },
@@ -2677,6 +2688,26 @@ export async function auditWorkbookCutoverBatch(
   const includedStudentIds = [
     ...new Set(groups.included.map((record) => record.studentId!)),
   ];
+  const protectedPaymentActivityStudentIds =
+    options.protectedPaymentActivityStudentIds === undefined
+      ? null
+      : new Set(options.protectedPaymentActivityStudentIds);
+  if (protectedPaymentActivityStudentIds) {
+    assert(
+      protectedPaymentActivityStudentIds.size ===
+        options.protectedPaymentActivityStudentIds!.length,
+      "protected payment-activity scope repeats a Student ID",
+    );
+    const originalProductionStudentIds = new Set(
+      groups.production.map((record) => record.studentId!),
+    );
+    assert(
+      [...protectedPaymentActivityStudentIds].every((studentId) =>
+        originalProductionStudentIds.has(studentId),
+      ),
+      "protected payment-activity scope contains a non-batch Student",
+    );
+  }
   const batchAuditLogs = await prisma.auditLog.findMany({
     where: {
       entity: WORKBOOK_CUTOVER_BATCH_AUDIT.entity,
@@ -2766,7 +2797,7 @@ export async function auditWorkbookCutoverBatch(
   const [includedInvoiceReferences, onboardingApplicants] = await Promise.all([
     prisma.invoice.findMany({
       where: { studentId: { in: includedStudentIds } },
-      select: { id: true },
+      select: { id: true, studentId: true },
     }),
     prisma.applicant.findMany({
       where: { studentId: { in: includedStudentIds } },
@@ -2841,6 +2872,7 @@ export async function auditWorkbookCutoverBatch(
       costCenterCode: true,
       dueDate: true,
       token: true,
+      createdAt: true,
     },
   });
   const sourcePaymentLinkIds = sourcePaymentLinks.map((row) => row.id);
@@ -2865,7 +2897,13 @@ export async function auditWorkbookCutoverBatch(
         studentId: { in: includedStudentIds },
         status: { in: ["success", "pending", "refund_pending"] },
       },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        studentId: true,
+        invoiceId: true,
+        createdAt: true,
+      },
     }),
     prisma.auditLog.findMany({
       where: {
@@ -2906,7 +2944,17 @@ export async function auditWorkbookCutoverBatch(
           },
         ],
       },
-      select: { id: true, status: true, resumeToken: true },
+      select: {
+        id: true,
+        status: true,
+        resumeToken: true,
+        studentId: true,
+        invoiceId: true,
+        applicantId: true,
+        paymentId: true,
+        paymentLinkId: true,
+        createdAt: true,
+      },
     }),
     prisma.piSpiRequest.findMany({
       where: {
@@ -2919,7 +2967,16 @@ export async function auditWorkbookCutoverBatch(
           { id: { in: batchEvidence.cancelledPiSpiRequestIds } },
         ],
       },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        studentId: true,
+        invoiceId: true,
+        applicantId: true,
+        paymentId: true,
+        paymentLinkId: true,
+        createdAt: true,
+      },
     }),
     prisma.payment.findMany({
       where: {
@@ -2928,7 +2985,13 @@ export async function auditWorkbookCutoverBatch(
           { id: { in: batchEvidence.cancelledPendingPaymentIds } },
         ],
       },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        studentId: true,
+        invoiceId: true,
+        createdAt: true,
+      },
     }),
     prisma.workbookCutoverBatch.count({
       where: { confirmationPlanSha256: batch.confirmationPlanSha256 },
@@ -2987,12 +3050,89 @@ export async function auditWorkbookCutoverBatch(
     ) && effectiveInvoices.length === permittedEffectiveInvoiceIds.size,
     "an included Student retains an unvoided pre-cutover invoice or credit",
   );
+  const invoiceStudentById = new Map(
+    includedInvoiceReferences.map((invoice) => [invoice.id, invoice.studentId]),
+  );
+  const applicantStudentById = new Map(
+    onboardingApplicants.map((applicant) => [
+      applicant.id,
+      applicant.studentId,
+    ]),
+  );
+  const paymentStudentById = new Map(
+    sourcePendingPayments.map((payment) => [payment.id, payment.studentId]),
+  );
+  const paymentLinkById = new Map(
+    sourcePaymentLinks.map((link) => [link.id, link]),
+  );
+  const removedApplicantIdSet = new Set(removedApplicantIds);
+  const includedStudentIdSet = new Set(includedStudentIds);
+  const isPermittedPostCutoverActivity = (row: {
+    createdAt: Date;
+    studentId?: string | null;
+    invoiceId?: string | null;
+    applicantId?: string | null;
+    paymentId?: string | null;
+    paymentLinkId?: string | null;
+  }): boolean => {
+    if (
+      protectedPaymentActivityStudentIds === null ||
+      !batch.importedAt ||
+      !(row.createdAt instanceof Date) ||
+      row.createdAt.getTime() <= batch.importedAt.getTime()
+    ) {
+      return false;
+    }
+    const owners = new Set<string>();
+    const addOwner = (studentId: string | null | undefined): boolean => {
+      if (!studentId) return true;
+      owners.add(studentId);
+      return !protectedPaymentActivityStudentIds.has(studentId);
+    };
+    if (!addOwner(row.studentId)) return false;
+    if (row.invoiceId) {
+      const invoiceStudentId = invoiceStudentById.get(row.invoiceId);
+      if (!invoiceStudentId || !addOwner(invoiceStudentId)) return false;
+    }
+    if (row.applicantId) {
+      if (removedApplicantIdSet.has(row.applicantId)) return false;
+      const applicantStudentId = applicantStudentById.get(row.applicantId);
+      if (!applicantStudentId || !addOwner(applicantStudentId)) return false;
+    }
+    if (row.paymentId) {
+      const paymentStudentId = paymentStudentById.get(row.paymentId);
+      if (!paymentStudentId || !addOwner(paymentStudentId)) return false;
+    }
+    if (row.paymentLinkId) {
+      const link = paymentLinkById.get(row.paymentLinkId);
+      if (!link || !addOwner(link.studentId)) return false;
+      if (link.invoiceId) {
+        const invoiceStudentId = invoiceStudentById.get(link.invoiceId);
+        if (!invoiceStudentId || !addOwner(invoiceStudentId)) return false;
+      }
+      if (link.onboardingApplicantId) {
+        if (removedApplicantIdSet.has(link.onboardingApplicantId)) return false;
+        const applicantStudentId = applicantStudentById.get(
+          link.onboardingApplicantId,
+        );
+        if (!applicantStudentId || !addOwner(applicantStudentId)) return false;
+      }
+    }
+    return (
+      owners.size === 1 &&
+      [...owners].every((studentId) => includedStudentIdSet.has(studentId))
+    );
+  };
   const reconstructionSet = new Set(reconstructionPaymentIds);
   assert(
     effectivePayments.every(
       (payment) =>
-        payment.status === "success" && reconstructionSet.has(payment.id),
-    ) && effectivePayments.length === reconstructionPaymentIds.length,
+        (payment.status === "success" && reconstructionSet.has(payment.id)) ||
+        (!reconstructionSet.has(payment.id) &&
+          isPermittedPostCutoverActivity(payment)),
+    ) &&
+      effectivePayments.filter((payment) => reconstructionSet.has(payment.id))
+        .length === reconstructionPaymentIds.length,
     "an included Student retains an effective pre-cutover payment",
   );
 
@@ -3061,8 +3201,11 @@ export async function auditWorkbookCutoverBatch(
   assert(
     sourcePaymentSubmissions.every(
       (row) =>
-        !["awaiting_proof", "submitted"].includes(row.status) &&
-        row.resumeToken === null,
+        (!["awaiting_proof", "submitted"].includes(row.status) &&
+          row.resumeToken === null) ||
+        (!evidenceIds.submission.has(row.id) &&
+          !evidenceIds.submissionResumeToken.has(row.id) &&
+          isPermittedPostCutoverActivity(row)),
     ) &&
       [...evidenceIds.submission].every((id) =>
         sourcePaymentSubmissions.some(
@@ -3079,10 +3222,16 @@ export async function auditWorkbookCutoverBatch(
   assert(
     sourcePaymentLinks.every(
       (row) =>
-        row.status !== "active" || allowedActivePaymentLinkIds.has(row.id),
+        row.status !== "active" ||
+        allowedActivePaymentLinkIds.has(row.id) ||
+        (!evidenceIds.link.has(row.id) &&
+          !evidenceIds.linkToken.has(row.id) &&
+          isPermittedPostCutoverActivity(row)),
     ) &&
-      sourcePaymentLinks.filter((row) => row.status === "active").length ===
-        allowedActivePaymentLinkIds.size &&
+      sourcePaymentLinks.filter(
+        (row) =>
+          row.status === "active" && allowedActivePaymentLinkIds.has(row.id),
+      ).length === allowedActivePaymentLinkIds.size &&
       [...evidenceIds.link].every((id) =>
         sourcePaymentLinks.some(
           (row) => row.id === id && row.status === "cancelled",
@@ -3100,7 +3249,9 @@ export async function auditWorkbookCutoverBatch(
   );
   assert(
     sourcePiSpiRequests.every(
-      (row) => !["initiated", "sent"].includes(row.status),
+      (row) =>
+        !["initiated", "sent"].includes(row.status) ||
+        (!evidenceIds.piSpi.has(row.id) && isPermittedPostCutoverActivity(row)),
     ) &&
       [...evidenceIds.piSpi].every((id) =>
         sourcePiSpiRequests.some(
@@ -3111,7 +3262,10 @@ export async function auditWorkbookCutoverBatch(
   );
   assert(
     sourcePendingPayments.every(
-      (row) => !["pending", "refund_pending"].includes(row.status),
+      (row) =>
+        !["pending", "refund_pending"].includes(row.status) ||
+        (!evidenceIds.payment.has(row.id) &&
+          isPermittedPostCutoverActivity(row)),
     ) &&
       [...evidenceIds.payment].every((id) =>
         sourcePendingPayments.some(

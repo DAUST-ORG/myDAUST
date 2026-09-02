@@ -415,11 +415,13 @@ async function existingSummary(
 async function assertOriginalCutoverAuditHealthy(
   db: PendingActivationDb,
   batchId: string,
+  protectedStudentIds: readonly string[],
 ): Promise<void> {
   try {
     const audit = await auditWorkbookCutoverBatch(
       db as unknown as PrismaClient,
       batchId,
+      { protectedPaymentActivityStudentIds: protectedStudentIds },
     );
     if (!audit.ok) {
       throw new Error("original cutover audit returned a non-success result");
@@ -1261,8 +1263,12 @@ export async function planWorkbookPendingActivationFromDatabase(
       targets: [],
     };
   }
-  await assertOriginalCutoverAuditHealthy(db, input.batchId);
   const state = await captureState(db, input.batchId, input.actorEmail);
+  await assertOriginalCutoverAuditHealthy(
+    db,
+    input.batchId,
+    state.targets.map((target) => target.student.id),
+  );
   return buildWorkbookPendingActivationPlan(state, input.batchId);
 }
 
@@ -1622,14 +1628,17 @@ async function executeInsideTransaction(
     };
   }
 
-  await assertOriginalCutoverAuditHealthy(tx, input.batchId);
-
   const initialState = await captureState(tx, input.batchId, input.actorEmail);
   const initialPlan = buildWorkbookPendingActivationPlan(
     initialState,
     input.batchId,
   );
   assertConfirmable(initialPlan);
+  await assertOriginalCutoverAuditHealthy(
+    tx,
+    input.batchId,
+    initialPlan.targets.map((target) => target.student.id),
+  );
   await lockPlanRows(tx, initialPlan);
   const lockedState = await captureState(tx, input.batchId, input.actorEmail);
   const plan = buildWorkbookPendingActivationPlan(lockedState, input.batchId);
@@ -1922,7 +1931,11 @@ export async function auditWorkbookPendingActivation(
     batchId,
     summary,
   );
-  const originalCutoverAudit = await auditWorkbookCutoverBatch(prisma, batchId);
+  const originalCutoverAudit = await auditWorkbookCutoverBatch(
+    prisma,
+    batchId,
+    { protectedPaymentActivityStudentIds: summary.studentIds },
+  );
   const [
     students,
     applicants,
