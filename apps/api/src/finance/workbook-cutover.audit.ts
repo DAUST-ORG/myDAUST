@@ -2681,6 +2681,7 @@ export async function auditWorkbookCutoverBatch(
     where: {
       entity: WORKBOOK_CUTOVER_BATCH_AUDIT.entity,
       entityId: batch.id,
+      action: WORKBOOK_CUTOVER_BATCH_AUDIT.action,
     },
     select: { action: true, data: true },
   });
