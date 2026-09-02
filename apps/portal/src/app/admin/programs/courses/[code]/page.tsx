@@ -139,7 +139,7 @@ function CatalogForm({ course, onSaved }: { course: AdminCourseDetail; onSaved: 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <Field label="Code"><input value={course.code} readOnly style={{ background: "var(--bg-subtle)", color: "var(--fg3)" }} /></Field>
         <Field label="Title"><input value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
-        <Field label="Credits"><input type="number" min={1} max={12} value={credits} onChange={(e) => setCredits(e.target.value)} /></Field>
+        <Field label="Credits"><input type="number" min={1} max={30} value={credits} onChange={(e) => setCredits(e.target.value)} /></Field>
         <Field label="Department">
           <Select value={departmentId} onChange={setDepartmentId} options={course.departments.map((d) => ({ value: d.id, label: d.name }))} />
         </Field>
