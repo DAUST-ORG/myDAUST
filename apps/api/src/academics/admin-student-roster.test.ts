@@ -180,6 +180,76 @@ describe("registrar student roster", () => {
     );
   });
 
+  it("filters by derived academic standing before pagination", async () => {
+    const probationTranscript = [
+      {
+        courseId: "course-probation",
+        courseCode: "CS 101",
+        credits: 3,
+        earnedCredits: 3,
+        gradePoints: 1,
+        countsTowardGpa: true,
+        countsTowardCredits: true,
+      },
+    ];
+    const { service: academics, prisma } = service([
+      student({
+        id: "student-probation",
+        studentNo: "DAUST-2026-002",
+        transcriptEntries: probationTranscript,
+      }),
+      student({ id: "student-ungraded", studentNo: "DAUST-2026-001" }),
+    ]);
+
+    const result = await academics.adminStudentRoster({
+      page: 1,
+      pageSize: 50,
+      standing: "academic_probation",
+      sort: "name",
+      direction: "asc",
+    });
+
+    expect(result.total).toBe(1);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: "student-probation",
+      academicStanding: { code: "academic_probation" },
+    });
+    expect(prisma.student.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.not.objectContaining({ skip: expect.anything() }),
+    );
+  });
+
+  const loginCases: Array<
+    ["active" | "must_change" | "not_activated", Record<string, unknown>]
+  > = [
+    ["active", { passwordHash: { not: null }, mustChangePassword: false }],
+    ["must_change", { mustChangePassword: true }],
+    ["not_activated", { passwordHash: null, mustChangePassword: false }],
+  ];
+  it.each(loginCases)(
+    "pushes the %s login filter into Person",
+    async (login, person) => {
+      const { service: academics, prisma } = service();
+
+      await academics.adminStudentRoster({
+        page: 1,
+        pageSize: 50,
+        login,
+        sort: "name",
+        direction: "asc",
+      });
+
+      expect(prisma.student.findMany).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          where: expect.objectContaining({ person: { is: person } }),
+        }),
+      );
+    },
+  );
+
   it("uses a lightweight query for directory selectors", async () => {
     const { service: academics, prisma } = service();
 
@@ -220,9 +290,34 @@ describe("registrar student roster query validation", () => {
       pageSize: 50,
       search: undefined,
       program: undefined,
+      level: undefined,
+      gender: undefined,
+      nationality: undefined,
+      standing: undefined,
+      login: undefined,
       sort: "name",
       direction: "asc",
     });
+  });
+
+  it("normalizes standing and validates login filters", () => {
+    const adminStudentRoster = vi.fn();
+    const controller = new AcademicsController({ adminStudentRoster } as never);
+
+    controller.adminStudentRoster({
+      standing: "good_standing",
+      login: "not_activated",
+    });
+
+    expect(adminStudentRoster).toHaveBeenCalledWith(
+      expect.objectContaining({
+        standing: "good_standing",
+        login: "not_activated",
+      }),
+    );
+    expect(() =>
+      controller.adminStudentRoster({ login: "password_missing" }),
+    ).toThrow(ZodError);
   });
 
   it("rejects unbounded page sizes", () => {

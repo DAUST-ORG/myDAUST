@@ -1,16 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import {
-  ArrowLeft,
-  Pin,
-  PinOff,
-  Send,
-  StickyNote,
-  Trash2,
-} from "lucide-react";
+import { ArrowLeft, Pin, PinOff, Send, StickyNote, Trash2 } from "lucide-react";
 import {
   type ApplicantNote,
   createApplicantNote,
@@ -31,6 +24,7 @@ import {
   Select,
   Textarea,
 } from "@/components/ui";
+import { admissionsWorkspacePath } from "../../workspace-path";
 
 const KIND_OPTIONS: { value: ApplicantNote["kind"]; label: string }[] = [
   { value: "general", label: "General" },
@@ -51,6 +45,7 @@ function canEditNote(
 export default function ApplicantNotesPage() {
   const params = useParams<{ id: string }>();
   const applicantId = params.id;
+  const basePath = admissionsWorkspacePath(usePathname());
   const { me } = useAuth();
 
   const [notes, setNotes] = useState<ApplicantNote[] | null>(null);
@@ -132,7 +127,7 @@ export default function ApplicantNotesPage() {
           title="Notes"
           subtitle="Could not load notes for this applicant."
           actions={
-            <Link href={`/admissions/${applicantId}`} className="btn-secondary">
+            <Link href={`${basePath}/${applicantId}`} className="btn-secondary">
               <ArrowLeft size={15} />
               Back to applicant
             </Link>
@@ -156,7 +151,7 @@ export default function ApplicantNotesPage() {
             : "Free-form notes for this applicant."
         }
         actions={
-          <Link href={`/admissions/${applicantId}`} className="btn-secondary">
+          <Link href={`${basePath}/${applicantId}`} className="btn-secondary">
             <ArrowLeft size={15} />
             Back to applicant
           </Link>

@@ -35,6 +35,7 @@ import {
   clearStudentStandingOverride,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
+import { paymentDatePresentation } from "@/lib/payment-dates";
 import { Avatar, Field, Modal, Tabs } from "@/components/ui";
 import {
   AccountStandingBadge,
@@ -42,7 +43,6 @@ import {
   InstallmentStandingBadge,
   accountBalanceLabel,
   accountPresentation,
-  installmentEffectiveSettled,
   invoiceEffectiveOutstanding,
   resolveAccountSummary,
 } from "@/components/AccountBalance";
@@ -64,6 +64,16 @@ function gradeColor(grade: string | null): string {
   if (grade.startsWith("A")) return "var(--success)";
   if (grade.startsWith("D") || grade === "F") return "var(--danger)";
   return "var(--fg1)";
+}
+
+function currentInvoiceLabel(invoice: {
+  description: string | null;
+  term: string;
+  packageType: string;
+}) {
+  return invoice.packageType === "standard_full"
+    ? "Annual fee schedule"
+    : (invoice.description ?? `Tuition — ${invoice.term}`);
 }
 
 export default function AdminStudentDetailPage() {
@@ -193,15 +203,24 @@ export default function AdminStudentDetailPage() {
   const balanceLabel = accountBalanceLabel(accountSummary);
   const accountMeta = accountPresentation(accountSummary);
   const balanceTone = accountMeta.color;
-  const payments = (account?.invoices ?? [])
+  // Void invoices are immutable financial history, not a second current bill.
+  // Finance retains them in the ledger; the Registrar profile presents only
+  // the student's effective schedule.
+  const currentInvoices = (account?.invoices ?? []).filter(
+    (invoice) => invoice.status !== "void",
+  );
+  const payments = currentInvoices
     .flatMap((inv) =>
       inv.payments
         .filter((p) => p.status === "success")
-        .map((p) => ({ ...p, item: inv.description ?? inv.term })),
+        .map((p) => ({
+          ...p,
+          item: currentInvoiceLabel(inv),
+          datePresentation: paymentDatePresentation(p),
+        })),
     )
-    .sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    .sort((a, b) =>
+      b.datePresentation.sortAt.localeCompare(a.datePresentation.sortAt),
     );
   const lastPayment = payments[0];
 
@@ -641,13 +660,14 @@ export default function AdminStudentDetailPage() {
                 v={account ? formatXof(account.totals.paid) : "—"}
               />
               <KV
-                k="Last payment"
+                k="Latest payment"
                 v={
                   lastPayment
-                    ? new Date(lastPayment.createdAt).toLocaleDateString(
-                        "fr-SN",
-                        { day: "numeric", month: "short", year: "numeric" },
-                      )
+                    ? `${formatXof(lastPayment.amount)} · ${
+                        lastPayment.datePresentation.eventDate
+                          ? formatDate(lastPayment.datePresentation.eventDate)
+                          : "date unavailable"
+                      }`
                     : "—"
                 }
               />
@@ -660,33 +680,42 @@ export default function AdminStudentDetailPage() {
                 <table>
                   <thead>
                     <tr>
+                      <th style={{ textAlign: "right" }}>Payment</th>
                       <th>Date</th>
                       <th>Item</th>
                       <th>Method</th>
-                      <th style={{ textAlign: "right" }}>Amount</th>
                     </tr>
                   </thead>
                   <tbody>
                     {payments.map((p) => (
                       <tr key={p.id}>
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          {new Date(p.createdAt).toLocaleDateString("fr-SN", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })}
-                        </td>
-                        <td style={{ fontWeight: 600 }}>{p.item}</td>
-                        <td>{p.method}</td>
                         <td
                           style={{
                             textAlign: "right",
-                            fontWeight: 700,
+                            fontWeight: 800,
                             color: "var(--success)",
+                            whiteSpace: "nowrap",
                           }}
                         >
                           {formatXof(p.amount)}
                         </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <span style={{ display: "grid", gap: 2 }}>
+                            <strong style={{ fontSize: 12.5 }}>
+                              {p.datePresentation.eventDate
+                                ? formatDate(p.datePresentation.eventDate)
+                                : "Date unavailable"}
+                            </strong>
+                            <small className="muted">
+                              {p.datePresentation.eventLabel}
+                              {p.datePresentation.settlementUnavailable
+                                ? " · settlement unavailable"
+                                : ""}
+                            </small>
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{p.item}</td>
+                        <td>{p.method}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -700,8 +729,8 @@ export default function AdminStudentDetailPage() {
           </div>
 
           <ProfileCard title="Charges on account" icon={Receipt}>
-            {account && account.invoices.length > 0 ? (
-              account.invoices.map((inv) => {
+            {account && currentInvoices.length > 0 ? (
+              currentInvoices.map((inv) => {
                 const isCredit = inv.total < 0;
                 const invoiceOutstanding = invoiceEffectiveOutstanding(inv);
                 const invoiceSummary = resolveAccountSummary(inv.summary, {
@@ -731,10 +760,7 @@ export default function AdminStudentDetailPage() {
                           color: isCredit ? "var(--success)" : "var(--fg1)",
                         }}
                       >
-                        {inv.description ??
-                          (isCredit
-                            ? "Account credit"
-                            : `Tuition — ${inv.term}`)}
+                        {isCredit ? "Account credit" : currentInvoiceLabel(inv)}
                       </span>
                       {!isCredit && (
                         <AccountStandingBadge summary={invoiceSummary} />
@@ -751,9 +777,24 @@ export default function AdminStudentDetailPage() {
                           −{formatXof(-inv.total)}
                         </span>
                       ) : (
-                        <span className="muted">
-                          {formatXof(inv.total - invoiceOutstanding)} /{" "}
-                          {formatXof(inv.total)} settled
+                        <span
+                          style={{
+                            display: "grid",
+                            justifyItems: "end",
+                            lineHeight: 1.25,
+                          }}
+                        >
+                          <strong
+                            style={{
+                              color: "var(--fg1)",
+                              fontVariantNumeric: "tabular-nums",
+                            }}
+                          >
+                            {formatXof(inv.paid)} paid
+                          </strong>
+                          <small className="muted">
+                            of {formatXof(inv.total)} scheduled
+                          </small>
                         </span>
                       )}
                     </div>
@@ -763,8 +804,8 @@ export default function AdminStudentDetailPage() {
                           <tr>
                             <th>#</th>
                             <th>Due</th>
-                            <th>Amount</th>
-                            <th>Settled</th>
+                            <th>Scheduled</th>
+                            <th>Paid</th>
                             <th>Status</th>
                           </tr>
                         </thead>
@@ -776,8 +817,8 @@ export default function AdminStudentDetailPage() {
                                 {formatDate(i.dueDate)}
                               </td>
                               <td>{formatXof(i.amountDue)}</td>
-                              <td>
-                                {formatXof(installmentEffectiveSettled(i))}
+                              <td style={{ fontWeight: 700 }}>
+                                {formatXof(i.amountPaid)}
                               </td>
                               <td>
                                 <InstallmentStandingBadge installment={i} />

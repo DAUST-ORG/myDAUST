@@ -2,9 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Pencil, UserPlus, X } from "lucide-react";
+import {
+  ChevronDown,
+  Pencil,
+  Search,
+  SlidersHorizontal,
+  UserPlus,
+  X,
+} from "lucide-react";
 import {
   type AdminStudent,
+  type AdminStudentLoginFilter,
   type AdminStudentRosterPage,
   type AdminStudentRosterSort,
   createRegistrarStudent,
@@ -24,11 +32,11 @@ import {
   IconButton,
   Modal,
   PageHeader,
-  SearchInput,
   Select,
   SortTh,
   useSort,
 } from "@/components/ui";
+import styles from "./students.module.css";
 
 const STATUS_TONE: Record<string, BadgeTone> = {
   active: "success",
@@ -38,6 +46,53 @@ const STATUS_LABEL: Record<string, string> = {
   active: "Active",
   probation: "Probation",
 };
+
+const STANDING_OPTIONS = [
+  { value: "all", label: "All standings" },
+  { value: "not_yet_graded", label: "Not yet graded" },
+  { value: "academic_probation", label: "Academic probation" },
+  { value: "good_standing", label: "Good standing" },
+  { value: "deans_list", label: "Dean's list" },
+];
+
+const LOGIN_OPTIONS = [
+  { value: "all", label: "All login states" },
+  { value: "active", label: "Active" },
+  { value: "must_change", label: "Must change password" },
+  { value: "not_activated", label: "Not activated" },
+];
+
+function RosterFilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <label className={styles.filterField}>
+      <span className={styles.filterLabel}>{label}</span>
+      <span className={styles.filterControl}>
+        <select
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          aria-label={`Filter by ${label.toLowerCase()}`}
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <ChevronDown size={15} aria-hidden="true" />
+      </span>
+    </label>
+  );
+}
 
 function gpaColor(gpa: number): string {
   if (gpa >= 3.5) return "var(--success)";
@@ -85,6 +140,8 @@ export default function AdminStudentsPage() {
   const [level, setLevel] = useState("all");
   const [gender, setGender] = useState("all");
   const [country, setCountry] = useState("all");
+  const [standing, setStanding] = useState("all");
+  const [login, setLogin] = useState<AdminStudentLoginFilter>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<25 | 50 | 100>(50);
   const [total, setTotal] = useState(0);
@@ -111,6 +168,8 @@ export default function AdminStudentsPage() {
             level,
             gender,
             nationality: country,
+            standing,
+            login,
             sort: sortKey,
             direction: sortDirection,
           },
@@ -140,6 +199,8 @@ export default function AdminStudentsPage() {
       level,
       gender,
       country,
+      standing,
+      login,
       sortDirection,
       sortKey,
     ],
@@ -187,12 +248,27 @@ export default function AdminStudentsPage() {
     ...nationalities.map((value) => ({ value, label: value })),
   ];
   const hasActiveFilter =
-    prog !== "all" || level !== "all" || gender !== "all" || country !== "all";
+    prog !== "all" ||
+    level !== "all" ||
+    gender !== "all" ||
+    country !== "all" ||
+    standing !== "all" ||
+    login !== "all";
+  const activeFilterCount = [
+    prog,
+    level,
+    gender,
+    country,
+    standing,
+    login,
+  ].filter((value) => value !== "all").length;
   function clearFilters() {
     setProg("all");
     setLevel("all");
     setGender("all");
     setCountry("all");
+    setStanding("all");
+    setLogin("all");
     setPage(1);
   }
 
@@ -249,70 +325,118 @@ export default function AdminStudentsPage() {
         </div>
       )}
 
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          alignItems: "center",
-          marginBottom: 16,
-          flexWrap: "wrap",
-        }}
+      <section
+        className={styles.filterPanel}
+        aria-label="Student roster filters"
       >
-        <SearchInput
-          value={q}
-          onChange={setQ}
-          placeholder="Search by name or ID…"
-          width={280}
-        />
-        <Select
-          value={prog}
-          onChange={(value) => {
-            setProg(value);
-            setPage(1);
-          }}
-          options={programOptions}
-          ariaLabel="Filter by program"
-        />
-        <Select
-          value={level}
-          onChange={(value) => {
-            setLevel(value);
-            setPage(1);
-          }}
-          options={levelOptions}
-          ariaLabel="Filter by academic level"
-        />
-        <Select
-          value={gender}
-          onChange={(value) => {
-            setGender(value);
-            setPage(1);
-          }}
-          options={genderOptions}
-          ariaLabel="Filter by gender"
-        />
-        <Select
-          value={country}
-          onChange={(value) => {
-            setCountry(value);
-            setPage(1);
-          }}
-          options={nationalityOptions}
-          ariaLabel="Filter by nationality"
-        />
-        {hasActiveFilter && (
-          <Button variant="secondary" onClick={clearFilters}>
-            Clear filters
-          </Button>
-        )}
-        <span className="muted" style={{ fontSize: 13 }}>
-          {loading
-            ? "Loading…"
-            : total === 0
-              ? "0 students"
-              : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}`}
-        </span>
-      </div>
+        <div className={styles.filterHeader}>
+          <div className={styles.filterIdentity}>
+            <span className={styles.filterIcon}>
+              <SlidersHorizontal size={17} aria-hidden="true" />
+            </span>
+            <span>
+              <span className={styles.filterTitle}>Refine roster</span>
+              <span className={styles.filterHint}>
+                Search identity records and narrow academic or account state.
+              </span>
+            </span>
+          </div>
+          <span className={styles.filterCount} aria-live="polite">
+            {loading
+              ? "Updating…"
+              : total === 0
+                ? "0 students"
+                : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}`}
+          </span>
+        </div>
+
+        <div className={styles.filterGrid}>
+          <label className={`${styles.filterField} ${styles.searchField}`}>
+            <span className={styles.filterLabel}>Search records</span>
+            <span className={styles.searchControl}>
+              <Search size={16} aria-hidden="true" />
+              <input
+                value={q}
+                onChange={(event) => setQ(event.target.value)}
+                placeholder="Name, Student ID, or email…"
+                aria-label="Search students by name, Student ID, or email"
+              />
+            </span>
+          </label>
+          <RosterFilterSelect
+            label="Program"
+            value={prog}
+            onChange={(value) => {
+              setProg(value);
+              setPage(1);
+            }}
+            options={programOptions}
+          />
+          <RosterFilterSelect
+            label="Academic level"
+            value={level}
+            onChange={(value) => {
+              setLevel(value);
+              setPage(1);
+            }}
+            options={levelOptions}
+          />
+          <RosterFilterSelect
+            label="Standing"
+            value={standing}
+            onChange={(value) => {
+              setStanding(value);
+              setPage(1);
+            }}
+            options={STANDING_OPTIONS}
+          />
+          <RosterFilterSelect
+            label="Login"
+            value={login}
+            onChange={(value) => {
+              setLogin(value as AdminStudentLoginFilter);
+              setPage(1);
+            }}
+            options={LOGIN_OPTIONS}
+          />
+          <RosterFilterSelect
+            label="Gender"
+            value={gender}
+            onChange={(value) => {
+              setGender(value);
+              setPage(1);
+            }}
+            options={genderOptions}
+          />
+          <RosterFilterSelect
+            label="Nationality"
+            value={country}
+            onChange={(value) => {
+              setCountry(value);
+              setPage(1);
+            }}
+            options={nationalityOptions}
+          />
+        </div>
+
+        <div className={styles.filterFooter}>
+          <span className={styles.filterSummary}>
+            {activeFilterCount > 0
+              ? `${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"} applied`
+              : "Showing the full registrar roster"}
+          </span>
+          {hasActiveFilter && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearFilters}
+              icon={<X size={14} />}
+            >
+              Clear filters
+            </Button>
+          )}
+        </div>
+      </section>
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
