@@ -1,0 +1,734 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: start;
+}
+
+.catalogColumn {
+  min-width: 0;
+}
+.planColumn {
+  position: sticky;
+  top: 18px;
+}
+
+.closedBanner,
+.holdBanner,
+.feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  font-size: 13.5px;
+}
+
+.closedBanner,
+.holdBanner {
+  color: var(--error-500);
+  border-color: color-mix(in srgb, var(--error-500) 38%, var(--border));
+  background: color-mix(in srgb, var(--error-500) 7%, var(--surface));
+}
+
+.closedBanner p,
+.holdBanner p,
+.feedback p {
+  margin: 3px 0 0;
+  color: var(--fg2);
+  line-height: 1.5;
+}
+
+.feedback_ok {
+  color: var(--success-500);
+  background: color-mix(in srgb, var(--success-500) 9%, var(--surface));
+  border-color: color-mix(in srgb, var(--success-500) 32%, var(--border));
+}
+.feedback_err {
+  color: var(--error-500);
+  background: color-mix(in srgb, var(--error-500) 7%, var(--surface));
+  border-color: color-mix(in srgb, var(--error-500) 32%, var(--border));
+}
+.feedback_info {
+  color: var(--daust-navy);
+  background: var(--bg-tint);
+  border-color: color-mix(in srgb, var(--daust-navy) 24%, var(--border));
+}
+
+.loadingCard {
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--fg3);
+  font-size: 13.5px;
+}
+
+.recommendationPanel {
+  overflow: hidden;
+  margin-bottom: 24px;
+  border: 1px solid color-mix(in srgb, var(--daust-navy) 22%, var(--border));
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--bg-tint) 64%, var(--surface));
+  box-shadow: var(--shadow-sm);
+}
+
+.recommendationHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--daust-navy) 13%, var(--border));
+}
+.recommendationTitle {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  min-width: 0;
+}
+.recommendationIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-md);
+  color: var(--daust-navy);
+  background: color-mix(in srgb, var(--daust-navy) 11%, var(--surface));
+}
+.eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--daust-navy);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.recommendationHeader h2,
+.sectionHeading h2 {
+  font-family: var(--font-display);
+  font-size: 19px;
+  line-height: 1.2;
+}
+.recommendationHeader p,
+.sectionHeading p {
+  max-width: 68ch;
+  margin: 4px 0 0;
+  color: var(--fg3);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.contextBadges {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.recommendationList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.recommendationCourse {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+.courseSummary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px;
+}
+.courseTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.courseTitleRow h3 {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 750;
+}
+.planSlot,
+.sectionCode {
+  color: var(--fg3);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.courseName {
+  margin: 4px 0 0;
+  color: var(--fg1);
+  font-size: 14px;
+  font-weight: 650;
+}
+.recommendationReason {
+  margin: 6px 0 0;
+  color: var(--fg3);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.readyState {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: var(--radius-pill);
+  color: var(--success-500);
+  background: color-mix(in srgb, var(--success-500) 10%, var(--surface));
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.requirementStrip {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 0 16px 13px;
+}
+.unlocks {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  color: var(--fg3);
+  font-size: 11.5px;
+}
+
+.sectionChoices {
+  min-width: 0;
+  margin: 0;
+  padding: 12px 16px 16px;
+  border: 0;
+  border-top: 1px solid var(--divider);
+}
+.sectionChoices legend {
+  padding: 0;
+  color: var(--fg3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+.sectionChoice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
+}
+.sectionChoiceSelected {
+  border-color: color-mix(in srgb, var(--daust-navy) 48%, var(--border));
+  background: color-mix(in srgb, var(--bg-tint) 55%, var(--surface));
+}
+.sectionChoice input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--daust-navy);
+}
+.sectionChoice label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.sectionChoice label > span,
+.sectionMeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--fg3);
+}
+.sectionChoice small,
+.blockedReason {
+  color: var(--error-500);
+  font-size: 11.5px;
+}
+.noSection {
+  margin: 8px 0 0;
+  color: var(--fg3);
+  font-size: 12.5px;
+}
+.meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.addButton,
+.addedButton,
+.overrideButton,
+.unavailableButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 7px 14px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.addButton {
+  color: #fff;
+  border: 1px solid transparent;
+  background: var(--daust-orange);
+}
+.addButton:hover {
+  background: var(--daust-orange-600);
+}
+.addedButton {
+  color: var(--success-500);
+  border: 1px solid color-mix(in srgb, var(--success-500) 32%, var(--border));
+  background: color-mix(in srgb, var(--success-500) 9%, var(--surface));
+}
+.overrideButton {
+  color: var(--daust-navy);
+  border: 1px solid var(--daust-navy);
+  background: var(--surface);
+}
+.unavailableButton {
+  color: var(--fg3);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.planComplete,
+.contextState {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px;
+  padding: 13px 14px;
+  border: 1px dashed color-mix(in srgb, var(--daust-navy) 28%, var(--border));
+  border-radius: var(--radius-md);
+  color: var(--daust-navy);
+  background: color-mix(in srgb, var(--bg-tint) 50%, var(--surface));
+  font-size: 13px;
+}
+.contextState p {
+  margin: 3px 0 0;
+  color: var(--fg3);
+  line-height: 1.5;
+}
+
+.attentionArea {
+  margin: 0 16px 16px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--daust-navy) 20%, var(--border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-tint) 42%, var(--surface));
+}
+.attentionHeading {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--daust-navy);
+}
+.attentionHeading h3 {
+  font-size: 14px;
+}
+.attentionHeading p {
+  margin: 2px 0 0;
+  color: var(--fg3);
+  font-size: 11.5px;
+}
+.attentionList {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 11px;
+}
+.attentionCourse {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.attentionCourseTitle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.attentionCourseTitle > span:not(:last-child) {
+  color: var(--fg2);
+}
+.attentionCourse > div {
+  min-width: 0;
+}
+.attentionCourse p {
+  display: block;
+  margin: 3px 0 0;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.attentionIssues {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--fg2);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.attentionStatus {
+  flex: 0 0 auto;
+  color: var(--daust-navy);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.otherSection {
+  margin-top: 4px;
+}
+.sectionHeading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+.sectionList {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.sectionRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--daust-navy);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+.sectionRowBody {
+  min-width: 0;
+  flex: 1;
+}
+.sectionMeta {
+  margin-top: 7px;
+  font-size: 12px;
+}
+.blockedReason {
+  margin: 6px 0 0;
+}
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 150px;
+  color: var(--fg-faint);
+  text-align: center;
+}
+.emptyState p {
+  margin: 0;
+  color: var(--fg3);
+  font-size: 13px;
+}
+
+.planTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--daust-navy);
+}
+.planTitle h2 {
+  font-family: var(--font-display);
+  font-size: 15.5px;
+}
+.planCount {
+  margin: -8px 0 12px;
+  color: var(--fg3);
+  font-size: 12px;
+}
+.emptyPlan {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 92px;
+  color: var(--fg-faint);
+  text-align: center;
+  font-size: 12.5px;
+}
+.plannedList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plannedCourse {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--divider);
+}
+.plannedCourse > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.plannedCourse strong {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+}
+.plannedCourse span {
+  overflow: hidden;
+  color: var(--fg3);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plannedCourse button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--fg3);
+  background: var(--surface);
+  cursor: pointer;
+}
+.creditSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 13px 0 14px;
+}
+.summaryRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  color: var(--fg3);
+  font-size: 12px;
+}
+.summaryRow strong {
+  color: var(--fg1);
+  font-variant-numeric: tabular-nums;
+}
+.planGuidance {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+.planGuidance p,
+.errorText {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  color: var(--fg3);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.planGuidance .errorText,
+.errorText {
+  color: var(--error-500);
+}
+
+.bundleModal,
+.overrideModal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.bundleIntro {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  color: var(--daust-navy);
+  background: var(--bg-tint);
+}
+.bundleIntro p,
+.overrideModal p {
+  margin: 3px 0 0;
+  color: var(--fg3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.bundleDependent {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+}
+.bundleDependent > span,
+.bundleDependent small {
+  color: var(--fg3);
+}
+.bundleField,
+.overrideModal label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--fg2);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.bundleField > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.bundleField select,
+.overrideModal textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--fg1);
+  background: var(--surface);
+  font: inherit;
+}
+.bundleField small,
+.overrideModal small {
+  color: var(--fg3);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.bundleProblem,
+.overrideBlocker {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 9px 11px;
+  border-left: 3px solid var(--error-500);
+  color: var(--error-500);
+  background: color-mix(in srgb, var(--error-500) 7%, var(--surface));
+  font-size: 12px;
+  line-height: 1.45;
+}
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 1080px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .planColumn {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .recommendationHeader,
+  .sectionHeading,
+  .courseSummary,
+  .sectionRow,
+  .attentionCourse {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .contextBadges {
+    justify-content: flex-start;
+  }
+  .recommendationHeader,
+  .recommendationList {
+    padding: 14px;
+  }
+  .attentionArea {
+    margin: 0 14px 14px;
+  }
+  .readyState,
+  .attentionStatus {
+    align-self: flex-start;
+  }
+  .sectionChoice {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .sectionChoice > button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+  .sectionRow > button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .recommendationTitle {
+    gap: 9px;
+  }
+  .recommendationIcon {
+    width: 34px;
+    height: 34px;
+  }
+  .courseSummary,
+  .sectionChoices {
+    padding: 13px;
+  }
+  .sectionChoice label > span,
+  .sectionMeta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .bundleDependent {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sectionChoice {
+    transition: none;
+  }
+}

@@ -5,7 +5,10 @@ import {
   type EnrollmentOverrideApproveInput,
 } from "@mydaust/shared";
 import { EnrollmentOverrideService } from "./enrollment-approvals.service.js";
-import { unwavedFailures } from "./enrollment-gates.js";
+import {
+  evaluateEnrollmentGates,
+  unwavedFailures,
+} from "./enrollment-gates.js";
 
 type TxLike = Prisma.TransactionClient;
 type FnMock = ReturnType<typeof vi.fn>;
@@ -30,7 +33,9 @@ describe("unwavedFailures", () => {
   });
 
   it("ignores waivers that don't match any actual failure", () => {
-    expect(unwavedFailures(failures, ["holds", "credit_cap"])).toEqual(failures);
+    expect(unwavedFailures(failures, ["holds", "credit_cap"])).toEqual(
+      failures,
+    );
   });
 });
 
@@ -62,11 +67,17 @@ function makeApprovalTransaction(opts: {
   request: ApprovalRow | null;
   freshFailures: EnrollmentGateFailure[];
   freshHolds?: { type: string }[];
+  termEnrollments?: Record<string, unknown>[];
 }) {
   const section = makeSectionRow();
   const tx: Record<string, unknown> = {
     $queryRaw: vi.fn(async () => [
-      { id: section.id, capacity: section.capacity, courseId: section.courseId, termId: section.termId },
+      {
+        id: section.id,
+        capacity: section.capacity,
+        courseId: section.courseId,
+        termId: section.termId,
+      },
     ]),
     term: {
       findUniqueOrThrow: vi.fn(async () => ({
@@ -83,11 +94,10 @@ function makeApprovalTransaction(opts: {
       findUnique: vi.fn(async () => null),
       count: vi.fn(async () => {
         const cap = opts.freshFailures.find((f) => f.gate === "capacity") as
-          | { taken: number }
-          | undefined;
+          { taken: number } | undefined;
         return cap ? cap.taken : 0;
       }),
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn(async () => opts.termEnrollments ?? []),
       create: vi.fn(async () => ({ id: "new-enrollment", status: "enrolled" })),
       update: vi.fn(async () => ({ id: "new-enrollment", status: "enrolled" })),
     },
@@ -95,6 +105,7 @@ function makeApprovalTransaction(opts: {
     course: {
       findUniqueOrThrow: vi.fn(async () => ({
         id: "course-1",
+        code: "CSC 101",
         credits: 3,
         prereqRules: [],
         coreqRules: [],
@@ -113,7 +124,10 @@ function makeApprovalTransaction(opts: {
     },
     approvalRequest: {
       findUnique: vi.fn(async () => opts.request),
-      update: vi.fn(async () => ({ ...(opts.request ?? { id: "x" }), status: "approved" })),
+      update: vi.fn(async () => ({
+        ...(opts.request ?? { id: "x" }),
+        status: "approved",
+      })),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
     approvalEvent: { create: vi.fn(async () => ({})) },
@@ -164,11 +178,14 @@ describe("EnrollmentOverrideService.approve", () => {
     vi.restoreAllMocks();
   });
 
-  function buildServiceWithPending(opts: {
-    freshFailures?: EnrollmentGateFailure[];
-    freshHolds?: { type: string }[];
-    notFound?: boolean;
-  } = {}) {
+  function buildServiceWithPending(
+    opts: {
+      freshFailures?: EnrollmentGateFailure[];
+      freshHolds?: { type: string }[];
+      termEnrollments?: Record<string, unknown>[];
+      notFound?: boolean;
+    } = {},
+  ) {
     const prisma = {
       $transaction: vi.fn(),
     };
@@ -176,6 +193,7 @@ describe("EnrollmentOverrideService.approve", () => {
       request: opts.notFound ? null : requestRow,
       freshFailures: opts.freshFailures ?? [],
       freshHolds: opts.freshHolds,
+      termEnrollments: opts.termEnrollments,
     });
     prisma.$transaction.mockImplementation(
       async (work: (tx: TxLike) => Promise<unknown>) => work(tx),
@@ -205,7 +223,9 @@ describe("EnrollmentOverrideService.approve", () => {
   it("rejects when the registrar ticks a gate that isn't actually failing", async () => {
     const { service } = buildServiceWithPending();
     await expect(
-      service.approve("approval-1", adminUser as never, { waivedGates: ["prerequisite"] }),
+      service.approve("approval-1", adminUser as never, {
+        waivedGates: ["prerequisite"],
+      }),
     ).rejects.toThrow(/did not block/);
   });
 
@@ -216,9 +236,31 @@ describe("EnrollmentOverrideService.approve", () => {
     ).rejects.toThrow(/not found/i);
   });
 
+  it("hard-rejects a different section of a course already held that term", async () => {
+    const { tx } = buildServiceWithPending({
+      termEnrollments: [
+        {
+          section: {
+            id: "other-section",
+            courseId: "course-1",
+            course: { id: "course-1", code: "CSC 101", credits: 3 },
+          },
+        },
+      ],
+    });
+
+    await expect(
+      evaluateEnrollmentGates(tx, "student-1", "section-1"),
+    ).rejects.toThrow(/Already enrolled in CSC 101/);
+  });
+
   it("bumps section capacity by 1 when capacity is waived and creates the enrollment", async () => {
     const { service, tx } = buildServiceWithPending({ freshFailures: [] });
-    const result = await service.approve("approval-1", adminUser as never, baseRequestInput);
+    const result = await service.approve(
+      "approval-1",
+      adminUser as never,
+      baseRequestInput,
+    );
     expect(result).toMatchObject({ id: "approval-1", status: "approved" });
     const txSection = tx as unknown as { section: { update: FnMock } };
     expect(txSection.section.update).toHaveBeenCalledWith({
@@ -307,10 +349,11 @@ describe("EnrollmentOverrideService.cancel", () => {
       notifications as never,
     );
     await expect(
-      service.cancel(
-        "approval-1",
-        { personId: "p-1", studentId: "s-1", roles: ["student"] } as never,
-      ),
+      service.cancel("approval-1", {
+        personId: "p-1",
+        studentId: "s-1",
+        roles: ["student"],
+      } as never),
     ).rejects.toThrow(/own request/);
   });
 

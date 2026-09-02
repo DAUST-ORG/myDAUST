@@ -854,6 +854,15 @@ export const enrollSection = (sectionId: string) =>
     method: "POST",
     body: JSON.stringify({ sectionId }),
   });
+export interface EnrollmentBundleResult {
+  enrollmentIds: string[];
+  sectionIds: string[];
+}
+export const enrollSectionBundle = (sectionIds: string[]) =>
+  request<EnrollmentBundleResult>("/academics/my/enrollments/bundle", {
+    method: "POST",
+    body: JSON.stringify({ sectionIds }),
+  });
 export const dropEnrollment = (enrollmentId: string) =>
   request("/academics/my/drop", {
     method: "POST",
@@ -4681,10 +4690,12 @@ export const replaceFeePlan = (input: {
 // --- Student: registration, degree audit, attendance ---
 export interface RegistrationSection {
   sectionId: string;
+  courseId: string;
   courseCode: string;
   title: string;
   credits: number;
   sectionCode: string;
+  status: string;
   instructor: string | null;
   room: string | null;
   days: string;
@@ -4697,16 +4708,98 @@ export interface RegistrationSection {
   /** Null when the student may register; otherwise the single clearest reason they cannot. */
   blockedReason: string | null;
 }
+export type RegistrationSemester = "Fall" | "Spring" | "Summer";
+export type RegistrationClosedReason =
+  | "closed_by_registrar"
+  | "configuration_invalid"
+  | "no_term_available"
+  | "term_ended"
+  | "add_deadline_passed"
+  | null;
+export type RecommendationStatus =
+  | "disabled"
+  | "ready"
+  | "missing_program"
+  | "missing_catalog_year"
+  | "missing_approved_catalog"
+  | "missing_curriculum"
+  | "unmapped_term"
+  | "missing_plan_position";
+export type RecommendationBasis =
+  | "student_year_level"
+  | "catalog_chronology"
+  | "earliest_incomplete_same_semester";
+export type RecommendationKind = "scheduled" | "catch_up" | "prerequisite";
+export type RecommendationReadiness = "ready" | "conditional" | "blocked";
+export type RecommendationAvailability =
+  "available" | "blocked" | "not_offered";
+export interface RegistrationRecommendationRequirement {
+  courseId: string;
+  courseCode: string;
+  minGrade: string | null;
+  status: "satisfied" | "in_progress" | "missing";
+}
+export interface RegistrationRecommendationCorequisite {
+  courseId: string;
+  courseCode: string;
+  status: "satisfied" | "enrolled" | "recommended" | "missing";
+}
+export interface RegistrationRecommendation {
+  courseId: string;
+  courseCode: string;
+  title: string;
+  credits: number;
+  kind: RecommendationKind;
+  rank: number;
+  plannedYearIndex: number | null;
+  plannedSemester: RegistrationSemester | null;
+  reason: string;
+  unlocks: string[];
+  readiness: RecommendationReadiness;
+  prerequisites: RegistrationRecommendationRequirement[];
+  corequisites: RegistrationRecommendationCorequisite[];
+  sectionIds: string[];
+  availableSectionIds: string[];
+  availability: RecommendationAvailability;
+}
 export interface RegistrationCatalog {
+  term: {
+    id: string;
+    name: string;
+    status: string | null;
+    semester: RegistrationSemester | null;
+    academicYearId: string | null;
+    academicYearLabel: string | null;
+    startDate: string;
+    endDate: string;
+    addDeadline: string | null;
+    dropDeadline: string | null;
+  } | null;
+  registration: {
+    mode: "legacy" | "configured";
+    open: boolean;
+    closedReason: RegistrationClosedReason;
+    recommendationsEnabled: boolean;
+  };
+  recommendationContext: {
+    status: RecommendationStatus;
+    basis: RecommendationBasis | null;
+    targetYearIndex: number | null;
+    semester: RegistrationSemester | null;
+    catalogAcademicYearId: string | null;
+    catalogLabel: string | null;
+    catalogRevision: number | null;
+  };
+  recommendations: RegistrationRecommendation[];
   maxCredits: number;
   currentCredits: number;
   holds: { type: string; reason: string | null }[];
   catalogYear: string | null;
   sections: RegistrationSection[];
 }
-export const getRegistrationCatalog = (termId: string) =>
+export const getRegistrationCatalog = (termId?: string) =>
   request<RegistrationCatalog>(
-    `/academics/my/registration?termId=${encodeURIComponent(termId)}`,
+    `/academics/my/registration${termId ? `?termId=${encodeURIComponent(termId)}` : ""}`,
   );
 
 export interface DegreeCategory {
@@ -4929,6 +5022,9 @@ export interface AcademicCatalogWorkspace {
   };
   effective: AcademicCatalogRevisionView;
   editable: AcademicCatalogRevisionView | null;
+  hasApprovedRevision: boolean;
+  draftSeedPrograms: AcademicCatalogProgram[];
+  courses: { id: string; code: string; title: string; credits: number }[];
   levelBands: Array<AcademicCatalogLevel & { minimumCredits: number }>;
   history: Array<
     AcademicCatalogRevisionView & {
@@ -5182,6 +5278,8 @@ export interface TermRow {
   id: string;
   name: string;
   status: string | null;
+  semester: string | null;
+  academicYearId: string | null;
   startDate: string;
   endDate: string;
   addDeadline: string | null;
@@ -6149,7 +6247,9 @@ export const getHelpdeskQueue = (
     qs.set(k, v === true ? "true" : v === false ? "false" : String(v));
   }
   const tail = qs.toString();
-  return request<HelpdeskQueueItem[]>(`/helpdesk/queue${tail ? `?${tail}` : ""}`);
+  return request<HelpdeskQueueItem[]>(
+    `/helpdesk/queue${tail ? `?${tail}` : ""}`,
+  );
 };
 
 /**
@@ -6192,10 +6292,7 @@ export async function uploadHelpdeskAttachment(
 ): Promise<HelpdeskAttachment> {
   const form = new FormData();
   form.append("file", file);
-  form.append(
-    "data",
-    JSON.stringify({ ticketId, name: name ?? file.name }),
-  );
+  form.append("data", JSON.stringify({ ticketId, name: name ?? file.name }));
   const res = await fetch(`${API_URL}/api/helpdesk/attachments`, {
     method: "POST",
     credentials: "include",

@@ -67,12 +67,142 @@ describe("academic progression", () => {
           progressionMode: "default",
           customLevels: [],
           requirements: [{ category: "Core", requiredCredits: 132 }],
+          curriculum: [],
         },
       ],
       reason: "Test invalid catalog",
       activateYear: false,
     });
     expect(result.success).toBe(false);
+  });
+
+  it("requires a canonical, uniquely ordered programme curriculum", () => {
+    const base = {
+      yearLabel: "2026–2027",
+      startsOn: "2026-08-01",
+      endsOn: "2027-07-31",
+      defaultLevels: levels,
+      programs: [
+        {
+          programId: "9f86312f-37af-43e9-89d3-249d39b8a961",
+          programCode: "BSCS",
+          programName: "Computer Science",
+          progressionMode: "default" as const,
+          customLevels: [],
+          requirements: [{ category: "Core", requiredCredits: 6 }],
+          curriculum: [
+            {
+              courseId: "46d98248-b86b-4a7d-b23b-99b6143ddfa8",
+              courseCode: "CS 101",
+              yearIndex: 1,
+              semester: "Fall" as const,
+              position: 0,
+            },
+          ],
+        },
+      ],
+      reason: "Publish the course sequence",
+      activateYear: false,
+    };
+
+    expect(AcademicCatalogDraftInput.safeParse(base).success).toBe(true);
+    expect(
+      AcademicCatalogDraftInput.safeParse({
+        ...base,
+        programs: base.programs.map(
+          ({ curriculum: _curriculum, ...program }) => program,
+        ),
+      }).success,
+    ).toBe(false);
+    expect(
+      AcademicCatalogDraftInput.safeParse({
+        ...base,
+        programs: [
+          {
+            ...base.programs[0],
+            curriculum: [
+              base.programs[0]!.curriculum[0]!,
+              {
+                ...base.programs[0]!.curriculum[0]!,
+                semester: "Winter",
+                position: 2,
+              },
+            ],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects curriculum years beyond the effective progression plan", () => {
+    const input = {
+      yearLabel: "2026–2027",
+      startsOn: "2026-08-01",
+      endsOn: "2027-07-31",
+      defaultLevels: levels,
+      programs: [
+        {
+          programId: "9f86312f-37af-43e9-89d3-249d39b8a961",
+          programCode: "BSCS",
+          programName: "Computer Science",
+          progressionMode: "default" as const,
+          customLevels: [],
+          requirements: [{ category: "Core", requiredCredits: 6 }],
+          curriculum: [
+            {
+              courseId: "46d98248-b86b-4a7d-b23b-99b6143ddfa8",
+              courseCode: "CS 401",
+              yearIndex: 4,
+              semester: "Fall" as const,
+              position: 0,
+            },
+          ],
+        },
+      ],
+      reason: "Validate the configured plan length",
+      activateYear: false,
+    };
+
+    const defaultResult = AcademicCatalogDraftInput.safeParse(input);
+    expect(defaultResult.success).toBe(false);
+    if (!defaultResult.success) {
+      expect(defaultResult.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ["programs", 0, "curriculum", 0, "yearIndex"],
+            message: expect.stringContaining("3-year progression plan"),
+          }),
+        ]),
+      );
+    }
+
+    const customResult = AcademicCatalogDraftInput.safeParse({
+      ...input,
+      programs: [
+        {
+          ...input.programs[0],
+          progressionMode: "custom",
+          customLevels: levels.slice(0, 2),
+          curriculum: [
+            {
+              ...input.programs[0]!.curriculum[0]!,
+              yearIndex: 2,
+            },
+          ],
+        },
+      ],
+    });
+    expect(customResult.success).toBe(false);
+    if (!customResult.success) {
+      expect(customResult.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ["programs", 0, "curriculum", 0, "yearIndex"],
+            message: expect.stringContaining("1-year progression plan"),
+          }),
+        ]),
+      );
+    }
   });
 });
 

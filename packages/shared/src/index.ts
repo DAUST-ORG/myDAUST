@@ -7,6 +7,7 @@ export * from "./users.js";
 export * from "./auth.js";
 export * from "./academics.js";
 export * from "./academic-catalog.js";
+export * from "./registration-plan.js";
 export * from "./comms.js";
 export * from "./admissions.js";
 export * from "./dining.js";

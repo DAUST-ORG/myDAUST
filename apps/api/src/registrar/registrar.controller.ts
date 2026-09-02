@@ -89,6 +89,14 @@ const TermPatch = z.object({
   dropDeadline: z.string().min(8).nullish(),
 });
 
+const RegistrationConfigurationInput = z
+  .object({
+    termId: z.string().uuid().nullable(),
+    recommendationsEnabled: z.boolean(),
+    reason: z.string().trim().min(5).max(500),
+  })
+  .strict();
+
 const CurriculumInput = z.object({
   programCode: z.string().min(1).max(20),
   academicYearId: z.string().min(1).max(64),
@@ -411,6 +419,24 @@ export class RegistrarController {
   @Get("terms")
   terms() {
     return this.registrar.listTerms();
+  }
+
+  @Get("registration-configuration")
+  @Roles("admin", "registrar")
+  registrationConfiguration() {
+    return this.registrar.registrationConfiguration();
+  }
+
+  @Patch("registration-configuration")
+  @Roles("admin", "registrar")
+  updateRegistrationConfiguration(
+    @CurrentUser() user: AuthUser,
+    @Body() body: unknown,
+  ) {
+    return this.registrar.updateRegistrationConfiguration(
+      user.personId,
+      RegistrationConfigurationInput.parse(body),
+    );
   }
 
   @Patch("terms/:id")
