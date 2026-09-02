@@ -553,13 +553,13 @@ export function buildWorkbookCutoverManifestFromReviewData(
       );
     }
     assertApplicantSourceAnchor(applicant, decision);
-    if (decision.disposition !== "Preserve current application") {
+    if (decision.disposition !== "Remove from active pipeline") {
       throw new Error(
-        `${applicant.sourceKey} must remain a current application`,
+        `${applicant.sourceKey} must be removed from the active Admissions pipeline`,
       );
     }
     const decisionWithoutReview = {
-      decision: "preserve" as const,
+      decision: "remove" as const,
       sourceKey: workbookCutoverApplicantKey(applicant.applicantId),
       sourceRecordSha256: applicant.sourceRecordSha256,
       applicantId: applicant.applicantId,
@@ -567,11 +567,14 @@ export function buildWorkbookCutoverManifestFromReviewData(
       lastName: applicant.lastName,
       email: applicant.email,
       stage: applicant.stage,
+      removeFromActivePipeline: true as const,
+      retainAuditEvidence: true as const,
+      revokeBearerCapabilities: true as const,
     };
     return {
       ...decisionWithoutReview,
       review: signedReview(
-        "applicant_preservation",
+        "applicant_removal",
         applicant.sourceKey,
         decisionWithoutReview,
         reviewFields(decision),
@@ -668,12 +671,13 @@ export function buildWorkbookCutoverManifestFromReviewData(
         (row) => row.decision === "archive",
       ).length,
       heldProductionStudents: 0,
-      preservedApplicants: applicants.length,
+      preservedApplicants: 0,
+      removedApplicants: applicants.length,
     },
     workbookRows,
     productionStudents,
     applicants,
-    reviewNote: `All workbook rows, frozen production Students, and current Applicants were signed in ${input.reviewWorkbookFileName}; review workbook SHA-256 ${input.reviewWorkbookSha256}. The importer derived finance snapshots only from the trusted extraction and made no production connection.`,
+    reviewNote: `All workbook rows, frozen production Students, and current Applicants were signed in ${input.reviewWorkbookFileName}; review workbook SHA-256 ${input.reviewWorkbookSha256}. Current Applicants carry reviewed terminal removal dispositions while their rows remain retained audit evidence. The importer derived finance snapshots only from the trusted extraction and made no production connection.`,
   });
   verifyWorkbookCutoverManifestExtraction(manifest, input.extraction);
   verifyWorkbookCutoverManifestProductionSnapshot(manifest, productionSnapshot);

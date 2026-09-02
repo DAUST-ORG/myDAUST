@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  AdmissionsService,
   academicYearStart,
   enrollmentCashStatus,
   publicBillPaymentUrl,
@@ -71,5 +72,32 @@ describe("admissions identity helpers", () => {
     expect(publicBillPaymentUrl("http://localhost:3000", "S 2026/31")).toBe(
       "http://localhost:3000/pay-bill?sid=S+2026%2F31",
     );
+  });
+});
+
+describe("application-fee capability revocation", () => {
+  it("does not restart checkout for a removed Applicant UUID", async () => {
+    const paymentSubmissions = { createForApplicant: vi.fn() };
+    const service = new AdmissionsService(
+      {
+        applicant: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "removed-applicant",
+            email: "removed@example.test",
+            stage: "rejected",
+            onboardingStatus: "cancelled",
+            feePaid: false,
+          }),
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      paymentSubmissions as never,
+    );
+
+    await expect(
+      service.feeCheckout("removed-applicant", "wave"),
+    ).rejects.toThrow("Application not found");
+    expect(paymentSubmissions.createForApplicant).not.toHaveBeenCalled();
   });
 });

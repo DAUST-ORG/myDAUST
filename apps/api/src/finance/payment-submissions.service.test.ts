@@ -128,3 +128,62 @@ describe("payment method configuration", () => {
     expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 });
+
+describe("revoked Applicant payer capabilities", () => {
+  function publicService(input: {
+    applicant?: {
+      id: string;
+      email: string;
+      stage: string;
+      onboardingStatus: string;
+    } | null;
+    paymentLink?: { id: string; status: string } | null;
+  }) {
+    const prisma = {
+      applicant: {
+        findUnique: vi.fn().mockResolvedValue(input.applicant ?? null),
+      },
+      paymentLink: {
+        findUnique: vi.fn().mockResolvedValue(input.paymentLink ?? null),
+      },
+      paymentSubmission: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    return {
+      prisma,
+      value: new PaymentSubmissionsService(
+        prisma as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      ),
+    };
+  }
+
+  it("rejects a removed Applicant UUID on proof creation and history reads", async () => {
+    const { value, prisma } = publicService({
+      applicant: {
+        id: "removed-applicant",
+        email: "removed@example.test",
+        stage: "rejected",
+        onboardingStatus: "cancelled",
+      },
+    });
+    await expect(
+      value.createForApplicant("removed-applicant", "wave", 50_000),
+    ).rejects.toThrow("Application not found");
+    await expect(value.listForApplicant("removed-applicant")).rejects.toThrow(
+      "Application not found",
+    );
+    expect(prisma.paymentSubmission.findMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cancelled payment-link token on public history reads", async () => {
+    const { value, prisma } = publicService({
+      paymentLink: { id: "removed-link", status: "cancelled" },
+    });
+    await expect(
+      value.listForPaymentLinkToken("revoked-token"),
+    ).rejects.toThrow("Payment link not found");
+    expect(prisma.paymentSubmission.findMany).not.toHaveBeenCalled();
+  });
+});

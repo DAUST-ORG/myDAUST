@@ -24,6 +24,11 @@ export const WORKBOOK_CUTOVER_ARCHIVE_AUDIT = {
   action: "student-archived-access-revoked",
 } as const;
 
+export const WORKBOOK_CUTOVER_APPLICANT_REMOVAL_AUDIT = {
+  entity: "Applicant",
+  action: "workbook-cutover-removed",
+} as const;
+
 export interface WorkbookCutoverAcademicFingerprint {
   transcriptCount: number;
   transcriptSha256: string;
@@ -55,6 +60,7 @@ export interface WorkbookCutoverBatchAuditResult {
   archivedStudents: number;
   preservedAcademicRecords: number;
   preservedApplicants: number;
+  removedApplicants: number;
   voidedInvoices: number;
   supersededPayments: number;
   cancelledInFlightAttempts: number;
@@ -209,9 +215,12 @@ interface ImportedBatchEvidence {
   academicFingerprints: AcademicEvidence[];
   originalProductionStudentIds: string[];
   originalApplicantIds: string[];
+  removedApplicantIds: string[];
   supersededInvoiceIds: string[];
   supersededPaymentIds: string[];
   cancelledPaymentSubmissionIds: string[];
+  revokedPaymentSubmissionResumeTokenIds: string[];
+  revokedPaymentLinkTokenEvidence: RevokedPaymentLinkTokenEvidence[];
   cancelledPaymentLinkIds: string[];
   cancelledPiSpiRequestIds: string[];
   cancelledPendingPaymentIds: string[];
@@ -223,6 +232,8 @@ interface ArchivedCapabilityCancellationEvidence {
   studentId: string;
   sourceRecordId: string;
   cancelledPaymentSubmissionIds: string[];
+  revokedPaymentSubmissionResumeTokenIds: string[];
+  revokedPaymentLinkTokenEvidence: RevokedPaymentLinkTokenEvidence[];
   cancelledPaymentLinkIds: string[];
   cancelledPiSpiRequestIds: string[];
   cancelledPendingPaymentIds: string[];
@@ -234,6 +245,11 @@ interface ArchivedCapabilityCancellationEvidence {
     applicantId: string;
     paymentLinkId: string;
   }>;
+}
+
+interface RevokedPaymentLinkTokenEvidence {
+  paymentLinkId: string;
+  originalTokenSha256: string;
 }
 
 function evidenceRoot(data: unknown): Record<string, unknown> {
@@ -288,6 +304,33 @@ function applicantPaymentLinkPointers(
     "batch audit cleared Applicant payment-link pointer evidence repeats an ID",
   );
   return pointers;
+}
+
+function paymentLinkTokenEvidence(
+  object: Record<string, unknown>,
+): RevokedPaymentLinkTokenEvidence[] {
+  const values = jsonArray(object.revokedPaymentLinkTokenEvidence);
+  assert(values, "batch audit revoked payment-link token evidence is missing");
+  const evidence = values.map((value) => {
+    const row = jsonObject(value);
+    assert(
+      row &&
+        typeof row.paymentLinkId === "string" &&
+        row.paymentLinkId.length > 0 &&
+        typeof row.originalTokenSha256 === "string" &&
+        /^[a-f0-9]{64}$/.test(row.originalTokenSha256),
+      "batch audit revoked payment-link token evidence is invalid",
+    );
+    return {
+      paymentLinkId: row.paymentLinkId,
+      originalTokenSha256: row.originalTokenSha256,
+    };
+  });
+  assert(
+    new Set(evidence.map((row) => row.paymentLinkId)).size === evidence.length,
+    "batch audit revoked payment-link token evidence repeats an ID",
+  );
+  return evidence;
 }
 
 function academicFingerprintFromJson(
@@ -388,6 +431,11 @@ function parseImportedBatchEvidence(data: unknown): ImportedBatchEvidence {
           object,
           "cancelledPaymentSubmissionIds",
         ),
+        revokedPaymentSubmissionResumeTokenIds: stringArray(
+          object,
+          "revokedPaymentSubmissionResumeTokenIds",
+        ),
+        revokedPaymentLinkTokenEvidence: paymentLinkTokenEvidence(object),
         cancelledPaymentLinkIds: stringArray(object, "cancelledPaymentLinkIds"),
         cancelledPiSpiRequestIds: stringArray(
           object,
@@ -431,12 +479,18 @@ function parseImportedBatchEvidence(data: unknown): ImportedBatchEvidence {
       "originalProductionStudentIds",
     ),
     originalApplicantIds: stringArray(root, "originalApplicantIds"),
+    removedApplicantIds: stringArray(root, "removedApplicantIds"),
     supersededInvoiceIds: stringArray(root, "supersededInvoiceIds"),
     supersededPaymentIds: stringArray(root, "supersededPaymentIds"),
     cancelledPaymentSubmissionIds: stringArray(
       root,
       "cancelledPaymentSubmissionIds",
     ),
+    revokedPaymentSubmissionResumeTokenIds: stringArray(
+      root,
+      "revokedPaymentSubmissionResumeTokenIds",
+    ),
+    revokedPaymentLinkTokenEvidence: paymentLinkTokenEvidence(root),
     cancelledPaymentLinkIds: stringArray(root, "cancelledPaymentLinkIds"),
     cancelledPiSpiRequestIds: stringArray(root, "cancelledPiSpiRequestIds"),
     cancelledPendingPaymentIds: stringArray(root, "cancelledPendingPaymentIds"),
@@ -546,7 +600,12 @@ function auditBatchAnchors(
     keepExceptionStudents: groups.production.filter(
       (record) => record.disposition === "keep_exception",
     ).length,
-    preserveApplicants: groups.applicants.length,
+    preserveApplicants: groups.applicants.filter(
+      (record) => record.disposition === "preserve_applicant",
+    ).length,
+    removeApplicants: groups.applicants.filter(
+      (record) => record.disposition === "remove_applicant",
+    ).length,
     reconciles: true,
   };
   for (const [key, value] of Object.entries(expectedControls)) {
@@ -675,11 +734,18 @@ function auditSourceConservation(
       groups.archived.length === batch.productionArchivedStudents,
     "production Student disposition counters differ",
   );
+  const preservedApplicants = groups.applicants.filter(
+    (record) => record.disposition === "preserve_applicant",
+  );
+  const removedApplicants = groups.applicants.filter(
+    (record) => record.disposition === "remove_applicant",
+  );
   assert(
-    groups.applicants.every(
-      (record) => record.disposition === "preserve_applicant",
-    ) && groups.applicants.length === batch.preservedApplicants,
-    "Applicant preservation counters differ",
+    preservedApplicants.length === batch.preservedApplicants &&
+      removedApplicants.length === batch.removedApplicants &&
+      preservedApplicants.length + removedApplicants.length ===
+        groups.applicants.length,
+    "Applicant disposition counters differ",
   );
 
   for (const record of productionLinked) {
@@ -1817,10 +1883,11 @@ type ArchivedCapabilityGraph = {
     id: string;
     status: string;
     activeKey: string | null;
+    resumeToken: string | null;
     paymentId: string | null;
     paymentLinkId: string | null;
   }>;
-  links: Array<{ id: string; status: string }>;
+  links: Array<{ id: string; token: string; status: string }>;
   piSpiRequests: Array<{
     id: string;
     status: string;
@@ -1951,6 +2018,7 @@ async function captureArchivedCapabilityGraph(
             id: true,
             status: true,
             activeKey: true,
+            resumeToken: true,
             paymentId: true,
             paymentLinkId: true,
           },
@@ -1959,7 +2027,7 @@ async function captureArchivedCapabilityGraph(
     linkIds.size > 0
       ? prisma.paymentLink.findMany({
           where: { id: { in: [...linkIds] } },
-          select: { id: true, status: true },
+          select: { id: true, token: true, status: true },
         })
       : Promise.resolve([]),
     piSpiRequestIds.size > 0
@@ -1996,7 +2064,9 @@ async function auditArchivedCapabilityCancellations(input: {
   cutoverAt: Date;
   genericEvidence: {
     submission: ReadonlySet<string>;
+    submissionResumeToken: ReadonlySet<string>;
     link: ReadonlySet<string>;
+    linkToken: ReadonlyMap<string, string>;
     piSpi: ReadonlySet<string>;
     payment: ReadonlySet<string>;
   };
@@ -2010,7 +2080,9 @@ async function auditArchivedCapabilityCancellations(input: {
   );
   const claimedIds = {
     submission: new Set<string>(),
+    submissionResumeToken: new Set<string>(),
     link: new Set<string>(),
+    linkToken: new Set<string>(),
     piSpi: new Set<string>(),
     payment: new Set<string>(),
   };
@@ -2042,6 +2114,24 @@ async function auditArchivedCapabilityCancellations(input: {
       input.genericEvidence.submission,
       "proof-payment",
     );
+    claim(
+      evidence.revokedPaymentSubmissionResumeTokenIds,
+      claimedIds.submissionResumeToken,
+      input.genericEvidence.submissionResumeToken,
+      "proof-payment resume-token",
+    );
+    for (const tokenEvidence of evidence.revokedPaymentLinkTokenEvidence) {
+      assert(
+        !claimedIds.linkToken.has(tokenEvidence.paymentLinkId),
+        "archived payment-link token evidence repeats an ID",
+      );
+      assert(
+        input.genericEvidence.linkToken.get(tokenEvidence.paymentLinkId) ===
+          tokenEvidence.originalTokenSha256,
+        "archived payment-link token evidence differs from batch evidence",
+      );
+      claimedIds.linkToken.add(tokenEvidence.paymentLinkId);
+    }
     claim(
       evidence.cancelledPaymentLinkIds,
       claimedIds.link,
@@ -2163,13 +2253,30 @@ async function auditArchivedCapabilityCancellations(input: {
       graph.submissions.every(
         (row) =>
           !["awaiting_proof", "submitted"].includes(row.status) &&
-          (row.status !== "cancelled" || row.activeKey === null),
+          (row.status !== "cancelled" || row.activeKey === null) &&
+          row.resumeToken === null,
       ),
       `${record.sourceKey} retains an unsettled proof-payment capability`,
     );
     assert(
       graph.links.every((row) => row.status !== "active"),
       `${record.sourceKey} retains an active payment-link capability`,
+    );
+    const linkTokenEvidence = new Map(
+      evidence.revokedPaymentLinkTokenEvidence.map((row) => [
+        row.paymentLinkId,
+        row.originalTokenSha256,
+      ]),
+    );
+    assert(
+      graph.links.every((row) => {
+        const originalTokenSha256 = linkTokenEvidence.get(row.id);
+        return (
+          originalTokenSha256 !== undefined &&
+          sha256(row.token) !== originalTokenSha256
+        );
+      }) && linkTokenEvidence.size === graph.links.length,
+      `${record.sourceKey} retains a pre-cutover payment-link bearer`,
     );
     assert(
       graph.piSpiRequests.every(
@@ -2227,6 +2334,297 @@ function auditActivationEvidence(input: {
     activationAuditRows += 1;
   }
   return activationAuditRows;
+}
+
+async function auditApplicantRemovals(input: {
+  prisma: PrismaClient;
+  batch: AuditedBatch;
+  records: SourceRecord[];
+  evidence: ImportedBatchEvidence;
+}): Promise<number> {
+  const records = input.records.filter(
+    (record) => record.disposition === "remove_applicant",
+  );
+  const applicantIds = records.map((record) => record.applicantId!);
+  assert(
+    canonicalWorkbookCutoverJson([...applicantIds].sort()) ===
+      canonicalWorkbookCutoverJson(
+        [...input.evidence.removedApplicantIds].sort(),
+      ),
+    "removed Applicant IDs differ from batch evidence",
+  );
+  if (records.length === 0) return 0;
+
+  const logs = await input.prisma.auditLog.findMany({
+    where: {
+      entity: WORKBOOK_CUTOVER_APPLICANT_REMOVAL_AUDIT.entity,
+      entityId: { in: applicantIds },
+      action: WORKBOOK_CUTOVER_APPLICANT_REMOVAL_AUDIT.action,
+    },
+    select: { entityId: true, actorId: true, data: true },
+  });
+  assert(
+    logs.length === records.length,
+    "Applicant removal audit count differs or an exact replay emitted another audit",
+  );
+  const logsByApplicant = new Map(
+    logs.map((log) => [log.entityId, log] as const),
+  );
+  const paymentIds = new Set<string>();
+  const paymentLinkIds = new Set<string>();
+  const removalLinkTokenEvidence = new Map<string, string>();
+  const submissionIds = new Set<string>();
+  const resumeTokenSubmissionIds = new Set<string>();
+  const piSpiIds = new Set<string>();
+  const genericSubmissionEvidence = new Set(
+    input.evidence.cancelledPaymentSubmissionIds,
+  );
+  const genericResumeTokenEvidence = new Set(
+    input.evidence.revokedPaymentSubmissionResumeTokenIds,
+  );
+  const genericLinkTokenEvidence = new Map(
+    input.evidence.revokedPaymentLinkTokenEvidence.map((row) => [
+      row.paymentLinkId,
+      row.originalTokenSha256,
+    ]),
+  );
+  const genericLinkEvidence = new Set(input.evidence.cancelledPaymentLinkIds);
+  const genericPiSpiEvidence = new Set(input.evidence.cancelledPiSpiRequestIds);
+  const genericPaymentEvidence = new Set(
+    input.evidence.cancelledPendingPaymentIds,
+  );
+
+  for (const record of records) {
+    const applicant = record.applicant;
+    assert(
+      applicant && applicant.id === record.applicantId,
+      `${record.sourceKey} original Applicant was deleted`,
+    );
+    assert(
+      applicant.stage === "rejected" &&
+        applicant.onboardingStatus === "cancelled" &&
+        applicant.onboardingCancelledAt !== null &&
+        applicant.onboardingCancelledAt.getTime() <=
+          input.batch.importedAt!.getTime() &&
+        applicant.activeOnboardingPaymentLinkId === null,
+      `${record.sourceKey} remains in an active Admissions state`,
+    );
+    if (applicant.statusTokenHash !== null) {
+      assert(
+        applicant.statusTokenRevokedAt !== null &&
+          applicant.statusTokenExpiresAt !== null &&
+          applicant.statusTokenRevokedAt.getTime() <=
+            input.batch.importedAt!.getTime() &&
+          applicant.statusTokenExpiresAt.getTime() <=
+            input.batch.importedAt!.getTime(),
+        `${record.sourceKey} retains an active status bearer`,
+      );
+    }
+
+    const log = logsByApplicant.get(applicant.id);
+    const data = jsonObject(log?.data);
+    assert(
+      log &&
+        data &&
+        log.actorId === input.batch.createdById &&
+        data.batchId === input.batch.id &&
+        data.sourceRecordId === record.id &&
+        data.reason === record.reviewReason,
+      `${record.sourceKey} lacks exact Applicant removal audit evidence`,
+    );
+    for (const id of stringArray(data, "cancelledPaymentSubmissionIds")) {
+      assert(
+        genericSubmissionEvidence.has(id),
+        `${record.sourceKey} removal submission evidence is absent from batch evidence`,
+      );
+      submissionIds.add(id);
+    }
+    for (const id of stringArray(
+      data,
+      "revokedPaymentSubmissionResumeTokenIds",
+    )) {
+      assert(
+        genericResumeTokenEvidence.has(id),
+        `${record.sourceKey} removal resume-token evidence is absent from batch evidence`,
+      );
+      resumeTokenSubmissionIds.add(id);
+      submissionIds.add(id);
+    }
+    for (const tokenEvidence of paymentLinkTokenEvidence(data)) {
+      assert(
+        genericLinkTokenEvidence.get(tokenEvidence.paymentLinkId) ===
+          tokenEvidence.originalTokenSha256,
+        `${record.sourceKey} removal link-token evidence differs from batch evidence`,
+      );
+      assert(
+        !removalLinkTokenEvidence.has(tokenEvidence.paymentLinkId),
+        `${record.sourceKey} removal link-token evidence repeats a capability`,
+      );
+      removalLinkTokenEvidence.set(
+        tokenEvidence.paymentLinkId,
+        tokenEvidence.originalTokenSha256,
+      );
+      paymentLinkIds.add(tokenEvidence.paymentLinkId);
+    }
+    for (const id of stringArray(data, "cancelledPaymentLinkIds")) {
+      assert(
+        genericLinkEvidence.has(id),
+        `${record.sourceKey} removal link evidence is absent from batch evidence`,
+      );
+      paymentLinkIds.add(id);
+    }
+    for (const id of stringArray(data, "cancelledPiSpiRequestIds")) {
+      assert(
+        genericPiSpiEvidence.has(id),
+        `${record.sourceKey} removal PI-SPI evidence is absent from batch evidence`,
+      );
+      piSpiIds.add(id);
+    }
+    for (const id of stringArray(data, "cancelledPendingPaymentIds")) {
+      assert(
+        genericPaymentEvidence.has(id),
+        `${record.sourceKey} removal payment evidence is absent from batch evidence`,
+      );
+      paymentIds.add(id);
+    }
+    if (typeof data.originalActiveOnboardingPaymentLinkId === "string") {
+      paymentLinkIds.add(data.originalActiveOnboardingPaymentLinkId);
+    } else {
+      assert(
+        data.originalActiveOnboardingPaymentLinkId === null,
+        `${record.sourceKey} original active-link evidence is invalid`,
+      );
+    }
+  }
+
+  const directLinks = await input.prisma.paymentLink.findMany({
+    where: {
+      OR: [
+        { onboardingApplicantId: { in: applicantIds } },
+        ...(paymentLinkIds.size > 0
+          ? [{ id: { in: [...paymentLinkIds] } }]
+          : []),
+      ],
+    },
+    select: { id: true, token: true, status: true },
+  });
+  for (const link of directLinks) paymentLinkIds.add(link.id);
+
+  let changed = true;
+  const submissions = new Map<
+    string,
+    {
+      id: string;
+      status: string;
+      resumeToken: string | null;
+      paymentId: string | null;
+      paymentLinkId: string | null;
+    }
+  >();
+  const piSpiRequests = new Map<
+    string,
+    {
+      id: string;
+      status: string;
+      paymentId: string | null;
+      paymentLinkId: string | null;
+    }
+  >();
+  while (changed) {
+    const before =
+      paymentIds.size +
+      paymentLinkIds.size +
+      submissions.size +
+      piSpiRequests.size;
+    const targetOr = [
+      { applicantId: { in: applicantIds } },
+      ...(paymentIds.size > 0 ? [{ paymentId: { in: [...paymentIds] } }] : []),
+      ...(paymentLinkIds.size > 0
+        ? [{ paymentLinkId: { in: [...paymentLinkIds] } }]
+        : []),
+    ];
+    const [submissionRows, piSpiRows] = await Promise.all([
+      input.prisma.paymentSubmission.findMany({
+        where: { OR: targetOr },
+        select: {
+          id: true,
+          status: true,
+          resumeToken: true,
+          paymentId: true,
+          paymentLinkId: true,
+        },
+      }),
+      input.prisma.piSpiRequest.findMany({
+        where: { OR: targetOr },
+        select: {
+          id: true,
+          status: true,
+          paymentId: true,
+          paymentLinkId: true,
+        },
+      }),
+    ]);
+    for (const row of submissionRows) submissions.set(row.id, row);
+    for (const row of piSpiRows) piSpiRequests.set(row.id, row);
+    for (const row of [...submissionRows, ...piSpiRows]) {
+      if (row.paymentId) paymentIds.add(row.paymentId);
+      if (row.paymentLinkId) paymentLinkIds.add(row.paymentLinkId);
+    }
+    changed =
+      before !==
+      paymentIds.size +
+        paymentLinkIds.size +
+        submissions.size +
+        piSpiRequests.size;
+  }
+  const [links, payments] = await Promise.all([
+    paymentLinkIds.size > 0
+      ? input.prisma.paymentLink.findMany({
+          where: { id: { in: [...paymentLinkIds] } },
+          select: { id: true, token: true, status: true },
+        })
+      : Promise.resolve([]),
+    paymentIds.size > 0
+      ? input.prisma.payment.findMany({
+          where: { id: { in: [...paymentIds] } },
+          select: { id: true, status: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  assert(
+    links.every((row) => row.status !== "active") &&
+      [...submissions.values()].every(
+        (row) =>
+          !["awaiting_proof", "submitted"].includes(row.status) &&
+          row.resumeToken === null,
+      ) &&
+      [...piSpiRequests.values()].every(
+        (row) => !["initiated", "sent"].includes(row.status),
+      ) &&
+      payments.every(
+        (row) => !["pending", "refund_pending"].includes(row.status),
+      ),
+    "a removed Applicant retains an in-flight payer capability",
+  );
+  assert(
+    [...submissions.values()].every(
+      (row) =>
+        row.resumeToken === null &&
+        (!resumeTokenSubmissionIds.has(row.id) ||
+          genericResumeTokenEvidence.has(row.id)),
+    ) &&
+      [...resumeTokenSubmissionIds].every((id) => submissions.has(id)) &&
+      links.every((row) => {
+        const originalTokenSha256 = removalLinkTokenEvidence.get(row.id);
+        return (
+          originalTokenSha256 !== undefined &&
+          sha256(row.token) !== originalTokenSha256
+        );
+      }) &&
+      removalLinkTokenEvidence.size === links.length,
+    "a removed Applicant retains a pre-cutover bearer token",
+  );
+  return records.length;
 }
 
 /**
@@ -2327,10 +2725,28 @@ export async function auditWorkbookCutoverBatch(
 
   const evidenceIds = {
     submission: new Set(batchEvidence.cancelledPaymentSubmissionIds),
+    submissionResumeToken: new Set(
+      batchEvidence.revokedPaymentSubmissionResumeTokenIds,
+    ),
     link: new Set(batchEvidence.cancelledPaymentLinkIds),
+    linkToken: new Map(
+      batchEvidence.revokedPaymentLinkTokenEvidence.map((row) => [
+        row.paymentLinkId,
+        row.originalTokenSha256,
+      ]),
+    ),
     piSpi: new Set(batchEvidence.cancelledPiSpiRequestIds),
     payment: new Set(batchEvidence.cancelledPendingPaymentIds),
   };
+  const removedApplicants = await auditApplicantRemovals({
+    prisma,
+    batch,
+    records: groups.applicants,
+    evidence: batchEvidence,
+  });
+  const removedApplicantIds = groups.applicants
+    .filter((record) => record.disposition === "remove_applicant")
+    .map((record) => record.applicantId!);
   const canonicalInvoiceByStudentId = new Map<string, string>();
   for (const record of groups.included) {
     assert(
@@ -2403,7 +2819,15 @@ export async function auditWorkbookCutoverBatch(
         { studentId: { in: includedStudentIds } },
         { invoiceId: { in: includedInvoiceIds } },
         { onboardingApplicantId: { in: onboardingApplicantIds } },
+        { onboardingApplicantId: { in: removedApplicantIds } },
         { id: { in: batchEvidence.cancelledPaymentLinkIds } },
+        {
+          id: {
+            in: batchEvidence.revokedPaymentLinkTokenEvidence.map(
+              (row) => row.paymentLinkId,
+            ),
+          },
+        },
       ],
     },
     select: {
@@ -2415,6 +2839,7 @@ export async function auditWorkbookCutoverBatch(
       onboardingApplicantId: true,
       costCenterCode: true,
       dueDate: true,
+      token: true,
     },
   });
   const sourcePaymentLinkIds = sourcePaymentLinks.map((row) => row.id);
@@ -2470,11 +2895,17 @@ export async function auditWorkbookCutoverBatch(
           { studentId: { in: includedStudentIds } },
           { invoiceId: { in: includedInvoiceIds } },
           { applicantId: { in: onboardingApplicantIds } },
+          { applicantId: { in: removedApplicantIds } },
           { paymentLinkId: { in: sourcePaymentLinkIds } },
           { id: { in: batchEvidence.cancelledPaymentSubmissionIds } },
+          {
+            id: {
+              in: batchEvidence.revokedPaymentSubmissionResumeTokenIds,
+            },
+          },
         ],
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, resumeToken: true },
     }),
     prisma.piSpiRequest.findMany({
       where: {
@@ -2482,6 +2913,7 @@ export async function auditWorkbookCutoverBatch(
           { studentId: { in: includedStudentIds } },
           { invoiceId: { in: includedInvoiceIds } },
           { applicantId: { in: onboardingApplicantIds } },
+          { applicantId: { in: removedApplicantIds } },
           { paymentLinkId: { in: sourcePaymentLinkIds } },
           { id: { in: batchEvidence.cancelledPiSpiRequestIds } },
         ],
@@ -2627,11 +3059,18 @@ export async function auditWorkbookCutoverBatch(
   }
   assert(
     sourcePaymentSubmissions.every(
-      (row) => !["awaiting_proof", "submitted"].includes(row.status),
+      (row) =>
+        !["awaiting_proof", "submitted"].includes(row.status) &&
+        row.resumeToken === null,
     ) &&
       [...evidenceIds.submission].every((id) =>
         sourcePaymentSubmissions.some(
           (row) => row.id === id && row.status === "cancelled",
+        ),
+      ) &&
+      [...evidenceIds.submissionResumeToken].every((id) =>
+        sourcePaymentSubmissions.some(
+          (row) => row.id === id && row.resumeToken === null,
         ),
       ),
     "proof-payment attempts were not all cancelled",
@@ -2649,6 +3088,14 @@ export async function auditWorkbookCutoverBatch(
         ),
       ),
     "pre-cutover payment links were not cancelled or a non-canonical active link remains",
+  );
+  assert(
+    [...evidenceIds.linkToken].every(([id, originalTokenSha256]) =>
+      sourcePaymentLinks.some(
+        (row) => row.id === id && sha256(row.token) !== originalTokenSha256,
+      ),
+    ),
+    "pre-cutover payment-link bearer tokens were not revoked",
   );
   assert(
     sourcePiSpiRequests.every(
@@ -2723,7 +3170,8 @@ export async function auditWorkbookCutoverBatch(
     reconstructionPayments: reconstructionPaymentIds.length,
     archivedStudents: groups.archived.length,
     preservedAcademicRecords,
-    preservedApplicants: groups.applicants.length,
+    preservedApplicants: groups.applicants.length - removedApplicants,
+    removedApplicants,
     voidedInvoices,
     supersededPayments,
     cancelledInFlightAttempts:

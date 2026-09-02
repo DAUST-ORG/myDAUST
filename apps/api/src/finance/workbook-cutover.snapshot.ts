@@ -500,6 +500,13 @@ export async function captureWorkbookCutoverLiveSnapshot(
         lastName: true,
         email: true,
         stage: true,
+        onboardingStatus: true,
+        studentId: true,
+        enrollmentInvoiceId: true,
+        activeOnboardingPaymentLinkId: true,
+        statusTokenHash: true,
+        statusTokenExpiresAt: true,
+        statusTokenRevokedAt: true,
       },
       orderBy: { id: "asc" },
     }),
@@ -836,6 +843,7 @@ export async function captureWorkbookCutoverLiveSnapshot(
     students.flatMap((student) => student.payments),
     paymentOwners,
   );
+  const allPayments = students.flatMap((student) => student.payments);
   const pendingRefundsByStudent = groupIds(
     refunds.filter((refund) => studentIds.includes(refund.studentId)),
     (refund) => refund.studentId,
@@ -931,10 +939,19 @@ export async function captureWorkbookCutoverLiveSnapshot(
         email: canonicalEmail(applicant.email),
         stage: applicant.stage,
       };
+      const operational = applicantOperationalState({
+        applicant,
+        capturedAt,
+        paymentLinks,
+        proofSubmissions,
+        piSpiRequests,
+        payments: allPayments,
+      });
       return {
         sourceKey: workbookCutoverApplicantKey(applicant.id),
         sourceRecordSha256: workbookCutoverApplicantSourceRecordDigest(source),
         ...source,
+        ...operational,
       };
     }),
     feeSchedules: feeSchedules.map((schedule) => ({
@@ -1185,6 +1202,159 @@ export function workbookCutoverApplicantSourceRecordDigest(
   source: Record<string, unknown>,
 ): string {
   return digestCanonicalState(source);
+}
+
+function applicantOperationalState(input: {
+  applicant: {
+    id: string;
+    onboardingStatus: string;
+    studentId: string | null;
+    enrollmentInvoiceId: string | null;
+    activeOnboardingPaymentLinkId: string | null;
+    statusTokenHash: string | null;
+    statusTokenExpiresAt: Date | null;
+    statusTokenRevokedAt: Date | null;
+  };
+  capturedAt: Date;
+  paymentLinks: readonly {
+    id: string;
+    status: string;
+    onboardingApplicantId: string | null;
+  }[];
+  proofSubmissions: readonly {
+    id: string;
+    status: string;
+    resumeToken: string | null;
+    paymentId: string | null;
+    paymentLinkId: string | null;
+    applicantId: string | null;
+  }[];
+  piSpiRequests: readonly {
+    id: string;
+    status: string;
+    paymentId: string | null;
+    paymentLinkId: string | null;
+    applicantId: string | null;
+  }[];
+  payments: readonly {
+    id: string;
+    status: string;
+  }[];
+}): {
+  onboardingStatus:
+    "not_started" | "payment_pending" | "enrolled" | "cancelled";
+  studentId: string | null;
+  activeOnboardingPaymentLinkId: string | null;
+  statusTokenCapability: boolean;
+  statusTokenActive: boolean;
+  operationalFingerprintSha256: string;
+  paymentLinkBearerIds: string[];
+  paymentSubmissionResumeTokenIds: string[];
+  inFlightProofSubmissionIds: string[];
+  inFlightPaymentLinkIds: string[];
+  inFlightPiSpiRequestIds: string[];
+  pendingPaymentIds: string[];
+  pendingRefundIds: string[];
+} {
+  const paymentLinkIds = new Set(
+    input.paymentLinks
+      .filter(
+        (link) =>
+          link.onboardingApplicantId === input.applicant.id ||
+          link.id === input.applicant.activeOnboardingPaymentLinkId,
+      )
+      .map((link) => link.id),
+  );
+  const paymentIds = new Set<string>();
+  let proof = input.proofSubmissions.filter(
+    (row) =>
+      row.applicantId === input.applicant.id ||
+      (row.paymentLinkId !== null && paymentLinkIds.has(row.paymentLinkId)),
+  );
+  let piSpi = input.piSpiRequests.filter(
+    (row) =>
+      row.applicantId === input.applicant.id ||
+      (row.paymentLinkId !== null && paymentLinkIds.has(row.paymentLinkId)),
+  );
+  let changed = true;
+  while (changed) {
+    const before =
+      paymentLinkIds.size + paymentIds.size + proof.length + piSpi.length;
+    for (const row of [...proof, ...piSpi]) {
+      if (row.paymentId) paymentIds.add(row.paymentId);
+      if (row.paymentLinkId) paymentLinkIds.add(row.paymentLinkId);
+    }
+    proof = input.proofSubmissions.filter(
+      (row) =>
+        row.applicantId === input.applicant.id ||
+        (row.paymentId !== null && paymentIds.has(row.paymentId)) ||
+        (row.paymentLinkId !== null && paymentLinkIds.has(row.paymentLinkId)),
+    );
+    piSpi = input.piSpiRequests.filter(
+      (row) =>
+        row.applicantId === input.applicant.id ||
+        (row.paymentId !== null && paymentIds.has(row.paymentId)) ||
+        (row.paymentLinkId !== null && paymentLinkIds.has(row.paymentLinkId)),
+    );
+    changed =
+      before !==
+      paymentLinkIds.size + paymentIds.size + proof.length + piSpi.length;
+  }
+  const links = input.paymentLinks.filter((link) =>
+    paymentLinkIds.has(link.id),
+  );
+  const payments = input.payments.filter((payment) =>
+    paymentIds.has(payment.id),
+  );
+  const statusTokenCapability = input.applicant.statusTokenHash !== null;
+  const statusTokenActive =
+    statusTokenCapability &&
+    input.applicant.statusTokenRevokedAt === null &&
+    (input.applicant.statusTokenExpiresAt === null ||
+      input.applicant.statusTokenExpiresAt.getTime() >
+        input.capturedAt.getTime());
+  const onboardingStatus = input.applicant.onboardingStatus as
+    "not_started" | "payment_pending" | "enrolled" | "cancelled";
+  return {
+    onboardingStatus,
+    studentId: input.applicant.studentId,
+    activeOnboardingPaymentLinkId:
+      input.applicant.activeOnboardingPaymentLinkId,
+    statusTokenCapability,
+    statusTokenActive,
+    operationalFingerprintSha256: digestCanonicalState({
+      applicant: input.applicant,
+      paymentLinks: sortRecords(links),
+      proofSubmissions: sortRecords(proof),
+      piSpiRequests: sortRecords(piSpi),
+      payments: sortRecords(payments),
+    }),
+    paymentLinkBearerIds: links.map((row) => row.id).sort(compareText),
+    paymentSubmissionResumeTokenIds: proof
+      .filter((row) => typeof row.resumeToken === "string")
+      .map((row) => row.id)
+      .sort(compareText),
+    inFlightProofSubmissionIds: proof
+      .filter((row) => ["awaiting_proof", "submitted"].includes(row.status))
+      .map((row) => row.id)
+      .sort(compareText),
+    inFlightPaymentLinkIds: links
+      .filter((row) => row.status === "active")
+      .map((row) => row.id)
+      .sort(compareText),
+    inFlightPiSpiRequestIds: piSpi
+      .filter((row) => ["initiated", "sent"].includes(row.status))
+      .map((row) => row.id)
+      .sort(compareText),
+    pendingPaymentIds: payments
+      .filter((row) => row.status === "pending")
+      .map((row) => row.id)
+      .sort(compareText),
+    pendingRefundIds: payments
+      .filter((row) => row.status === "refund_pending")
+      .map((row) => row.id)
+      .sort(compareText),
+  };
 }
 
 export function workbookCutoverSnapshotCounts(

@@ -77,6 +77,21 @@ const LiveApplicantSchema = z
     lastName: z.string().trim().min(1).max(160),
     email: z.string().trim().email().max(320),
     stage: z.string().trim().min(1).max(80),
+    onboardingStatus: z
+      .enum(["not_started", "payment_pending", "enrolled", "cancelled"])
+      .optional(),
+    studentId: IdSchema.nullable().optional(),
+    activeOnboardingPaymentLinkId: IdSchema.nullable().optional(),
+    statusTokenCapability: z.boolean().optional(),
+    statusTokenActive: z.boolean().optional(),
+    operationalFingerprintSha256: WorkbookCutoverSha256Schema.optional(),
+    paymentLinkBearerIds: z.array(IdSchema).max(10_000).optional(),
+    paymentSubmissionResumeTokenIds: z.array(IdSchema).max(10_000).optional(),
+    inFlightProofSubmissionIds: z.array(IdSchema).max(10_000).optional(),
+    inFlightPaymentLinkIds: z.array(IdSchema).max(10_000).optional(),
+    inFlightPiSpiRequestIds: z.array(IdSchema).max(10_000).optional(),
+    pendingPaymentIds: z.array(IdSchema).max(10_000).optional(),
+    pendingRefundIds: z.array(IdSchema).max(10_000).optional(),
   })
   .strict();
 
@@ -188,6 +203,7 @@ export type WorkbookCutoverBlockerCode =
   | "applicant_source_set_drift"
   | "production_identity_drift"
   | "applicant_identity_drift"
+  | "applicant_removal_required"
   | "academic_fingerprint_drift"
   | "workbook_identity_hold"
   | "production_student_hold"
@@ -307,6 +323,7 @@ export interface WorkbookCutoverPlanControls {
   archiveStudents: number;
   keepExceptionStudents: number;
   preserveApplicants: number;
+  removeApplicants: number;
   reconciles: true;
 }
 
@@ -383,6 +400,7 @@ export function planWorkbookCutover(
     blockers,
   );
   checkReviewedHolds(manifest, blockers);
+  checkApplicantRemovals(manifest, blockers);
   checkLiveSourceSets(reviewedProductionSnapshot, liveSnapshot, blockers);
   checkRefunds(liveSnapshot, blockers);
   const selectedFeeSchedule = selectFeeSchedule(
@@ -474,9 +492,32 @@ export function workbookCutoverLiveSnapshotDigest(
           compareText,
         ),
       })),
-    applicants: [...snapshot.applicants].sort((left, right) =>
-      compareText(left.sourceKey, right.sourceKey),
-    ),
+    applicants: [...snapshot.applicants]
+      .sort((left, right) => compareText(left.sourceKey, right.sourceKey))
+      .map((applicant) => ({
+        ...applicant,
+        paymentLinkBearerIds: [...(applicant.paymentLinkBearerIds ?? [])].sort(
+          compareText,
+        ),
+        paymentSubmissionResumeTokenIds: [
+          ...(applicant.paymentSubmissionResumeTokenIds ?? []),
+        ].sort(compareText),
+        inFlightProofSubmissionIds: [
+          ...(applicant.inFlightProofSubmissionIds ?? []),
+        ].sort(compareText),
+        inFlightPaymentLinkIds: [
+          ...(applicant.inFlightPaymentLinkIds ?? []),
+        ].sort(compareText),
+        inFlightPiSpiRequestIds: [
+          ...(applicant.inFlightPiSpiRequestIds ?? []),
+        ].sort(compareText),
+        pendingPaymentIds: [...(applicant.pendingPaymentIds ?? [])].sort(
+          compareText,
+        ),
+        pendingRefundIds: [...(applicant.pendingRefundIds ?? [])].sort(
+          compareText,
+        ),
+      })),
     feeSchedules: [...snapshot.feeSchedules].sort((left, right) =>
       compareText(left.id, right.id),
     ),
@@ -662,6 +703,21 @@ function checkReviewedHolds(
   }
 }
 
+function checkApplicantRemovals(
+  manifest: WorkbookCutoverManifest,
+  blockers: WorkbookCutoverBlocker[],
+): void {
+  for (const applicant of manifest.applicants) {
+    if (applicant.decision === "remove") continue;
+    blockers.push({
+      code: "applicant_removal_required",
+      sourceKey: applicant.sourceKey,
+      message:
+        "Every frozen current Applicant requires the signed terminal removal disposition",
+    });
+  }
+}
+
 function checkLiveSourceSets(
   reviewed: z.infer<typeof WorkbookCutoverProductionSnapshotSchema>,
   live: WorkbookCutoverLiveSnapshot,
@@ -769,6 +825,17 @@ function checkRefunds(
       sourceKey: student.sourceKey,
       message: "A refund remains pending for this Student",
       details: { refundIds: [...student.pendingRefundIds].sort(compareText) },
+    });
+  }
+  for (const applicant of live.applicants) {
+    if ((applicant.pendingRefundIds ?? []).length === 0) continue;
+    blockers.push({
+      code: "refund_pending",
+      sourceKey: applicant.sourceKey,
+      message: "A refund remains pending for this Applicant",
+      details: {
+        refundIds: [...(applicant.pendingRefundIds ?? [])].sort(compareText),
+      },
     });
   }
   if (live.orphanPendingRefundIds.length > 0) {
@@ -1034,7 +1101,12 @@ function planControls(
     keepExceptionStudents: productionActions.filter(
       (action) => action.decision === "keep_exception",
     ).length,
-    preserveApplicants: manifest.applicants.length,
+    preserveApplicants: manifest.applicants.filter(
+      (action) => action.decision === "preserve",
+    ).length,
+    removeApplicants: manifest.applicants.filter(
+      (action) => action.decision === "remove",
+    ).length,
     reconciles: true,
   };
 }

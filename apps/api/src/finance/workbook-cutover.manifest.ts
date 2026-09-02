@@ -824,19 +824,31 @@ const ProductionStudentDecisionSchema = z.discriminatedUnion("decision", [
     .strict(),
 ]);
 
-const ApplicantDecisionSchema = z
-  .object({
-    decision: z.literal("preserve"),
-    sourceKey: z.string().trim().min(3).max(240),
-    sourceRecordSha256: WorkbookCutoverSha256Schema,
-    applicantId: IdSchema,
-    firstName: z.string().trim().min(1).max(160),
-    lastName: z.string().trim().min(1).max(160),
-    email: EmailSchema,
-    stage: z.string().trim().min(1).max(80),
-    review: WorkbookCutoverSignedReviewSchema,
-  })
-  .strict();
+const ApplicantDecisionFields = {
+  sourceKey: z.string().trim().min(3).max(240),
+  sourceRecordSha256: WorkbookCutoverSha256Schema,
+  applicantId: IdSchema,
+  firstName: z.string().trim().min(1).max(160),
+  lastName: z.string().trim().min(1).max(160),
+  email: EmailSchema,
+  stage: z.string().trim().min(1).max(80),
+  review: WorkbookCutoverSignedReviewSchema,
+} as const;
+
+const ApplicantDecisionSchema = z.discriminatedUnion("decision", [
+  z
+    .object({ decision: z.literal("preserve"), ...ApplicantDecisionFields })
+    .strict(),
+  z
+    .object({
+      decision: z.literal("remove"),
+      ...ApplicantDecisionFields,
+      removeFromActivePipeline: z.literal(true),
+      retainAuditEvidence: z.literal(true),
+      revokeBearerCapabilities: z.literal(true),
+    })
+    .strict(),
+]);
 
 const BaselineControlsSchema = z
   .object({
@@ -896,6 +908,7 @@ const DispositionControlsSchema = z
     archivedProductionStudents: z.number().int().nonnegative().max(50_000),
     heldProductionStudents: z.number().int().nonnegative().max(50_000),
     preservedApplicants: z.number().int().nonnegative().max(50_000),
+    removedApplicants: z.number().int().nonnegative().max(50_000).default(0),
   })
   .strict();
 
@@ -1072,7 +1085,9 @@ export const WorkbookCutoverManifestSchema = z
     manifest.applicants.forEach((applicant, index) => {
       const { review, ...payload } = applicant;
       verifyReview(
-        "applicant_preservation",
+        applicant.decision === "remove"
+          ? "applicant_removal"
+          : "applicant_preservation",
         applicant.sourceKey,
         payload,
         review,
@@ -1708,7 +1723,12 @@ function validateDispositionControls(
     heldProductionStudents: manifest.productionStudents.filter(
       (row) => row.decision === "hold",
     ).length,
-    preservedApplicants: manifest.applicants.length,
+    preservedApplicants: manifest.applicants.filter(
+      (row) => row.decision === "preserve",
+    ).length,
+    removedApplicants: manifest.applicants.filter(
+      (row) => row.decision === "remove",
+    ).length,
   };
   for (const [key, value] of Object.entries(derived)) {
     if (

@@ -107,7 +107,9 @@ function resignManifest(manifest: WorkbookCutoverManifest): void {
   for (const applicant of manifest.applicants) {
     const { review: applicantReview, ...payload } = applicant;
     sign(
-      "applicant_preservation",
+      applicant.decision === "remove"
+        ? "applicant_removal"
+        : "applicant_preservation",
       applicant.sourceKey,
       payload,
       applicantReview,
@@ -521,10 +523,13 @@ function buildFixture() {
         },
   );
   const applicants = reviewedApplicants.map((source) => ({
-    decision: "preserve" as const,
+    decision: "remove" as const,
     ...source,
+    removeFromActivePipeline: true as const,
+    retainAuditEvidence: true as const,
+    revokeBearerCapabilities: true as const,
     review: review(
-      "This open Applicant remains an application after the cutover.",
+      "This current Applicant is removed from the active pipeline by the final cutover decision.",
     ),
   }));
   const manifest = {
@@ -570,7 +575,8 @@ function buildFixture() {
       keptProductionExceptions: 14,
       archivedProductionStudents: 0,
       heldProductionStudents: 0,
-      preservedApplicants: 42,
+      preservedApplicants: 0,
+      removedApplicants: 42,
     },
     workbookRows,
     productionStudents,
@@ -593,7 +599,22 @@ function buildFixture() {
       inFlightPaymentLinkIds: [] as string[],
       inFlightPiSpiRequestIds: [] as string[],
     })),
-    applicants: reviewedApplicants,
+    applicants: reviewedApplicants.map((applicant) => ({
+      ...applicant,
+      onboardingStatus: "not_started" as const,
+      studentId: null,
+      activeOnboardingPaymentLinkId: null,
+      statusTokenCapability: false,
+      statusTokenActive: false,
+      operationalFingerprintSha256: sha(
+        `applicant-operational-${applicant.applicantId}`,
+      ),
+      inFlightProofSubmissionIds: [] as string[],
+      inFlightPaymentLinkIds: [] as string[],
+      inFlightPiSpiRequestIds: [] as string[],
+      pendingPaymentIds: [] as string[],
+      pendingRefundIds: [] as string[],
+    })),
     feeSchedules: [
       {
         id: "fee-schedule-1",
@@ -696,7 +717,12 @@ function recomputeDispositionControls(
     heldProductionStudents: manifest.productionStudents.filter(
       (row) => row.decision === "hold",
     ).length,
-    preservedApplicants: manifest.applicants.length,
+    preservedApplicants: manifest.applicants.filter(
+      (row) => row.decision === "preserve",
+    ).length,
+    removedApplicants: manifest.applicants.filter(
+      (row) => row.decision === "remove",
+    ).length,
   };
 }
 
@@ -767,7 +793,7 @@ describe("workbook cutover exhaustive reviewed inputs", () => {
         email: applicant.email,
         stage: applicant.stage,
         sourceRecordSha256: applicant.sourceRecordSha256,
-        disposition: "Preserve current application",
+        disposition: "Remove from active pipeline",
         reason,
         reviewer,
         reviewDate,
@@ -795,7 +821,8 @@ describe("workbook cutover exhaustive reviewed inputs", () => {
       includedWorkbookRows: 403,
       linkedProductionStudents: 403,
       keptProductionExceptions: 14,
-      preservedApplicants: 42,
+      preservedApplicants: 0,
+      removedApplicants: 42,
     });
     expect(() =>
       buildWorkbookCutoverManifestFromReviewData(importInput, {
@@ -891,7 +918,8 @@ describe("workbook cutover exhaustive reviewed inputs", () => {
       reviewedExclusionRows: 0,
       heldRows: 0,
       accountCreditXof: 1_433,
-      preserveApplicants: 42,
+      preserveApplicants: 0,
+      removeApplicants: 42,
       reconciles: true,
     });
     const variance = first.workbookActions.find(
@@ -1059,6 +1087,37 @@ describe("workbook cutover exhaustive reviewed inputs", () => {
     ).toBe(false);
   });
 
+  it("invalidates the plan when an Applicant payer capability changes after dry run", () => {
+    const input = WorkbookCutoverPlanInputSchema.parse(buildFixture());
+    const dryRun = planWorkbookCutover(input);
+    const applicant = input.liveSnapshot.applicants[0]!;
+    applicant.inFlightProofSubmissionIds = ["late-applicant-proof"];
+    applicant.paymentSubmissionResumeTokenIds = ["late-applicant-proof"];
+    applicant.operationalFingerprintSha256 = sha(
+      "applicant-capability-created-after-dry-run",
+    );
+    const confirmationReplan = planWorkbookCutover(input);
+    expect(confirmationReplan.planSha256).not.toBe(dryRun.planSha256);
+    expect(
+      workbookCutoverPlanDigestMatches(confirmationReplan, dryRun.planSha256),
+    ).toBe(false);
+  });
+
+  it("blocks confirmation for a refund in the Applicant-owned closure", () => {
+    const input = WorkbookCutoverPlanInputSchema.parse(buildFixture());
+    input.liveSnapshot.applicants[0]!.pendingRefundIds = [
+      "applicant-refund-pending",
+    ];
+    const plan = planWorkbookCutover(input);
+    expect(plan.confirmBlocked).toBe(true);
+    expect(plan.blockers).toContainEqual(
+      expect.objectContaining({
+        code: "refund_pending",
+        sourceKey: input.liveSnapshot.applicants[0]!.sourceKey,
+      }),
+    );
+  });
+
   it("keeps the live-state digest stable when only the observation time changes", () => {
     const input = WorkbookCutoverPlanInputSchema.parse(buildFixture());
     const firstDigest = workbookCutoverLiveSnapshotDigest(input.liveSnapshot);
@@ -1119,10 +1178,13 @@ describe("workbook cutover exhaustive reviewed inputs", () => {
       addedApplicants.length;
     input.manifest.applicants.push(
       ...addedApplicants.map((applicant) => ({
-        decision: "preserve" as const,
+        decision: "remove" as const,
         ...applicant,
+        removeFromActivePipeline: true as const,
+        retainAuditEvidence: true as const,
+        revokeBearerCapabilities: true as const,
         review: review(
-          "This later open Applicant was included in the refreshed exhaustive review.",
+          "This later Applicant was included and removed by the refreshed exhaustive review.",
         ),
       })),
     );
@@ -1137,7 +1199,8 @@ describe("workbook cutover exhaustive reviewed inputs", () => {
     expect(plan.confirmBlocked).toBe(false);
     expect(plan.controls.productionStudents).toBe(418);
     expect(plan.controls.applicants).toBe(46);
-    expect(plan.controls.preserveApplicants).toBe(46);
+    expect(plan.controls.preserveApplicants).toBe(0);
+    expect(plan.controls.removeApplicants).toBe(46);
   });
 
   it("preplans locked permanent numbers and collision-safe SIS-only login identities", () => {

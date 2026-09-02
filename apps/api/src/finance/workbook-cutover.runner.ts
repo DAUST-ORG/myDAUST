@@ -110,6 +110,7 @@ export interface WorkbookCutoverResult {
   workbookCreatedRows: number;
   workbookDuplicateRows: number;
   productionArchivedStudents: number;
+  removedApplicants: number;
   includedBilledXof: number;
   includedPaidXof: number;
   credentialRows: number;
@@ -123,18 +124,28 @@ interface WorkbookCutoverCommittedResult {
 
 interface CutoverEvidence {
   cancelledPaymentSubmissionIds: string[];
+  revokedPaymentSubmissionResumeTokenIds: string[];
+  revokedPaymentLinkTokenEvidence: RevokedPaymentLinkTokenEvidence[];
   cancelledPaymentLinkIds: string[];
   cancelledPiSpiRequestIds: string[];
   cancelledPendingPaymentIds: string[];
   archivedCapabilityCancellations: ArchivedCapabilityCancellationEvidence[];
+  removedApplicantIds: string[];
   activationApplicantIds: string[];
 }
 
 interface CancelledPaymentCapabilities {
   cancelledPaymentSubmissionIds: string[];
+  revokedPaymentSubmissionResumeTokenIds: string[];
+  revokedPaymentLinkTokenEvidence: RevokedPaymentLinkTokenEvidence[];
   cancelledPaymentLinkIds: string[];
   cancelledPiSpiRequestIds: string[];
   cancelledPendingPaymentIds: string[];
+}
+
+interface RevokedPaymentLinkTokenEvidence {
+  paymentLinkId: string;
+  originalTokenSha256: string;
 }
 
 interface ClearedApplicantPaymentLinkPointer {
@@ -432,6 +443,7 @@ async function findExistingBatch(
       workbookCreatedRows: true,
       workbookDuplicateRows: true,
       productionArchivedStudents: true,
+      removedApplicants: true,
       includedBilledXof: true,
       includedPaidXof: true,
     },
@@ -511,7 +523,12 @@ function exactReplayPlan(
       keepExceptionStudents: manifest.productionStudents.filter(
         (row) => row.decision === "keep_exception",
       ).length,
-      preserveApplicants: manifest.applicants.length,
+      preserveApplicants: manifest.applicants.filter(
+        (row) => row.decision === "preserve",
+      ).length,
+      removeApplicants: manifest.applicants.filter(
+        (row) => row.decision === "remove",
+      ).length,
       reconciles: true,
     },
   };
@@ -557,6 +574,7 @@ async function executeInsideTransaction(
         workbookCreatedRows: batch.workbookCreatedRows,
         workbookDuplicateRows: batch.workbookDuplicateRows,
         productionArchivedStudents: batch.productionArchivedStudents,
+        removedApplicants: batch.removedApplicants,
         includedBilledXof: safeNumber(
           batch.includedBilledXof,
           "included billed XOF",
@@ -612,10 +630,13 @@ async function executeInsideTransaction(
   const catalog = await loadCatalogContext(tx, input.manifest, plan);
   const evidence: CutoverEvidence = {
     cancelledPaymentSubmissionIds: [],
+    revokedPaymentSubmissionResumeTokenIds: [],
+    revokedPaymentLinkTokenEvidence: [],
     cancelledPaymentLinkIds: [],
     cancelledPiSpiRequestIds: [],
     cancelledPendingPaymentIds: [],
     archivedCapabilityCancellations: [],
+    removedApplicantIds: [],
     activationApplicantIds: [],
   };
   const activationPayloads: EnrollmentActivation[] = [];
@@ -715,6 +736,12 @@ async function executeInsideTransaction(
       evidence.cancelledPaymentSubmissionIds.push(
         ...cancelledCapabilities.cancelledPaymentSubmissionIds,
       );
+      evidence.revokedPaymentSubmissionResumeTokenIds.push(
+        ...cancelledCapabilities.revokedPaymentSubmissionResumeTokenIds,
+      );
+      evidence.revokedPaymentLinkTokenEvidence.push(
+        ...cancelledCapabilities.revokedPaymentLinkTokenEvidence,
+      );
       evidence.cancelledPaymentLinkIds.push(
         ...cancelledCapabilities.cancelledPaymentLinkIds,
       );
@@ -755,6 +782,32 @@ async function executeInsideTransaction(
     });
   }
   for (const applicant of plan.applicantActions) {
+    if (applicant.decision === "remove") {
+      const removal = await removeApplicantFromPipelineInTransaction(tx, {
+        applicantId: applicant.applicantId,
+        actorId: plan.actorId,
+        batchId: batch.id,
+        sourceRecordId: recordIds.get(applicant.sourceKey)!,
+        reason: applicant.review.reason,
+      });
+      evidence.cancelledPaymentSubmissionIds.push(
+        ...removal.cancelledPaymentSubmissionIds,
+      );
+      evidence.revokedPaymentSubmissionResumeTokenIds.push(
+        ...removal.revokedPaymentSubmissionResumeTokenIds,
+      );
+      evidence.revokedPaymentLinkTokenEvidence.push(
+        ...removal.revokedPaymentLinkTokenEvidence,
+      );
+      evidence.cancelledPaymentLinkIds.push(...removal.cancelledPaymentLinkIds);
+      evidence.cancelledPiSpiRequestIds.push(
+        ...removal.cancelledPiSpiRequestIds,
+      );
+      evidence.cancelledPendingPaymentIds.push(
+        ...removal.cancelledPendingPaymentIds,
+      );
+      evidence.removedApplicantIds.push(applicant.applicantId);
+    }
     await tx.workbookCutoverSourceRecord.update({
       where: { id: recordIds.get(applicant.sourceKey)! },
       data: { appliedAt: new Date() },
@@ -779,6 +832,7 @@ async function executeInsideTransaction(
       ).length,
       productionArchivedStudents: plan.controls.archiveStudents,
       preservedApplicants: plan.controls.preserveApplicants,
+      removedApplicants: plan.controls.removeApplicants,
       includedBilledXof: BigInt(plan.controls.includedBilledXof),
       includedPaidXof: BigInt(plan.controls.includedPaidXof),
       excludedBilledXof: BigInt(plan.controls.reviewedExclusionBilledXof),
@@ -814,6 +868,7 @@ async function executeInsideTransaction(
         originalApplicantIds: uniqueSorted(
           liveSnapshot.applicants.map((applicant) => applicant.applicantId),
         ),
+        removedApplicantIds: uniqueSorted(evidence.removedApplicantIds),
         academicFingerprints: liveSnapshot.students.map((student) => ({
           studentId: student.studentId,
           personId: student.personId,
@@ -824,6 +879,19 @@ async function executeInsideTransaction(
         supersededPaymentIds: uniqueSorted(supersededPaymentIds),
         cancelledPaymentSubmissionIds: uniqueSorted(
           evidence.cancelledPaymentSubmissionIds,
+        ),
+        revokedPaymentSubmissionResumeTokenIds: uniqueSorted(
+          evidence.revokedPaymentSubmissionResumeTokenIds,
+        ),
+        revokedPaymentLinkTokenEvidence: [
+          ...new Map(
+            evidence.revokedPaymentLinkTokenEvidence.map((row) => [
+              row.paymentLinkId,
+              row,
+            ]),
+          ).values(),
+        ].sort((left, right) =>
+          left.paymentLinkId.localeCompare(right.paymentLinkId),
         ),
         cancelledPaymentLinkIds: uniqueSorted(evidence.cancelledPaymentLinkIds),
         cancelledPiSpiRequestIds: uniqueSorted(
@@ -839,6 +907,14 @@ async function executeInsideTransaction(
               sourceRecordId: row.sourceRecordId,
               cancelledPaymentSubmissionIds: uniqueSorted(
                 row.cancelledPaymentSubmissionIds,
+              ),
+              revokedPaymentSubmissionResumeTokenIds: uniqueSorted(
+                row.revokedPaymentSubmissionResumeTokenIds,
+              ),
+              revokedPaymentLinkTokenEvidence: [
+                ...row.revokedPaymentLinkTokenEvidence,
+              ].sort((left, right) =>
+                left.paymentLinkId.localeCompare(right.paymentLinkId),
               ),
               cancelledPaymentLinkIds: uniqueSorted(
                 row.cancelledPaymentLinkIds,
@@ -881,6 +957,7 @@ async function executeInsideTransaction(
       workbookCreatedRows: createActions.length,
       workbookDuplicateRows: plan.controls.reviewedExclusionRows,
       productionArchivedStudents: plan.controls.archiveStudents,
+      removedApplicants: plan.controls.removeApplicants,
       includedBilledXof: plan.controls.includedBilledXof,
       includedPaidXof: plan.controls.includedPaidXof,
       credentialRows: createActions.length,
@@ -1225,7 +1302,8 @@ async function createSourceRecords(
       sourceKey: row.sourceKey,
       sourceKeySha256: sha256(row.sourceKey),
       sourceFingerprintSha256: row.sourceRecordSha256,
-      disposition: "preserve_applicant",
+      disposition:
+        row.decision === "remove" ? "remove_applicant" : "preserve_applicant",
       reviewedById: reviewerId(input.plan, row.review.reviewedBy),
       reviewedAt: new Date(row.review.reviewedAt),
       reviewReason: row.review.reason,
@@ -1678,6 +1756,8 @@ type SupersededFinancialState = {
   invoices: SupersededInvoiceSnapshot[];
   payments: SupersededPaymentSnapshot[];
   cancelledPaymentSubmissionIds: string[];
+  revokedPaymentSubmissionResumeTokenIds: string[];
+  revokedPaymentLinkTokenEvidence: RevokedPaymentLinkTokenEvidence[];
   cancelledPaymentLinkIds: string[];
   cancelledPiSpiRequestIds: string[];
   cancelledPendingPaymentIds: string[];
@@ -1686,6 +1766,7 @@ type SupersededFinancialState = {
 type PaymentCapabilityAttempt = {
   id: string;
   status: string;
+  resumeToken?: string | null;
   paymentId: string | null;
   paymentLinkId: string | null;
 };
@@ -1795,6 +1876,7 @@ async function cancelStudentPaymentCapabilitiesInTransaction(
         select: {
           id: true,
           status: true,
+          resumeToken: true,
           paymentId: true,
           paymentLinkId: true,
         },
@@ -1826,15 +1908,24 @@ async function cancelStudentPaymentCapabilitiesInTransaction(
   const unsettledSubmissions = [...submissions.values()]
     .filter((row) => ["awaiting_proof", "submitted"].includes(row.status))
     .sort((left, right) => left.id.localeCompare(right.id));
+  const unsettledSubmissionIds = new Set(
+    unsettledSubmissions.map((row) => row.id),
+  );
+  const resumeTokenSubmissions = [...submissions.values()]
+    .filter((row) => typeof row.resumeToken === "string")
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const terminalResumeTokenSubmissions = resumeTokenSubmissions.filter(
+    (row) => !unsettledSubmissionIds.has(row.id),
+  );
   const unsettledPiSpiRequests = [...piSpiRequests.values()]
     .filter((row) => ["initiated", "sent"].includes(row.status))
     .sort((left, right) => left.id.localeCompare(right.id));
-  const [activeLinks, pendingPayments] = await Promise.all([
+  const [ownedLinks, pendingPayments] = await Promise.all([
     paymentLinkIds.size > 0
       ? tx.paymentLink.findMany({
-          where: { id: { in: [...paymentLinkIds] }, status: "active" },
+          where: { id: { in: [...paymentLinkIds] } },
           orderBy: { id: "asc" },
-          select: { id: true },
+          select: { id: true, token: true, status: true },
         })
       : Promise.resolve([]),
     paymentIds.size > 0
@@ -1845,52 +1936,82 @@ async function cancelStudentPaymentCapabilitiesInTransaction(
         })
       : Promise.resolve([]),
   ]);
+  const activeLinks = ownedLinks.filter((row) => row.status === "active");
 
-  const [submissionMutation, linkMutation, piSpiMutation, paymentMutation] =
-    await Promise.all([
-      unsettledSubmissions.length > 0
-        ? tx.paymentSubmission.updateMany({
-            where: {
-              id: { in: unsettledSubmissions.map((row) => row.id) },
-              status: { in: ["awaiting_proof", "submitted"] },
+  const [
+    submissionMutation,
+    terminalResumeTokenMutation,
+    paymentLinkTokenMutations,
+    linkMutation,
+    piSpiMutation,
+    paymentMutation,
+  ] = await Promise.all([
+    unsettledSubmissions.length > 0
+      ? tx.paymentSubmission.updateMany({
+          where: {
+            id: { in: unsettledSubmissions.map((row) => row.id) },
+            status: { in: ["awaiting_proof", "submitted"] },
+          },
+          data: {
+            status: "cancelled",
+            activeKey: null,
+            resumeToken: null,
+            rejectionReason: reason,
+          },
+        })
+      : Promise.resolve({ count: 0 }),
+    terminalResumeTokenSubmissions.length > 0
+      ? tx.paymentSubmission.updateMany({
+          where: {
+            id: {
+              in: terminalResumeTokenSubmissions.map((row) => row.id),
             },
-            data: {
-              status: "cancelled",
-              activeKey: null,
-              rejectionReason: reason,
-            },
-          })
-        : Promise.resolve({ count: 0 }),
-      activeLinks.length > 0
-        ? tx.paymentLink.updateMany({
-            where: {
-              id: { in: activeLinks.map((row) => row.id) },
-              status: "active",
-            },
-            data: { status: "cancelled" },
-          })
-        : Promise.resolve({ count: 0 }),
-      unsettledPiSpiRequests.length > 0
-        ? tx.piSpiRequest.updateMany({
-            where: {
-              id: { in: unsettledPiSpiRequests.map((row) => row.id) },
-              status: { in: ["initiated", "sent"] },
-            },
-            data: { status: "cancelled", statusReason: reason },
-          })
-        : Promise.resolve({ count: 0 }),
-      pendingPayments.length > 0
-        ? tx.payment.updateMany({
-            where: {
-              id: { in: pendingPayments.map((row) => row.id) },
-              status: "pending",
-            },
-            data: { status: "cancelled" },
-          })
-        : Promise.resolve({ count: 0 }),
-    ]);
+            resumeToken: { not: null },
+          },
+          data: { resumeToken: null },
+        })
+      : Promise.resolve({ count: 0 }),
+    Promise.all(
+      ownedLinks.map((link) =>
+        tx.paymentLink.updateMany({
+          where: { id: link.id, token: link.token },
+          data: { token: `cutover-revoked-${randomUUID()}` },
+        }),
+      ),
+    ),
+    activeLinks.length > 0
+      ? tx.paymentLink.updateMany({
+          where: {
+            id: { in: activeLinks.map((row) => row.id) },
+            status: "active",
+          },
+          data: { status: "cancelled" },
+        })
+      : Promise.resolve({ count: 0 }),
+    unsettledPiSpiRequests.length > 0
+      ? tx.piSpiRequest.updateMany({
+          where: {
+            id: { in: unsettledPiSpiRequests.map((row) => row.id) },
+            status: { in: ["initiated", "sent"] },
+          },
+          data: { status: "cancelled", statusReason: reason },
+        })
+      : Promise.resolve({ count: 0 }),
+    pendingPayments.length > 0
+      ? tx.payment.updateMany({
+          where: {
+            id: { in: pendingPayments.map((row) => row.id) },
+            status: "pending",
+          },
+          data: { status: "cancelled" },
+        })
+      : Promise.resolve({ count: 0 }),
+  ]);
   if (
     submissionMutation.count !== unsettledSubmissions.length ||
+    terminalResumeTokenMutation.count !==
+      terminalResumeTokenSubmissions.length ||
+    paymentLinkTokenMutations.some((mutation) => mutation.count !== 1) ||
     linkMutation.count !== activeLinks.length ||
     piSpiMutation.count !== unsettledPiSpiRequests.length ||
     paymentMutation.count !== pendingPayments.length
@@ -1901,6 +2022,15 @@ async function cancelStudentPaymentCapabilitiesInTransaction(
         studentId,
         expectedSubmissionCancellations: unsettledSubmissions.length,
         actualSubmissionCancellations: submissionMutation.count,
+        expectedResumeTokenRevocations: resumeTokenSubmissions.length,
+        actualResumeTokenRevocations:
+          unsettledSubmissions.filter((row) => row.resumeToken !== null)
+            .length + terminalResumeTokenMutation.count,
+        expectedPaymentLinkTokenRevocations: ownedLinks.length,
+        actualPaymentLinkTokenRevocations: paymentLinkTokenMutations.reduce(
+          (sum, mutation) => sum + mutation.count,
+          0,
+        ),
         expectedLinkCancellations: activeLinks.length,
         actualLinkCancellations: linkMutation.count,
         expectedPiSpiCancellations: unsettledPiSpiRequests.length,
@@ -1913,10 +2043,311 @@ async function cancelStudentPaymentCapabilitiesInTransaction(
 
   return {
     cancelledPaymentSubmissionIds: unsettledSubmissions.map((row) => row.id),
+    revokedPaymentSubmissionResumeTokenIds: resumeTokenSubmissions.map(
+      (row) => row.id,
+    ),
+    revokedPaymentLinkTokenEvidence: ownedLinks.map((link) => ({
+      paymentLinkId: link.id,
+      originalTokenSha256: sha256(link.token),
+    })),
     cancelledPaymentLinkIds: activeLinks.map((row) => row.id),
     cancelledPiSpiRequestIds: unsettledPiSpiRequests.map((row) => row.id),
     cancelledPendingPaymentIds: pendingPayments.map((row) => row.id),
   };
+}
+
+/**
+ * Removes one reviewed Applicant from every active Admissions surface without
+ * deleting the source row. Applicant-owned payer attempts are discovered from
+ * both the direct applicant/link references and their transitive payment/link
+ * edges, then cancelled in the same SERIALIZABLE transaction.
+ */
+async function removeApplicantFromPipelineInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    applicantId: string;
+    actorId: string;
+    batchId: string;
+    sourceRecordId: string;
+    reason: string;
+  },
+): Promise<CancelledPaymentCapabilities> {
+  const applicant = await tx.applicant.findUnique({
+    where: { id: input.applicantId },
+    select: {
+      id: true,
+      stage: true,
+      onboardingStatus: true,
+      onboardingCancelledAt: true,
+      statusTokenHash: true,
+      statusTokenExpiresAt: true,
+      statusTokenRevokedAt: true,
+      activeOnboardingPaymentLinkId: true,
+    },
+  });
+  if (!applicant) {
+    throw new WorkbookCutoverBlockedError(
+      "A reviewed Applicant disappeared during cutover confirmation",
+      { sourceRecordId: input.sourceRecordId },
+    );
+  }
+
+  const directLinks = await tx.paymentLink.findMany({
+    where: {
+      OR: [
+        { onboardingApplicantId: input.applicantId },
+        ...(applicant.activeOnboardingPaymentLinkId
+          ? [{ id: applicant.activeOnboardingPaymentLinkId }]
+          : []),
+      ],
+    },
+    select: { id: true },
+    orderBy: { id: "asc" },
+  });
+  const paymentLinkIds = new Set(directLinks.map((row) => row.id));
+  const paymentIds = new Set<string>();
+  const submissions = new Map<string, PaymentCapabilityAttempt>();
+  const piSpiRequests = new Map<string, PaymentCapabilityAttempt>();
+  let changed = true;
+  while (changed) {
+    const before =
+      paymentIds.size +
+      paymentLinkIds.size +
+      submissions.size +
+      piSpiRequests.size;
+    const targetOr = [
+      { applicantId: input.applicantId },
+      ...(paymentIds.size > 0 ? [{ paymentId: { in: [...paymentIds] } }] : []),
+      ...(paymentLinkIds.size > 0
+        ? [{ paymentLinkId: { in: [...paymentLinkIds] } }]
+        : []),
+    ];
+    const [submissionRows, piSpiRows] = await Promise.all([
+      tx.paymentSubmission.findMany({
+        where: { OR: targetOr },
+        select: {
+          id: true,
+          status: true,
+          resumeToken: true,
+          paymentId: true,
+          paymentLinkId: true,
+        },
+      }),
+      tx.piSpiRequest.findMany({
+        where: { OR: targetOr },
+        select: {
+          id: true,
+          status: true,
+          paymentId: true,
+          paymentLinkId: true,
+        },
+      }),
+    ]);
+    for (const row of submissionRows) submissions.set(row.id, row);
+    for (const row of piSpiRows) piSpiRequests.set(row.id, row);
+    for (const row of [...submissionRows, ...piSpiRows]) {
+      if (row.paymentId) paymentIds.add(row.paymentId);
+      if (row.paymentLinkId) paymentLinkIds.add(row.paymentLinkId);
+    }
+    const after =
+      paymentIds.size +
+      paymentLinkIds.size +
+      submissions.size +
+      piSpiRequests.size;
+    changed = before !== after;
+  }
+
+  const unsettledSubmissions = [...submissions.values()]
+    .filter((row) => ["awaiting_proof", "submitted"].includes(row.status))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const unsettledSubmissionIds = new Set(
+    unsettledSubmissions.map((row) => row.id),
+  );
+  const resumeTokenSubmissions = [...submissions.values()]
+    .filter((row) => typeof row.resumeToken === "string")
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const terminalResumeTokenSubmissions = resumeTokenSubmissions.filter(
+    (row) => !unsettledSubmissionIds.has(row.id),
+  );
+  const unsettledPiSpiRequests = [...piSpiRequests.values()]
+    .filter((row) => ["initiated", "sent"].includes(row.status))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const [ownedLinks, pendingPayments, pendingRefund] = await Promise.all([
+    paymentLinkIds.size > 0
+      ? tx.paymentLink.findMany({
+          where: { id: { in: [...paymentLinkIds] } },
+          select: { id: true, token: true, status: true },
+          orderBy: { id: "asc" },
+        })
+      : Promise.resolve([]),
+    paymentIds.size > 0
+      ? tx.payment.findMany({
+          where: { id: { in: [...paymentIds] }, status: "pending" },
+          select: { id: true },
+          orderBy: { id: "asc" },
+        })
+      : Promise.resolve([]),
+    paymentIds.size > 0
+      ? tx.payment.findFirst({
+          where: { id: { in: [...paymentIds] }, status: "refund_pending" },
+          select: { id: true },
+        })
+      : Promise.resolve(null),
+  ]);
+  const activeLinks = ownedLinks.filter((row) => row.status === "active");
+  if (pendingRefund) {
+    throw new WorkbookCutoverBlockedError(
+      "An Applicant-owned refund remains pending",
+      { applicantId: input.applicantId, paymentId: pendingRefund.id },
+    );
+  }
+
+  const [
+    submissionMutation,
+    terminalResumeTokenMutation,
+    paymentLinkTokenMutations,
+    linkMutation,
+    piSpiMutation,
+    paymentMutation,
+  ] = await Promise.all([
+    unsettledSubmissions.length > 0
+      ? tx.paymentSubmission.updateMany({
+          where: {
+            id: { in: unsettledSubmissions.map((row) => row.id) },
+            status: { in: ["awaiting_proof", "submitted"] },
+          },
+          data: {
+            status: "cancelled",
+            activeKey: null,
+            resumeToken: null,
+            rejectionReason: input.reason,
+          },
+        })
+      : Promise.resolve({ count: 0 }),
+    terminalResumeTokenSubmissions.length > 0
+      ? tx.paymentSubmission.updateMany({
+          where: {
+            id: {
+              in: terminalResumeTokenSubmissions.map((row) => row.id),
+            },
+            resumeToken: { not: null },
+          },
+          data: { resumeToken: null },
+        })
+      : Promise.resolve({ count: 0 }),
+    Promise.all(
+      ownedLinks.map((link) =>
+        tx.paymentLink.updateMany({
+          where: { id: link.id, token: link.token },
+          data: { token: `cutover-revoked-${randomUUID()}` },
+        }),
+      ),
+    ),
+    activeLinks.length > 0
+      ? tx.paymentLink.updateMany({
+          where: {
+            id: { in: activeLinks.map((row) => row.id) },
+            status: "active",
+          },
+          data: { status: "cancelled" },
+        })
+      : Promise.resolve({ count: 0 }),
+    unsettledPiSpiRequests.length > 0
+      ? tx.piSpiRequest.updateMany({
+          where: {
+            id: { in: unsettledPiSpiRequests.map((row) => row.id) },
+            status: { in: ["initiated", "sent"] },
+          },
+          data: { status: "cancelled", statusReason: input.reason },
+        })
+      : Promise.resolve({ count: 0 }),
+    pendingPayments.length > 0
+      ? tx.payment.updateMany({
+          where: {
+            id: { in: pendingPayments.map((row) => row.id) },
+            status: "pending",
+          },
+          data: { status: "cancelled" },
+        })
+      : Promise.resolve({ count: 0 }),
+  ]);
+  if (
+    submissionMutation.count !== unsettledSubmissions.length ||
+    terminalResumeTokenMutation.count !==
+      terminalResumeTokenSubmissions.length ||
+    paymentLinkTokenMutations.some((mutation) => mutation.count !== 1) ||
+    linkMutation.count !== activeLinks.length ||
+    piSpiMutation.count !== unsettledPiSpiRequests.length ||
+    paymentMutation.count !== pendingPayments.length
+  ) {
+    throw new WorkbookCutoverBlockedError(
+      "An Applicant payer capability changed during cutover confirmation",
+      { applicantId: input.applicantId },
+    );
+  }
+
+  const now = new Date();
+  const applicantMutation = await tx.applicant.updateMany({
+    where: {
+      id: applicant.id,
+      stage: applicant.stage,
+      onboardingStatus: applicant.onboardingStatus,
+      activeOnboardingPaymentLinkId: applicant.activeOnboardingPaymentLinkId,
+    },
+    data: {
+      stage: "rejected",
+      onboardingStatus: "cancelled",
+      onboardingCancelledAt: applicant.onboardingCancelledAt ?? now,
+      activeOnboardingPaymentLinkId: null,
+      ...(applicant.statusTokenHash
+        ? { statusTokenRevokedAt: now, statusTokenExpiresAt: now }
+        : {}),
+    },
+  });
+  if (applicantMutation.count !== 1) {
+    throw new WorkbookCutoverBlockedError(
+      "Applicant state changed during cutover removal",
+      { applicantId: input.applicantId },
+    );
+  }
+
+  const evidence: CancelledPaymentCapabilities = {
+    cancelledPaymentSubmissionIds: unsettledSubmissions.map((row) => row.id),
+    revokedPaymentSubmissionResumeTokenIds: resumeTokenSubmissions.map(
+      (row) => row.id,
+    ),
+    revokedPaymentLinkTokenEvidence: ownedLinks.map((link) => ({
+      paymentLinkId: link.id,
+      originalTokenSha256: sha256(link.token),
+    })),
+    cancelledPaymentLinkIds: activeLinks.map((row) => row.id),
+    cancelledPiSpiRequestIds: unsettledPiSpiRequests.map((row) => row.id),
+    cancelledPendingPaymentIds: pendingPayments.map((row) => row.id),
+  };
+  await tx.auditLog.create({
+    data: {
+      entity: "Applicant",
+      entityId: applicant.id,
+      action: "workbook-cutover-removed",
+      actorId: input.actorId,
+      data: safeJson({
+        batchId: input.batchId,
+        sourceRecordId: input.sourceRecordId,
+        reason: input.reason,
+        originalStage: applicant.stage,
+        originalOnboardingStatus: applicant.onboardingStatus,
+        statusTokenCapabilityRetainedAsRevokedEvidence:
+          applicant.statusTokenHash !== null,
+        originalStatusTokenWasRevoked: applicant.statusTokenRevokedAt !== null,
+        originalStatusTokenExpiresAt:
+          applicant.statusTokenExpiresAt?.toISOString() ?? null,
+        originalActiveOnboardingPaymentLinkId:
+          applicant.activeOnboardingPaymentLinkId,
+        ...evidence,
+      }),
+    },
+  });
+  return evidence;
 }
 
 /**
@@ -2315,6 +2746,12 @@ async function applyWorkbookReconstruction(
   const superseded = await supersedeStudentFinancialState(tx, student.id);
   input.evidence.cancelledPaymentSubmissionIds.push(
     ...superseded.cancelledPaymentSubmissionIds,
+  );
+  input.evidence.revokedPaymentSubmissionResumeTokenIds.push(
+    ...superseded.revokedPaymentSubmissionResumeTokenIds,
+  );
+  input.evidence.revokedPaymentLinkTokenEvidence.push(
+    ...superseded.revokedPaymentLinkTokenEvidence,
   );
   input.evidence.cancelledPaymentLinkIds.push(
     ...superseded.cancelledPaymentLinkIds,

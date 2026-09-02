@@ -169,7 +169,11 @@ export async function inWorkbookCutoverReadOnlyRepeatableReadTransaction<T>(
       await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
       return operation(tx);
     },
-    { isolationLevel: "RepeatableRead" },
+    {
+      isolationLevel: "RepeatableRead",
+      maxWait: 30_000,
+      timeout: 120_000,
+    },
   );
 }
 

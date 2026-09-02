@@ -30,6 +30,7 @@ import {
   type BillingProfileChangeInput,
   type BillingProfilePricingClaims,
 } from "../finance/billing-profile.service.js";
+import { assertActiveApplicantPaymentCapability } from "./applicant-payment-capability.js";
 
 /** Escape user-supplied text before embedding it in email HTML (applications are anonymous/public). */
 const esc = (s: unknown): string =>
@@ -172,7 +173,7 @@ export class AdmissionsService {
     const applicant = await this.prisma.applicant.findUnique({
       where: { id: applicantId },
     });
-    if (!applicant) throw new NotFoundException("Application not found");
+    assertActiveApplicantPaymentCapability(applicant);
     if (applicant.feePaid)
       throw new BadRequestException("Application fee already paid");
     const fee = await this.appConfig.applicationFee();

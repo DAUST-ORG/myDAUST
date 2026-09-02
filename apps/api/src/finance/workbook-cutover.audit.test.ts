@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { PrismaClient } from "@mydaust/db";
 import { describe, expect, it } from "vitest";
 import {
+  WORKBOOK_CUTOVER_APPLICANT_REMOVAL_AUDIT,
   WORKBOOK_CUTOVER_ARCHIVE_AUDIT,
   WORKBOOK_CUTOVER_BATCH_AUDIT,
   WORKBOOK_CUTOVER_PAYMENT_AUDIT,
@@ -570,6 +571,7 @@ async function fixture() {
     rosterSnapshotSha256: sha("roster"),
     identityManifestSha256: sha("manifest"),
     confirmationPlanSha256: sha("plan"),
+    createdById: "reviewer-1",
     workbookRowCount: 403,
     productionStudentCount: 418,
     applicantCount: 46,
@@ -580,6 +582,7 @@ async function fixture() {
     productionKeptStudents: 417,
     productionArchivedStudents: 0,
     preservedApplicants: 46,
+    removedApplicants: 0,
     sourceBilledXof: 1_514_469_978n,
     sourcePaidXof: 286_551_264n,
     includedBilledXof: 1_514_469_978n,
@@ -623,6 +626,7 @@ async function fixture() {
       archiveStudents: 0,
       keepExceptionStudents: 417,
       preserveApplicants: 46,
+      removeApplicants: 0,
       reconciles: true,
     },
     activations: 0,
@@ -642,9 +646,12 @@ async function fixture() {
     originalApplicantIds: [applicant, ...additionalApplicants].map(
       (record) => record.applicantId,
     ),
+    removedApplicantIds: [],
     supersededInvoiceIds: [oldInvoice.id],
     supersededPaymentIds: [oldPayment.id],
     cancelledPaymentSubmissionIds: [],
+    revokedPaymentSubmissionResumeTokenIds: [],
+    revokedPaymentLinkTokenEvidence: [],
     cancelledPaymentLinkIds: [],
     cancelledPiSpiRequestIds: [],
     cancelledPendingPaymentIds: [],
@@ -652,6 +659,11 @@ async function fixture() {
       studentId: string;
       sourceRecordId: string;
       cancelledPaymentSubmissionIds: string[];
+      revokedPaymentSubmissionResumeTokenIds: string[];
+      revokedPaymentLinkTokenEvidence: Array<{
+        paymentLinkId: string;
+        originalTokenSha256: string;
+      }>;
       cancelledPaymentLinkIds: string[];
       cancelledPiSpiRequestIds: string[];
       cancelledPendingPaymentIds: string[];
@@ -681,6 +693,11 @@ async function fixture() {
     }),
   );
   const archiveAuditRows: Array<{ entityId: string; data: unknown }> = [];
+  const applicantRemovalAuditRows: Array<{
+    entityId: string;
+    actorId: string;
+    data: unknown;
+  }> = [];
   const onboardingApplicants: Array<Record<string, unknown>> = [];
   const paymentLinks: Array<Record<string, unknown>> = [];
   const prisma = {
@@ -754,6 +771,11 @@ async function fixture() {
         if (args.where.entity === WORKBOOK_CUTOVER_ARCHIVE_AUDIT.entity) {
           return archiveAuditRows;
         }
+        if (
+          args.where.entity === WORKBOOK_CUTOVER_APPLICANT_REMOVAL_AUDIT.entity
+        ) {
+          return applicantRemovalAuditRows;
+        }
         return [];
       },
     },
@@ -769,6 +791,7 @@ async function fixture() {
     productionExceptions,
     academicStudentRows,
     archiveAuditRows,
+    applicantRemovalAuditRows,
     onboardingApplicants,
     paymentLinks,
     payment,
@@ -843,6 +866,8 @@ async function addArchivedPendingPaymentStudent(
     studentId: student.id,
     sourceRecordId: record.id,
     cancelledPaymentSubmissionIds: [],
+    revokedPaymentSubmissionResumeTokenIds: [],
+    revokedPaymentLinkTokenEvidence: [],
     cancelledPaymentLinkIds: [],
     cancelledPiSpiRequestIds: [],
     cancelledPendingPaymentIds: [],
@@ -883,6 +908,52 @@ describe("workbook cutover independent post-audit", () => {
       paymentAuditRows: 1,
       reviewerAttestations: 1,
       replayAnchorBatchCount: 1,
+    });
+  });
+
+  it("verifies a terminal Applicant removal without deleting its source row", async () => {
+    const fixtureData = await fixture();
+    const record = fixtureData.batch.sourceRecords.find(
+      (row) => row.sourceKind === "applicant",
+    )!;
+    record.disposition = "remove_applicant";
+    record.applicant = {
+      id: record.applicantId,
+      stage: "rejected",
+      onboardingStatus: "cancelled",
+      onboardingCancelledAt: new Date("2026-09-01T10:59:00.000Z"),
+      activeOnboardingPaymentLinkId: null,
+      statusTokenHash: sha("retained-status-token"),
+      statusTokenRevokedAt: new Date("2026-09-01T10:59:00.000Z"),
+      statusTokenExpiresAt: new Date("2026-09-01T10:59:00.000Z"),
+    };
+    fixtureData.batch.preservedApplicants -= 1;
+    fixtureData.batch.removedApplicants += 1;
+    fixtureData.batchAuditData.controls.preserveApplicants -= 1;
+    fixtureData.batchAuditData.controls.removeApplicants += 1;
+    fixtureData.batchAuditData.removedApplicantIds.push(record.applicantId);
+    fixtureData.applicantRemovalAuditRows.push({
+      entityId: record.applicantId,
+      actorId: fixtureData.batch.createdById,
+      data: {
+        batchId: fixtureData.batch.id,
+        sourceRecordId: record.id,
+        reason: record.reviewReason,
+        originalActiveOnboardingPaymentLinkId: null,
+        cancelledPaymentSubmissionIds: [],
+        revokedPaymentSubmissionResumeTokenIds: [],
+        revokedPaymentLinkTokenEvidence: [],
+        cancelledPaymentLinkIds: [],
+        cancelledPiSpiRequestIds: [],
+        cancelledPendingPaymentIds: [],
+      },
+    });
+    await expect(
+      auditWorkbookCutoverBatch(fixtureData.prisma, "batch-1"),
+    ).resolves.toMatchObject({
+      ok: true,
+      preservedApplicants: 45,
+      removedApplicants: 1,
     });
   });
 
