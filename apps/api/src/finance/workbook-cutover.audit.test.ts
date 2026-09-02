@@ -700,6 +700,7 @@ async function fixture() {
   }> = [];
   const onboardingApplicants: Array<Record<string, unknown>> = [];
   const paymentLinks: Array<Record<string, unknown>> = [];
+  const auditFindManyWhere: Array<Record<string, unknown>> = [];
   const prisma = {
     workbookCutoverBatch: {
       findUnique: async () => batch,
@@ -752,9 +753,14 @@ async function fixture() {
       },
     },
     auditLog: {
-      findMany: async (args: { where: { entity: string } }) => {
+      findMany: async (args: {
+        where: { entity: string; action?: string };
+      }) => {
+        auditFindManyWhere.push(args.where);
         if (args.where.entity === WORKBOOK_CUTOVER_BATCH_AUDIT.entity) {
-          return batchAuditRows;
+          return batchAuditRows.filter(
+            (row) => !args.where.action || row.action === args.where.action,
+          );
         }
         if (args.where.entity === WORKBOOK_CUTOVER_PAYMENT_AUDIT.entity) {
           return [
@@ -795,6 +801,7 @@ async function fixture() {
     onboardingApplicants,
     paymentLinks,
     payment,
+    auditFindManyWhere,
   };
 }
 
@@ -895,7 +902,7 @@ async function addArchivedPendingPaymentStudent(
 
 describe("workbook cutover independent post-audit", () => {
   it("reconciles exhaustive sources, billing, academics, audit evidence, and replay anchors", async () => {
-    const { prisma } = await fixture();
+    const { prisma, auditFindManyWhere } = await fixture();
     const result = await auditWorkbookCutoverBatch(prisma, "batch-1");
     expect(result).toMatchObject({
       ok: true,
@@ -909,6 +916,24 @@ describe("workbook cutover independent post-audit", () => {
       reviewerAttestations: 1,
       replayAnchorBatchCount: 1,
     });
+    expect(auditFindManyWhere).toContainEqual({
+      entity: WORKBOOK_CUTOVER_BATCH_AUDIT.entity,
+      entityId: "batch-1",
+      action: WORKBOOK_CUTOVER_BATCH_AUDIT.action,
+    });
+  });
+
+  it("ignores a later lifecycle-override summary when auditing the original imported cutover", async () => {
+    const fixtureData = await fixture();
+    fixtureData.batchAuditRows.push({
+      action: "pending-payment-activation-imported",
+      data: {
+        laterLifecycleOverride: true,
+      },
+    });
+    await expect(
+      auditWorkbookCutoverBatch(fixtureData.prisma, "batch-1"),
+    ).resolves.toMatchObject({ ok: true, batchAuditRows: 1 });
   });
 
   it("verifies a terminal Applicant removal without deleting its source row", async () => {
@@ -1119,7 +1144,10 @@ describe("workbook cutover independent post-audit", () => {
 
   it("detects an audit record emitted by an exact replay", async () => {
     const { prisma, batchAuditRows, batchAuditData } = await fixture();
-    batchAuditRows.push({ action: "replayed", data: batchAuditData });
+    batchAuditRows.push({
+      action: WORKBOOK_CUTOVER_BATCH_AUDIT.action,
+      data: batchAuditData,
+    });
     await expect(auditWorkbookCutoverBatch(prisma, "batch-1")).rejects.toThrow(
       /exact replay emitted another audit/,
     );
