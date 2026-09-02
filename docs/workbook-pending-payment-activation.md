@@ -52,10 +52,17 @@ Dry run is the default. Review only the redacted blocker counts and controls.
 The clean result must show nine targets, nine active onboarding links, zero
 proof drafts, zero submitted proofs, zero active PI-SPI requests, zero pending
 Payments, zero pending refunds, `confirmBlocked: false`, and a `planSha256`.
-Its bound global roster control must be exactly 446 physical Students = 391
-active + 9 pending-payment + 46 archived. Any unrelated Student creation or
-lifecycle change requires a new dry run and blocks confirmation unless this
-one-time baseline remains exact.
+The batch-anchored roster slice must contain exactly nine pending-payment and
+46 archived Students, and the pre-cutover unanchored slice must be empty.
+Legitimate Students created after the cutover may remain outside the batch;
+their IDs, Person IDs, lifecycle states, and creation timestamps are bound into
+one post-cutover non-target fingerprint. All slices must reconcile to the global
+status partition, and their exact dry-run state must remain unchanged through
+confirmation. Any intervening roster change produces a different plan digest
+or blocks confirmation and requires a new dry run. The batch summary persists
+the reviewed pre-activation counts and derives the expected post-activation
+counts by moving exactly nine Students from pending-payment to active without
+changing the physical or archived totals.
 
 ## Confirmation
 

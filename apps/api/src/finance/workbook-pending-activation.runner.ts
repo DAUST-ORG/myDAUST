@@ -25,6 +25,17 @@ export type WorkbookPendingActivationBlocker = {
   count?: number;
 };
 
+type StudentStatusCounts = {
+  physical: number;
+  active: number;
+  pendingPayment: number;
+  archived: number;
+};
+
+type StudentRosterSlice = StudentStatusCounts & {
+  fingerprintSha256: string;
+};
+
 export type PendingActivationLinkSnapshot = {
   id: string;
   onboardingApplicantId: string | null;
@@ -43,6 +54,7 @@ export type PendingActivationSubmissionSnapshot = {
   paymentLinkId: string | null;
   paymentId: string | null;
   status: string;
+  createdAt: string;
   activeKeySha256: string | null;
   resumeTokenSha256: string | null;
 };
@@ -55,6 +67,7 @@ export type PendingActivationPiSpiSnapshot = {
   paymentLinkId: string | null;
   paymentId: string | null;
   status: string;
+  createdAt: string;
   amountXof: number;
 };
 
@@ -172,11 +185,10 @@ export type WorkbookPendingActivationCapturedState = {
     status: string;
     roles: string[];
   };
-  globalStudentCounts: {
-    physical: number;
-    active: number;
-    pendingPayment: number;
-    archived: number;
+  globalStudentCounts: StudentStatusCounts & {
+    batchAnchored: StudentRosterSlice;
+    postCutoverNonTarget: StudentRosterSlice;
+    preCutoverUnanchored: StudentRosterSlice;
   };
   targets: WorkbookPendingActivationTargetSnapshot[];
 };
@@ -242,6 +254,9 @@ type PersistedSummary = {
   applicantIds: string[];
   sourceRecordIds: string[];
   cancelledPaymentLinkIds: string[];
+  preActivationStudentCounts: StudentStatusCounts;
+  expectedPostActivationStudentCounts: StudentStatusCounts;
+  postCutoverNonTarget: StudentRosterSlice;
 };
 
 type ValidatedStudentAuditEvidence = {
@@ -294,6 +309,14 @@ function uniqueSorted(values: readonly string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
+function mergeById<T extends { id: string }>(
+  ...groups: ReadonlyArray<ReadonlyArray<T>>
+): T[] {
+  return [...new Map(groups.flat().map((row) => [row.id, row])).values()].sort(
+    (left, right) => left.id.localeCompare(right.id),
+  );
+}
+
 function safeJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
@@ -308,6 +331,92 @@ function parseStringArray(value: unknown): string[] | null {
     : null;
 }
 
+function parseStudentStatusCounts(value: unknown): StudentStatusCounts | null {
+  if (!isObject(value)) return null;
+  const counts = [
+    value.physical,
+    value.active,
+    value.pendingPayment,
+    value.archived,
+  ];
+  if (
+    !counts.every(
+      (count) =>
+        typeof count === "number" && Number.isSafeInteger(count) && count >= 0,
+    ) ||
+    (value.active as number) +
+      (value.pendingPayment as number) +
+      (value.archived as number) !==
+      value.physical
+  ) {
+    return null;
+  }
+  return {
+    physical: value.physical as number,
+    active: value.active as number,
+    pendingPayment: value.pendingPayment as number,
+    archived: value.archived as number,
+  };
+}
+
+function parseStudentRosterSlice(value: unknown): StudentRosterSlice | null {
+  const counts = parseStudentStatusCounts(value);
+  if (
+    !counts ||
+    !isObject(value) ||
+    typeof value.fingerprintSha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(value.fingerprintSha256)
+  ) {
+    return null;
+  }
+  return { ...counts, fingerprintSha256: value.fingerprintSha256 };
+}
+
+function expectedPostActivationStudentCounts(
+  preActivation: StudentStatusCounts,
+): StudentStatusCounts {
+  return {
+    physical: preActivation.physical,
+    active: preActivation.active + WORKBOOK_PENDING_ACTIVATION_TARGET_COUNT,
+    pendingPayment:
+      preActivation.pendingPayment - WORKBOOK_PENDING_ACTIVATION_TARGET_COUNT,
+    archived: preActivation.archived,
+  };
+}
+
+function sameStudentStatusCounts(
+  left: StudentStatusCounts,
+  right: StudentStatusCounts,
+): boolean {
+  return (
+    left.physical === right.physical &&
+    left.active === right.active &&
+    left.pendingPayment === right.pendingPayment &&
+    left.archived === right.archived
+  );
+}
+
+function globalStudentStatusCounts(
+  value: WorkbookPendingActivationCapturedState["globalStudentCounts"],
+): StudentStatusCounts {
+  return {
+    physical: value.physical,
+    active: value.active,
+    pendingPayment: value.pendingPayment,
+    archived: value.archived,
+  };
+}
+
+function sameStudentRosterSlice(
+  left: StudentRosterSlice,
+  right: StudentRosterSlice,
+): boolean {
+  return (
+    sameStudentStatusCounts(left, right) &&
+    left.fingerprintSha256 === right.fingerprintSha256
+  );
+}
+
 function parsePersistedSummary(value: unknown): PersistedSummary | null {
   if (!isObject(value)) return null;
   const studentIds = parseStringArray(value.studentIds);
@@ -315,6 +424,15 @@ function parsePersistedSummary(value: unknown): PersistedSummary | null {
   const sourceRecordIds = parseStringArray(value.sourceRecordIds);
   const cancelledPaymentLinkIds = parseStringArray(
     value.cancelledPaymentLinkIds,
+  );
+  const preActivationStudentCounts = parseStudentStatusCounts(
+    value.preActivationStudentCounts,
+  );
+  const expectedPostActivationCounts = parseStudentStatusCounts(
+    value.expectedPostActivationStudentCounts,
+  );
+  const postCutoverNonTarget = parseStudentRosterSlice(
+    value.postCutoverNonTargetStudentControl,
   );
   if (
     value.schemaVersion !== 1 ||
@@ -329,6 +447,14 @@ function parsePersistedSummary(value: unknown): PersistedSummary | null {
     value.reviewedOverride !== true ||
     value.inventedCash !== false ||
     value.financialLedgerChanged !== false ||
+    !preActivationStudentCounts ||
+    !expectedPostActivationCounts ||
+    !postCutoverNonTarget ||
+    postCutoverNonTarget.archived !== 0 ||
+    !sameStudentStatusCounts(
+      expectedPostActivationCounts,
+      expectedPostActivationStudentCounts(preActivationStudentCounts),
+    ) ||
     !studentIds ||
     !applicantIds ||
     !sourceRecordIds ||
@@ -353,6 +479,9 @@ function parsePersistedSummary(value: unknown): PersistedSummary | null {
     applicantIds: uniqueSorted(applicantIds),
     sourceRecordIds: uniqueSorted(sourceRecordIds),
     cancelledPaymentLinkIds: uniqueSorted(cancelledPaymentLinkIds),
+    preActivationStudentCounts,
+    expectedPostActivationStudentCounts: expectedPostActivationCounts,
+    postCutoverNonTarget,
   };
 }
 
@@ -462,9 +591,54 @@ function countStatuses(
 
 async function captureGlobalStudentCounts(
   db: PendingActivationDb,
+  batchId: string,
+  importedAt: Date | null,
 ): Promise<WorkbookPendingActivationCapturedState["globalStudentCounts"]> {
   const students = await db.student.findMany({
-    select: { recordStatus: true },
+    select: {
+      id: true,
+      personId: true,
+      recordStatus: true,
+      createdAt: true,
+      workbookCutoverRecords: {
+        where: { batchId },
+        select: { id: true },
+      },
+    },
+  });
+  const postCutoverNonTarget = importedAt
+    ? students.filter(
+        (row) =>
+          row.createdAt.getTime() > importedAt.getTime() &&
+          row.workbookCutoverRecords.length === 0,
+      )
+    : [];
+  const batchAnchored = students.filter(
+    (row) => row.workbookCutoverRecords.length > 0,
+  );
+  const preCutoverUnanchored = students.filter(
+    (row) =>
+      row.workbookCutoverRecords.length === 0 &&
+      (!importedAt || row.createdAt.getTime() <= importedAt.getTime()),
+  );
+  const studentSlice = (rows: typeof students) => ({
+    physical: rows.length,
+    active: rows.filter((row) => row.recordStatus === "active").length,
+    pendingPayment: rows.filter((row) => row.recordStatus === "pending_payment")
+      .length,
+    archived: rows.filter((row) => row.recordStatus === "archived").length,
+    fingerprintSha256: sha256(
+      canonicalWorkbookCutoverJson(
+        rows
+          .map((row) => ({
+            id: row.id,
+            personId: row.personId,
+            recordStatus: row.recordStatus,
+            createdAt: row.createdAt.toISOString(),
+          }))
+          .sort((left, right) => left.id.localeCompare(right.id)),
+      ),
+    ),
   });
   return {
     physical: students.length,
@@ -473,7 +647,113 @@ async function captureGlobalStudentCounts(
       (row) => row.recordStatus === "pending_payment",
     ).length,
     archived: students.filter((row) => row.recordStatus === "archived").length,
+    batchAnchored: studentSlice(batchAnchored),
+    postCutoverNonTarget: studentSlice(postCutoverNonTarget),
+    preCutoverUnanchored: studentSlice(preCutoverUnanchored),
   };
+}
+
+function postActivationStudentControlFailures(
+  globalCounts: WorkbookPendingActivationCapturedState["globalStudentCounts"],
+  summary: PersistedSummary,
+): string[] {
+  const failures: string[] = [];
+  const slices = [
+    globalCounts.batchAnchored,
+    globalCounts.postCutoverNonTarget,
+    globalCounts.preCutoverUnanchored,
+  ];
+  if (
+    !sameStudentStatusCounts(
+      globalStudentStatusCounts(globalCounts),
+      summary.expectedPostActivationStudentCounts,
+    )
+  ) {
+    failures.push("global_counts_changed");
+  }
+  if (
+    globalCounts.active +
+      globalCounts.pendingPayment +
+      globalCounts.archived !==
+    globalCounts.physical
+  ) {
+    failures.push("global_status_partition_changed");
+  }
+  if (
+    slices.some(
+      (slice) =>
+        slice.active + slice.pendingPayment + slice.archived !== slice.physical,
+    )
+  ) {
+    failures.push("slice_status_partition_changed");
+  }
+  if (
+    slices.reduce((sum, slice) => sum + slice.physical, 0) !==
+      globalCounts.physical ||
+    slices.reduce((sum, slice) => sum + slice.active, 0) !==
+      globalCounts.active ||
+    slices.reduce((sum, slice) => sum + slice.pendingPayment, 0) !==
+      globalCounts.pendingPayment ||
+    slices.reduce((sum, slice) => sum + slice.archived, 0) !==
+      globalCounts.archived
+  ) {
+    failures.push("roster_classification_changed");
+  }
+  if (slices.some((slice) => !/^[a-f0-9]{64}$/.test(slice.fingerprintSha256))) {
+    failures.push("roster_fingerprint_invalid");
+  }
+  if (globalCounts.preCutoverUnanchored.physical !== 0) {
+    failures.push("pre_cutover_unanchored_student_present");
+  }
+  if (
+    globalCounts.batchAnchored.pendingPayment !== 0 ||
+    globalCounts.batchAnchored.archived !== 46
+  ) {
+    failures.push("batch_anchored_lifecycle_changed");
+  }
+  if (
+    globalCounts.postCutoverNonTarget.archived !== 0 ||
+    !sameStudentRosterSlice(
+      globalCounts.postCutoverNonTarget,
+      summary.postCutoverNonTarget,
+    )
+  ) {
+    failures.push("post_cutover_non_target_changed");
+  }
+  return failures;
+}
+
+async function assertPostActivationStudentControls(
+  db: PendingActivationDb,
+  batchId: string,
+  summary: PersistedSummary,
+): Promise<WorkbookPendingActivationCapturedState["globalStudentCounts"]> {
+  const batch = await db.workbookCutoverBatch.findUnique({
+    where: { id: batchId },
+    select: { importedAt: true },
+  });
+  if (!batch?.importedAt) {
+    throw new WorkbookPendingActivationBlockedError(
+      "Activation batch imported timestamp is missing",
+    );
+  }
+  const globalCounts = await captureGlobalStudentCounts(
+    db,
+    batchId,
+    batch.importedAt,
+  );
+  const failures = postActivationStudentControlFailures(globalCounts, summary);
+  if (failures.length > 0) {
+    throw new WorkbookPendingActivationBlockedError(
+      "Activation roster controls no longer match the confirmed plan",
+      {
+        failures,
+        expected: summary.expectedPostActivationStudentCounts,
+        actual: globalStudentStatusCounts(globalCounts),
+      },
+    );
+  }
+  return globalCounts;
 }
 
 export function buildWorkbookPendingActivationPlan(
@@ -491,28 +771,20 @@ export function buildWorkbookPendingActivationPlan(
   ) {
     blockers.push({ code: "cutover_batch_not_imported" });
   }
-  if (state.globalStudentCounts.physical !== 446) {
-    blockers.push({
-      code: "physical_student_count_mismatch",
-      count: state.globalStudentCounts.physical,
-    });
-  }
-  if (state.globalStudentCounts.active !== 391) {
-    blockers.push({
-      code: "active_student_count_mismatch",
-      count: state.globalStudentCounts.active,
-    });
-  }
-  if (state.globalStudentCounts.pendingPayment !== 9) {
+  const { batchAnchored, postCutoverNonTarget, preCutoverUnanchored } =
+    state.globalStudentCounts;
+  if (
+    batchAnchored.pendingPayment !== WORKBOOK_PENDING_ACTIVATION_TARGET_COUNT
+  ) {
     blockers.push({
       code: "pending_payment_student_count_mismatch",
-      count: state.globalStudentCounts.pendingPayment,
+      count: batchAnchored.pendingPayment,
     });
   }
-  if (state.globalStudentCounts.archived !== 46) {
+  if (batchAnchored.archived !== 46) {
     blockers.push({
       code: "archived_student_count_mismatch",
-      count: state.globalStudentCounts.archived,
+      count: batchAnchored.archived,
     });
   }
   if (
@@ -522,6 +794,42 @@ export function buildWorkbookPendingActivationPlan(
     state.globalStudentCounts.physical
   ) {
     blockers.push({ code: "student_status_partition_mismatch" });
+  }
+  const slices = [batchAnchored, postCutoverNonTarget, preCutoverUnanchored];
+  if (
+    slices.some(
+      (slice) =>
+        slice.active + slice.pendingPayment + slice.archived !== slice.physical,
+    )
+  ) {
+    blockers.push({ code: "student_slice_status_partition_mismatch" });
+  }
+  if (
+    slices.reduce((sum, slice) => sum + slice.physical, 0) !==
+      state.globalStudentCounts.physical ||
+    slices.reduce((sum, slice) => sum + slice.active, 0) !==
+      state.globalStudentCounts.active ||
+    slices.reduce((sum, slice) => sum + slice.pendingPayment, 0) !==
+      state.globalStudentCounts.pendingPayment ||
+    slices.reduce((sum, slice) => sum + slice.archived, 0) !==
+      state.globalStudentCounts.archived
+  ) {
+    blockers.push({ code: "student_roster_classification_mismatch" });
+  }
+  if (slices.some((slice) => !/^[a-f0-9]{64}$/.test(slice.fingerprintSha256))) {
+    blockers.push({ code: "student_roster_fingerprint_invalid" });
+  }
+  if (preCutoverUnanchored.physical !== 0) {
+    blockers.push({
+      code: "pre_cutover_unanchored_student_requires_review",
+      count: preCutoverUnanchored.physical,
+    });
+  }
+  if (postCutoverNonTarget.archived !== 0) {
+    blockers.push({
+      code: "post_cutover_archived_student_requires_review",
+      count: postCutoverNonTarget.archived,
+    });
   }
   if (state.targets.length !== WORKBOOK_PENDING_ACTIVATION_TARGET_COUNT) {
     blockers.push({
@@ -635,17 +943,34 @@ export function buildWorkbookPendingActivationPlan(
     ) {
       blockers.push({ code: "canonical_invoice_drift" });
     }
-    const targetLinkIds = new Set(target.links.map((link) => link.id));
-    const targetInvoiceIds = new Set(
+    const currentTargetLinkIds = new Set(
+      target.links
+        .filter(
+          (link) =>
+            link.onboardingApplicantId === applicant?.id ||
+            link.id === applicant?.activeOnboardingPaymentLinkId,
+        )
+        .map((link) => link.id),
+    );
+    const canonicalTargetInvoiceIds = new Set(
       [applicant?.enrollmentInvoiceId, workbook?.canonicalInvoiceId].flatMap(
         (value) => (value ? [value] : []),
       ),
     );
+    const ownedInvoiceIds = new Set(
+      target.invoices
+        .filter((invoice) => invoice.studentId === target.student.id)
+        .map((invoice) => invoice.id),
+    );
+    const relatedLinks = new Map(target.links.map((link) => [link.id, link]));
     const relatedPayments = new Map(
       target.payments.map((payment) => [payment.id, payment]),
     );
     const attemptOwnershipDrift = [
       ...target.submissions.map((attempt) => ({
+        kind: "proof" as const,
+        status: attempt.status,
+        createdAt: attempt.createdAt,
         applicantId: attempt.applicantId,
         studentId: attempt.studentId,
         invoiceId: attempt.invoiceId,
@@ -653,6 +978,9 @@ export function buildWorkbookPendingActivationPlan(
         paymentLinkId: attempt.paymentLinkId,
       })),
       ...target.piSpiRequests.map((attempt) => ({
+        kind: "pi_spi" as const,
+        status: attempt.status,
+        createdAt: attempt.createdAt,
         applicantId: attempt.applicantId,
         studentId: attempt.studentId,
         invoiceId: attempt.invoiceId,
@@ -660,24 +988,91 @@ export function buildWorkbookPendingActivationPlan(
         paymentLinkId: attempt.paymentLinkId,
       })),
     ].some((attempt) => {
+      const importedAtMs = state.batch?.importedAt
+        ? Date.parse(state.batch.importedAt)
+        : Number.NaN;
+      const attemptCreatedAtMs = Date.parse(attempt.createdAt);
+      if (
+        !Number.isFinite(importedAtMs) ||
+        !Number.isFinite(attemptCreatedAtMs) ||
+        attemptCreatedAtMs > importedAtMs
+      ) {
+        return true;
+      }
+      const currentLink = attempt.paymentLinkId
+        ? relatedLinks.get(attempt.paymentLinkId)
+        : null;
+      const currentLinkOwnershipCoherent =
+        attempt.paymentLinkId === null ||
+        (currentTargetLinkIds.has(attempt.paymentLinkId) &&
+          currentLink !== null &&
+          currentLink !== undefined &&
+          (currentLink.studentId === null ||
+            currentLink.studentId === target.student.id) &&
+          (currentLink.invoiceId === null ||
+            canonicalTargetInvoiceIds.has(currentLink.invoiceId)) &&
+          (currentLink.onboardingApplicantId === null ||
+            currentLink.onboardingApplicantId === applicant?.id));
+      const currentPayment = attempt.paymentId
+        ? relatedPayments.get(attempt.paymentId)
+        : null;
+      const currentPaymentOwnershipCoherent =
+        attempt.paymentId === null ||
+        (currentPayment !== null &&
+          currentPayment !== undefined &&
+          currentPayment.studentId === target.student.id &&
+          canonicalTargetInvoiceIds.has(currentPayment.invoiceId));
+      const currentOwnership =
+        (attempt.applicantId === null ||
+          attempt.applicantId === applicant?.id) &&
+        (attempt.studentId === null ||
+          attempt.studentId === target.student.id) &&
+        (attempt.invoiceId === null ||
+          canonicalTargetInvoiceIds.has(attempt.invoiceId)) &&
+        currentLinkOwnershipCoherent &&
+        currentPaymentOwnershipCoherent;
+      if (currentOwnership) return false;
+
+      const terminal =
+        attempt.kind === "proof"
+          ? ["approved", "rejected", "cancelled"].includes(attempt.status)
+          : ["settled", "cancelled", "rejected", "expired"].includes(
+              attempt.status,
+            );
+      if (!terminal) return true;
+
+      const link = currentLink;
+      const linkHasTargetOwner =
+        link !== null &&
+        link !== undefined &&
+        (link.studentId === target.student.id ||
+          (link.invoiceId !== null && ownedInvoiceIds.has(link.invoiceId)) ||
+          link.onboardingApplicantId === applicant?.id);
+      const linkOwnershipCoherent =
+        attempt.paymentLinkId === null ||
+        (linkHasTargetOwner &&
+          (link!.studentId === null || link!.studentId === target.student.id) &&
+          (link!.invoiceId === null || ownedInvoiceIds.has(link!.invoiceId)) &&
+          (link!.onboardingApplicantId === null ||
+            link!.onboardingApplicantId === applicant?.id));
+      const payment = attempt.paymentId
+        ? relatedPayments.get(attempt.paymentId)
+        : null;
+      const paymentOwnershipCoherent =
+        attempt.paymentId === null ||
+        (payment !== null &&
+          payment !== undefined &&
+          payment.studentId === target.student.id &&
+          ownedInvoiceIds.has(payment.invoiceId));
       return (
         (attempt.applicantId !== null &&
           attempt.applicantId !== applicant?.id) ||
         (attempt.studentId !== null &&
           attempt.studentId !== target.student.id) ||
         (attempt.invoiceId !== null &&
-          !targetInvoiceIds.has(attempt.invoiceId)) ||
-        (attempt.paymentLinkId !== null &&
-          !targetLinkIds.has(attempt.paymentLinkId)) ||
-        (attempt.paymentId !== null &&
-          (() => {
-            const payment = relatedPayments.get(attempt.paymentId);
-            return (
-              !payment ||
-              payment.studentId !== target.student.id ||
-              !targetInvoiceIds.has(payment.invoiceId)
-            );
-          })())
+          !ownedInvoiceIds.has(attempt.invoiceId)) ||
+        !linkOwnershipCoherent ||
+        !paymentOwnershipCoherent
       );
     });
     if (attemptOwnershipDrift) {
@@ -751,7 +1146,6 @@ async function captureState(
   actorEmail: string,
 ): Promise<WorkbookPendingActivationCapturedState> {
   const actor = await requireActor(db, actorEmail);
-  const globalStudentCounts = await captureGlobalStudentCounts(db);
   const capturedNow = new Date();
   const batch = await db.workbookCutoverBatch.findUnique({
     where: { id: batchId },
@@ -764,6 +1158,11 @@ async function captureState(
       importedAt: true,
     },
   });
+  const globalStudentCounts = await captureGlobalStudentCounts(
+    db,
+    batchId,
+    batch?.importedAt ?? null,
+  );
   const records = batch
     ? await db.workbookCutoverSourceRecord.findMany({
         where: {
@@ -848,7 +1247,7 @@ async function captureState(
       ? [row.student.applicant.activeOnboardingPaymentLinkId]
       : [],
   );
-  const invoiceIds = uniqueSorted(
+  const canonicalInvoiceIds = uniqueSorted(
     records.flatMap((row) =>
       [
         row.linkedWorkbookRecord?.canonicalInvoiceId,
@@ -856,8 +1255,62 @@ async function captureState(
       ].flatMap((value) => (value ? [value] : [])),
     ),
   );
-  const links =
-    applicantIds.length > 0 || activePointerIds.length > 0
+  const initialInvoices =
+    studentIds.length > 0 || canonicalInvoiceIds.length > 0
+      ? await db.invoice.findMany({
+          where: {
+            OR: [
+              ...(studentIds.length > 0
+                ? [{ studentId: { in: studentIds } }]
+                : []),
+              ...(canonicalInvoiceIds.length > 0
+                ? [{ id: { in: canonicalInvoiceIds } }]
+                : []),
+            ],
+          },
+          orderBy: { id: "asc" },
+          select: {
+            id: true,
+            studentId: true,
+            status: true,
+            totalAmount: true,
+            amountPaid: true,
+            revision: true,
+            updatedAt: true,
+          },
+        })
+      : [];
+  const initialInvoiceIds = initialInvoices.map((row) => row.id);
+  const initialPayments =
+    studentIds.length > 0 || initialInvoiceIds.length > 0
+      ? await db.payment.findMany({
+          where: {
+            OR: [
+              ...(studentIds.length > 0
+                ? [{ studentId: { in: studentIds } }]
+                : []),
+              ...(initialInvoiceIds.length > 0
+                ? [{ invoiceId: { in: initialInvoiceIds } }]
+                : []),
+            ],
+          },
+          orderBy: { id: "asc" },
+          select: {
+            id: true,
+            studentId: true,
+            invoiceId: true,
+            status: true,
+            amount: true,
+            updatedAt: true,
+          },
+        })
+      : [];
+  const initialPaymentIds = initialPayments.map((row) => row.id);
+  const initialLinks =
+    applicantIds.length > 0 ||
+    activePointerIds.length > 0 ||
+    studentIds.length > 0 ||
+    initialInvoiceIds.length > 0
       ? await db.paymentLink.findMany({
           where: {
             OR: [
@@ -866,6 +1319,12 @@ async function captureState(
                 : []),
               ...(activePointerIds.length > 0
                 ? [{ id: { in: activePointerIds } }]
+                : []),
+              ...(studentIds.length > 0
+                ? [{ studentId: { in: studentIds } }]
+                : []),
+              ...(initialInvoiceIds.length > 0
+                ? [{ invoiceId: { in: initialInvoiceIds } }]
                 : []),
             ],
           },
@@ -881,17 +1340,23 @@ async function captureState(
           },
         })
       : [];
-  const linkIds = links.map((row) => row.id);
+  const initialLinkIds = initialLinks.map((row) => row.id);
   const attemptScope = [
-    ...(linkIds.length > 0 ? [{ paymentLinkId: { in: linkIds } }] : []),
+    ...(initialLinkIds.length > 0
+      ? [{ paymentLinkId: { in: initialLinkIds } }]
+      : []),
     ...(applicantIds.length > 0 ? [{ applicantId: { in: applicantIds } }] : []),
     ...(studentIds.length > 0 ? [{ studentId: { in: studentIds } }] : []),
-    ...(invoiceIds.length > 0 ? [{ invoiceId: { in: invoiceIds } }] : []),
+    ...(initialInvoiceIds.length > 0
+      ? [{ invoiceId: { in: initialInvoiceIds } }]
+      : []),
+    ...(initialPaymentIds.length > 0
+      ? [{ paymentId: { in: initialPaymentIds } }]
+      : []),
   ];
   const [
     submissions,
     piSpiRequests,
-    invoices,
     invites,
     activationRequests,
     activationCards,
@@ -908,6 +1373,7 @@ async function captureState(
             paymentLinkId: true,
             paymentId: true,
             status: true,
+            createdAt: true,
             activeKey: true,
             resumeToken: true,
           },
@@ -925,29 +1391,8 @@ async function captureState(
             paymentLinkId: true,
             paymentId: true,
             status: true,
+            createdAt: true,
             amountXof: true,
-          },
-        })
-      : [],
-    studentIds.length > 0 || invoiceIds.length > 0
-      ? db.invoice.findMany({
-          where: {
-            OR: [
-              ...(studentIds.length > 0
-                ? [{ studentId: { in: studentIds } }]
-                : []),
-              ...(invoiceIds.length > 0 ? [{ id: { in: invoiceIds } }] : []),
-            ],
-          },
-          orderBy: { id: "asc" },
-          select: {
-            id: true,
-            studentId: true,
-            status: true,
-            totalAmount: true,
-            amountPaid: true,
-            revision: true,
-            updatedAt: true,
           },
         })
       : [],
@@ -1003,29 +1448,31 @@ async function captureState(
         })
       : [],
   ]);
-  const attemptPaymentIds = uniqueSorted(
+  const referencedPaymentIds = uniqueSorted(
     [...submissions, ...piSpiRequests].flatMap((row) =>
-      row.paymentId ? [row.paymentId] : [],
+      row.paymentId && !initialPaymentIds.includes(row.paymentId)
+        ? [row.paymentId]
+        : [],
     ),
   );
-  const studentPayments =
-    studentIds.length > 0 ||
-    invoiceIds.length > 0 ||
-    attemptPaymentIds.length > 0
-      ? await db.payment.findMany({
-          where: {
-            OR: [
-              ...(studentIds.length > 0
-                ? [{ studentId: { in: studentIds } }]
-                : []),
-              ...(invoiceIds.length > 0
-                ? [{ invoiceId: { in: invoiceIds } }]
-                : []),
-              ...(attemptPaymentIds.length > 0
-                ? [{ id: { in: attemptPaymentIds } }]
-                : []),
-            ],
-          },
+  const referencedLinkIds = uniqueSorted(
+    [...submissions, ...piSpiRequests].flatMap((row) =>
+      row.paymentLinkId && !initialLinkIds.includes(row.paymentLinkId)
+        ? [row.paymentLinkId]
+        : [],
+    ),
+  );
+  const directlyReferencedInvoiceIds = uniqueSorted(
+    [...submissions, ...piSpiRequests].flatMap((row) =>
+      row.invoiceId && !initialInvoiceIds.includes(row.invoiceId)
+        ? [row.invoiceId]
+        : [],
+    ),
+  );
+  const [referencedPayments, referencedLinks] = await Promise.all([
+    referencedPaymentIds.length > 0
+      ? db.payment.findMany({
+          where: { id: { in: referencedPaymentIds } },
           orderBy: { id: "asc" },
           select: {
             id: true,
@@ -1036,7 +1483,47 @@ async function captureState(
             updatedAt: true,
           },
         })
+      : [],
+    referencedLinkIds.length > 0
+      ? db.paymentLink.findMany({
+          where: { id: { in: referencedLinkIds } },
+          orderBy: { id: "asc" },
+          select: {
+            id: true,
+            onboardingApplicantId: true,
+            studentId: true,
+            invoiceId: true,
+            status: true,
+            amountXof: true,
+            token: true,
+          },
+        })
+      : [],
+  ]);
+  const payments = mergeById(initialPayments, referencedPayments);
+  const links = mergeById(initialLinks, referencedLinks);
+  const referencedInvoiceIds = uniqueSorted([
+    ...directlyReferencedInvoiceIds,
+    ...payments.map((row) => row.invoiceId),
+    ...links.flatMap((row) => (row.invoiceId ? [row.invoiceId] : [])),
+  ]).filter((id) => !initialInvoiceIds.includes(id));
+  const referencedInvoices =
+    referencedInvoiceIds.length > 0
+      ? await db.invoice.findMany({
+          where: { id: { in: referencedInvoiceIds } },
+          orderBy: { id: "asc" },
+          select: {
+            id: true,
+            studentId: true,
+            status: true,
+            totalAmount: true,
+            amountPaid: true,
+            revision: true,
+            updatedAt: true,
+          },
+        })
       : [];
+  const invoices = mergeById(initialInvoices, referencedInvoices);
   const normalizedEmails = uniqueSorted(
     records.flatMap((row) => {
       const email = row.student?.person.email?.trim().toLowerCase();
@@ -1060,35 +1547,84 @@ async function captureState(
       const student = record.student;
       if (!student?.person) return [];
       const applicant = student.applicant;
-      const targetLinks = links.filter(
-        (link) =>
-          link.onboardingApplicantId === applicant?.id ||
-          link.id === applicant?.activeOnboardingPaymentLinkId,
+      const ownedTargetInvoiceIds = new Set(
+        invoices
+          .filter((invoice) => invoice.studentId === student.id)
+          .map((invoice) => invoice.id),
       );
-      const targetLinkIds = new Set(targetLinks.map((link) => link.id));
-      const targetInvoiceIds = new Set(
-        [
+      const targetInvoiceScopeIds = new Set([
+        ...ownedTargetInvoiceIds,
+        ...[
           record.linkedWorkbookRecord?.canonicalInvoiceId,
           applicant?.enrollmentInvoiceId,
         ].flatMap((value) => (value ? [value] : [])),
+      ]);
+      const targetPaymentIds = new Set(
+        payments
+          .filter(
+            (payment) =>
+              payment.studentId === student.id ||
+              targetInvoiceScopeIds.has(payment.invoiceId),
+          )
+          .map((payment) => payment.id),
+      );
+      const targetLinkIds = new Set(
+        links
+          .filter(
+            (link) =>
+              link.onboardingApplicantId === applicant?.id ||
+              link.id === applicant?.activeOnboardingPaymentLinkId ||
+              link.studentId === student.id ||
+              (link.invoiceId !== null &&
+                targetInvoiceScopeIds.has(link.invoiceId)),
+          )
+          .map((link) => link.id),
       );
       const attemptBelongs = (row: {
         applicantId: string | null;
         studentId: string | null;
         invoiceId: string | null;
         paymentLinkId: string | null;
+        paymentId: string | null;
       }) =>
         row.applicantId === applicant?.id ||
         row.studentId === student.id ||
-        (row.invoiceId !== null && targetInvoiceIds.has(row.invoiceId)) ||
-        (row.paymentLinkId !== null && targetLinkIds.has(row.paymentLinkId));
+        (row.invoiceId !== null && targetInvoiceScopeIds.has(row.invoiceId)) ||
+        (row.paymentLinkId !== null && targetLinkIds.has(row.paymentLinkId)) ||
+        (row.paymentId !== null && targetPaymentIds.has(row.paymentId));
       const targetSubmissions = submissions.filter(attemptBelongs);
       const targetPiSpi = piSpiRequests.filter(attemptBelongs);
+      const attemptLinkIds = new Set(
+        [...targetSubmissions, ...targetPiSpi].flatMap((row) =>
+          row.paymentLinkId ? [row.paymentLinkId] : [],
+        ),
+      );
+      const targetLinks = links.filter(
+        (link) => targetLinkIds.has(link.id) || attemptLinkIds.has(link.id),
+      );
       const targetAttemptPaymentIds = new Set(
         [...targetSubmissions, ...targetPiSpi].flatMap((row) =>
           row.paymentId ? [row.paymentId] : [],
         ),
       );
+      const targetPayments = payments.filter(
+        (payment) =>
+          targetPaymentIds.has(payment.id) ||
+          targetAttemptPaymentIds.has(payment.id),
+      );
+      const targetAttemptInvoiceIds = new Set(
+        [...targetSubmissions, ...targetPiSpi].flatMap((row) =>
+          row.invoiceId ? [row.invoiceId] : [],
+        ),
+      );
+      const targetInvoiceClosureIds = new Set([
+        ...targetInvoiceScopeIds,
+        ...targetAttemptInvoiceIds,
+        ...targetLinks.flatMap((link) =>
+          link.invoiceId ? [link.invoiceId] : [],
+        ),
+        ...targetPayments.map((payment) => payment.invoiceId),
+      ]);
       return [
         {
           sourceRecordId: record.id,
@@ -1165,6 +1701,7 @@ async function captureState(
             paymentLinkId: row.paymentLinkId,
             paymentId: row.paymentId,
             status: row.status,
+            createdAt: row.createdAt.toISOString(),
             activeKeySha256: hashNullable(row.activeKey),
             resumeTokenSha256: hashNullable(row.resumeToken),
           })),
@@ -1176,21 +1713,15 @@ async function captureState(
             paymentLinkId: row.paymentLinkId,
             paymentId: row.paymentId,
             status: row.status,
+            createdAt: row.createdAt.toISOString(),
             amountXof: row.amountXof,
           })),
-          payments: studentPayments
-            .filter(
-              (row) =>
-                row.studentId === student.id ||
-                targetInvoiceIds.has(row.invoiceId) ||
-                targetAttemptPaymentIds.has(row.id),
-            )
-            .map((row) => ({
-              ...row,
-              updatedAt: row.updatedAt.toISOString(),
-            })),
+          payments: targetPayments.map((row) => ({
+            ...row,
+            updatedAt: row.updatedAt.toISOString(),
+          })),
           invoices: invoices
-            .filter((row) => row.studentId === student.id)
+            .filter((row) => targetInvoiceClosureIds.has(row.id))
             .map((row) => ({
               ...row,
               updatedAt: row.updatedAt.toISOString(),
@@ -1241,7 +1772,15 @@ export async function planWorkbookPendingActivationFromDatabase(
   const actor = await requireActor(db, input.actorEmail);
   const summary = await existingSummary(db, input.batchId);
   if (summary) {
-    const globalStudentCounts = await captureGlobalStudentCounts(db);
+    const batch = await db.workbookCutoverBatch.findUnique({
+      where: { id: input.batchId },
+      select: { importedAt: true },
+    });
+    const globalStudentCounts = await captureGlobalStudentCounts(
+      db,
+      input.batchId,
+      batch?.importedAt ?? null,
+    );
     return {
       schemaVersion: 1,
       operation: "workbook-pending-payment-activation",
@@ -1615,6 +2154,7 @@ async function executeInsideTransaction(
     }
     await requireActor(tx, input.actorEmail);
     await verifyReplayEvidence(tx, input.batchId, replaySummary);
+    await assertPostActivationStudentControls(tx, input.batchId, replaySummary);
     return {
       batchId: input.batchId,
       planSha256: replaySummary.planSha256,
@@ -1855,6 +2395,15 @@ async function executeInsideTransaction(
         cancelledPaymentLinkIds: uniqueSorted(cancelledLinkIds),
         activePaymentAttemptCountAtConfirmation: 0,
         pendingOrRefundPaymentCountAtConfirmation: 0,
+        preActivationStudentCounts: globalStudentStatusCounts(
+          plan.globalStudentCounts,
+        ),
+        expectedPostActivationStudentCounts:
+          expectedPostActivationStudentCounts(
+            globalStudentStatusCounts(plan.globalStudentCounts),
+          ),
+        postCutoverNonTargetStudentControl:
+          plan.globalStudentCounts.postCutoverNonTarget,
         activatedAt: now.toISOString(),
         reviewedOverride: true,
         inventedCash: false,
@@ -1936,15 +2485,16 @@ export async function auditWorkbookPendingActivation(
     batchId,
     { protectedPaymentActivityStudentIds: summary.studentIds },
   );
+  const globalStudentCounts = await assertPostActivationStudentControls(
+    prisma,
+    batchId,
+    summary,
+  );
   const [
     students,
     applicants,
     activeLinks,
     batchAuditRows,
-    physicalStudents,
-    activeRosterStudents,
-    pendingPaymentStudents,
-    archivedStudents,
     canonicalInvoices,
     reconstructionPayments,
   ] = await Promise.all([
@@ -1983,10 +2533,6 @@ export async function auditWorkbookPendingActivation(
         action: WORKBOOK_PENDING_ACTIVATION_BATCH_AUDIT_ACTION,
       },
     }),
-    prisma.student.count(),
-    prisma.student.count({ where: { recordStatus: "active" } }),
-    prisma.student.count({ where: { recordStatus: "pending_payment" } }),
-    prisma.student.count({ where: { recordStatus: "archived" } }),
     prisma.workbookCutoverSourceRecord.count({
       where: {
         batchId,
@@ -2043,10 +2589,6 @@ export async function auditWorkbookPendingActivation(
     studentAuditRows !== WORKBOOK_PENDING_ACTIVATION_TARGET_COUNT ||
     applicantAuditRows !== WORKBOOK_PENDING_ACTIVATION_TARGET_COUNT ||
     batchAuditRows !== 1 ||
-    physicalStudents !== 446 ||
-    activeRosterStudents !== 400 ||
-    pendingPaymentStudents !== 0 ||
-    archivedStudents !== 46 ||
     canonicalInvoices !== 400 ||
     reconstructionPayments !== 223 ||
     !originalCutoverAudit.ok ||
@@ -2063,10 +2605,11 @@ export async function auditWorkbookPendingActivation(
         studentAuditRows,
         applicantAuditRows,
         batchAuditRows,
-        physicalStudents,
-        activeRosterStudents,
-        pendingPaymentStudents,
-        archivedStudents,
+        physicalStudents: globalStudentCounts.physical,
+        activeRosterStudents: globalStudentCounts.active,
+        pendingPaymentStudents: globalStudentCounts.pendingPayment,
+        archivedStudents: globalStudentCounts.archived,
+        postCutoverNonTarget: globalStudentCounts.postCutoverNonTarget,
         canonicalInvoices,
         reconstructionPayments,
         originalCutoverAuditOk: originalCutoverAudit.ok,
@@ -2085,10 +2628,10 @@ export async function auditWorkbookPendingActivation(
     studentAuditRows,
     applicantAuditRows,
     batchAuditRows,
-    physicalStudents,
-    activeRosterStudents,
-    pendingPaymentStudents,
-    archivedStudents,
+    physicalStudents: globalStudentCounts.physical,
+    activeRosterStudents: globalStudentCounts.active,
+    pendingPaymentStudents: globalStudentCounts.pendingPayment,
+    archivedStudents: globalStudentCounts.archived,
     canonicalInvoices,
     reconstructionPayments,
     originalCutoverAuditOk: true,
