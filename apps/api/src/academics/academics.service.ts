@@ -441,6 +441,7 @@ export class AcademicsService {
         : null,
       instructorId: s.instructorId,
       termId: s.termId,
+      recommended: s.recommended,
       prerequisites: s.course.prerequisites.map((p) => p.code),
     }));
   }
@@ -1112,6 +1113,7 @@ export class AcademicsService {
         seatsTaken: s._count.enrollments,
         capacity: s.capacity,
         seatsLeft,
+        recommended: s.recommended,
         blockedReason,
       };
     });
@@ -2191,6 +2193,76 @@ export class AcademicsService {
     return assignment;
   }
 
+  /** Faculty: edit an existing assessment column. Only instructors of the section (or admin) may edit. */
+  async updateAssignment(
+    assignmentId: string,
+    personId: string,
+    isAdmin: boolean,
+    input: {
+      title?: string;
+      description?: string;
+      type?: string;
+      maxPoints?: number;
+      weight?: number;
+      dueDate?: string;
+    },
+  ) {
+    const assignment = await this.assertAssignmentOwner(assignmentId, personId, isAdmin);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.assignment.update({
+        where: { id: assignmentId },
+        data: {
+          ...(input.title !== undefined && { title: input.title }),
+          ...(input.description !== undefined && { description: input.description || null }),
+          ...(input.type !== undefined && { type: input.type as never }),
+          ...(input.maxPoints !== undefined && { maxPoints: input.maxPoints }),
+          ...(input.weight !== undefined && { weight: input.weight }),
+          ...(input.dueDate !== undefined && { dueDate: new Date(input.dueDate) }),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          entity: "Assignment",
+          entityId: assignmentId,
+          action: "updated",
+          actorId: personId,
+          data: { title: result.title, type: result.type, weight: result.weight, maxPoints: result.maxPoints, dueDate: result.dueDate },
+        },
+      });
+      return result;
+    });
+    return updated;
+  }
+
+  /** Faculty: delete an assessment column. Only allowed if no student has submitted or been graded. */
+  async deleteAssignment(
+    assignmentId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    const assignment = await this.assertAssignmentOwner(assignmentId, personId, isAdmin);
+    const submissionCount = await this.prisma.submission.count({
+      where: { assignmentId, status: { in: ["submitted", "graded"] } },
+    });
+    if (submissionCount > 0) {
+      throw new BadRequestException("Cannot delete an assignment that has already been submitted or graded");
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.submission.deleteMany({ where: { assignmentId } });
+      await tx.assignment.delete({ where: { id: assignmentId } });
+      await tx.auditLog.create({
+        data: {
+          entity: "Assignment",
+          entityId: assignmentId,
+          action: "deleted",
+          actorId: personId,
+          data: { title: assignment.title, sectionId: assignment.sectionId },
+        },
+      });
+    });
+    return { ok: true };
+  }
+
   /** Resolve enrollments to person ids and emit one notification each. Never throws. */
   private async notifyEnrollments(
     enrollmentIds: string[],
@@ -2438,6 +2510,9 @@ export class AcademicsService {
       where: { id: assignmentId },
     });
     if (!assignment) throw new NotFoundException("Assignment not found");
+    if (new Date() > new Date(assignment.dueDate)) {
+      throw new BadRequestException("This assignment is past its due date and can no longer be submitted");
+    }
     const enrollment = await this.prisma.enrollment.findUnique({
       where: {
         studentId_sectionId: { studentId, sectionId: assignment.sectionId },
@@ -3581,6 +3656,7 @@ export class AcademicsService {
       startTime: string;
       endTime: string;
       room?: string | null;
+      recommended?: boolean;
     },
   ) {
     const course = await this.prisma.course.findUnique({
@@ -3619,6 +3695,7 @@ export class AcademicsService {
         startTime: input.startTime,
         endTime: input.endTime,
         room: input.room ?? null,
+        recommended: input.recommended ?? false,
       },
     });
     await this.prisma.auditLog.create({
@@ -3646,6 +3723,7 @@ export class AcademicsService {
       endTime?: string;
       room?: string | null;
       status?: string;
+      recommended?: boolean;
     },
   ) {
     const section = await this.prisma.section.findUnique({ where: { id } });
@@ -3680,6 +3758,9 @@ export class AcademicsService {
         ...(input.endTime !== undefined ? { endTime: input.endTime } : {}),
         ...(input.room !== undefined ? { room: input.room } : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.recommended !== undefined
+          ? { recommended: input.recommended }
+          : {}),
       },
     });
     await this.prisma.auditLog.create({
@@ -3688,6 +3769,10 @@ export class AcademicsService {
         entityId: id,
         action: "section-updated",
         actorId,
+        data:
+          input.recommended === undefined
+            ? undefined
+            : { recommended: input.recommended },
       },
     });
     return updated;

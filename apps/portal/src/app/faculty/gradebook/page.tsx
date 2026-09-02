@@ -7,8 +7,10 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
+  Pencil,
   Plus,
   SlidersHorizontal,
+  Trash2,
 } from "lucide-react";
 import {
   Avatar,
@@ -26,10 +28,12 @@ import {
   type SectionAssignment,
   type TeachingSection,
   createAssignment,
+  deleteAssignment,
   getAssignmentSubmissions,
   getSectionAssignments,
   getTeaching,
   gradeSubmission,
+  updateAssignment,
 } from "@/lib/api";
 import { getFacultyGradebook } from "@/lib/api-faculty";
 
@@ -95,6 +99,8 @@ export default function FacultyGradebook() {
   const [scores, setScores] = useState<ScoreMap>({});
   const [showCols, setShowCols] = useState(false);
   const [newItem, setNewItem] = useState(BLANK_ITEM);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingItem, setEditingItem] = useState(BLANK_ITEM);
   const [msg, setMsg] = useState<string | null>(null);
   const [itemError, setItemError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -210,6 +216,64 @@ export default function FacultyGradebook() {
         dueDate: new Date(newItem.dueDate).toISOString(),
       });
       setNewItem(BLANK_ITEM);
+      await load();
+    } catch (e) {
+      setItemError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteColumn(col: SectionAssignment) {
+    if (!confirm(`Delete "${col.title}"? This cannot be undone.`)) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await deleteAssignment(sectionId, col.id);
+      setEditingId(null);
+      await load();
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdit() {
+    if (!editingId) return;
+    setItemError(null);
+    const maxPoints = Number(editingItem.maxPoints);
+    const weight = Number(editingItem.weight);
+    if (!editingItem.title.trim() || !editingItem.dueDate) {
+      setItemError("Enter an item name and due date.");
+      return;
+    }
+    if (!Number.isInteger(maxPoints) || maxPoints < 1 || maxPoints > 1000) {
+      setItemError("Max points must be a whole number between 1 and 1,000.");
+      return;
+    }
+    if (!Number.isInteger(weight) || weight < 0 || weight > 100) {
+      setItemError("Weight must be a whole percentage from 0 to 100.");
+      return;
+    }
+    const currentWeight = columns.find((c) => c.id === editingId)?.weight ?? 0;
+    if (weightTotal - currentWeight + weight > 100) {
+      setItemError(
+        `This would make the total ${weightTotal - currentWeight + weight}%. Reduce the item weight so the gradebook stays at or below 100%.`,
+      );
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      await updateAssignment(sectionId, editingId, {
+        title: editingItem.title.trim(),
+        type: editingItem.type,
+        maxPoints,
+        weight,
+        dueDate: new Date(editingItem.dueDate).toISOString(),
+      });
+      setEditingId(null);
       await load();
     } catch (e) {
       setItemError((e as Error).message);
@@ -566,29 +630,48 @@ export default function FacultyGradebook() {
         )}
 
         {columns.map((c) => (
-          <div
-            key={c.id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "10px 0",
-              borderBottom: "1px solid var(--divider)",
-            }}
-          >
-            <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>
-              {c.title}
-            </span>
-            <span style={{ width: 130, fontSize: 12.5, color: "var(--fg3)" }}>
-              {category(c.type).label}
-            </span>
-            <span style={{ width: 78, textAlign: "center", fontSize: 12.5 }}>
-              {c.weight}%
-            </span>
-            <span style={{ width: 70, textAlign: "center", fontSize: 12.5 }}>
-              /{c.maxPoints}
-            </span>
-          </div>
+          editingId === c.id ? (
+            <div key={c.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--divider)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <Field label="Item name">
+                  <Input value={editingItem.title} onChange={(v) => setEditingItem({ ...editingItem, title: v })} />
+                </Field>
+                <Field label="Category">
+                  <Select value={editingItem.type} onChange={(v) => setEditingItem({ ...editingItem, type: v })} options={CATEGORIES.map((cat) => ({ value: cat.value, label: cat.label }))} />
+                </Field>
+                <Field label="Weight %">
+                  <Input value={editingItem.weight} onChange={(v) => setEditingItem({ ...editingItem, weight: v })} type="number" />
+                </Field>
+                <Field label="Max points">
+                  <Input value={editingItem.maxPoints} onChange={(v) => setEditingItem({ ...editingItem, maxPoints: v })} type="number" />
+                </Field>
+                <Field label="Due date">
+                  <Input value={editingItem.dueDate} onChange={(v) => setEditingItem({ ...editingItem, dueDate: v })} type="date" />
+                </Field>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <Button variant="secondary" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
+                <Button variant="navy" size="sm" disabled={busy} onClick={saveEdit}>{busy ? "Saving…" : "Save"}</Button>
+              </div>
+            </div>
+          ) : (
+            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid var(--divider)" }}>
+              <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600 }}>{c.title}</span>
+              <span style={{ width: 130, fontSize: 12.5, color: "var(--fg3)" }}>{category(c.type).label}</span>
+              <span style={{ width: 78, textAlign: "center", fontSize: 12.5 }}>{c.weight}%</span>
+              <span style={{ width: 70, textAlign: "center", fontSize: 12.5 }}>/{c.maxPoints}</span>
+              <button
+                title="Edit"
+                onClick={() => { setEditingId(c.id); setEditingItem({ title: c.title, type: c.type, weight: String(c.weight), maxPoints: String(c.maxPoints), dueDate: c.dueDate.slice(0, 10) }); setItemError(null); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--fg3)", padding: 4 }}
+              ><Pencil size={14} /></button>
+              <button
+                title="Delete"
+                onClick={() => deleteColumn(c)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--error-500, #a3291b)", padding: 4 }}
+              ><Trash2 size={14} /></button>
+            </div>
+          )
         ))}
 
         <div

@@ -17,6 +17,7 @@ import {
   MarkAttendanceInput,
   SubmitAssignmentInput,
   SubmitGradesInput,
+  UpdateAssignmentInput,
 } from "@mydaust/shared";
 import { z } from "zod";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
@@ -91,6 +92,7 @@ const CreateSectionInput = z.object({
   startTime: z.string().regex(TIME_RE),
   endTime: z.string().regex(TIME_RE),
   room: z.string().max(40).nullable().optional(),
+  recommended: z.boolean().optional(),
 });
 const UpdateSectionInput = z.object({
   sectionCode: z.string().min(1).max(10).optional(),
@@ -103,6 +105,8 @@ const UpdateSectionInput = z.object({
   room: z.string().max(40).nullable().optional(),
   // Closing a section removes it from registration; seats remaining is a separate concern.
   status: z.enum(["open", "closed"]).optional(),
+  // Staff-curated flag surfaced to students in the registration catalogue.
+  recommended: z.boolean().optional(),
 });
 
 const UpdateStudentInput = z.object({
@@ -630,6 +634,28 @@ export class AcademicsController {
       user.personId,
       user.roles.includes("admin"),
     );
+  }
+
+  @Patch("sections/:id/assignments/:assignmentId")
+  @Roles("faculty", "admin")
+  updateAssignment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") _sectionId: string,
+    @Param("assignmentId") assignmentId: string,
+    @Body() body: unknown,
+  ) {
+    const input = UpdateAssignmentInput.parse(body);
+    return this.academics.updateAssignment(assignmentId, user.personId, user.roles.includes("admin"), input);
+  }
+
+  @Delete("sections/:id/assignments/:assignmentId")
+  @Roles("faculty", "admin")
+  deleteAssignment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") _sectionId: string,
+    @Param("assignmentId") assignmentId: string,
+  ) {
+    return this.academics.deleteAssignment(assignmentId, user.personId, user.roles.includes("admin"));
   }
 
   @Get("assignments/:id/submissions")

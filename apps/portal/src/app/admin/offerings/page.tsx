@@ -54,6 +54,7 @@ export default function AdminOfferingsPage() {
 
   const openCount = sections.filter(isOpen).length;
   const closedCount = sections.length - openCount;
+  const recommendedCount = sections.filter((s) => s.recommended).length;
 
   const rows = useMemo(() => {
     return sections.filter((s) => {
@@ -68,7 +69,7 @@ export default function AdminOfferingsPage() {
       <PageHeader
         eyebrow="Academic structure"
         title="Course Sections"
-        subtitle={`${openCount} open · ${closedCount} closed course sections${term ? ` · ${term.name}` : ""}`}
+        subtitle={`${openCount} open · ${closedCount} closed · ${recommendedCount} recommended course sections${term ? ` · ${term.name}` : ""}`}
         actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => setAdding(true)}>New section</Button>}
       />
 
@@ -132,6 +133,7 @@ function OfferingCard({
             {section.courseCode} · {section.sectionCode}
           </span>
           <StatusToggle section={section} onChanged={onChanged} />
+          <RecommendedToggle section={section} onChanged={onChanged} />
         </div>
         <div style={{ fontWeight: 600, fontSize: 14 }}>{section.title}</div>
         <div className="muted" style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12.5, marginTop: 6 }}>
@@ -188,6 +190,35 @@ function StatusToggle({ section, onChanged }: { section: Section; onChanged: () 
       style={{ border: "none", background: "transparent", padding: 0, cursor: busy ? "wait" : "pointer" }}
     >
       <Badge tone={open ? "success" : "error"}>{open ? "Open" : "Closed"}</Badge>
+    </button>
+  );
+}
+
+/** Staff-curated flag: students see an orange "Recommended" pill in the catalogue. */
+function RecommendedToggle({ section, onChanged }: { section: Section; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const recommended = section.recommended;
+
+  async function toggle() {
+    setBusy(true);
+    try {
+      await updateSection(section.id, { recommended: !recommended });
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      disabled={busy}
+      title={recommended ? "Remove from student recommendations" : "Recommend this section to students"}
+      style={{ border: "none", background: "transparent", padding: 0, cursor: busy ? "wait" : "pointer" }}
+    >
+      <Badge tone={recommended ? "warning" : "neutral"}>
+        {recommended ? "Recommended" : "Recommend"}
+      </Badge>
     </button>
   );
 }

@@ -92,6 +92,7 @@ function Row({
   graded?: boolean;
 }) {
   const due = dueLabel(a.dueDate);
+  const isPastDue = new Date() > new Date(a.dueDate);
   return (
     <div style={{ borderTop: "1px solid var(--divider)", padding: "12px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -105,7 +106,11 @@ function Row({
         ) : (
           <>
             <span className={`badge ${STATUS_BADGE[a.status]}`}>{a.status}</span>
-            <button onClick={onToggle}>{open ? "Close" : a.status === "submitted" ? "Resubmit" : "Submit"}</button>
+            {a.status === "assigned" && isPastDue ? (
+              <span className="badge pending" style={{ fontSize: 11, padding: "4px 10px", opacity: 0.7 }}>Past due</span>
+            ) : (
+              <button onClick={onToggle}>{open ? "Close" : a.status === "submitted" ? "Resubmit" : "Submit"}</button>
+            )}
           </>
         )}
       </div>

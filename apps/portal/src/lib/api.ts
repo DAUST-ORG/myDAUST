@@ -822,6 +822,8 @@ export interface Section {
   instructor: string | null;
   instructorId: string | null;
   termId: string;
+  /** Staff-curated flag surfaced to students in the registration catalogue. */
+  recommended: boolean;
   prerequisites: string[];
 }
 export interface MyEnrollment {
@@ -1061,6 +1063,28 @@ export const createAssignment = (
   request(`/academics/sections/${sectionId}/assignments`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+
+export const updateAssignment = (
+  sectionId: string,
+  assignmentId: string,
+  body: {
+    title?: string;
+    description?: string;
+    type?: string;
+    maxPoints?: number;
+    weight?: number;
+    dueDate?: string;
+  },
+) =>
+  request(`/academics/sections/${sectionId}/assignments/${assignmentId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+export const deleteAssignment = (sectionId: string, assignmentId: string) =>
+  request(`/academics/sections/${sectionId}/assignments/${assignmentId}`, {
+    method: "DELETE",
   });
 
 export interface SubmissionRow {
@@ -1472,6 +1496,7 @@ export interface SectionInput {
   startTime: string;
   endTime: string;
   room?: string | null;
+  recommended?: boolean;
 }
 export const createSection = (input: SectionInput) =>
   request<{ id: string }>("/academics/admin/sections", {
@@ -4705,6 +4730,8 @@ export interface RegistrationSection {
   seatsTaken: number;
   capacity: number;
   seatsLeft: number;
+  /** Staff-curated flag; renders an orange "Recommended" pill when true. */
+  recommended: boolean;
   /** Null when the student may register; otherwise the single clearest reason they cannot. */
   blockedReason: string | null;
 }

@@ -49,6 +49,16 @@ export const CreateAssignmentInput = z.object({
 });
 export type CreateAssignmentInput = z.infer<typeof CreateAssignmentInput>;
 
+export const UpdateAssignmentInput = z.object({
+  title: z.string().min(1).max(200).optional(),
+  description: z.string().max(5000).optional(),
+  type: AssignmentType.optional(),
+  maxPoints: z.number().int().positive().max(1000).optional(),
+  weight: z.number().int().min(0).max(100).optional(),
+  dueDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
+});
+export type UpdateAssignmentInput = z.infer<typeof UpdateAssignmentInput>;
+
 export const SubmitAssignmentInput = z
   .object({
     text: z.string().max(20000).optional(),
