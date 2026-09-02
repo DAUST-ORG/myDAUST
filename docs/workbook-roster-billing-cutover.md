@@ -132,7 +132,7 @@ The output path must not already exist; an exact rebuild to a different private
 path must produce the same canonical manifest digest.
 The `Completion` columns are display formulas only; the builder recomputes every
 gate and rejects formulas in the signed Decision, Evidence/Reason, Reviewer, and
-Review Date cells. All snapshot-declared Applicant preservation rows require
+Review Date cells. All snapshot-declared Applicant disposition rows require
 the same signed reason/reviewer/date fields as the roster decisions.
 
 The workbook supplies four installment due amounts, not calendar dates. The

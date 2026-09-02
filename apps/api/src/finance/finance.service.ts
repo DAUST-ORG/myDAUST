@@ -24,6 +24,7 @@ import {
   type WirePaymentConfig,
 } from "@mydaust/shared";
 import { requirePersonEmail } from "../auth/person-email.js";
+import { assertActiveApplicantPaymentCapability } from "../admissions/applicant-payment-capability.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { MailService } from "../mail/mail.service.js";
 import {
@@ -1721,9 +1722,7 @@ export class FinanceService {
     if (result.didSettle) {
       // Money is already committed. Email/provider failures are deliberately
       // best-effort and must never make a successful settlement look rolled back.
-      await Promise.allSettled([
-        this.emailReceipt(paymentId),
-      ]);
+      await Promise.allSettled([this.emailReceipt(paymentId)]);
     }
   }
 
@@ -2097,6 +2096,20 @@ export class FinanceService {
               amount,
             );
           }
+          if (input.applicantId) {
+            const applicant = await tx.applicant.findUnique({
+              where: { id: input.applicantId },
+              select: {
+                feePaid: true,
+                stage: true,
+                onboardingStatus: true,
+              },
+            });
+            assertActiveApplicantPaymentCapability(applicant);
+            if (applicant.feePaid) {
+              throw new BadRequestException("Application fee already paid");
+            }
+          }
           // Applicant fees have no Invoice, so they carry no Payment row — the fee is marked
           // paid on the Applicant itself when the rail settles.
           const payment =
@@ -2367,7 +2380,7 @@ export class FinanceService {
     const applicant = await this.prisma.applicant.findUnique({
       where: { id: applicantId },
     });
-    if (!applicant) throw new NotFoundException("Application not found");
+    assertActiveApplicantPaymentCapability(applicant);
     if (applicant.feePaid) {
       throw new BadRequestException("Application fee already paid");
     }
@@ -2383,6 +2396,11 @@ export class FinanceService {
 
   /** Poll an application-fee request; the applicant id scopes it. */
   async getApplicantPiSpiStatus(applicantId: string, txId: string) {
+    const applicant = await this.prisma.applicant.findUnique({
+      where: { id: applicantId },
+      select: { stage: true, onboardingStatus: true },
+    });
+    assertActiveApplicantPaymentCapability(applicant);
     const request = await this.prisma.piSpiRequest.findUnique({
       where: { txId },
     });

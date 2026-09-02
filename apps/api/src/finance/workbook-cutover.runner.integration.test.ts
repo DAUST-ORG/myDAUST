@@ -88,6 +88,13 @@ let archivedPointerPaymentLinkId: string;
 let archivedPaymentLinkIds: string[];
 let archivedPaymentSubmissionIds: string[];
 let archivedPiSpiRequestIds: string[];
+let removedApplicantId: string;
+let removedApplicantActiveLinkId: string;
+let removedApplicantPaidLinkId: string;
+let removedApplicantOriginalActiveLinkToken: string;
+let removedApplicantOriginalPaidLinkToken: string;
+let removedApplicantSubmissionIds: string[];
+let removedApplicantPiSpiId: string;
 
 function distribute(total: number, count: number): number[] {
   const base = Math.floor(total / count);
@@ -638,7 +645,8 @@ async function reviewedInputs(recordAttestation = true) {
         WORKBOOK_CUTOVER_BASELINE.productionStudents - 4,
       archivedProductionStudents: 1,
       heldProductionStudents: 0,
-      preservedApplicants: WORKBOOK_CUTOVER_BASELINE.currentApplicants,
+      preservedApplicants: 0,
+      removedApplicants: WORKBOOK_CUTOVER_BASELINE.currentApplicants,
     },
     workbookRows,
     productionStudents: reviewedStudents.map((student) =>
@@ -684,10 +692,13 @@ async function reviewedInputs(recordAttestation = true) {
                 },
     ),
     applicants: reviewedApplicants.map((applicant) => ({
-      decision: "preserve" as const,
+      decision: "remove" as const,
       ...applicant,
+      removeFromActivePipeline: true as const,
+      retainAuditEvidence: true as const,
+      revokeBearerCapabilities: true as const,
       review: review(
-        "This open Applicant remains an application through the integration cutover.",
+        "This current Applicant is removed from the active pipeline by the integration cutover.",
       ),
     })),
     reviewNote:
@@ -746,7 +757,7 @@ async function reviewedInputs(recordAttestation = true) {
   for (const applicant of manifestInput.applicants) {
     const { review: applicantReview, ...applicantPayload } = applicant;
     applicantReview.signatureSha256 = workbookCutoverReviewSignature({
-      scope: "applicant_preservation",
+      scope: "applicant_removal",
       sourceKey: applicant.sourceKey,
       payload: applicantPayload,
       reviewedBy: applicantReview.reviewedBy,
@@ -956,6 +967,92 @@ describe.skipIf(!DB_URL)("workbook cutover runner transaction", () => {
         }),
       ),
     });
+    const removedApplicant = await prisma.applicant.findFirstOrThrow({
+      where: { email: "cutover-applicant-1@example.test" },
+    });
+    removedApplicantId = removedApplicant.id;
+    removedApplicantOriginalActiveLinkToken = `remove-active-${randomUUID()}`;
+    removedApplicantOriginalPaidLinkToken = `remove-paid-${randomUUID()}`;
+    const [activeApplicantLink, paidApplicantLink] = await Promise.all([
+      prisma.paymentLink.create({
+        data: {
+          token: removedApplicantOriginalActiveLinkToken,
+          amountXof: 50_000,
+          purpose: "Applicant removal active capability",
+          payeeName: "Applicant1 Pending",
+          status: "active",
+          onboardingApplicantId: removedApplicant.id,
+        },
+      }),
+      prisma.paymentLink.create({
+        data: {
+          token: removedApplicantOriginalPaidLinkToken,
+          amountXof: 50_000,
+          purpose: "Applicant removal historical capability",
+          payeeName: "Applicant1 Pending",
+          status: "paid",
+          onboardingApplicantId: removedApplicant.id,
+        },
+      }),
+    ]);
+    removedApplicantActiveLinkId = activeApplicantLink.id;
+    removedApplicantPaidLinkId = paidApplicantLink.id;
+    await prisma.applicant.update({
+      where: { id: removedApplicant.id },
+      data: {
+        activeOnboardingPaymentLinkId: activeApplicantLink.id,
+        statusTokenHash: createHash("sha256")
+          .update("removed-applicant-status-token")
+          .digest("hex"),
+        statusTokenExpiresAt: new Date("2026-10-01T00:00:00.000Z"),
+      },
+    });
+    const [openSubmission, terminalSubmission, removedApplicantPiSpi] =
+      await Promise.all([
+        prisma.paymentSubmission.create({
+          data: {
+            resumeToken: `remove-resume-open-${randomUUID()}`,
+            activeKey: `applicant:${removedApplicant.id}`,
+            status: "awaiting_proof",
+            method: "wave",
+            source: "application_fee",
+            applicantId: removedApplicant.id,
+            submittedAmountXof: 50_000,
+            contactEmail: removedApplicant.email,
+            bankSnapshot: {},
+          },
+        }),
+        prisma.paymentSubmission.create({
+          data: {
+            resumeToken: `remove-resume-terminal-${randomUUID()}`,
+            status: "approved",
+            method: "wave",
+            source: "application_fee",
+            applicantId: removedApplicant.id,
+            paymentLinkId: paidApplicantLink.id,
+            submittedAmountXof: 50_000,
+            confirmedAmountXof: 50_000,
+            contactEmail: removedApplicant.email,
+            bankSnapshot: {},
+          },
+        }),
+        prisma.piSpiRequest.create({
+          data: {
+            txId: `remove-applicant-${randomUUID()}`,
+            status: "initiated",
+            source: "application_fee",
+            payerAlias: "+221700000006",
+            amountXof: 50_000,
+            motif: "Applicant removal request",
+            applicantId: removedApplicant.id,
+          },
+        }),
+      ]);
+    removedApplicantSubmissionIds = [
+      openSubmission.id,
+      terminalSubmission.id,
+    ].sort();
+    removedApplicantPiSpiId = removedApplicantPiSpi.id;
     const department = await prisma.department.create({
       data: { code: `CUT${randomUUID().slice(0, 5)}`, name: "Cutover Studies" },
     });
@@ -1515,6 +1612,29 @@ describe.skipIf(!DB_URL)("workbook cutover runner transaction", () => {
     expect(attestedPlan.confirmBlocked).toBe(false);
     expect(attestedPlan.blockers).toEqual([]);
     expect(attestedPlan.planSha256).not.toBe(missingPlan.planSha256);
+
+    const lateCapability = await prisma.paymentLink.create({
+      data: {
+        token: `late-applicant-capability-${randomUUID()}`,
+        amountXof: 50_000,
+        purpose: "Capability created after reviewed dry run",
+        payeeName: "Applicant1 Pending",
+        status: "active",
+        onboardingApplicantId: removedApplicantId,
+      },
+    });
+    try {
+      await expect(
+        executeWorkbookCutover(prisma, input.manifest, input.sources, {
+          actorEmail,
+          expectedPlanSha256: attestedPlan.planSha256,
+          newStudentCredentials: [],
+        }),
+      ).rejects.toThrow(/plan changed after the reviewed dry run/i);
+      await expect(prisma.workbookCutoverBatch.count()).resolves.toBe(0);
+    } finally {
+      await prisma.paymentLink.delete({ where: { id: lateCapability.id } });
+    }
   }, 180_000);
 
   it("rolls back every supersession and cancellation when reconstruction fails late", async () => {
@@ -1650,6 +1770,8 @@ describe.skipIf(!DB_URL)("workbook cutover runner transaction", () => {
         reviewedExclusionRows: 400,
         accountCreditXof: 1_433,
         archiveStudents: 1,
+        preserveApplicants: 0,
+        removeApplicants: WORKBOOK_CUTOVER_BASELINE.currentApplicants,
         reconciles: true,
       },
     });
@@ -1678,6 +1800,7 @@ describe.skipIf(!DB_URL)("workbook cutover runner transaction", () => {
       workbookCreatedRows: 0,
       workbookDuplicateRows: 400,
       productionArchivedStudents: 1,
+      removedApplicants: WORKBOOK_CUTOVER_BASELINE.currentApplicants,
       includedBilledXof:
         input.included.financial.amountBilledXof +
         input.activationIncluded.financial.amountBilledXof +
@@ -1756,6 +1879,93 @@ describe.skipIf(!DB_URL)("workbook cutover runner transaction", () => {
     expect(submissions.every((row) => row.activeKey === null)).toBe(true);
     expect(piSpi).toHaveLength(3);
     expect(piSpi.every((row) => row.status === "cancelled")).toBe(true);
+
+    const [
+      removedApplicant,
+      removedApplicantLinks,
+      removedApplicantSubmissions,
+      removedApplicantPiSpi,
+      applicantRemovalAuditCount,
+    ] = await Promise.all([
+      prisma.applicant.findUniqueOrThrow({
+        where: { id: removedApplicantId },
+      }),
+      prisma.paymentLink.findMany({
+        where: {
+          id: {
+            in: [removedApplicantActiveLinkId, removedApplicantPaidLinkId],
+          },
+        },
+        orderBy: { id: "asc" },
+      }),
+      prisma.paymentSubmission.findMany({
+        where: { id: { in: removedApplicantSubmissionIds } },
+        orderBy: { id: "asc" },
+      }),
+      prisma.piSpiRequest.findUniqueOrThrow({
+        where: { id: removedApplicantPiSpiId },
+      }),
+      prisma.auditLog.count({
+        where: {
+          entity: "Applicant",
+          action: "workbook-cutover-removed",
+        },
+      }),
+    ]);
+    expect(removedApplicant).toMatchObject({
+      stage: "rejected",
+      onboardingStatus: "cancelled",
+      activeOnboardingPaymentLinkId: null,
+    });
+    expect(removedApplicant.onboardingCancelledAt).not.toBeNull();
+    expect(removedApplicant.statusTokenRevokedAt).not.toBeNull();
+    expect(removedApplicant.statusTokenExpiresAt).toEqual(
+      removedApplicant.statusTokenRevokedAt,
+    );
+    expect(removedApplicantLinks).toHaveLength(2);
+    expect(
+      removedApplicantLinks.find(
+        (link) => link.id === removedApplicantActiveLinkId,
+      )?.status,
+    ).toBe("cancelled");
+    expect(
+      removedApplicantLinks.find(
+        (link) => link.id === removedApplicantPaidLinkId,
+      )?.status,
+    ).toBe("paid");
+    expect(
+      removedApplicantLinks.some(
+        (link) => link.token === removedApplicantOriginalActiveLinkToken,
+      ),
+    ).toBe(false);
+    expect(
+      removedApplicantLinks.some(
+        (link) => link.token === removedApplicantOriginalPaidLinkToken,
+      ),
+    ).toBe(false);
+    expect(removedApplicantSubmissions).toHaveLength(2);
+    expect(
+      removedApplicantSubmissions.every((row) => row.resumeToken === null),
+    ).toBe(true);
+    expect(
+      removedApplicantSubmissions.find((row) => row.status === "cancelled")
+        ?.activeKey,
+    ).toBeNull();
+    expect(
+      removedApplicantSubmissions.some((row) => row.status === "approved"),
+    ).toBe(true);
+    expect(removedApplicantPiSpi.status).toBe("cancelled");
+    expect(applicantRemovalAuditCount).toBe(
+      WORKBOOK_CUTOVER_BASELINE.currentApplicants,
+    );
+    await expect(
+      prisma.applicant.count({
+        where: {
+          id: { in: input.manifest.applicants.map((row) => row.applicantId) },
+          stage: { in: ["submitted", "review", "interview", "offer"] },
+        },
+      }),
+    ).resolves.toBe(0);
 
     const [
       archivedStudent,
@@ -2118,6 +2328,8 @@ describe.skipIf(!DB_URL)("workbook cutover runner transaction", () => {
       includedWorkbookRows: 3,
       excludedWorkbookRows: 400,
       archivedStudents: 1,
+      preservedApplicants: 0,
+      removedApplicants: WORKBOOK_CUTOVER_BASELINE.currentApplicants,
       enrollmentActivations: 1,
       activationAuditRows: 1,
     });

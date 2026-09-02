@@ -14,6 +14,7 @@ import {
 } from "@mydaust/shared";
 import { MailService } from "../mail/mail.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { assertActiveApplicantPaymentCapability } from "../admissions/applicant-payment-capability.js";
 import {
   assertCurrentEnrollmentInvoicePaymentInTransaction,
   assertCurrentOnboardingPaymentLinkInTransaction,
@@ -459,9 +460,9 @@ export class PaymentSubmissionsService {
   ) {
     const applicant = await this.prisma.applicant.findUnique({
       where: { id: applicantId },
-      select: { email: true },
+      select: { email: true, stage: true, onboardingStatus: true },
     });
-    if (!applicant) throw new NotFoundException("Application not found");
+    assertActiveApplicantPaymentCapability(applicant);
     return this.create({
       source: "application_fee",
       method,
@@ -541,8 +542,13 @@ export class PaymentSubmissionsService {
     if (input.applicantId) {
       const applicant = await client.applicant.findUnique({
         where: { id: input.applicantId },
+        select: {
+          feePaid: true,
+          stage: true,
+          onboardingStatus: true,
+        },
       });
-      if (!applicant) throw new NotFoundException("Application not found");
+      assertActiveApplicantPaymentCapability(applicant);
       if (applicant.feePaid)
         throw new BadRequestException("Application fee already paid");
     }
@@ -607,9 +613,11 @@ export class PaymentSubmissionsService {
   async listForPaymentLinkToken(token: string) {
     const link = await this.prisma.paymentLink.findUnique({
       where: { token },
-      select: { id: true },
+      select: { id: true, status: true },
     });
-    if (!link) throw new NotFoundException("Payment link not found");
+    if (!link || link.status === "cancelled") {
+      throw new NotFoundException("Payment link not found");
+    }
     const rows = await this.prisma.paymentSubmission.findMany({
       where: { paymentLinkId: link.id },
       orderBy: { createdAt: "desc" },
@@ -621,9 +629,9 @@ export class PaymentSubmissionsService {
   async listForApplicant(applicantId: string) {
     const applicant = await this.prisma.applicant.findUnique({
       where: { id: applicantId },
-      select: { id: true },
+      select: { id: true, stage: true, onboardingStatus: true },
     });
-    if (!applicant) throw new NotFoundException("Application not found");
+    assertActiveApplicantPaymentCapability(applicant);
     const rows = await this.prisma.paymentSubmission.findMany({
       where: { applicantId },
       orderBy: { createdAt: "desc" },

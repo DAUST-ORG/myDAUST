@@ -116,3 +116,35 @@ describe("onboarding payment-link PI-SPI initiation", () => {
     expect(requestData?.invoiceId).toBeUndefined();
   });
 });
+
+describe("removed Applicant PI-SPI capabilities", () => {
+  it("rejects both initiation and polling for a removed Applicant UUID", async () => {
+    const prisma = {
+      applicant: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "removed-applicant",
+          stage: "rejected",
+          onboardingStatus: "cancelled",
+          feePaid: false,
+        }),
+      },
+      piSpiRequest: { findUnique: vi.fn() },
+    };
+    const rails = { get: vi.fn() };
+    const finance = new FinanceService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      rails as never,
+    );
+
+    await expect(
+      finance.submitApplicantPiSpi("removed-applicant", randomUUID(), 50_000),
+    ).rejects.toThrow("Application not found");
+    await expect(
+      finance.getApplicantPiSpiStatus("removed-applicant", "old-request"),
+    ).rejects.toThrow("Application not found");
+    expect(rails.get).not.toHaveBeenCalled();
+    expect(prisma.piSpiRequest.findUnique).not.toHaveBeenCalled();
+  });
+});

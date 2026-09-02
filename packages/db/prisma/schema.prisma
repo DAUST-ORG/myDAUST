@@ -113,6 +113,7 @@ enum WorkbookCutoverDisposition {
   keep_exception
   archive_student
   preserve_applicant
+  remove_applicant
 }
 
 enum WorkbookCutoverFinancialEventKind {
@@ -1010,6 +1011,7 @@ model WorkbookCutoverBatch {
   productionKeptStudents     Int                                  @default(0)
   productionArchivedStudents Int                                  @default(0)
   preservedApplicants        Int                                  @default(0)
+  removedApplicants          Int                                  @default(0)
   sourceBilledXof            BigInt
   sourcePaidXof              BigInt
   includedBilledXof          BigInt                               @default(0)
@@ -2771,7 +2773,7 @@ model StudentInvite {
   // Setup invites bind the capability to the reviewed login identity.
   // Nullable keeps the migration additive; null legacy rows fail closed.
   boundEmailSha256  String?
-  purpose           StudentInvitePurpose        @default(first_time)
+  purpose           StudentInvitePurpose      @default(first_time)
   expiresAt         DateTime
   usedAt            DateTime?
   createdAt         DateTime                  @default(now())

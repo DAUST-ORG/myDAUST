@@ -98,7 +98,11 @@ describe("workbook cutover production review snapshot", () => {
         }) => Promise<string>,
         options: { isolationLevel: string },
       ) => {
-        expect(options).toEqual({ isolationLevel: "RepeatableRead" });
+        expect(options).toEqual({
+          isolationLevel: "RepeatableRead",
+          maxWait: 30_000,
+          timeout: 120_000,
+        });
         return callback({ $executeRawUnsafe: execute });
       },
     );

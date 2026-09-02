@@ -311,6 +311,13 @@ describe("captureWorkbookCutoverLiveSnapshot", () => {
         lastName: "Applicant",
         email: "OPEN@EXAMPLE.COM",
         stage: "submitted",
+        onboardingStatus: "not_started",
+        studentId: null,
+        enrollmentInvoiceId: null,
+        activeOnboardingPaymentLinkId: "link-open-applicant",
+        statusTokenHash: "b".repeat(64),
+        statusTokenExpiresAt: new Date("2026-09-02T10:00:00.000Z"),
+        statusTokenRevokedAt: null,
       },
     ]);
     const paymentLinks = [
@@ -329,6 +336,14 @@ describe("captureWorkbookCutoverLiveSnapshot", () => {
         onboardingApplicantId: "accepted-applicant-1",
       },
       {
+        id: "link-open-applicant",
+        token: "open-applicant-link-token",
+        studentId: null,
+        invoiceId: null,
+        status: "paid",
+        onboardingApplicantId: "applicant-1",
+      },
+      {
         id: "link-indirect",
         studentId: null,
         invoiceId: null,
@@ -341,7 +356,7 @@ describe("captureWorkbookCutoverLiveSnapshot", () => {
         id: "proof-1",
         studentId: null,
         invoiceId: null,
-        paymentId: null,
+        paymentId: "payment-1",
         paymentLinkId: "link-1",
         applicantId: null,
         status: "submitted",
@@ -363,6 +378,16 @@ describe("captureWorkbookCutoverLiveSnapshot", () => {
         paymentLinkId: "link-retired",
         applicantId: null,
         status: "awaiting_proof",
+      },
+      {
+        id: "proof-open-applicant",
+        resumeToken: "open-applicant-resume-token",
+        studentId: null,
+        invoiceId: null,
+        paymentId: "payment-1",
+        paymentLinkId: "link-open-applicant",
+        applicantId: "applicant-1",
+        status: "approved",
       },
       {
         id: "proof-direct-indirect",
@@ -532,6 +557,14 @@ describe("captureWorkbookCutoverLiveSnapshot", () => {
     expect(snapshot.applicants[0]).toMatchObject({
       sourceKey: "applicant:applicant-1",
       email: "open@example.com",
+      onboardingStatus: "not_started",
+      activeOnboardingPaymentLinkId: "link-open-applicant",
+      statusTokenCapability: true,
+      statusTokenActive: true,
+      paymentLinkBearerIds: ["link-1", "link-open-applicant"],
+      paymentSubmissionResumeTokenIds: ["proof-open-applicant"],
+      inFlightProofSubmissionIds: ["proof-1"],
+      pendingRefundIds: ["payment-1"],
     });
     expect(snapshot.studentNumberSequence).toEqual({
       academicYearStart: 2026,
