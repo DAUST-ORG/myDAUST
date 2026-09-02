@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { Prisma } from "@mydaust/db";
 import { normalizeStudentNumber } from "@mydaust/shared";
@@ -9,10 +10,47 @@ import { NotificationsService } from "../notifications/notifications.service.js"
 import { PrismaService } from "../prisma/prisma.service.js";
 import { summarizeTranscriptRows } from "../transcript/transcript-calculation.js";
 import { assignStandardPackageInTransaction } from "../finance/standard-package.js";
+import {
+  REGISTRATION_CONFIGURATION_KEY,
+  acquireRegistrationConfigurationWriteLock,
+  normalizeRegistrationSemester,
+  readRegistrationConfiguration,
+  type RegistrationConfigurationValue,
+} from "../academics/registration-configuration.js";
 
 /** Defaults for the early-alert thresholds shown on Student Success. */
 const DEFAULT_MIN_GPA = 2.5;
 const DEFAULT_MIN_ATTENDANCE = 75;
+
+function presentRegistrationTerm(
+  term: {
+    id: string;
+    name: string;
+    status: string | null;
+    semester: string | null;
+    academicYearId: string | null;
+    startDate: Date;
+    endDate: Date;
+    addDeadline: Date | null;
+    dropDeadline: Date | null;
+    academicYear: { label: string } | null;
+  } | null,
+) {
+  return term
+    ? {
+        id: term.id,
+        name: term.name,
+        status: term.status,
+        semester: normalizeRegistrationSemester(term.semester),
+        academicYearId: term.academicYearId,
+        academicYearLabel: term.academicYear?.label ?? null,
+        startDate: term.startDate,
+        endDate: term.endDate,
+        addDeadline: term.addDeadline,
+        dropDeadline: term.dropDeadline,
+      }
+    : null;
+}
 
 /** The extended student columns the design's Add/Edit record modal captures. */
 export interface RegistrarStudentInput {
@@ -1198,8 +1236,125 @@ export class RegistrarService {
       endDate: t.endDate,
       addDeadline: t.addDeadline,
       dropDeadline: t.dropDeadline,
+      semester: normalizeRegistrationSemester(t.semester),
+      academicYearId: t.academicYearId,
       academicYear: t.academicYear?.label ?? null,
     }));
+  }
+
+  /**
+   * The setting row is optional for backward compatibility. Once present,
+   * termId=null is an intentional closure rather than "pick a default term".
+   */
+  async registrationConfiguration() {
+    const configuration = await readRegistrationConfiguration(this.prisma);
+    if (configuration.state === "invalid") {
+      throw new ServiceUnavailableException(
+        "Registration configuration is invalid; save a valid configuration before reopening registration",
+      );
+    }
+    if (configuration.state === "absent") {
+      return {
+        configured: false,
+        termId: null,
+        recommendationsEnabled: false,
+        term: null,
+      };
+    }
+    const term = configuration.termId
+      ? await this.prisma.term.findUnique({
+          where: { id: configuration.termId },
+          include: { academicYear: { select: { label: true } } },
+        })
+      : null;
+    if (configuration.termId && !term) {
+      throw new ServiceUnavailableException(
+        "The designated registration term no longer exists; save a valid configuration before reopening registration",
+      );
+    }
+    return {
+      configured: true,
+      termId: configuration.termId,
+      recommendationsEnabled: configuration.recommendationsEnabled,
+      term: presentRegistrationTerm(term),
+    };
+  }
+
+  async updateRegistrationConfiguration(
+    actorId: string,
+    input: RegistrationConfigurationValue & { reason: string },
+  ) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      await acquireRegistrationConfigurationWriteLock(tx);
+      if (input.termId === null && input.recommendationsEnabled) {
+        throw new BadRequestException(
+          "Recommendations cannot be enabled while registration is explicitly closed",
+        );
+      }
+      const previous = await readRegistrationConfiguration(tx);
+      const term = input.termId
+        ? await tx.term.findUnique({
+            where: { id: input.termId },
+            include: { academicYear: { select: { label: true } } },
+          })
+        : null;
+      if (input.termId && !term) {
+        throw new NotFoundException("Registration term not found");
+      }
+      if (
+        input.recommendationsEnabled &&
+        (!term?.academicYearId || !normalizeRegistrationSemester(term.semester))
+      ) {
+        throw new BadRequestException(
+          "Recommendations require a designated term with an academic year and a Fall, Spring, or Summer semester",
+        );
+      }
+      await tx.appSetting.upsert({
+        where: { key: REGISTRATION_CONFIGURATION_KEY },
+        create: {
+          key: REGISTRATION_CONFIGURATION_KEY,
+          valueJson: {
+            termId: input.termId,
+            recommendationsEnabled: input.recommendationsEnabled,
+          },
+        },
+        update: {
+          valueJson: {
+            termId: input.termId,
+            recommendationsEnabled: input.recommendationsEnabled,
+          },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          entity: "AppSetting",
+          entityId: REGISTRATION_CONFIGURATION_KEY,
+          action: "registration-configuration-updated",
+          actorId,
+          data: {
+            reason: input.reason.trim(),
+            previous:
+              previous.state === "valid"
+                ? {
+                    termId: previous.termId,
+                    recommendationsEnabled: previous.recommendationsEnabled,
+                  }
+                : { state: previous.state },
+            current: {
+              termId: input.termId,
+              recommendationsEnabled: input.recommendationsEnabled,
+            },
+          },
+        },
+      });
+      return term;
+    });
+    return {
+      configured: true,
+      termId: input.termId,
+      recommendationsEnabled: input.recommendationsEnabled,
+      term: presentRegistrationTerm(result),
+    };
   }
 
   /** Only one term is "active" at a time — activating one demotes any other. */
@@ -1300,28 +1455,51 @@ export class RegistrarService {
     academicYearId: string,
     entries: { yearIndex: number; semester: string; courseCode: string }[],
   ) {
-    const program = await this.prisma.program.findUnique({
-      where: { code: programCode },
-    });
-    if (!program) throw new NotFoundException("Programme not found");
-    const programId = program.id;
-    const codes = [...new Set(entries.map((e) => e.courseCode))];
-    const courses = await this.prisma.course.findMany({
-      where: { code: { in: codes } },
-      select: { id: true, code: true },
-    });
-    const idByCode = new Map(courses.map((c) => [c.code, c.id]));
-    const missing = codes.filter((c) => !idByCode.has(c));
-    if (missing.length > 0)
-      throw new BadRequestException(
-        `Unknown course code(s): ${missing.join(", ")}`,
+    return this.prisma.$transaction(async (tx) => {
+      const lockedYear = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id
+        FROM "AcademicYear"
+        WHERE id = ${academicYearId}
+        FOR UPDATE
+      `;
+      if (!lockedYear[0])
+        throw new NotFoundException("Academic year not found");
+      const approvedRevision = await tx.academicCatalogRevision.findFirst({
+        where: { academicYearId, status: "approved" },
+        select: { id: true },
+      });
+      if (approvedRevision) {
+        throw new BadRequestException(
+          "This academic year already has an approved catalog. Make curriculum changes through Academic Years by creating a new revision.",
+        );
+      }
+      const program = await tx.program.findUnique({
+        where: { code: programCode },
+      });
+      if (!program) throw new NotFoundException("Programme not found");
+      const codes = [...new Set(entries.map((entry) => entry.courseCode))];
+      const courses = await tx.course.findMany({
+        where: { code: { in: codes } },
+        select: { id: true, code: true },
+      });
+      const idByCode = new Map(
+        courses.map((course) => [course.code, course.id]),
       );
-
-    await this.prisma.$transaction(async (tx) => {
+      const missing = codes.filter((code) => !idByCode.has(code));
+      if (missing.length > 0) {
+        throw new BadRequestException(
+          `Unknown course code(s): ${missing.join(", ")}`,
+        );
+      }
       const curriculum = await tx.curriculum.upsert({
-        where: { programId_academicYearId: { programId, academicYearId } },
+        where: {
+          programId_academicYearId: {
+            programId: program.id,
+            academicYearId,
+          },
+        },
         update: {},
-        create: { programId, academicYearId },
+        create: { programId: program.id, academicYearId },
       });
       await tx.curriculumEntry.deleteMany({
         where: { curriculumId: curriculum.id },
@@ -1335,15 +1513,17 @@ export class RegistrarService {
           position: i,
         })),
       });
+      await tx.auditLog.create({
+        data: {
+          entity: "Curriculum",
+          entityId: `${programCode}:${academicYearId}`,
+          action: "saved",
+          actorId,
+          data: { entries: entries.length },
+        },
+      });
+      return { ok: true };
     });
-    await this.audit(
-      "Curriculum",
-      `${programCode}:${academicYearId}`,
-      "saved",
-      actorId,
-      { entries: entries.length },
-    );
-    return { ok: true };
   }
 
   private audit(

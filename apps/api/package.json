@@ -17,7 +17,8 @@
     "cutover:workbook": "node dist/finance/workbook-cutover.cli.js",
     "import:legacy-cohort": "node dist/admissions/legacy-cohort-import.cli.js",
     "reconcile:accepted-applicants": "node dist/admissions/accepted-applicant-reconciliation.cli.js",
-    "reconcile:installment-statuses": "node dist/finance/reconcile-installment-statuses.cli.js"
+    "reconcile:installment-statuses": "node dist/finance/reconcile-installment-statuses.cli.js",
+    "audit:registration-readiness": "node dist/academics/registration-readiness.cli.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.864.0",

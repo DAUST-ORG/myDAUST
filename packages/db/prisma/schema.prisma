@@ -1705,6 +1705,8 @@ model Section {
   gradeSubmission     GradeSubmission?
   // Registration gate: closed sections are not offered to students.
   status              String                     @default("open") // open | closed
+  // Staff toggle: surfaces this section to students as "Recommended".
+  recommended         Boolean                    @default(false)
   evaluationSchedules CourseEvaluationSchedule[]
   evaluationResponses CourseEvaluationResponse[]
 

@@ -21,6 +21,8 @@ const defaultLevels = [
   { code: "S1", name: "Foundation", creditCeiling: 30 },
   { code: "S2", name: "Development", creditCeiling: 60 },
   { code: "S3", name: "Advanced", creditCeiling: 90 },
+  { code: "S4", name: "Senior", creditCeiling: 120 },
+  { code: "S5", name: "Completion", creditCeiling: 150 },
 ];
 
 let prisma: PrismaClient;
@@ -30,8 +32,12 @@ let registrar: AuthUser;
 let director: AuthUser;
 let yearId: string;
 let programId: string;
+const courseByCredits = new Map<number, { id: string; code: string }>();
 
 function catalogInput(requiredCredits: number, reason: string) {
+  const course = courseByCredits.get(requiredCredits);
+  if (!course)
+    throw new Error(`Missing test course for ${requiredCredits} credits`);
   return {
     yearLabel: "AY 2026 corrected",
     startsOn: "2026-08-20",
@@ -45,6 +51,18 @@ function catalogInput(requiredCredits: number, reason: string) {
         progressionMode: "default" as const,
         customLevels: [],
         requirements: [{ category: "Degree", requiredCredits }],
+        curriculum: [
+          {
+            courseId: course.id,
+            courseCode: course.code,
+            yearIndex: Math.min(
+              5,
+              Math.max(1, Math.ceil(requiredCredits / 30)),
+            ),
+            semester: "Fall" as const,
+            position: 0,
+          },
+        ],
       },
     ],
     reason,
@@ -106,6 +124,17 @@ describe.skipIf(!DB_URL)("academic catalog approval lifecycle", () => {
       },
     });
     programId = program.id;
+    for (const credits of [132, 90, 87, 84]) {
+      const course = await prisma.course.create({
+        data: {
+          code: `CS ${credits}`,
+          title: `${credits}-credit catalog fixture`,
+          credits,
+          departmentId: department.id,
+        },
+      });
+      courseByCredits.set(credits, { id: course.id, code: course.code });
+    }
     const year = await prisma.academicYear.create({
       data: { label: "AY 2026", status: "draft" },
     });
@@ -116,11 +145,7 @@ describe.skipIf(!DB_URL)("academic catalog approval lifecycle", () => {
         revision: 1,
         status: "approved",
         yearLabel: year.label,
-        defaultLevels: [
-          ...defaultLevels,
-          { code: "S4", name: "Senior", creditCeiling: 120 },
-          { code: "S5", name: "Completion", creditCeiling: 150 },
-        ],
+        defaultLevels,
         programConfigurations: [
           {
             ...catalogInput(132, "Legacy baseline").programs[0],
@@ -199,6 +224,28 @@ describe.skipIf(!DB_URL)("academic catalog approval lifecycle", () => {
       status: "approved",
       reviewedById: director.personId,
     });
+    const curriculum = await prisma.curriculum.findUniqueOrThrow({
+      where: {
+        programId_academicYearId: { programId, academicYearId: yearId },
+      },
+      include: { entries: { include: { course: true } } },
+    });
+    expect(curriculum.entries).toHaveLength(1);
+    expect(curriculum.entries[0]).toMatchObject({
+      yearIndex: 3,
+      semester: "Fall",
+      position: 0,
+      course: { code: "CS 90", credits: 90 },
+    });
+    await expect(
+      prisma.auditLog.findFirstOrThrow({
+        where: {
+          entity: "AcademicCatalogRevision",
+          entityId: approved.id,
+          action: "approved-curricula-synced",
+        },
+      }),
+    ).resolves.toBeTruthy();
 
     const after = await catalogs.progress({
       programId,

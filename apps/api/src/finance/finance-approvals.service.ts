@@ -36,6 +36,7 @@ import {
   type BillingCatalogChangeInput,
   type BillingProfileChangeInput,
 } from "./billing-profile.service.js";
+import { validateCanonicalAcademicCatalog } from "../academic-catalog/academic-catalog.service.js";
 
 export const DIRECTOR_WIDGET_KEYS = [
   "people",
@@ -101,6 +102,55 @@ export type ProtectedChange = {
 };
 
 type StoredApproval = Prisma.ApprovalRequestGetPayload<Record<string, never>>;
+
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, canonicalJson(item)]),
+    );
+  }
+  return value;
+}
+
+export function academicCatalogApprovalPayloadMatches(
+  afterJson: unknown,
+  revision: {
+    id: string;
+    academicYearId: string;
+    revision: number;
+    yearLabel: string;
+    startsOn: Date | null;
+    endsOn: Date | null;
+    defaultLevels: unknown;
+    defaultStandingRules: unknown;
+    notYetGradedStanding: unknown;
+    programConfigurations: unknown;
+    reason: string | null;
+    activateYear: boolean;
+  },
+) {
+  const current = {
+    id: revision.id,
+    academicYearId: revision.academicYearId,
+    revision: revision.revision,
+    yearLabel: revision.yearLabel,
+    startsOn: revision.startsOn?.toISOString().slice(0, 10) ?? null,
+    endsOn: revision.endsOn?.toISOString().slice(0, 10) ?? null,
+    defaultLevels: revision.defaultLevels,
+    defaultStandingRules: revision.defaultStandingRules,
+    notYetGradedStanding: revision.notYetGradedStanding,
+    programs: revision.programConfigurations,
+    reason: revision.reason,
+    activateYear: revision.activateYear,
+  };
+  return (
+    JSON.stringify(canonicalJson(afterJson)) ===
+    JSON.stringify(canonicalJson(current))
+  );
+}
 
 @Injectable()
 export class FinanceApprovalsService {
@@ -574,6 +624,9 @@ export class FinanceApprovalsService {
       if (request.status !== "pending") {
         throw new BadRequestException(`Request is already ${request.status}`);
       }
+      if (request.kind === "academic_catalog" && request.targetId) {
+        await this.lockAcademicCatalogYear(tx, request.targetId);
+      }
       const staleReason = await this.staleReason(tx, request);
       if (staleReason) {
         await this.operatingBudget.markDecision(
@@ -773,6 +826,9 @@ export class FinanceApprovalsService {
       if (!revision || revision.status !== "pending") {
         return "The academic catalog draft is no longer awaiting approval";
       }
+      if (!academicCatalogApprovalPayloadMatches(request.afterJson, revision)) {
+        return "The pending academic catalog payload changed after it was submitted";
+      }
       const approved = await tx.academicCatalogRevision.findFirst({
         where: {
           academicYearId: revision.academicYearId,
@@ -896,6 +952,7 @@ export class FinanceApprovalsService {
         "Academic catalog revision target is missing",
       );
     }
+    await this.lockAcademicCatalogYear(tx, request.targetId);
     const revision = await tx.academicCatalogRevision.findUnique({
       where: { id: request.targetId },
     });
@@ -904,7 +961,12 @@ export class FinanceApprovalsService {
         "Academic catalog revision is no longer awaiting approval",
       );
     }
-    const parsed = AcademicCatalogDraftInput.parse({
+    if (!academicCatalogApprovalPayloadMatches(request.afterJson, revision)) {
+      throw new BadRequestException(
+        "The pending academic catalog payload changed after it was submitted",
+      );
+    }
+    const draft = AcademicCatalogDraftInput.parse({
       yearLabel: revision.yearLabel,
       startsOn: revision.startsOn?.toISOString().slice(0, 10) ?? null,
       endsOn: revision.endsOn?.toISOString().slice(0, 10) ?? null,
@@ -915,6 +977,22 @@ export class FinanceApprovalsService {
       reason: revision.reason,
       activateYear: revision.activateYear,
     });
+    const referencedCourseIds = [
+      ...new Set(
+        draft.programs.flatMap((program) =>
+          program.curriculum.map((entry) => entry.courseId),
+        ),
+      ),
+    ].sort();
+    for (const courseId of referencedCourseIds) {
+      await tx.$queryRaw<{ id: string }[]>`
+        SELECT id
+        FROM "Course"
+        WHERE id = ${courseId}
+        FOR SHARE
+      `;
+    }
+    const parsed = await validateCanonicalAcademicCatalog(tx, draft);
     const currentPrograms = await tx.program.findMany({
       select: { id: true },
     });
@@ -991,9 +1069,54 @@ export class FinanceApprovalsService {
     if (requirementRows.length > 0) {
       await tx.programRequirement.createMany({ data: requirementRows });
     }
+    let curriculumEntries = 0;
+    for (const program of parsed.programs) {
+      const curriculum = await tx.curriculum.upsert({
+        where: {
+          programId_academicYearId: {
+            programId: program.programId,
+            academicYearId: year.id,
+          },
+        },
+        update: {},
+        create: {
+          programId: program.programId,
+          academicYearId: year.id,
+        },
+      });
+      await tx.curriculumEntry.deleteMany({
+        where: { curriculumId: curriculum.id },
+      });
+      if (program.curriculum.length > 0) {
+        await tx.curriculumEntry.createMany({
+          data: program.curriculum.map((entry) => ({
+            curriculumId: curriculum.id,
+            courseId: entry.courseId,
+            yearIndex: entry.yearIndex,
+            semester: entry.semester,
+            position: entry.position,
+          })),
+        });
+      }
+      curriculumEntries += program.curriculum.length;
+    }
     await tx.student.updateMany({
       where: { catalogYearId: year.id },
       data: { catalogYear: year.label },
+    });
+    await tx.auditLog.create({
+      data: {
+        entity: "AcademicCatalogRevision",
+        entityId: revision.id,
+        action: "approved-curricula-synced",
+        actorId,
+        data: {
+          approvalRequestId: request.id,
+          academicYearId: year.id,
+          programs: parsed.programs.length,
+          curriculumEntries,
+        },
+      },
     });
     return {
       academicYearId: year.id,
@@ -1001,7 +1124,34 @@ export class FinanceApprovalsService {
       revision: revision.revision,
       levels: parsed.defaultLevels.length,
       programs: parsed.programs.length,
+      curriculumEntries,
     };
+  }
+
+  private async lockAcademicCatalogYear(
+    tx: Prisma.TransactionClient,
+    revisionId: string,
+  ) {
+    const candidate = await tx.academicCatalogRevision.findUnique({
+      where: { id: revisionId },
+      select: { academicYearId: true },
+    });
+    if (!candidate) {
+      throw new BadRequestException(
+        "Academic catalog revision is no longer awaiting approval",
+      );
+    }
+    const lockedYear = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id
+      FROM "AcademicYear"
+      WHERE id = ${candidate.academicYearId}
+      FOR UPDATE
+    `;
+    if (!lockedYear[0]) {
+      throw new BadRequestException(
+        "The academic year for this catalog revision no longer exists",
+      );
+    }
   }
 
   private normalizedLegacyScheduleRow(

@@ -13,6 +13,7 @@ import {
   academicLevelBands,
   deriveAcademicLevel,
   type AcademicCatalogDraft,
+  type AcademicCatalogCurriculumEntry,
   type AcademicCatalogLevel,
   type AcademicCatalogProgram,
   type AcademicNotYetGradedStanding,
@@ -88,10 +89,115 @@ function programs(value: unknown): AcademicCatalogProgram[] {
     const program = raw as AcademicCatalogProgram;
     return {
       ...program,
+      curriculum: Array.isArray(program.curriculum) ? program.curriculum : [],
       standingMode: program.standingMode ?? "default",
       customStandingRules: program.customStandingRules ?? [],
     };
   });
+}
+
+function snapshotContainsCompleteCurricula(
+  value: unknown,
+  programIds: readonly string[],
+): boolean {
+  if (!Array.isArray(value)) return false;
+  const curriculaByProgram = new Map<string, unknown>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const programId = (raw as { programId?: unknown }).programId;
+    if (typeof programId !== "string") continue;
+    curriculaByProgram.set(
+      programId,
+      (raw as { curriculum?: unknown }).curriculum,
+    );
+  }
+  return programIds.every((programId) =>
+    Array.isArray(curriculaByProgram.get(programId)),
+  );
+}
+
+/**
+ * Bind every programme/course reference to the live canonical rows and assert
+ * that the snapshotted course sequence reconciles to its requirement total.
+ * Run this again at submit and approval so a course edit cannot make a pending
+ * catalog internally inconsistent.
+ */
+export async function validateCanonicalAcademicCatalog(
+  client: Pick<Prisma.TransactionClient, "program" | "course">,
+  input: AcademicCatalogDraft,
+): Promise<AcademicCatalogDraft> {
+  const courseIds = [
+    ...new Set(
+      input.programs.flatMap((program) =>
+        program.curriculum.map((entry) => entry.courseId),
+      ),
+    ),
+  ];
+  const [canonicalPrograms, canonicalCourses] = await Promise.all([
+    client.program.findMany({
+      orderBy: { code: "asc" },
+      select: { id: true, code: true, name: true },
+    }),
+    client.course.findMany({
+      where: { id: { in: courseIds } },
+      select: { id: true, code: true, credits: true },
+    }),
+  ]);
+  const submittedById = new Map(
+    input.programs.map((program) => [program.programId, program]),
+  );
+  if (
+    input.programs.length !== canonicalPrograms.length ||
+    canonicalPrograms.some((program) => !submittedById.has(program.id))
+  ) {
+    throw new BadRequestException(
+      "The catalog must include every current programme exactly once",
+    );
+  }
+
+  const courseById = new Map(
+    canonicalCourses.map((course) => [course.id, course]),
+  );
+  return {
+    ...input,
+    programs: canonicalPrograms.map((canonicalProgram) => {
+      const submitted = submittedById.get(canonicalProgram.id)!;
+      if (submitted.programCode !== canonicalProgram.code) {
+        throw new BadRequestException(
+          `Programme ${canonicalProgram.id} is ${canonicalProgram.code}, not ${submitted.programCode}`,
+        );
+      }
+      let curriculumCredits = 0;
+      for (const entry of submitted.curriculum) {
+        const course = courseById.get(entry.courseId);
+        if (!course) {
+          throw new BadRequestException(
+            `Unknown curriculum course ${entry.courseCode} (${entry.courseId})`,
+          );
+        }
+        if (course.code !== entry.courseCode) {
+          throw new BadRequestException(
+            `Curriculum course ${entry.courseId} is ${course.code}, not ${entry.courseCode}`,
+          );
+        }
+        curriculumCredits += course.credits;
+      }
+      const requiredCredits = submitted.requirements.reduce(
+        (sum, requirement) => sum + requirement.requiredCredits,
+        0,
+      );
+      if (curriculumCredits !== requiredCredits) {
+        throw new BadRequestException(
+          `${canonicalProgram.code} curriculum totals ${curriculumCredits} credits; programme requirements total ${requiredCredits}`,
+        );
+      }
+      return {
+        ...submitted,
+        programCode: canonicalProgram.code,
+        programName: canonicalProgram.name,
+      };
+    }),
+  };
 }
 
 function standingRules(value: unknown): AcademicStandingRule[] {
@@ -159,6 +265,49 @@ export class AcademicCatalogService {
         category: requirement.category,
         requiredCredits: requirement.requiredCredits,
       })),
+      curriculum: [],
+    }));
+  }
+
+  private async relationalCurricula(academicYearId: string) {
+    const rows = await this.prisma.curriculum.findMany({
+      where: { academicYearId },
+      select: {
+        programId: true,
+        entries: {
+          orderBy: [{ position: "asc" }, { id: "asc" }],
+          select: {
+            courseId: true,
+            yearIndex: true,
+            semester: true,
+            position: true,
+            course: { select: { code: true } },
+          },
+        },
+      },
+    });
+    return new Map<string, AcademicCatalogCurriculumEntry[]>(
+      rows.map((row) => [
+        row.programId,
+        row.entries.map((entry) => ({
+          courseId: entry.courseId,
+          courseCode: entry.course.code,
+          yearIndex: entry.yearIndex,
+          semester:
+            entry.semester as AcademicCatalogCurriculumEntry["semester"],
+          position: entry.position,
+        })),
+      ]),
+    );
+  }
+
+  private seedRelationalCurricula(
+    programRows: AcademicCatalogProgram[],
+    curriculumByProgram: Map<string, AcademicCatalogCurriculumEntry[]>,
+  ) {
+    return programRows.map((program) => ({
+      ...program,
+      curriculum: curriculumByProgram.get(program.programId) ?? [],
     }));
   }
 
@@ -184,33 +333,44 @@ export class AcademicCatalogService {
       where: { id: academicYearId },
     });
     if (!year) throw new NotFoundException("Academic year not found");
-    const [approved, editable, allPrograms, revisionHistory] =
-      await Promise.all([
-        this.prisma.academicCatalogRevision.findFirst({
-          where: { academicYearId, status: "approved" },
-          orderBy: { revision: "desc" },
-        }),
-        this.prisma.academicCatalogRevision.findFirst({
-          where: { academicYearId, status: { in: ["draft", "pending"] } },
-          orderBy: { revision: "desc" },
-        }),
-        this.prisma.program.findMany({
-          orderBy: { code: "asc" },
-          select: { id: true, code: true, name: true },
-        }),
-        this.prisma.academicCatalogRevision.findMany({
-          where: { academicYearId },
-          orderBy: { revision: "desc" },
-          include: {
-            createdBy: {
-              select: { firstName: true, lastName: true, email: true },
-            },
-            approvedBy: {
-              select: { firstName: true, lastName: true, email: true },
-            },
+    const [
+      approved,
+      editable,
+      allPrograms,
+      revisionHistory,
+      curriculumByProgram,
+      courses,
+    ] = await Promise.all([
+      this.prisma.academicCatalogRevision.findFirst({
+        where: { academicYearId, status: "approved" },
+        orderBy: { revision: "desc" },
+      }),
+      this.prisma.academicCatalogRevision.findFirst({
+        where: { academicYearId, status: { in: ["draft", "pending"] } },
+        orderBy: { revision: "desc" },
+      }),
+      this.prisma.program.findMany({
+        orderBy: { code: "asc" },
+        select: { id: true, code: true, name: true },
+      }),
+      this.prisma.academicCatalogRevision.findMany({
+        where: { academicYearId },
+        orderBy: { revision: "desc" },
+        include: {
+          createdBy: {
+            select: { firstName: true, lastName: true, email: true },
           },
-        }),
-      ]);
+          approvedBy: {
+            select: { firstName: true, lastName: true, email: true },
+          },
+        },
+      }),
+      this.relationalCurricula(academicYearId),
+      this.prisma.course.findMany({
+        orderBy: { code: "asc" },
+        select: { id: true, code: true, title: true, credits: true },
+      }),
+    ]);
     const legacy = await this.legacyPrograms(year.label);
     const baselinePrograms = approved
       ? programs(approved.programConfigurations)
@@ -218,7 +378,7 @@ export class AcademicCatalogService {
     const byId = new Map(
       baselinePrograms.map((program) => [program.programId, program]),
     );
-    const completePrograms = allPrograms.map(
+    const effectivePrograms = allPrograms.map(
       (program): AcademicCatalogProgram =>
         byId.get(program.id) ?? {
           programId: program.id,
@@ -229,8 +389,18 @@ export class AcademicCatalogService {
           standingMode: "default",
           customStandingRules: [],
           requirements: [],
+          curriculum: [],
         },
     );
+    const snapshotHasCompleteCurricula =
+      approved !== null &&
+      snapshotContainsCompleteCurricula(
+        approved.programConfigurations,
+        allPrograms.map((program) => program.id),
+      );
+    const draftSeedPrograms = snapshotHasCompleteCurricula
+      ? effectivePrograms
+      : this.seedRelationalCurricula(effectivePrograms, curriculumByProgram);
     const effective = approved
       ? this.present(approved)
       : {
@@ -241,12 +411,12 @@ export class AcademicCatalogService {
           yearLabel: year.label,
           startsOn: dateOnly(year.startsOn),
           endsOn: dateOnly(year.endsOn),
-          defaultLevels: this.defaultLevelsFor(completePrograms),
+          defaultLevels: this.defaultLevelsFor(effectivePrograms),
           defaultStandingRules: DEFAULT_ACADEMIC_STANDING_RULES.map((rule) => ({
             ...rule,
           })),
           notYetGradedStanding: { ...DEFAULT_NOT_YET_GRADED_STANDING },
-          programs: completePrograms,
+          programs: effectivePrograms,
           reason: "Legacy programme requirements",
           activateYear: year.status === "active",
           createdAt: year.createdAt.toISOString(),
@@ -254,6 +424,23 @@ export class AcademicCatalogService {
           approvedAt: null,
           approvalRequestId: null,
         };
+    const editableView = editable ? this.present(editable) : null;
+    const seededEditable =
+      editable &&
+      editableView &&
+      editable.status === "draft" &&
+      !snapshotContainsCompleteCurricula(
+        editable.programConfigurations,
+        allPrograms.map((program) => program.id),
+      )
+        ? {
+            ...editableView,
+            programs: this.seedRelationalCurricula(
+              editableView.programs,
+              curriculumByProgram,
+            ),
+          }
+        : editableView;
     return {
       year: {
         id: year.id,
@@ -262,8 +449,14 @@ export class AcademicCatalogService {
         startsOn: dateOnly(year.startsOn),
         endsOn: dateOnly(year.endsOn),
       },
-      effective: { ...effective, programs: completePrograms },
-      editable: editable ? this.present(editable) : null,
+      // `effective` is always the literal approved/legacy snapshot. Relational
+      // curricula are exposed separately as a draft seed so they can never be
+      // presented to students or staff as director-approved by accident.
+      effective: { ...effective, programs: effectivePrograms },
+      editable: seededEditable,
+      hasApprovedRevision: approved !== null,
+      draftSeedPrograms,
+      courses,
       levelBands: academicLevelBands(effective.defaultLevels),
       history: revisionHistory.map((revision) => ({
         ...this.present(revision),
@@ -285,111 +478,138 @@ export class AcademicCatalogService {
 
   async saveDraft(academicYearId: string, actorId: string, raw: unknown) {
     const parsed = AcademicCatalogDraftInput.parse(raw);
-    const [year, canonicalPrograms] = await Promise.all([
-      this.prisma.academicYear.findUnique({
-        where: { id: academicYearId },
-      }),
-      this.prisma.program.findMany({
-        orderBy: { code: "asc" },
-        select: { id: true, code: true, name: true },
-      }),
-    ]);
-    if (!year) throw new NotFoundException("Academic year not found");
-    const submittedById = new Map(
-      parsed.programs.map((program) => [program.programId, program]),
-    );
-    if (
-      parsed.programs.length !== canonicalPrograms.length ||
-      canonicalPrograms.some((program) => !submittedById.has(program.id))
-    ) {
-      throw new BadRequestException(
-        "The catalog must include every current programme exactly once",
-      );
-    }
-    const input: AcademicCatalogDraft = {
-      ...parsed,
-      programs: canonicalPrograms.map((program) => ({
-        ...submittedById.get(program.id)!,
-        programCode: program.code,
-        programName: program.name,
-      })),
-    };
-    const pending = await this.prisma.academicCatalogRevision.findFirst({
-      where: { academicYearId, status: "pending" },
-      select: { id: true },
-    });
-    if (pending) {
-      throw new BadRequestException(
-        "This catalog already has a revision awaiting director approval",
-      );
-    }
-    const currentDraft = await this.prisma.academicCatalogRevision.findFirst({
-      where: { academicYearId, status: "draft" },
-      orderBy: { revision: "desc" },
-    });
-    const latest = await this.prisma.academicCatalogRevision.findFirst({
-      where: { academicYearId },
-      orderBy: { revision: "desc" },
-      select: { revision: true },
-    });
-    const data = {
-      yearLabel: input.yearLabel,
-      startsOn: input.startsOn
-        ? new Date(`${input.startsOn}T00:00:00.000Z`)
-        : null,
-      endsOn: input.endsOn ? new Date(`${input.endsOn}T00:00:00.000Z`) : null,
-      defaultLevels: json(input.defaultLevels),
-      defaultStandingRules: json(input.defaultStandingRules),
-      notYetGradedStanding: json(input.notYetGradedStanding),
-      programConfigurations: json(input.programs),
-      reason: input.reason,
-      activateYear: input.activateYear,
-      createdById: actorId,
-    };
-    const draft = currentDraft
-      ? await this.prisma.academicCatalogRevision.update({
-          where: { id: currentDraft.id },
-          data,
-        })
-      : await this.prisma.academicCatalogRevision.create({
+    return this.prisma.$transaction(
+      async (tx) => {
+        const lockedYear = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id
+          FROM "AcademicYear"
+          WHERE id = ${academicYearId}
+          FOR UPDATE
+        `;
+        if (!lockedYear[0])
+          throw new NotFoundException("Academic year not found");
+        const input = await validateCanonicalAcademicCatalog(tx, parsed);
+        const pending = await tx.academicCatalogRevision.findFirst({
+          where: { academicYearId, status: "pending" },
+          select: { id: true },
+        });
+        if (pending) {
+          throw new BadRequestException(
+            "This catalog already has a revision awaiting director approval",
+          );
+        }
+        const currentDraft = await tx.academicCatalogRevision.findFirst({
+          where: { academicYearId, status: "draft" },
+          orderBy: { revision: "desc" },
+        });
+        if (currentDraft) {
+          await tx.$queryRaw<{ id: string }[]>`
+            SELECT id
+            FROM "AcademicCatalogRevision"
+            WHERE id = ${currentDraft.id}
+            FOR UPDATE
+          `;
+        }
+        const latest = await tx.academicCatalogRevision.findFirst({
+          where: { academicYearId },
+          orderBy: { revision: "desc" },
+          select: { revision: true },
+        });
+        const data = {
+          yearLabel: input.yearLabel,
+          startsOn: input.startsOn
+            ? new Date(`${input.startsOn}T00:00:00.000Z`)
+            : null,
+          endsOn: input.endsOn
+            ? new Date(`${input.endsOn}T00:00:00.000Z`)
+            : null,
+          defaultLevels: json(input.defaultLevels),
+          defaultStandingRules: json(input.defaultStandingRules),
+          notYetGradedStanding: json(input.notYetGradedStanding),
+          programConfigurations: json(input.programs),
+          reason: input.reason,
+          activateYear: input.activateYear,
+          createdById: actorId,
+        };
+        let draft;
+        if (currentDraft) {
+          const updated = await tx.academicCatalogRevision.updateMany({
+            where: { id: currentDraft.id, status: "draft" },
+            data,
+          });
+          if (updated.count !== 1) {
+            throw new BadRequestException(
+              "The catalog draft was submitted while it was being saved; reload before editing again",
+            );
+          }
+          draft = await tx.academicCatalogRevision.findUniqueOrThrow({
+            where: { id: currentDraft.id },
+          });
+        } else {
+          draft = await tx.academicCatalogRevision.create({
+            data: {
+              academicYearId,
+              revision: (latest?.revision ?? 0) + 1,
+              status: "draft",
+              ...data,
+            },
+          });
+        }
+        await tx.auditLog.create({
           data: {
-            academicYearId,
-            revision: (latest?.revision ?? 0) + 1,
-            status: "draft",
-            ...data,
+            entity: "AcademicCatalogRevision",
+            entityId: draft.id,
+            action: currentDraft ? "draft-updated" : "draft-created",
+            actorId,
+            data: { academicYearId, revision: draft.revision },
           },
         });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "AcademicCatalogRevision",
-        entityId: draft.id,
-        action: currentDraft ? "draft-updated" : "draft-created",
-        actorId,
-        data: { academicYearId, revision: draft.revision },
+        return this.present(draft);
       },
-    });
-    return this.present(draft);
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   async submit(academicYearId: string, actor: AuthUser) {
     return this.prisma.$transaction(
       async (tx) => {
-        const draft = await tx.academicCatalogRevision.findFirst({
-          where: { academicYearId, status: "draft" },
-          orderBy: { revision: "desc" },
-        });
+        const lockedYear = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id
+          FROM "AcademicYear"
+          WHERE id = ${academicYearId}
+          FOR UPDATE
+        `;
+        if (!lockedYear[0])
+          throw new NotFoundException("Academic year not found");
+        const lockedDraft = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id
+          FROM "AcademicCatalogRevision"
+          WHERE "academicYearId" = ${academicYearId}
+            AND status = 'draft'
+          ORDER BY revision DESC
+          LIMIT 1
+          FOR UPDATE
+        `;
+        const draft = lockedDraft[0]
+          ? await tx.academicCatalogRevision.findUnique({
+              where: { id: lockedDraft[0].id },
+            })
+          : null;
         if (!draft) throw new NotFoundException("Catalog draft not found");
-        const parsed: AcademicCatalogDraft = AcademicCatalogDraftInput.parse({
-          yearLabel: draft.yearLabel,
-          startsOn: dateOnly(draft.startsOn),
-          endsOn: dateOnly(draft.endsOn),
-          defaultLevels: draft.defaultLevels,
-          defaultStandingRules: draft.defaultStandingRules,
-          notYetGradedStanding: draft.notYetGradedStanding,
-          programs: draft.programConfigurations,
-          reason: draft.reason,
-          activateYear: draft.activateYear,
-        });
+        const parsed = await validateCanonicalAcademicCatalog(
+          tx,
+          AcademicCatalogDraftInput.parse({
+            yearLabel: draft.yearLabel,
+            startsOn: dateOnly(draft.startsOn),
+            endsOn: dateOnly(draft.endsOn),
+            defaultLevels: draft.defaultLevels,
+            defaultStandingRules: draft.defaultStandingRules,
+            notYetGradedStanding: draft.notYetGradedStanding,
+            programs: draft.programConfigurations,
+            reason: draft.reason,
+            activateYear: draft.activateYear,
+          }),
+        );
         const approved = await tx.academicCatalogRevision.findFirst({
           where: { academicYearId, status: "approved" },
           orderBy: { revision: "desc" },
@@ -416,10 +636,19 @@ export class AcademicCatalogService {
             requestedById: actor.personId,
           },
         });
-        await tx.academicCatalogRevision.update({
-          where: { id: draft.id },
-          data: { status: "pending", approvalRequestId: request.id },
+        const submitted = await tx.academicCatalogRevision.updateMany({
+          where: { id: draft.id, status: "draft" },
+          data: {
+            status: "pending",
+            approvalRequestId: request.id,
+            programConfigurations: json(parsed.programs),
+          },
         });
+        if (submitted.count !== 1) {
+          throw new BadRequestException(
+            "The catalog draft changed while it was being submitted; reload and try again",
+          );
+        }
         await tx.approvalEvent.create({
           data: {
             requestId: request.id,

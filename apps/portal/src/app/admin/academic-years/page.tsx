@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   CalendarClock,
@@ -28,6 +29,12 @@ import {
   submitAcademicCatalog,
 } from "@/lib/api";
 import { Badge, Button, EmptyState, Field, PageHeader } from "@/components/ui";
+import {
+  type CatalogCourseReference,
+  CurriculumPlanEditor,
+  curriculumCreditTotal,
+  curriculumErrors,
+} from "./CurriculumPlanEditor";
 
 function copyLevels(levels: AcademicCatalogLevel[]) {
   return levels.map((level) => ({ ...level }));
@@ -40,6 +47,7 @@ function copyPrograms(programs: AcademicCatalogProgram[]) {
     requirements: program.requirements.map((requirement) => ({
       ...requirement,
     })),
+    curriculum: program.curriculum.map((entry) => ({ ...entry })),
     customStandingRules: copyStandingRules(program.customStandingRules),
   }));
 }
@@ -59,7 +67,9 @@ function initialDraft(
     defaultLevels: copyLevels(source.defaultLevels),
     defaultStandingRules: copyStandingRules(source.defaultStandingRules),
     notYetGradedStanding: { ...source.notYetGradedStanding },
-    programs: copyPrograms(source.programs),
+    programs: copyPrograms(
+      workspace.editable ? source.programs : workspace.draftSeedPrograms,
+    ),
     reason: source.status === "draft" ? (source.reason ?? "") : "",
     activateYear:
       source.status === "draft"
@@ -76,6 +86,7 @@ function total(program: AcademicCatalogProgram) {
 }
 
 export default function AcademicCatalogPage() {
+  const requestedYearId = useSearchParams().get("year");
   const [years, setYears] = useState<AcademicYearRow[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<AcademicCatalogWorkspace | null>(
@@ -92,11 +103,12 @@ export default function AcademicCatalogPage() {
     setSelectedId((current) =>
       current && rows.some((row) => row.id === current)
         ? current
-        : (rows.find((row) => row.status === "active")?.id ??
+        : (rows.find((row) => row.id === requestedYearId)?.id ??
+          rows.find((row) => row.status === "active")?.id ??
           rows.at(-1)?.id ??
           null),
     );
-  }, []);
+  }, [requestedYearId]);
 
   useEffect(() => {
     loadYears().catch((cause: Error) => setError(cause.message));
@@ -117,12 +129,28 @@ export default function AcademicCatalogPage() {
   }, [loadWorkspace]);
 
   const isPending = workspace?.editable?.status === "pending";
+  const isDraft = workspace?.editable?.status === "draft";
   const customCount =
     draft?.programs.filter((program) => program.progressionMode === "custom")
       .length ?? 0;
   const configuredCount =
     draft?.programs.filter((program) => program.requirements.length > 0)
       .length ?? 0;
+  const curriculumProblemCount =
+    draft && workspace
+      ? draft.programs.reduce(
+          (count, program) =>
+            count +
+            curriculumErrors(
+              program,
+              workspace.courses,
+              program.progressionMode === "custom"
+                ? program.customLevels
+                : draft.defaultLevels,
+            ).length,
+          0,
+        )
+      : 0;
 
   async function addYear() {
     if (!years) return;
@@ -151,6 +179,12 @@ export default function AcademicCatalogPage() {
 
   async function save(submit = false) {
     if (!selectedId || !draft) return;
+    if (curriculumProblemCount > 0) {
+      setError(
+        "Resolve the highlighted programme course-plan errors before saving this catalog.",
+      );
+      return;
+    }
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -244,7 +278,7 @@ export default function AcademicCatalogPage() {
       <PageHeader
         eyebrow="Academic structure"
         title="Academic Catalog"
-        subtitle="Catalog years, programme requirements and earned-credit progression—published only after director approval."
+        subtitle="Catalog years, programme course plans, degree requirements and earned-credit progression—published only after director approval."
         actions={
           <Button variant="primary" onClick={addYear} disabled={busy || !years}>
             Add catalog year
@@ -311,20 +345,41 @@ export default function AcademicCatalogPage() {
                 <header className="catalog-editor-head">
                   <div>
                     <div className="catalog-kicker">
-                      Revision {workspace.effective.revision || "baseline"}
+                      {workspace.editable
+                        ? `${isPending ? "Pending" : "Draft"} revision ${workspace.editable.revision}`
+                        : workspace.hasApprovedRevision
+                          ? `Approved revision ${workspace.effective.revision}`
+                          : "Legacy baseline"}
                     </div>
                     <h2>{workspace.year.label}</h2>
                     <p>
                       {configuredCount} programmes configured · {customCount}{" "}
                       custom progression{" "}
-                      {customCount === 1 ? "scheme" : "schemes"}
+                      {customCount === 1 ? "scheme" : "schemes"} ·{" "}
+                      {draft.programs.reduce(
+                        (count, program) => count + program.curriculum.length,
+                        0,
+                      )}{" "}
+                      planned courses
                     </p>
                   </div>
                   <div className="catalog-status-stack">
-                    <Badge tone={isPending ? "warning" : "success"}>
+                    <Badge
+                      tone={
+                        isPending || isDraft
+                          ? "warning"
+                          : workspace.hasApprovedRevision
+                            ? "success"
+                            : "neutral"
+                      }
+                    >
                       {isPending
                         ? "Director review pending"
-                        : "Approved catalog active"}
+                        : isDraft
+                          ? "Draft revision in progress"
+                          : workspace.hasApprovedRevision
+                            ? "Approved catalog active"
+                            : "Legacy baseline · not approved"}
                     </Badge>
                     {workspace.effective.approvedAt && (
                       <small>
@@ -443,10 +498,11 @@ export default function AcademicCatalogPage() {
                     <div className="section-heading">
                       <div>
                         <span>04</span>
-                        <h3>Programme requirements</h3>
+                        <h3>Programme plans &amp; requirements</h3>
                       </div>
                       <p>
-                        Category credits define each degree total. Custom
+                        Ordered course plans power student recommendations;
+                        category credits define each degree total. Custom
                         programmes stay custom unless explicitly conformed.
                       </p>
                     </div>
@@ -455,6 +511,7 @@ export default function AcademicCatalogPage() {
                         <ProgrammeEditor
                           key={program.programId}
                           program={program}
+                          courses={workspace.courses}
                           defaultLevels={draft.defaultLevels}
                           defaultStandingRules={draft.defaultStandingRules}
                           onChange={(next) => {
@@ -513,7 +570,14 @@ export default function AcademicCatalogPage() {
                         variant="secondary"
                         icon={<CopyCheck size={15} />}
                         onClick={() => void save(false)}
-                        disabled={!draft.reason.trim()}
+                        disabled={
+                          !draft.reason.trim() || curriculumProblemCount > 0
+                        }
+                        title={
+                          curriculumProblemCount > 0
+                            ? "Resolve course-plan errors before saving"
+                            : undefined
+                        }
                       >
                         Save draft
                       </Button>
@@ -521,7 +585,14 @@ export default function AcademicCatalogPage() {
                         variant="primary"
                         icon={<Send size={15} />}
                         onClick={() => void save(true)}
-                        disabled={!draft.reason.trim()}
+                        disabled={
+                          !draft.reason.trim() || curriculumProblemCount > 0
+                        }
+                        title={
+                          curriculumProblemCount > 0
+                            ? "Resolve course-plan errors before submitting"
+                            : undefined
+                        }
                       >
                         Submit to director
                       </Button>
@@ -533,7 +604,7 @@ export default function AcademicCatalogPage() {
                   <section className="catalog-history">
                     <div className="section-heading">
                       <div>
-                        <span>04</span>
+                        <span>05</span>
                         <h3>Revision history</h3>
                       </div>
                       <p>
@@ -738,10 +809,9 @@ export default function AcademicCatalogPage() {
           width: 100%;
         }
         .standing-row {
-          grid-template-columns: 28px 110px minmax(
-              150px,
-              1fr
-            ) 105px 72px 120px 34px;
+          grid-template-columns:
+            28px 110px minmax(150px, 1fr)
+            105px 72px 120px 34px;
         }
         .standing-row select {
           width: 100%;
@@ -758,7 +828,7 @@ export default function AcademicCatalogPage() {
           cursor: pointer;
         }
         .icon-button:hover {
-          background: var(--error-soft);
+          background: color-mix(in srgb, var(--danger) 8%, var(--surface));
           color: var(--error-500);
         }
         .level-add {
@@ -925,12 +995,12 @@ export default function AcademicCatalogPage() {
           margin-bottom: 12px;
         }
         .catalog-alert.error {
-          background: var(--error-soft);
+          background: color-mix(in srgb, var(--danger) 8%, var(--surface));
           color: var(--error-500);
         }
         .catalog-alert.success {
-          background: var(--success-soft);
-          color: var(--success-700);
+          background: color-mix(in srgb, var(--success) 9%, var(--surface));
+          color: var(--success);
         }
         @media (max-width: 980px) {
           .catalog-layout {
@@ -1057,6 +1127,7 @@ function LevelEditor({
 
 function ProgrammeEditor({
   program,
+  courses,
   defaultLevels,
   defaultStandingRules,
   onChange,
@@ -1065,6 +1136,7 @@ function ProgrammeEditor({
   onRemoveLevel,
 }: {
   program: AcademicCatalogProgram;
+  courses: CatalogCourseReference[];
   defaultLevels: AcademicCatalogLevel[];
   defaultStandingRules: AcademicStandingRule[];
   onChange: (program: AcademicCatalogProgram) => void;
@@ -1074,6 +1146,12 @@ function ProgrammeEditor({
 }) {
   const custom = program.progressionMode === "custom";
   const customStanding = program.standingMode === "custom";
+  const coursePlanCredits = curriculumCreditTotal(program, courses);
+  const coursePlanProblems = curriculumErrors(
+    program,
+    courses,
+    custom ? program.customLevels : defaultLevels,
+  ).length;
   return (
     <details className="programme-editor">
       <summary>
@@ -1085,6 +1163,10 @@ function ProgrammeEditor({
             {program.requirements.length
               ? `${program.requirements.length} requirement categories`
               : "Requirements not configured"}
+            {` · ${program.curriculum.length} planned courses · ${coursePlanCredits} course credits`}
+            {coursePlanProblems > 0
+              ? ` · ${coursePlanProblems} ${coursePlanProblems === 1 ? "plan error" : "plan errors"}`
+              : ""}
           </small>
         </span>
         <span className="programme-total">{total(program) || "—"} credits</span>
@@ -1192,6 +1274,13 @@ function ProgrammeEditor({
             <Plus size={14} /> Add requirement category
           </button>
         </div>
+
+        <CurriculumPlanEditor
+          program={program}
+          courses={courses}
+          progressionLevels={custom ? program.customLevels : defaultLevels}
+          onChange={onChange}
+        />
 
         {custom && (
           <div className="custom-levels">

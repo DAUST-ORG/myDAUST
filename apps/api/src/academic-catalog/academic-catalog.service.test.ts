@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AcademicCatalogService } from "./academic-catalog.service.js";
 
 const PROGRAM_ID = "00000000-0000-4000-8000-000000000001";
+const COURSE_ID = "00000000-0000-4000-8000-000000000101";
 
 const levels = [
   { code: "S1", name: "Level one", creditCeiling: 30 },
@@ -18,6 +19,15 @@ const program = {
   progressionMode: "default" as const,
   customLevels: [],
   requirements: [{ category: "Degree", requiredCredits: 132 }],
+  curriculum: [
+    {
+      courseId: COURSE_ID,
+      courseCode: "CS 499",
+      yearIndex: 3,
+      semester: "Spring" as const,
+      position: 0,
+    },
+  ],
 };
 
 describe("AcademicCatalogService.progress", () => {
@@ -160,8 +170,20 @@ describe("AcademicCatalogService.progress", () => {
         revision: 7,
         defaultLevels: levels,
         defaultStandingRules: [
-          { code: "probation", label: "Probation", minimumGpa: 0, order: 0, tone: "warning" },
-          { code: "clear", label: "Clear", minimumGpa: 2, order: 1, tone: "success" },
+          {
+            code: "probation",
+            label: "Probation",
+            minimumGpa: 0,
+            order: 0,
+            tone: "warning",
+          },
+          {
+            code: "clear",
+            label: "Clear",
+            minimumGpa: 2,
+            order: 1,
+            tone: "success",
+          },
         ],
         notYetGradedStanding: {
           code: "not_yet_graded",
@@ -173,8 +195,20 @@ describe("AcademicCatalogService.progress", () => {
             ...program,
             standingMode: "custom",
             customStandingRules: [
-              { code: "review", label: "Review", minimumGpa: 0, order: 0, tone: "warning" },
-              { code: "clear", label: "Clear", minimumGpa: 2.25, order: 1, tone: "success" },
+              {
+                code: "review",
+                label: "Review",
+                minimumGpa: 0,
+                order: 0,
+                tone: "warning",
+              },
+              {
+                code: "clear",
+                label: "Clear",
+                minimumGpa: 2.25,
+                order: 1,
+                tone: "success",
+              },
             ],
           },
         ],
@@ -201,6 +235,120 @@ describe("AcademicCatalogService.progress", () => {
 });
 
 describe("AcademicCatalogService draft and approval submission", () => {
+  it("seeds legacy workspace drafts from the relational curriculum", async () => {
+    const revision = {
+      id: "revision-1",
+      academicYearId: "year-1",
+      revision: 1,
+      status: "approved",
+      yearLabel: "2026–2027",
+      startsOn: null,
+      endsOn: null,
+      defaultLevels: levels,
+      defaultStandingRules: [],
+      notYetGradedStanding: null,
+      programConfigurations: [
+        {
+          ...program,
+          curriculum: undefined,
+        },
+      ],
+      reason: "Legacy snapshot",
+      activateYear: false,
+      createdById: null,
+      approvedById: null,
+      approvalRequestId: null,
+      approvedAt: new Date("2026-08-15T00:00:00.000Z"),
+      createdAt: new Date("2026-08-15T00:00:00.000Z"),
+      updatedAt: new Date("2026-08-15T00:00:00.000Z"),
+    };
+    const draft = {
+      ...revision,
+      id: "revision-2",
+      revision: 2,
+      status: "draft",
+      approvedAt: null,
+    };
+    const findPrograms = vi.fn(async (args: Record<string, unknown>) =>
+      "include" in args
+        ? [
+            {
+              id: PROGRAM_ID,
+              code: "BSCS",
+              name: "Computer Science",
+              requirements: [{ category: "Degree", requiredCredits: 132 }],
+            },
+          ]
+        : [{ id: PROGRAM_ID, code: "BSCS", name: "Computer Science" }],
+    );
+    const prisma = {
+      academicYear: {
+        findUnique: vi.fn(async () => ({
+          id: "year-1",
+          label: "2026–2027",
+          status: "active",
+          startsOn: null,
+          endsOn: null,
+          createdAt: new Date("2026-08-01T00:00:00.000Z"),
+        })),
+      },
+      academicCatalogRevision: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValueOnce(revision)
+          .mockResolvedValueOnce(draft),
+        findMany: vi.fn(async () => []),
+      },
+      program: { findMany: findPrograms },
+      curriculum: {
+        findMany: vi.fn(async () => [
+          {
+            programId: PROGRAM_ID,
+            entries: [
+              {
+                courseId: COURSE_ID,
+                yearIndex: 3,
+                semester: "Spring",
+                position: 0,
+                course: { code: "CS 499" },
+              },
+            ],
+          },
+        ]),
+      },
+      course: {
+        findMany: vi.fn(async () => [
+          {
+            id: COURSE_ID,
+            code: "CS 499",
+            title: "Capstone",
+            credits: 132,
+          },
+        ]),
+      },
+    };
+    const service = new AcademicCatalogService(prisma as never);
+
+    const workspace = await service.workspace("year-1");
+
+    expect(workspace.hasApprovedRevision).toBe(true);
+    expect(workspace.effective.programs[0]?.curriculum).toEqual([]);
+    expect(workspace.editable?.programs[0]?.curriculum).toEqual(
+      program.curriculum,
+    );
+    expect(workspace.draftSeedPrograms[0]?.curriculum).toEqual(
+      program.curriculum,
+    );
+    expect(workspace.courses).toEqual([
+      {
+        id: COURSE_ID,
+        code: "CS 499",
+        title: "Capstone",
+        credits: 132,
+      },
+    ]);
+  });
+
   it("requires every current programme and snapshots canonical programme identity", async () => {
     const create = vi.fn(
       async ({ data }: { data: Record<string, unknown> }) => ({
@@ -215,11 +363,16 @@ describe("AcademicCatalogService draft and approval submission", () => {
         ...data,
       }),
     );
-    const prisma = {
-      academicYear: { findUnique: vi.fn(async () => ({ id: "year-1" })) },
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "year-1" }]),
       program: {
         findMany: vi.fn(async () => [
           { id: PROGRAM_ID, code: "BSCS", name: "Computer Science" },
+        ]),
+      },
+      course: {
+        findMany: vi.fn(async () => [
+          { id: COURSE_ID, code: "CS 499", credits: 132 },
         ]),
       },
       academicCatalogRevision: {
@@ -232,20 +385,31 @@ describe("AcademicCatalogService draft and approval submission", () => {
       },
       auditLog: { create: vi.fn(async () => ({})) },
     };
+    const prisma = {
+      $transaction: vi.fn(
+        async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+      ),
+    };
     const service = new AcademicCatalogService(prisma as never);
+
+    await expect(
+      service.saveDraft("year-1", "registrar-1", {
+        yearLabel: "2026–2027 corrected",
+        startsOn: "2026-08-20",
+        endsOn: "2027-06-30",
+        defaultLevels: levels,
+        programs: [{ ...program, programCode: "FORGED" }],
+        reason: "Correct the catalog label",
+        activateYear: true,
+      }),
+    ).rejects.toThrow(`Programme ${PROGRAM_ID} is BSCS, not FORGED`);
 
     await service.saveDraft("year-1", "registrar-1", {
       yearLabel: "2026–2027 corrected",
       startsOn: "2026-08-20",
       endsOn: "2027-06-30",
       defaultLevels: levels,
-      programs: [
-        {
-          ...program,
-          programCode: "FORGED",
-          programName: "Forged programme name",
-        },
-      ],
+      programs: [{ ...program, programName: "Forged programme name" }],
       reason: "Correct the catalog label",
       activateYear: true,
     });
@@ -281,14 +445,26 @@ describe("AcademicCatalogService draft and approval submission", () => {
       activateYear: false,
     };
     const approvalCreate = vi.fn(async () => ({ id: "approval-1" }));
-    const revisionUpdate = vi.fn(async () => ({}));
+    const revisionUpdate = vi.fn(async () => ({ count: 1 }));
     const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValueOnce([{ id: "year-1" }])
+        .mockResolvedValueOnce([{ id: "revision-2" }]),
       academicCatalogRevision: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValueOnce(draft)
-          .mockResolvedValueOnce(null),
-        update: revisionUpdate,
+        findUnique: vi.fn(async () => draft),
+        findFirst: vi.fn(async () => null),
+        updateMany: revisionUpdate,
+      },
+      program: {
+        findMany: vi.fn(async () => [
+          { id: PROGRAM_ID, code: "BSCS", name: "Computer Science" },
+        ]),
+      },
+      course: {
+        findMany: vi.fn(async () => [
+          { id: COURSE_ID, code: "CS 499", credits: 132 },
+        ]),
       },
       approvalRequest: { create: approvalCreate },
       approvalEvent: { create: vi.fn(async () => ({})) },
@@ -322,8 +498,143 @@ describe("AcademicCatalogService draft and approval submission", () => {
       }),
     });
     expect(revisionUpdate).toHaveBeenCalledWith({
-      where: { id: "revision-2" },
-      data: { status: "pending", approvalRequestId: "approval-1" },
+      where: { id: "revision-2", status: "draft" },
+      data: expect.objectContaining({
+        status: "pending",
+        approvalRequestId: "approval-1",
+        programConfigurations: [
+          expect.objectContaining({
+            programId: PROGRAM_ID,
+            curriculum: program.curriculum,
+          }),
+        ],
+      }),
     });
+    expect(tx.$queryRaw.mock.calls[0]?.[0].join(" ")).toContain(
+      'FROM "AcademicYear"',
+    );
+    expect(tx.$queryRaw.mock.calls[1]?.[0].join(" ")).toContain(
+      'FROM "AcademicCatalogRevision"',
+    );
+  });
+
+  it("fails a draft save if its locked revision is no longer draft", async () => {
+    const currentDraft = {
+      id: "revision-2",
+      academicYearId: "year-1",
+      revision: 2,
+      status: "draft",
+    };
+    const auditCreate = vi.fn();
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValueOnce([{ id: "year-1" }])
+        .mockResolvedValueOnce([{ id: "revision-2" }]),
+      program: {
+        findMany: vi.fn(async () => [
+          { id: PROGRAM_ID, code: "BSCS", name: "Computer Science" },
+        ]),
+      },
+      course: {
+        findMany: vi.fn(async () => [
+          { id: COURSE_ID, code: "CS 499", credits: 132 },
+        ]),
+      },
+      academicCatalogRevision: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(currentDraft)
+          .mockResolvedValueOnce({ revision: 2 }),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      auditLog: { create: auditCreate },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+      ),
+    };
+
+    await expect(
+      new AcademicCatalogService(prisma as never).saveDraft(
+        "year-1",
+        "registrar-1",
+        {
+          yearLabel: "2026–2027",
+          startsOn: "2026-08-20",
+          endsOn: "2027-06-30",
+          defaultLevels: levels,
+          programs: [program],
+          reason: "Concurrent save",
+          activateYear: false,
+        },
+      ),
+    ).rejects.toThrow(/submitted while it was being saved/i);
+    expect(auditCreate).not.toHaveBeenCalled();
+    expect(tx.$queryRaw.mock.calls[0]?.[0].join(" ")).toContain(
+      'FROM "AcademicYear"',
+    );
+    expect(tx.$queryRaw.mock.calls[1]?.[0].join(" ")).toContain(
+      'FROM "AcademicCatalogRevision"',
+    );
+  });
+
+  it("rejects non-canonical course references and credit totals", async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "year-1" }]),
+      program: {
+        findMany: vi.fn(async () => [
+          { id: PROGRAM_ID, code: "BSCS", name: "Computer Science" },
+        ]),
+      },
+      course: {
+        findMany: vi.fn(async () => [
+          { id: COURSE_ID, code: "CS 499", credits: 3 },
+        ]),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+      ),
+    };
+    const service = new AcademicCatalogService(prisma as never);
+
+    await expect(
+      service.saveDraft("year-1", "registrar-1", {
+        yearLabel: "2026–2027",
+        startsOn: null,
+        endsOn: null,
+        defaultLevels: levels,
+        programs: [
+          {
+            ...program,
+            curriculum: [
+              { ...program.curriculum[0], courseCode: "FORGED 499" },
+            ],
+          },
+        ],
+        reason: "Invalid course reference",
+        activateYear: false,
+      }),
+    ).rejects.toThrow(
+      `Curriculum course ${COURSE_ID} is CS 499, not FORGED 499`,
+    );
+
+    await expect(
+      service.saveDraft("year-1", "registrar-1", {
+        yearLabel: "2026–2027",
+        startsOn: null,
+        endsOn: null,
+        defaultLevels: levels,
+        programs: [program],
+        reason: "Invalid credit total",
+        activateYear: false,
+      }),
+    ).rejects.toThrow(
+      "BSCS curriculum totals 3 credits; programme requirements total 132",
+    );
   });
 });
