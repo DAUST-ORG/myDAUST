@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { COST_CENTERS, FEE_STRUCTURE, SCHOLARSHIP_TIERS } from "@mydaust/shared";
+import { COST_CENTERS, FEE_STRUCTURE } from "@mydaust/shared";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { seedSisReference } from "./sis-reference.js";
@@ -34,12 +34,7 @@ async function moneyConfig() {
   for (const f of fees) {
     await prisma.feeItem.upsert({ where: { key: f.key }, update: f, create: f });
   }
-  if ((await prisma.scholarshipTier.count()) === 0) {
-    await prisma.scholarshipTier.createMany({
-      data: SCHOLARSHIP_TIERS.map((t) => ({ minScore: t.minScore, pct: t.pct, band: t.band })),
-    });
-  }
-  console.log("fees + scholarship tiers: official values");
+  console.log("fees: official values");
 }
 
 async function academicCatalog() {
