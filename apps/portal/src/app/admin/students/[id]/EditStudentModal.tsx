@@ -64,7 +64,6 @@ export function EditStudentModal({
     emergencyName2: student.emergencyName2 ?? "",
     emergencyPhone2: student.emergencyPhone2 ?? "",
     major: student.major ?? "",
-    minor: student.minor ?? "",
     admitTerm: student.admitTerm ?? "",
     expectedGrad: student.expectedGrad ?? "",
     enrollmentStatus: student.enrollmentStatus ?? "",
@@ -114,7 +113,6 @@ export function EditStudentModal({
       emergencyName2: norm(form.emergencyName2),
       emergencyPhone2: norm(form.emergencyPhone2),
       major: norm(form.major),
-      minor: norm(form.minor),
       admitTerm: norm(form.admitTerm),
       expectedGrad: norm(form.expectedGrad),
       enrollmentStatus: norm(form.enrollmentStatus),
@@ -197,7 +195,6 @@ export function EditStudentModal({
             <Field label="Advisor"><input value={form.advisor} onChange={(e) => set("advisor", e.target.value)} placeholder="Dr. Ibrahima Bâ" /></Field>
             <Field label="Cohort"><input value={form.cohort} onChange={(e) => set("cohort", e.target.value)} placeholder="Class of 2028" /></Field>
             <Field label="Major"><input value={form.major} onChange={(e) => set("major", e.target.value)} /></Field>
-            <Field label="Minor"><input value={form.minor} onChange={(e) => set("minor", e.target.value)} /></Field>
             <Field label="Admit term"><input value={form.admitTerm} onChange={(e) => set("admitTerm", e.target.value)} placeholder="Fall 2023" /></Field>
             <Field label="Expected graduation"><input value={form.expectedGrad} onChange={(e) => set("expectedGrad", e.target.value)} placeholder="June 2027" /></Field>
           </Section>

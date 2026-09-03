@@ -527,7 +527,6 @@ export default function AdminStudentDetailPage() {
             />
             <KV k="Credits in progress" v={String(s.currentTermCredits)} />
             <KV k="Major" v={s.major ?? "—"} />
-            <KV k="Minor" v={s.minor ?? "—"} />
             <KV k="Catalog year" v={s.catalogYear ?? "—"} />
             <KV k="Admit term" v={s.admitTerm ?? "—"} />
             <KV k="Expected graduation" v={s.expectedGrad ?? s.cohort ?? "—"} />
