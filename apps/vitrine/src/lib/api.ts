@@ -67,7 +67,6 @@ export async function getPreviewContent(
 
 export interface ApplyResult {
   id: string;
-  scholarship: { pct: number; band: string };
 }
 
 export async function submitApplication(
@@ -305,17 +304,4 @@ export async function getFees(): Promise<PublicFee[]> {
   const res = await fetch(`${API_URL}/api/config/fees`);
   if (!res.ok) throw new Error(String(res.status));
   return res.json() as Promise<PublicFee[]>;
-}
-
-export interface PublicTier {
-  id: string;
-  minScore: number;
-  pct: number;
-  band: string;
-  note: string | null;
-}
-export async function getScholarships(): Promise<PublicTier[]> {
-  const res = await fetch(`${API_URL}/api/config/scholarships`);
-  if (!res.ok) throw new Error(String(res.status));
-  return res.json() as Promise<PublicTier[]>;
 }

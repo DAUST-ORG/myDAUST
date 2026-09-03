@@ -5,7 +5,6 @@ import { PrismaClient } from "@mydaust/db";
 import {
   INITIAL_BILLING_ADJUSTMENT_DEFINITIONS,
   INITIAL_BILLING_SERVICE_OPTIONS,
-  SCHOLARSHIP_TIERS,
 } from "@mydaust/shared";
 import { AppConfigService } from "../app-config/app-config.service.js";
 import { FinanceService } from "../finance/finance.service.js";
@@ -207,7 +206,6 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
 
   it("seeds fee and scholarship defaults exactly once across concurrent readers", async () => {
     await prisma.feeItem.deleteMany();
-    await prisma.scholarshipTier.deleteMany();
     const configs = Array.from(
       { length: 4 },
       () => new AppConfigService(prisma as never),
@@ -216,15 +214,11 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     await Promise.all(
       configs.flatMap((config) => [
         config.fees(),
-        config.scholarships(),
         config.applicationFee(),
       ]),
     );
 
     await expect(prisma.feeItem.count()).resolves.toBe(5);
-    await expect(prisma.scholarshipTier.count()).resolves.toBe(
-      SCHOLARSHIP_TIERS.length,
-    );
   });
 
   it("returns intake-bound pricing claims for list and detail acceptance entry points", async () => {

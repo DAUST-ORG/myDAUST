@@ -12,7 +12,6 @@ import {
   Copy,
   ExternalLink,
   Flag,
-  Gift,
   GraduationCap,
   Mail,
   MapPin,
@@ -491,12 +490,6 @@ export default function ApplicantDetailPage() {
           value={a.feePaid ? "Paid" : "Due"}
           color={a.feePaid ? "var(--success)" : "var(--warning)"}
         />
-        <Stat
-          icon={Gift}
-          label="Merit scholarship"
-          value={a.scholarship.pct > 0 ? `${a.scholarship.pct}%` : "None"}
-          color={a.scholarship.pct > 0 ? "var(--success)" : "var(--fg1)"}
-        />
         {a.onboarding?.firstInstallment && (
           <Stat
             icon={UserCheck}
@@ -597,20 +590,6 @@ export default function ApplicantDetailPage() {
             <Card title="Health & other">
               <KV k="Allergies" v={a.allergies ?? "—"} />
               <KV k="Heard about DAUST via" v={a.source ?? "—"} />
-            </Card>
-            <Card title="Scholarship (est.)">
-              <KV
-                k="Merit award"
-                v={a.scholarship.pct > 0 ? `${a.scholarship.pct}%` : "No award"}
-              />
-              <KV k="Band" v={a.scholarship.band ?? "—"} />
-              <p
-                className="muted"
-                style={{ fontSize: 11.5, marginTop: 10, marginBottom: 0 }}
-              >
-                Computed from the current BAC scholarship tiers; confirmed at
-                enrolment.
-              </p>
             </Card>
           </div>
           {a.essay && (

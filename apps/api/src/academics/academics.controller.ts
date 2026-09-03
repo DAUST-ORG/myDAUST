@@ -802,4 +802,27 @@ export class AcademicsController {
   mySectionMaterials(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.academics.studentSectionMaterials(user.studentId!, id);
   }
+
+  // --- Major selection (first-login prompt) ---
+
+  @Get("my/major-status")
+  @Roles("student")
+  myMajorStatus(@CurrentUser() user: AuthUser) {
+    return this.academics.majorSelectionStatus(user.studentId!);
+  }
+
+  @Get("my/available-programs")
+  @Roles("student")
+  myAvailablePrograms() {
+    return this.academics.availablePrograms();
+  }
+
+  @Post("my/major")
+  @Roles("student")
+  chooseMyMajor(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const input = z
+      .object({ programCode: z.string().max(20).nullable() })
+      .parse(body);
+    return this.academics.chooseMyMajor(user.studentId!, input.programCode);
+  }
 }

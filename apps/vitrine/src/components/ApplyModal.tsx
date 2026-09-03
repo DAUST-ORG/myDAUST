@@ -463,32 +463,6 @@ export function ApplyModal({
             >
               {tx.thankBody}
             </p>
-            {result.scholarship.pct > 0 && (
-              <div
-                style={{
-                  margin: "18px auto 0",
-                  maxWidth: 420,
-                  background: "var(--accent-bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  padding: "14px 16px",
-                  fontFamily: "var(--font-body)",
-                  fontSize: 13.5,
-                  lineHeight: 1.55,
-                  color: "var(--fg1)",
-                }}
-              >
-                {t(
-                  "Based on your reported score, you may qualify for a ",
-                  "Selon la note indiquée, vous pourriez bénéficier d’une ",
-                )}
-                <strong>
-                  {result.scholarship.pct}%{" "}
-                  {t("merit scholarship", "bourse au mérite")}
-                </strong>{" "}
-                ({result.scholarship.band}).
-              </div>
-            )}
             {feeNote && (
               <p
                 style={{

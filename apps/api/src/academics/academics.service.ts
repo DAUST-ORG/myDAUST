@@ -3854,7 +3854,7 @@ export class AcademicsService {
   /** Admissions funnel + applicant list. */
   async adminApplicants() {
     const apps = await this.prisma.applicant.findMany({
-      orderBy: { score: "desc" },
+      orderBy: { createdAt: "desc" },
       include: {
         student: { select: { id: true, studentNo: true } },
         enrollmentInvoice: {
@@ -4828,5 +4828,60 @@ export class AcademicsService {
       enrolled: s._count.enrollments,
       capacity: s.capacity,
     }));
+  }
+
+  /** Programs available for a student to choose as their major. */
+  async availablePrograms() {
+    const programs = await this.prisma.program.findMany({
+      orderBy: { name: "asc" },
+      select: { code: true, name: true, degree: true, school: true },
+    });
+    return programs;
+  }
+
+  /** Check whether a student has completed the major selection prompt. */
+  async majorSelectionStatus(studentId: string) {
+    const s = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      select: { majorSelectionDone: true },
+    });
+    if (!s) throw new NotFoundException("Student not found");
+    return { majorSelectionDone: s.majorSelectionDone };
+  }
+
+  /** Save a student's major/program selection (or "Undecided"). */
+  async chooseMyMajor(
+    studentId: string,
+    programCode: string | null,
+  ): Promise<{ majorSelectionDone: true }> {
+    const s = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      select: { id: true, recordStatus: true },
+    });
+    if (!s) throw new NotFoundException("Student not found");
+    if (s.recordStatus !== "active") {
+      throw new ForbiddenException("Student enrollment is not active");
+    }
+
+    let programId: string | null = null;
+    if (programCode) {
+      const program = await this.prisma.program.findUnique({
+        where: { code: programCode },
+        select: { id: true },
+      });
+      if (!program) throw new BadRequestException("Invalid program code");
+      programId = program.id;
+    }
+
+    await this.prisma.student.update({
+      where: { id: studentId },
+      data: {
+        programId,
+        major: programCode ?? null,
+        majorSelectionDone: true,
+      },
+    });
+
+    return { majorSelectionDone: true };
   }
 }

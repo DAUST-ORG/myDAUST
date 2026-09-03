@@ -640,6 +640,8 @@ model Student {
   emergencyPhone2          String?
   major                    String?
   minor                    String?
+  // Whether the student has completed the major/program selection prompted on login.
+  majorSelectionDone       Boolean                      @default(false)
   admitTerm                String?
   expectedGrad             String?
   enrollmentStatus         String? // full-time | part-time | leave
@@ -2175,13 +2177,6 @@ model FeeItem {
   sortOrder Int     @default(0)
 }
 
-model ScholarshipTier {
-  id       String  @id @default(uuid())
-  minScore Float // BAC threshold (inclusive)
-  pct      Int // tuition discount percent
-  band     String
-  note     String?
-}
 
 // --- Track D additions: course materials/posts, SA boards, innovation global tasks. ---
 
