@@ -262,7 +262,7 @@ function CourseModal({
           <Field label="Department">
             <Select value={departmentId} onChange={setDepartmentId} options={departments.map((d) => ({ value: d.id, label: d.name }))} />
           </Field>
-          <Field label="Credits"><input type="number" min={1} max={12} value={credits} onChange={(e) => setCredits(e.target.value)} /></Field>
+          <Field label="Credits"><input type="number" min={1} max={30} value={credits} onChange={(e) => setCredits(e.target.value)} /></Field>
         </div>
         <Field label="Semesters offered">
           <div style={{ display: "flex", gap: 8 }}>

@@ -115,7 +115,7 @@ export default function AdmissionsPage() {
   const [advancing, setAdvancing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const { sort, toggle, apply } = useSort({ key: "score", dir: "desc" });
+  const { sort, toggle, apply } = useSort({ key: "submitted", dir: "desc" });
 
   function load() {
     // A swallowed failure here renders as a permanent "Loading…", which is indistinguishable

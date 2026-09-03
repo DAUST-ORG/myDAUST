@@ -4,15 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   type FeeItem,
-  type ScholarshipTierRow,
-  createScholarshipTier,
-  deleteScholarshipTier,
   getCurrentTerm,
   getFeeConfig,
   getMe,
-  getScholarshipConfig,
   updateFeeItem,
-  updateScholarshipTier,
   getEmailTemplates,
   updateEmailTemplates,
 } from "@/lib/api";
@@ -37,7 +32,7 @@ function generalRows(currentTerm: string): [string, string][] {
 }
 
 export default function SettingsPage() {
-  // Fees and scholarships are admin-only writes; a plain registrar views this read-only.
+  // Fees are admin-only writes; a plain registrar views this read-only.
   const [isAdmin, setIsAdmin] = useState(false);
   const [isRegistrar, setIsRegistrar] = useState(false);
   const [currentTerm, setCurrentTerm] = useState("—");
@@ -63,7 +58,7 @@ export default function SettingsPage() {
       <p className="eyebrow">System</p>
       <h1 className="page-title">Security & System</h1>
       <p className="muted" style={{ marginTop: -6, marginBottom: 20 }}>
-        Institution configuration, fees, scholarships and role assignment.
+        Institution configuration, fees and role assignment.
       </p>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -87,7 +82,6 @@ export default function SettingsPage() {
       </div>
 
       <FeesEditor editable={isAdmin} />
-      <TiersEditor editable={isAdmin} />
       <EmailTemplatesEditor editable={isAdmin || isRegistrar} />
 
       {isAdmin && (
@@ -289,198 +283,6 @@ function FeesEditor({ editable }: { editable: boolean }) {
   );
 }
 
-function TiersEditor({ editable }: { editable: boolean }) {
-  const [tiers, setTiers] = useState<ScholarshipTierRow[]>([]);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [row, setRow] = useState({ minScore: 12, pct: 10, band: "" });
-  const [adding, setAdding] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<ScholarshipTierRow | null>(
-    null,
-  );
-
-  const load = useCallback(() => {
-    getScholarshipConfig()
-      .then(setTiers)
-      .catch(() => {});
-  }, []);
-  useEffect(() => load(), [load]);
-
-  async function save() {
-    try {
-      if (adding) await createScholarshipTier(row);
-      else if (editId) await updateScholarshipTier(editId, row);
-      setEditId(null);
-      setAdding(false);
-      setNote(
-        "Scholarship tiers updated (audit-logged) — new applications award from these.",
-      );
-      load();
-    } catch (e) {
-      setNote((e as Error).message);
-    }
-  }
-  async function remove(id: string) {
-    await deleteScholarshipTier(id);
-    setPendingDelete(null);
-    setNote("Tier removed (audit-logged).");
-    load();
-  }
-
-  const editorRow = (
-    <tr>
-      <td>
-        <input
-          type="number"
-          step="0.1"
-          value={row.minScore}
-          onChange={(e) => setRow({ ...row, minScore: Number(e.target.value) })}
-          style={{ width: 80 }}
-        />
-      </td>
-      <td>
-        <input
-          type="number"
-          value={row.pct}
-          onChange={(e) => setRow({ ...row, pct: Number(e.target.value) })}
-          style={{ width: 70 }}
-        />
-        %
-      </td>
-      <td>
-        <input
-          value={row.band}
-          onChange={(e) => setRow({ ...row, band: e.target.value })}
-          placeholder="Band label"
-        />
-      </td>
-      <td style={{ whiteSpace: "nowrap" }}>
-        <button
-          className="primary"
-          onClick={save}
-          disabled={!row.band.trim()}
-          style={{ fontSize: 12, marginRight: 6 }}
-        >
-          Save
-        </button>
-        <button
-          onClick={() => {
-            setEditId(null);
-            setAdding(false);
-          }}
-          style={{ fontSize: 12 }}
-        >
-          Cancel
-        </button>
-      </td>
-    </tr>
-  );
-
-  return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <p className="h1" style={{ fontSize: 16, flex: 1 }}>
-          Merit scholarships — auto-awarded on BAC (director-configurable)
-        </p>
-        {note && (
-          <span className="muted" style={{ fontSize: 12 }}>
-            {note}
-          </span>
-        )}
-        {editable && (
-          <button
-            className="primary"
-            onClick={() => {
-              setAdding(true);
-              setEditId(null);
-              setRow({ minScore: 12, pct: 10, band: "" });
-            }}
-            style={{ fontSize: 12 }}
-          >
-            Add tier
-          </button>
-        )}
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Min BAC</th>
-            <th>Discount</th>
-            <th>Band</th>
-            {editable && <th />}
-          </tr>
-        </thead>
-        <tbody>
-          {tiers.map((t) =>
-            editId === t.id ? (
-              <TrKeyed key={t.id}>{editorRow}</TrKeyed>
-            ) : (
-              <tr key={t.id}>
-                <td>≥ {t.minScore}</td>
-                <td>
-                  <strong>{t.pct}%</strong>
-                </td>
-                <td>
-                  {t.band}
-                  {t.note && (
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      {t.note}
-                    </div>
-                  )}
-                </td>
-                {editable && (
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    <button
-                      onClick={() => {
-                        setEditId(t.id);
-                        setAdding(false);
-                        setRow({
-                          minScore: t.minScore,
-                          pct: t.pct,
-                          band: t.band,
-                        });
-                      }}
-                      style={{ fontSize: 12, marginRight: 6 }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => setPendingDelete(t)}
-                      style={{ fontSize: 12 }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                )}
-              </tr>
-            ),
-          )}
-          {adding && <TrKeyed key="new">{editorRow}</TrKeyed>}
-        </tbody>
-      </table>
-      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-        Highest matching threshold wins. Changes apply to new applications
-        immediately; the vitrine reads these live.
-      </p>
-      {pendingDelete && (
-        <ConfirmDialog
-          title="Remove scholarship tier?"
-          confirmLabel="Remove tier"
-          message={
-            <>
-              Remove the <strong>{pendingDelete.band}</strong> tier (≥{" "}
-              {pendingDelete.minScore} → {pendingDelete.pct}%)? New applications
-              will no longer award from it.
-            </>
-          }
-          onClose={() => setPendingDelete(null)}
-          onConfirm={() => remove(pendingDelete.id)}
-        />
-      )}
-    </div>
-  );
-}
-
 // tr fragments need a keyed wrapper when reused; render children directly.
 function TrKeyed({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
@@ -567,7 +369,7 @@ function EmailTemplatesEditor({ editable }: { editable: boolean }) {
       </div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         Available variables: {"{{firstName}}"}, {"{{lastName}}"},{" "}
-        {"{{scholarshipLine}}"}, {"{{appFee}}"}
+        {"{{appFee}}"}
       </p>
 
       <div style={{ marginTop: 16 }}>

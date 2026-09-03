@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppShell, type ViewAsOption } from "./AppShell";
-import { getMe, type Me } from "@/lib/api";
+import { getMe, getMajorStatus, type Me } from "@/lib/api";
 import {
   PORTALS,
   type PortalKey,
   ROLE_PORTALS,
   portalForRoles,
 } from "@/lib/nav";
+import { MajorSelectModal } from "./MajorSelectModal";
 
 /**
  * Client boundary between a portal's server layout and AppShell.
@@ -102,6 +103,7 @@ export function PortalShell({
   children: React.ReactNode;
 }) {
   const [me, setMe] = useState<Me | null>(null);
+  const [showMajorModal, setShowMajorModal] = useState(false);
   const mismatch =
     requiresAnyRole !== undefined &&
     me !== null &&
@@ -123,6 +125,17 @@ export function PortalShell({
       router.replace("/change-password");
   }, [me, pathname, router]);
 
+  // Students must choose their major before using the portal.
+  useEffect(() => {
+    if (me?.studentId && !me.mustChangePassword) {
+      getMajorStatus()
+        .then((s) => {
+          if (!s.majorSelectionDone) setShowMajorModal(true);
+        })
+        .catch(() => {});
+    }
+  }, [me]);
+
   // The design gives the switcher to the registrar/admin console only.
   const isAdmin = me?.roles.includes("admin") ?? false;
   const options = isAdmin
@@ -132,16 +145,22 @@ export function PortalShell({
     : [];
 
   return (
-    <AppShell
-      variant="navy"
-      portalName={nav.label}
-      portalMeta={nav.meta}
-      nav={nav.groups}
-      viewAs={effective}
-      viewAsOptions={options.length > 1 ? options : undefined}
-      profileHref={PROFILE_HREF[effective]}
-    >
-      {children}
-    </AppShell>
+    <>
+      <AppShell
+        variant="navy"
+        portalName={nav.label}
+        portalMeta={nav.meta}
+        nav={nav.groups}
+        viewAs={effective}
+        viewAsOptions={options.length > 1 ? options : undefined}
+        profileHref={PROFILE_HREF[effective]}
+      >
+        {children}
+      </AppShell>
+      <MajorSelectModal
+        open={showMajorModal}
+        onDone={() => setShowMajorModal(false)}
+      />
+    </>
   );
 }

@@ -558,16 +558,8 @@ export default function Site() {
       </section>
       <section style={{ background: "var(--bg-subtle)" }}>
         <div style={{ ...WRAP, padding: "88px 40px" }}>
-          <SectionHead num="02" label={tx.costKicker} />
-          <div className="grid-3" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--daust-navy-700)", border: "1px solid var(--daust-navy-700)", marginTop: 40 }}>
-            {c.scholarships.map((s) => (
-              <div key={s.pct} style={{ background: "var(--daust-navy)", padding: "32px 28px", color: "#fff" }}>
-                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 52, lineHeight: 1, color: "#fff", letterSpacing: "-.01em" }}>{s.pct}<span style={{ color: "var(--daust-orange)" }}> ↓</span></div>
-                <div style={{ fontFamily: "var(--font-body)", fontSize: 13.5, color: "var(--fg-on-navy-muted)", marginTop: 14, lineHeight: 1.5 }}>{s.cond}</div>
-              </div>
-            ))}
-          </div>
-          <div className="grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "var(--border)", border: "1px solid var(--border)", marginTop: 1 }}>
+          <SectionHead num="01" label={tx.costKicker} />
+          <div className="grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "var(--border)", border: "1px solid var(--border)", marginTop: 40 }}>
             {c.tuition.map((t) => (
               <div key={t.label} style={{ background: "#fff", padding: "26px 28px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
                 <div>

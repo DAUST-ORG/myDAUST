@@ -293,6 +293,23 @@ export interface NavContext {
 export const getNavContext = () => request<NavContext>("/nav/context");
 export const getMe = () => request<Me>("/auth/me");
 
+// --- Major selection (first-login prompt) ---
+export interface AvailableProgram {
+  code: string;
+  name: string;
+  degree: string | null;
+  school: string | null;
+}
+export const getAvailablePrograms = () =>
+  request<AvailableProgram[]>("/academics/my/available-programs");
+export const getMajorStatus = () =>
+  request<{ majorSelectionDone: boolean }>("/academics/my/major-status");
+export const chooseMyMajor = (programCode: string | null) =>
+  request<{ majorSelectionDone: true }>("/academics/my/major", {
+    method: "POST",
+    body: JSON.stringify({ programCode }),
+  });
+
 // --- Finance: student ---
 export interface BillingInstallment {
   id: string;
@@ -4054,7 +4071,6 @@ export interface ApplicantDetail {
   source: string | null;
   essay: string | null;
   term: string | null;
-  scholarship: { pct: number; band: string | null };
   onboarding: ApplicantOnboardingView | null;
 }
 export const getApplicant = (id: string) =>
@@ -4163,36 +4179,6 @@ export const updateFeeItem = (
     method: "PATCH",
     body: JSON.stringify(patch),
   });
-
-export interface ScholarshipTierRow {
-  id: string;
-  minScore: number;
-  pct: number;
-  band: string;
-  note: string | null;
-}
-export const getScholarshipConfig = () =>
-  request<ScholarshipTierRow[]>("/config/scholarships");
-export const createScholarshipTier = (body: {
-  minScore: number;
-  pct: number;
-  band: string;
-  note?: string;
-}) =>
-  request("/config/scholarships", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-export const updateScholarshipTier = (
-  id: string,
-  body: { minScore: number; pct: number; band: string; note?: string },
-) =>
-  request(`/config/scholarships/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(body),
-  });
-export const deleteScholarshipTier = (id: string) =>
-  request(`/config/scholarships/${id}`, { method: "DELETE" });
 
 export const getNotificationRecipients = () =>
   request<{ recipients: string[] }>("/config/notification-recipients");

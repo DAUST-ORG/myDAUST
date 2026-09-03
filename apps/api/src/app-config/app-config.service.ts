@@ -5,11 +5,7 @@ import {
 } from "@nestjs/common";
 import {
   FEE_STRUCTURE,
-  SCHOLARSHIP_TIERS,
-  type ScholarshipTierDef,
   type UpdateFeeInput,
-  type ScholarshipTierInput,
-  scholarshipForBac,
   type EmailTemplatesInput,
   DEFAULT_EMAIL_TEMPLATES,
 } from "@mydaust/shared";
@@ -75,9 +71,8 @@ export class AppConfigService {
    */
   private async ensureSeeded() {
     await this.prisma.$transaction(async (tx) => {
-      // ScholarshipTier has no natural unique key, so ON CONFLICT cannot make
-      // its cold-start seed safe. A transaction-scoped advisory lock serializes
-      // only this tiny bootstrap section across every API process.
+      // A transaction-scoped advisory lock serializes only this tiny bootstrap
+      // section across every API process.
       await tx.$queryRaw<Array<{ locked: number }>>(
         Prisma.sql`
           SELECT 1::int AS "locked"
@@ -91,16 +86,6 @@ export class AppConfigService {
       // implicitly by a read.
       if ((await tx.feeItem.count()) === 0) {
         await tx.feeItem.createMany({ data: DEFAULT_FEES });
-      }
-      if ((await tx.scholarshipTier.count()) === 0) {
-        await tx.scholarshipTier.createMany({
-          data: SCHOLARSHIP_TIERS.map((t) => ({
-            minScore: t.minScore,
-            pct: t.pct,
-            band: t.band,
-            note: t.note ?? null,
-          })),
-        });
       }
     });
   }
@@ -204,29 +189,6 @@ export class AppConfigService {
     return templates;
   }
 
-  async scholarships(): Promise<(ScholarshipTierDef & { id: string })[]> {
-    await this.ensureSeeded();
-    const rows = await this.prisma.scholarshipTier.findMany({
-      orderBy: { minScore: "desc" },
-    });
-    return rows.map((r) => ({
-      id: r.id,
-      minScore: r.minScore,
-      pct: r.pct,
-      band: r.band,
-      note: r.note,
-    }));
-  }
-
-  /** The live award function: DB tiers, shared pure logic, constant fallback if the table is empty. */
-  async awardFor(score: number | null | undefined) {
-    const tiers = await this.scholarships();
-    return scholarshipForBac(
-      score,
-      tiers.length > 0 ? tiers : SCHOLARSHIP_TIERS,
-    );
-  }
-
   /** Current application fee (fixed amount) for checkout + revenue derivation. */
   async applicationFee(): Promise<number> {
     await this.ensureSeeded();
@@ -281,70 +243,5 @@ export class AppConfigService {
       },
     });
     return updated;
-  }
-
-  async createTier(input: ScholarshipTierInput, actorId: string) {
-    const tier = await this.prisma.scholarshipTier.create({
-      data: {
-        minScore: input.minScore,
-        pct: input.pct,
-        band: input.band,
-        note: input.note ?? null,
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "ScholarshipTier",
-        entityId: tier.id,
-        action: "tier-created",
-        actorId,
-        data: input,
-      },
-    });
-    return tier;
-  }
-
-  async updateTier(id: string, input: ScholarshipTierInput, actorId: string) {
-    const existing = await this.prisma.scholarshipTier.findUnique({
-      where: { id },
-    });
-    if (!existing) throw new NotFoundException("Tier not found");
-    const tier = await this.prisma.scholarshipTier.update({
-      where: { id },
-      data: {
-        minScore: input.minScore,
-        pct: input.pct,
-        band: input.band,
-        note: input.note ?? null,
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "ScholarshipTier",
-        entityId: id,
-        action: "tier-updated",
-        actorId,
-        data: { from: existing, to: input },
-      },
-    });
-    return tier;
-  }
-
-  async deleteTier(id: string, actorId: string) {
-    const existing = await this.prisma.scholarshipTier.findUnique({
-      where: { id },
-    });
-    if (!existing) throw new NotFoundException("Tier not found");
-    await this.prisma.scholarshipTier.delete({ where: { id } });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "ScholarshipTier",
-        entityId: id,
-        action: "tier-deleted",
-        actorId,
-        data: existing,
-      },
-    });
-    return { ok: true };
   }
 }

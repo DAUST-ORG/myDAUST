@@ -9,7 +9,6 @@ import {
 import { Prisma } from "@mydaust/db";
 import {
   normalizeStudentNumber,
-  scholarshipForBac,
   toDakarDateKey,
   type ApplicationInput,
 } from "@mydaust/shared";
@@ -212,12 +211,7 @@ export class AdmissionsService {
       },
     });
 
-    const award = await this.appConfig.awardFor(score);
     const appFee = await this.appConfig.applicationFee();
-    const scholarshipLine =
-      award.pct > 0
-        ? `<p>Based on your reported BAC, you may qualify for a <strong>${award.pct}% merit scholarship</strong> (${award.band}).</p>`
-        : "";
 
     const templates = await this.appConfig.emailTemplates();
     const cc = templates.applicationCc?.length
@@ -231,7 +225,6 @@ export class AdmissionsService {
       str
         .replace(/\{\{firstName\}\}/g, esc(input.firstName))
         .replace(/\{\{lastName\}\}/g, esc(input.lastName))
-        .replace(/\{\{scholarshipLine\}\}/g, scholarshipLine)
         .replace(/\{\{appFee\}\}/g, appFee.toLocaleString("en-US"));
 
     try {
@@ -246,17 +239,16 @@ export class AdmissionsService {
       this.logger.warn(`application email failed: ${String(e)}`);
     }
 
-    return { id: applicant.id, scholarship: award };
+    return { id: applicant.id };
   }
 
-  /** Registrar/admin: one applicant's detail + the merit scholarship their BAC would earn. */
+  /** Registrar/admin: one applicant's detail. */
   async applicantDetail(id: string) {
     const a = await this.prisma.applicant.findUnique({ where: { id } });
     if (!a) throw new NotFoundException("Applicant not found");
     const program = a.programCode
       ? await this.prisma.program.findUnique({ where: { code: a.programCode } })
       : null;
-    const scholarship = await this.appConfig.awardFor(a.score);
     const appFee = await this.appConfig.applicationFee();
     const onboarding = await this.adminOnboardingSummary(a.id);
     return {
@@ -291,7 +283,6 @@ export class AdmissionsService {
       source: a.source,
       essay: a.essay,
       term: a.term,
-      scholarship,
       onboarding,
     };
   }
@@ -594,23 +585,6 @@ export class AdmissionsService {
             "The applicant intake academic year changed; refresh the billing options before accepting",
           );
         }
-        const scholarshipTiers = await tx.scholarshipTier.findMany({
-          orderBy: { minScore: "desc" },
-        });
-        if (scholarshipTiers.length === 0) {
-          throw new BadRequestException(
-            "BAC scholarship tiers must be configured before acceptance",
-          );
-        }
-        const bacAward = scholarshipForBac(applicant.score, scholarshipTiers);
-        if (bacAward.pct > 0 && ![10, 15, 20].includes(bacAward.pct)) {
-          throw new BadRequestException(
-            `The configured ${bacAward.pct}% BAC award has no approved billing adjustment definition`,
-          );
-        }
-        const automaticAwardKey = [10, 15, 20].includes(bacAward.pct)
-          ? `merit_${bacAward.pct}`
-          : null;
         const email = applicant.email.trim().toLowerCase();
         const existingPerson = await tx.person.findFirst({
           where: { email: { equals: email, mode: "insensitive" } },
@@ -676,7 +650,6 @@ export class AdmissionsService {
             actorId,
             academicYearLabel: academicYear.label,
             selection: profileSelection,
-            automaticAwardKey,
             pricingClaims,
           });
         const invoice = await tx.invoice.findUnique({
@@ -1497,19 +1470,12 @@ export class AdmissionsService {
       applicant.student.studentNo,
     );
     try {
-      const [templates, award] = await Promise.all([
-        this.appConfig.emailTemplates(),
-        this.appConfig.awardFor(applicant.score),
-      ]);
-      const scholarshipLine =
-        award.pct > 0
-          ? `<p>Based on your reported BAC, you may qualify for a <strong>${award.pct}% merit scholarship</strong> (${esc(award.band)}).</p>`
-          : "";
+      const templates = await this.appConfig.emailTemplates();
       const interpolate = (str: string) =>
         str
           .replace(/\{\{firstName\}\}/g, esc(applicant.firstName))
           .replace(/\{\{lastName\}\}/g, esc(applicant.lastName))
-          .replace(/\{\{scholarshipLine\}\}/g, scholarshipLine)
+          .replace(/\{\{scholarshipLine\}\}/g, "")
           .replace(/\{\{appFee\}\}/g, "");
       const required = applicant.requiredEnrollmentCashXof ?? first.amountDue;
       const enrollmentMessage =

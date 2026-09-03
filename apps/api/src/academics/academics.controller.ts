@@ -52,7 +52,7 @@ const SEMESTERS = z.array(z.enum(["fall", "spring", "summer"]));
 const CreateCourseInput = z.object({
   code: z.string().min(1).max(20),
   title: z.string().min(1).max(160),
-  credits: z.number().int().min(1).max(12),
+  credits: z.number().int().min(1).max(30),
   departmentId: z.string().min(1),
   status: z.enum(["active", "draft"]).optional(),
   description: z.string().max(2000).nullish(),
@@ -72,7 +72,7 @@ const UpdateProgramInput = z.object({
 
 const UpdateCourseInput = z.object({
   title: z.string().min(1).max(160).optional(),
-  credits: z.number().int().min(1).max(12).optional(),
+  credits: z.number().int().min(1).max(30).optional(),
   departmentId: z.string().min(1).optional(),
   status: z.enum(["active", "draft"]).optional(),
   description: z.string().max(2000).nullish(),
@@ -801,5 +801,28 @@ export class AcademicsController {
   @Roles("student")
   mySectionMaterials(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.academics.studentSectionMaterials(user.studentId!, id);
+  }
+
+  // --- Major selection (first-login prompt) ---
+
+  @Get("my/major-status")
+  @Roles("student")
+  myMajorStatus(@CurrentUser() user: AuthUser) {
+    return this.academics.majorSelectionStatus(user.studentId!);
+  }
+
+  @Get("my/available-programs")
+  @Roles("student")
+  myAvailablePrograms() {
+    return this.academics.availablePrograms();
+  }
+
+  @Post("my/major")
+  @Roles("student")
+  chooseMyMajor(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const input = z
+      .object({ programCode: z.string().max(20).nullable() })
+      .parse(body);
+    return this.academics.chooseMyMajor(user.studentId!, input.programCode);
   }
 }

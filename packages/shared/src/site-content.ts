@@ -1,4 +1,4 @@
-// All copy + data for the DAUST public site. This is the DEFAULT content; the site
+﻿// All copy + data for the DAUST public site. This is the DEFAULT content; the site
 // CMS layers per-path bilingual text overrides + image overrides on top at runtime
 // (see SiteOverrides / applyOverrides below). EN/FR are swapped by the `lang` argument.
 
@@ -140,8 +140,8 @@ export function buildContent(lang: Lang) {
   ];
 
   const suggestions = fr
-    ? ["Quels programmes propose DAUST ?", "Combien coûtent les études et les bourses ?", "Comment postuler à DAUST ?", "Faut-il parler anglais pour être admis ?"]
-    : ["What engineering programs does DAUST offer?", "How much is tuition, and are there scholarships?", "How do I apply to DAUST?", "Do I need to speak English to be admitted?"];
+    ? ["Quels programmes propose DAUST ?", "Combien coûtent les études ?", "Comment postuler à DAUST ?", "Faut-il parler anglais pour être admis ?"]
+    : ["What engineering programs does DAUST offer?", "How much is tuition?", "How do I apply to DAUST?", "Do I need to speak English to be admitted?"];
 
   const footCols: { head: string; items: { label: string; page?: PageKey; apply?: boolean; ai?: boolean }[] }[] = [
     { head: T("Study", "Étudier"), items: [
@@ -227,12 +227,6 @@ export function buildContent(lang: Lang) {
     { n: "02", title: T("Send documents", "Envoyer les documents"), desc: T("Provide your high-school diploma and 11th & 12th grade transcripts.", "Fournissez votre diplôme du secondaire et vos relevés de Première et Terminale.") },
     { n: "03", title: T("Assessment", "Évaluation"), desc: T("Decisions assess the academic foundation needed for DAUST courses.", "La décision évalue les bases académiques nécessaires aux cours de DAUST.") },
     { n: "04", title: T("Enroll", "Inscription"), desc: T("Pay the 30,000 FCFA fee and join the September 2026 intake.", "Payez les frais de 30 000 FCFA et rejoignez la rentrée de septembre 2026.") },
-  ];
-
-  const scholarships = [
-    { pct: "20%", cond: T("Merit discount with a Baccalauréat average of 15 and above.", "Réduction au mérite pour une moyenne au Baccalauréat de 15 et plus.") },
-    { pct: "15%", cond: T("Merit discount with a Baccalauréat average of 13.5 – 14.9.", "Réduction au mérite pour une moyenne au Baccalauréat de 13,5 – 14,9.") },
-    { pct: "10%", cond: T("Merit discount with a Baccalauréat average of 12 – 13.4.", "Réduction au mérite pour une moyenne au Baccalauréat de 12 – 13,4.") },
   ];
 
   const tuition = [
@@ -377,15 +371,8 @@ export function buildContent(lang: Lang) {
     {
       patterns: ["tuition", "cost", "costs", "price", "prices", "fee", "fees", "frais", "cout", "how much", "combien", "expensive", "cher", "pay", "payer", "budget"],
       answer: T(
-        "Here’s the cost breakdown:\n• **Tuition:** 2,975,000 FCFA/year (1,487,500/semester)\n• **Housing** (optional, furnished dorms): 300,000–400,000 FCFA/semester\n• **Cafeteria** (optional): 202,500–315,000 FCFA/semester\n• **One-time fees:** 30,000 application + 10,000 insurance\n\nMerit scholarships of **10–20%** are available based on your Baccalauréat average.",
-        "Voici le détail des frais :\n• **Scolarité :** 2 975 000 FCFA/an (1 487 500/semestre)\n• **Logement** (optionnel, résidences meublées) : 300 000–400 000 FCFA/semestre\n• **Restauration** (optionnelle) : 202 500–315 000 FCFA/semestre\n• **Frais uniques :** 30 000 candidature + 10 000 assurance\n\nDes bourses au mérite de **10 à 20 %** sont possibles selon votre moyenne au Baccalauréat.",
-      ),
-    },
-    {
-      patterns: ["scholarship", "scholarships", "bourse", "bourses", "financial aid", "aid", "aide", "aides", "discount", "reduction", "merit", "merite", "grant"],
-      answer: T(
-    "Merit scholarships are based on your Baccalauréat average:\n• **20%** · average of 15 and above\n• **15%** · average of 13.5–14.9\n• **10%** · average of 12–13.4",
-    "Les bourses au mérite dépendent de votre moyenne au Baccalauréat :\n• **20 %** · moyenne de 15 et plus\n• **15 %** · moyenne de 13,5–14,9\n• **10 %** · moyenne de 12–13,4",
+        "Here's the cost breakdown:\n• **Tuition:** 2,975,000 FCFA/year (1,487,500/semester)\n• **Housing** (optional, furnished dorms): 300,000–400,000 FCFA/semester\n• **Cafeteria** (optional): 202,500–315,000 FCFA/semester\n• **One-time fees:** 30,000 application + 10,000 insurance",
+        "Voici le détail des frais :\n• **Scolarité :** 2 975 000 FCFA/an (1 487 500/semestre)\n• **Logement** (optionnel, résidences meublées) : 300 000–400 000 FCFA/semestre\n• **Restauration** (optionnelle) : 202 500–315 000 FCFA/semestre\n• **Frais uniques :** 30 000 candidature + 10 000 assurance",
       ),
     },
     {
@@ -454,19 +441,19 @@ export function buildContent(lang: Lang) {
     {
       patterns: ["hi", "hey", "hello", "bonjour", "salut", "hola", "yo", "good morning", "good afternoon"],
       answer: T(
-        "Hello! I can help with questions about DAUST’s engineering programs, admissions, tuition and scholarships, the Intensive English Program, or life on campus in Somone. What would you like to know?",
-        "Bonjour ! Je peux vous renseigner sur les programmes d’ingénierie de DAUST, les admissions, les frais et bourses, le programme d’anglais intensif, ou la vie sur le campus à Somone. Que souhaitez-vous savoir ?",
+        "Hello! I can help with questions about DAUST’s engineering programs, admissions, tuition, the Intensive English Program, or life on campus in Somone. What would you like to know?",
+        "Bonjour ! Je peux vous renseigner sur les programmes d’ingénierie de DAUST, les admissions, les frais, le programme d’anglais intensif, ou la vie sur le campus à Somone. Que souhaitez-vous savoir ?",
       ),
     },
   ];
   const chatFallback = T(
-    "I don’t have a direct answer to that one. For anything specific, email admissions@daust.org or call +221 77 488 25 15, or use the Apply button and our team will help you personally. You can also ask me about programs, admissions, tuition, scholarships, English requirements, or campus life.",
-    "Je n’ai pas de réponse directe à cette question. Pour tout point précis, écrivez à admissions@daust.org ou appelez le +221 77 488 25 15, ou utilisez le bouton Postuler et notre équipe vous aidera personnellement. Vous pouvez aussi me poser des questions sur les programmes, les admissions, les frais, les bourses, l’anglais ou la vie sur le campus.",
+    "I don’t have a direct answer to that one. For anything specific, email admissions@daust.org or call +221 77 488 25 15, or use the Apply button and our team will help you personally. You can also ask me about programs, admissions, tuition, English requirements, or campus life.",
+    "Je n’ai pas de réponse directe à cette question. Pour tout point précis, écrivez à admissions@daust.org ou appelez le +221 77 488 25 15, ou utilisez le bouton Postuler et notre équipe vous aidera personnellement. Vous pouvez aussi me poser des questions sur les programmes, les admissions, les frais, l’anglais ou la vie sur le campus.",
   );
 
   return {
     fr, tx, nav, suggestions, footCols, stats, pillars, recognition, programs,
-    impactStats, news, model, admSteps, scholarships, tuition, admReq, faq,
+    impactStats, news, model, admSteps, tuition, admReq, faq,
     researchAreas, directors, researchStats, faculty, ventureSteps, ventures,
     campusFeatures, timeline, portalRoles, contactInfo, privacySections,
     chatKb, chatFallback,
@@ -530,7 +517,6 @@ export const SITE_SECTION_LABELS: Record<string, string> = {
   news: "News & Stories",
   model: "Academic model",
   admSteps: "Admission steps",
-  scholarships: "Scholarships",
   tuition: "Tuition & fees",
   admReq: "Admission requirements",
   faq: "FAQ",
