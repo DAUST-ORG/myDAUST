@@ -225,6 +225,7 @@ async function fixture() {
     source: "paid_to_date_workbook",
     settledAt: null,
     recognizedOn: new Date("2026-08-29T00:00:00.000Z"),
+    createdAt: new Date("2026-09-01T11:00:00.000Z"),
     allocations: [
       {
         id: "allocation-1",
@@ -700,6 +701,10 @@ async function fixture() {
   }> = [];
   const onboardingApplicants: Array<Record<string, unknown>> = [];
   const paymentLinks: Array<Record<string, unknown>> = [];
+  const payments: Array<Record<string, unknown>> = [payment];
+  const paymentSubmissions: Array<Record<string, unknown>> = [];
+  const piSpiRequests: Array<Record<string, unknown>> = [];
+  const auditFindManyWhere: Array<Record<string, unknown>> = [];
   const prisma = {
     workbookCutoverBatch: {
       findUnique: async () => batch,
@@ -722,16 +727,18 @@ async function fixture() {
     student: {
       findMany: async () => academicStudentRows,
     },
-    invoice: { findMany: async () => [{ id: invoice.id }] },
-    payment: {
+    invoice: {
       findMany: async (args: { where?: { status?: unknown } }) =>
         args.where?.status
-          ? [{ id: payment.id, status: "success" }]
-          : [payment],
+          ? [{ id: invoice.id }]
+          : [{ id: invoice.id, studentId: invoice.studentId }],
     },
-    paymentSubmission: { findMany: async () => [] },
+    payment: {
+      findMany: async () => payments,
+    },
+    paymentSubmission: { findMany: async () => paymentSubmissions },
     paymentLink: { findMany: async () => paymentLinks },
-    piSpiRequest: { findMany: async () => [] },
+    piSpiRequest: { findMany: async () => piSpiRequests },
     applicant: {
       findMany: async (args: { where?: Record<string, unknown> }) => {
         const studentId = args.where?.studentId;
@@ -752,9 +759,14 @@ async function fixture() {
       },
     },
     auditLog: {
-      findMany: async (args: { where: { entity: string } }) => {
+      findMany: async (args: {
+        where: { entity: string; action?: string };
+      }) => {
+        auditFindManyWhere.push(args.where);
         if (args.where.entity === WORKBOOK_CUTOVER_BATCH_AUDIT.entity) {
-          return batchAuditRows;
+          return batchAuditRows.filter(
+            (row) => !args.where.action || row.action === args.where.action,
+          );
         }
         if (args.where.entity === WORKBOOK_CUTOVER_PAYMENT_AUDIT.entity) {
           return [
@@ -794,8 +806,38 @@ async function fixture() {
     applicantRemovalAuditRows,
     onboardingApplicants,
     paymentLinks,
+    payments,
+    paymentSubmissions,
+    piSpiRequests,
     payment,
+    auditFindManyWhere,
   };
+}
+
+function addPostCutoverProofDraft(
+  fixtureData: Awaited<ReturnType<typeof fixture>>,
+  createdAt = new Date("2026-09-01T11:05:00.000Z"),
+) {
+  const payment = {
+    id: "post-cutover-pending-payment",
+    invoiceId: fixtureData.invoice.id,
+    studentId: "student-1",
+    amount: 157_500,
+    status: "pending",
+    createdAt,
+  };
+  fixtureData.payments.push(payment);
+  fixtureData.paymentSubmissions.push({
+    id: "post-cutover-proof-draft",
+    status: "awaiting_proof",
+    resumeToken: "private-resume-token",
+    studentId: payment.studentId,
+    invoiceId: payment.invoiceId,
+    applicantId: null,
+    paymentId: payment.id,
+    paymentLinkId: null,
+    createdAt,
+  });
 }
 
 function addCanonicalPendingPaymentLink(
@@ -895,7 +937,7 @@ async function addArchivedPendingPaymentStudent(
 
 describe("workbook cutover independent post-audit", () => {
   it("reconciles exhaustive sources, billing, academics, audit evidence, and replay anchors", async () => {
-    const { prisma } = await fixture();
+    const { prisma, auditFindManyWhere } = await fixture();
     const result = await auditWorkbookCutoverBatch(prisma, "batch-1");
     expect(result).toMatchObject({
       ok: true,
@@ -909,6 +951,62 @@ describe("workbook cutover independent post-audit", () => {
       reviewerAttestations: 1,
       replayAnchorBatchCount: 1,
     });
+    expect(auditFindManyWhere).toContainEqual({
+      entity: WORKBOOK_CUTOVER_BATCH_AUDIT.entity,
+      entityId: "batch-1",
+      action: WORKBOOK_CUTOVER_BATCH_AUDIT.action,
+    });
+  });
+
+  it("ignores a later lifecycle-override summary when auditing the original imported cutover", async () => {
+    const fixtureData = await fixture();
+    fixtureData.batchAuditRows.push({
+      action: "pending-payment-activation-imported",
+      data: {
+        laterLifecycleOverride: true,
+      },
+    });
+    await expect(
+      auditWorkbookCutoverBatch(fixtureData.prisma, "batch-1"),
+    ).resolves.toMatchObject({ ok: true, batchAuditRows: 1 });
+  });
+
+  it("allows post-cutover proof activity outside an explicitly protected Student scope", async () => {
+    const fixtureData = await fixture();
+    addPostCutoverProofDraft(fixtureData);
+    await expect(
+      auditWorkbookCutoverBatch(fixtureData.prisma, "batch-1", {
+        protectedPaymentActivityStudentIds: ["student-exception-1"],
+      }),
+    ).resolves.toMatchObject({ ok: true, reconstructionPayments: 1 });
+  });
+
+  it("keeps the default cutover audit strict for outside post-cutover proof activity", async () => {
+    const fixtureData = await fixture();
+    addPostCutoverProofDraft(fixtureData);
+    await expect(
+      auditWorkbookCutoverBatch(fixtureData.prisma, "batch-1"),
+    ).rejects.toThrow(/effective pre-cutover payment/);
+  });
+
+  it("rejects pre-cutover proof activity even when it is outside the protected scope", async () => {
+    const fixtureData = await fixture();
+    addPostCutoverProofDraft(fixtureData, new Date("2026-09-01T10:59:59.999Z"));
+    await expect(
+      auditWorkbookCutoverBatch(fixtureData.prisma, "batch-1", {
+        protectedPaymentActivityStudentIds: ["student-exception-1"],
+      }),
+    ).rejects.toThrow(/effective pre-cutover payment/);
+  });
+
+  it("keeps post-cutover proof activity fail-closed for a protected Student", async () => {
+    const fixtureData = await fixture();
+    addPostCutoverProofDraft(fixtureData);
+    await expect(
+      auditWorkbookCutoverBatch(fixtureData.prisma, "batch-1", {
+        protectedPaymentActivityStudentIds: ["student-1"],
+      }),
+    ).rejects.toThrow(/effective pre-cutover payment/);
   });
 
   it("verifies a terminal Applicant removal without deleting its source row", async () => {
@@ -1119,7 +1217,10 @@ describe("workbook cutover independent post-audit", () => {
 
   it("detects an audit record emitted by an exact replay", async () => {
     const { prisma, batchAuditRows, batchAuditData } = await fixture();
-    batchAuditRows.push({ action: "replayed", data: batchAuditData });
+    batchAuditRows.push({
+      action: WORKBOOK_CUTOVER_BATCH_AUDIT.action,
+      data: batchAuditData,
+    });
     await expect(auditWorkbookCutoverBatch(prisma, "batch-1")).rejects.toThrow(
       /exact replay emitted another audit/,
     );

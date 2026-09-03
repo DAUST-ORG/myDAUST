@@ -15,6 +15,7 @@
     "export:workbook-cutover-production-snapshot": "node dist/finance/workbook-cutover.review-snapshot.cli.js",
     "build:workbook-cutover-manifest": "node dist/finance/workbook-cutover.review-import.cli.js",
     "cutover:workbook": "node dist/finance/workbook-cutover.cli.js",
+    "activate:workbook-pending-students": "node dist/finance/workbook-pending-activation.cli.js",
     "import:legacy-cohort": "node dist/admissions/legacy-cohort-import.cli.js",
     "reconcile:accepted-applicants": "node dist/admissions/accepted-applicant-reconciliation.cli.js",
     "reconcile:installment-statuses": "node dist/finance/reconcile-installment-statuses.cli.js",
