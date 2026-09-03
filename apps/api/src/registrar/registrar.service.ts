@@ -81,7 +81,6 @@ export interface RegistrarStudentInput {
   yearLevel?: number | null;
   cohort?: string | null;
   major?: string | null;
-  minor?: string | null;
   admitTerm?: string | null;
   expectedGrad?: string | null;
   enrollmentStatus?: string | null;
@@ -305,7 +304,6 @@ export class RegistrarService {
           yearLevel: input.yearLevel ?? null,
           cohort: norm(input.cohort),
           major: norm(input.major),
-          minor: norm(input.minor),
           admitTerm: norm(input.admitTerm),
           expectedGrad: norm(input.expectedGrad),
           enrollmentStatus: norm(input.enrollmentStatus),

@@ -1636,7 +1636,6 @@ export interface AdminStudentDetail {
   emergencyName2: string | null;
   emergencyPhone2: string | null;
   major: string | null;
-  minor: string | null;
   admitTerm: string | null;
   expectedGrad: string | null;
   enrollmentStatus: string | null;
@@ -1872,7 +1871,6 @@ export interface UpdateStudentInput {
   emergencyName2?: string | null;
   emergencyPhone2?: string | null;
   major?: string | null;
-  minor?: string | null;
   admitTerm?: string | null;
   expectedGrad?: string | null;
   enrollmentStatus?: string | null;
@@ -2787,7 +2785,6 @@ export interface RegistrarStudentInput {
   yearLevel?: number | null;
   cohort?: string | null;
   major?: string | null;
-  minor?: string | null;
   admitTerm?: string | null;
   expectedGrad?: string | null;
   enrollmentStatus?: string | null;

@@ -144,7 +144,6 @@ const UpdateStudentInput = z.object({
   emergencyName2: z.string().max(120).nullish(),
   emergencyPhone2: z.string().max(40).nullish(),
   major: z.string().max(120).nullish(),
-  minor: z.string().max(120).nullish(),
   admitTerm: z.string().max(40).nullish(),
   expectedGrad: z.string().max(40).nullish(),
   enrollmentStatus: z.string().max(40).nullish(),

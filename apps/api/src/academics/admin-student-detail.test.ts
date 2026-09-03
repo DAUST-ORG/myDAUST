@@ -45,7 +45,6 @@ describe("AcademicsService admin student detail", () => {
       emergencyName2: null,
       emergencyPhone2: null,
       major: null,
-      minor: null,
       admitTerm: null,
       expectedGrad: null,
       enrollmentStatus: null,

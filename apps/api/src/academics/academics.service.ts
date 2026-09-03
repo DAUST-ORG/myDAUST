@@ -373,7 +373,6 @@ export interface UpdateStudentFields {
   emergencyName2?: string | null;
   emergencyPhone2?: string | null;
   major?: string | null;
-  minor?: string | null;
   admitTerm?: string | null;
   expectedGrad?: string | null;
   enrollmentStatus?: string | null;
@@ -1573,7 +1572,6 @@ export class AcademicsService {
         catalogYear: s.catalogYear,
         advisor: s.advisor,
         major: s.major,
-        minor: s.minor,
         admitTerm: s.admitTerm,
         expectedGrad: s.expectedGrad,
         enrollmentStatus: s.enrollmentStatus,
@@ -4089,7 +4087,6 @@ export class AcademicsService {
       emergencyName2: student.emergencyName2,
       emergencyPhone2: student.emergencyPhone2,
       major: student.major,
-      minor: student.minor,
       admitTerm: student.admitTerm,
       expectedGrad: student.expectedGrad,
       enrollmentStatus: student.enrollmentStatus,
@@ -4284,7 +4281,6 @@ export class AcademicsService {
         ? { emergencyPhone2: input.emergencyPhone2 }
         : {}),
       ...(input.major !== undefined ? { major: input.major } : {}),
-      ...(input.minor !== undefined ? { minor: input.minor } : {}),
       ...(input.admitTerm !== undefined ? { admitTerm: input.admitTerm } : {}),
       ...(input.expectedGrad !== undefined
         ? { expectedGrad: input.expectedGrad }

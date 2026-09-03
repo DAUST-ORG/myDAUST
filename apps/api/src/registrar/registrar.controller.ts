@@ -139,7 +139,6 @@ const CreateStudentInput = z.object({
   advisor: nz,
   cohort: nz,
   major: nz,
-  minor: nz,
   admitTerm: nz,
   expectedGrad: nz,
   enrollmentStatus: nz,
