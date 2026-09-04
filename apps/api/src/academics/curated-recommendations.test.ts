@@ -3,6 +3,7 @@ import {
   courseCodeForLabel,
   isEmptyCourseCell,
   isGroupHeaderRow,
+  reviewedStudentNumberFor,
 } from "./curated-recommendations.catalog.js";
 import { parseRosterHtml } from "./curated-recommendations.parser.js";
 import {
@@ -48,6 +49,30 @@ describe("curated recommendation label mapping", () => {
 
   it("returns null for an unknown label instead of guessing", () => {
     expect(courseCodeForLabel("Underwater Basket Weaving")).toBeNull();
+  });
+
+  it("resolves the roster names a reviewer had to decide by hand", () => {
+    // Five of these are archived rather than active, so no search of active
+    // students could ever have found them; one is a spelling variant; one name
+    // is carried by two active students.
+    expect(reviewedStudentNumberFor("Seynabou Soumaré")).toBe("F20255SS");
+    expect(reviewedStudentNumberFor("Fatimatou Bintou DIOP")).toBe("F202520FBD");
+    expect(reviewedStudentNumberFor("Aminata Diop")).toBe("S20265AD");
+    expect(reviewedStudentNumberFor("El Hadji Habib  Diop")).toBe("F202201EHD");
+  });
+
+  it("matches reviewed names through the same normalisation as everything else", () => {
+    // The roster's double spaces and casing must not defeat the override.
+    expect(reviewedStudentNumberFor("Mouhamet  Ndiaye")).toBe("F202315MN");
+    expect(reviewedStudentNumberFor("mouhamet ndiaye")).toBe("F202315MN");
+    expect(
+      reviewedStudentNumberFor("Mouhamed Cheikhna Cheikh Saadbou  Diop"),
+    ).toBe("F20256MCCSD");
+  });
+
+  it("returns null for a name nobody has reviewed", () => {
+    expect(reviewedStudentNumberFor("Rama Thalia Cabral")).toBeNull();
+    expect(reviewedStudentNumberFor("Fatima Ndiaye")).toBeNull();
   });
 
   it("recognises the group separator rows mixed into the table", () => {
