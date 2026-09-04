@@ -1,18 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { Paperclip, Plus, X } from "lucide-react";
 import {
   type Contact,
+  type MessageAttachment,
   type TeachingSection,
   type ThreadDetail,
   type ThreadSummary,
   broadcastToSection,
+  fileUrl,
   getContacts,
   getThread,
   getThreads,
   sendThreadMessage,
   startThread,
+  uploadFile,
 } from "@/lib/api";
 
 const NAVY = "var(--daust-navy)";
@@ -48,6 +51,47 @@ function fmtTime(iso: string) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function fileSizeLabel(bytes?: number) {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AttachmentList({ attachments, tone }: { attachments: MessageAttachment[]; tone: "me" | "other" }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+      {attachments.map((a, i) => (
+        <a
+          key={i}
+          href={fileUrl(a.url)}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "7px 10px",
+            borderRadius: 9,
+            fontSize: 12.5,
+            fontWeight: 600,
+            textDecoration: "none",
+            background: tone === "me" ? "rgba(255,255,255,.16)" : "var(--bg-tint)",
+            color: tone === "me" ? "#fff" : "var(--daust-navy)",
+            border: tone === "me" ? "1px solid rgba(255,255,255,.25)" : "1px solid var(--border)",
+          }}
+        >
+          <Paperclip size={13} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+          {fileSizeLabel(a.size) && (
+            <span style={{ fontSize: 11, opacity: 0.75, flexShrink: 0 }}>{fileSizeLabel(a.size)}</span>
+          )}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export interface InboxProps {
   eyebrow?: string;
   title?: string;
@@ -63,8 +107,11 @@ export function Inbox({ eyebrow = "Conversations", title = "Messages", sections 
   const [sel, setSel] = useState<string | null>(null);
   const [detail, setDetail] = useState<ThreadDetail | null>(null);
   const [draft, setDraft] = useState("");
+  const [replyAttachments, setReplyAttachments] = useState<MessageAttachment[]>([]);
   const [composing, setComposing] = useState(false);
+  const [replying, setReplying] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const replyFileRef = useRef<HTMLInputElement>(null);
 
   const loadThreads = useCallback(async () => {
     const t = await getThreads();
@@ -87,11 +134,24 @@ export function Inbox({ eyebrow = "Conversations", title = "Messages", sections 
     endRef.current?.scrollIntoView();
   }, [detail]);
 
+  async function pickReplyFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setReplying(true);
+    try {
+      const uploaded = await Promise.all(Array.from(files).map((f) => uploadFile(f)));
+      setReplyAttachments((prev) => [...prev, ...uploaded]);
+    } finally {
+      setReplying(false);
+    }
+  }
+
   async function send() {
-    if (!draft.trim() || !sel) return;
+    if ((!draft.trim() && replyAttachments.length === 0) || !sel || replying) return;
     const body = draft;
     setDraft("");
-    await sendThreadMessage(sel, body);
+    const atts = replyAttachments;
+    setReplyAttachments([]);
+    await sendThreadMessage(sel, body, atts);
     setDetail(await getThread(sel));
     loadThreads();
   }
@@ -193,21 +253,58 @@ export function Inbox({ eyebrow = "Conversations", title = "Messages", sections 
                     }}
                   >
                     {b.body}
+                    {b.attachments && b.attachments.length > 0 && (
+                      <AttachmentList attachments={b.attachments} tone={b.me ? "me" : "other"} />
+                    )}
                   </div>
                   <span style={{ fontSize: 10.5, color: "var(--gray-300)", margin: "3px 6px 0" }}>{fmtTime(b.time)}</span>
                 </div>
               ))}
               <div ref={endRef} />
             </div>
-            <div style={{ padding: 16, borderTop: "1px solid var(--divider)", display: "flex", gap: 10 }}>
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && send()}
-                placeholder="Write a message…"
-                style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 10, padding: "12px 15px", fontSize: 13.5, outline: "none" }}
-              />
-              <button onClick={send} className="primary" style={{ padding: "0 22px" }}>Send</button>
+            <div style={{ padding: 16, borderTop: "1px solid var(--divider)", display: "flex", flexDirection: "column", gap: 8 }}>
+              {replyAttachments.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {replyAttachments.map((a, i) => (
+                    <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--bg-tint)", border: "1px solid var(--border)", borderRadius: 999, padding: "4px 10px", fontSize: 12 }}>
+                      <Paperclip size={12} style={{ flexShrink: 0 }} />
+                      <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+                      <button
+                        onClick={() => setReplyAttachments((prev) => prev.filter((_, j) => j !== i))}
+                        style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--fg3)", display: "flex", padding: 0 }}
+                        aria-label="Remove attachment"
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10 }}>
+                <input
+                  ref={replyFileRef}
+                  type="file"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(e) => pickReplyFiles(e.target.files)}
+                />
+                <button
+                  onClick={() => replyFileRef.current?.click()}
+                  disabled={replying}
+                  style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 10, padding: "0 12px", cursor: "pointer", color: "var(--fg2)", display: "flex", alignItems: "center" }}
+                  title="Attach files"
+                >
+                  <Paperclip size={16} />
+                </button>
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && send()}
+                  placeholder="Write a message…"
+                  style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 10, padding: "12px 15px", fontSize: 13.5, outline: "none" }}
+                />
+                <button onClick={send} className="primary" disabled={(!draft.trim() && replyAttachments.length === 0) || replying} style={{ padding: "0 22px" }}>Send</button>
+              </div>
             </div>
           </div>
         )}
@@ -230,37 +327,79 @@ function NewMessage({
   const [sectionId, setSectionId] = useState("");
   const [subject, setSubject] = useState("");
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [recipientId, setRecipientId] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [body, setBody] = useState("");
+  const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getContacts().then((c) => {
-      setContacts(c);
-      if (c[0]) setRecipientId(c[0].id);
-    }).catch(() => {});
+    getContacts().then(setContacts).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (sections?.[0]) setSectionId((cur) => cur || sections[0]!.id);
   }, [sections]);
 
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelected((prev) =>
+      prev.size === contacts.length
+        ? new Set<string>()
+        : new Set(contacts.map((c) => c.id)),
+    );
+  };
+
+  async function pickFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const uploaded = await Promise.all(
+        Array.from(files).map((f) => uploadFile(f)),
+      );
+      setAttachments((prev) => [...prev, ...uploaded]);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit() {
-    if (!body.trim()) return;
-    if (mode === "course" ? !sectionId : !recipientId) return;
+    if (mode === "course" ? !sectionId : selected.size === 0) return;
+    if (!body.trim() && attachments.length === 0) return;
     setBusy(true);
     setErr(null);
     try {
       if (mode === "course") {
         // Fans out into per-student 1:1 threads, so each reply comes back privately —
         // and every recipient thread lands in this same inbox as real sent history.
-        await broadcastToSection(sectionId, body, subject.trim() || undefined);
+        await broadcastToSection(
+          sectionId,
+          body.trim(),
+          subject.trim() || undefined,
+          attachments,
+        );
         onSent("");
         return;
       }
-      const { threadId } = await startThread(recipientId, body);
-      onSent(threadId);
+      const res = await startThread({
+        recipientIds: [...selected],
+        subject: subject.trim() || undefined,
+        body: body.trim(),
+        attachments,
+      });
+      onSent(res.threadId ?? "");
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -269,7 +408,7 @@ function NewMessage({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", padding: 24, gap: 14 }}>
+    <div style={{ display: "flex", flexDirection: "column", padding: 24, gap: 14, overflowY: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <h3 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 18, flex: 1 }}>New message</h3>
         <button onClick={onCancel}>Cancel</button>
@@ -283,7 +422,7 @@ function NewMessage({
               className={mode === m ? "primary" : ""}
               onClick={() => setMode(m)}
             >
-              {m === "individual" ? "One student" : "Whole course"}
+              {m === "individual" ? "One or more students" : "Whole course"}
             </button>
           ))}
         </div>
@@ -298,21 +437,53 @@ function NewMessage({
               ))}
             </select>
           </label>
-          <label>
-            <span className="muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>Subject</span>
-            <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Optional" style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)" }} />
-          </label>
         </>
       ) : (
         <label>
-          <span className="muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>To</span>
-          <select value={recipientId} onChange={(e) => setRecipientId(e.target.value)} style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)" }}>
+          <span className="muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+            To ({selected.size} selected)
+            {contacts.length > 0 && (
+              <a
+                href="#"
+                onClick={(e) => { e.preventDefault(); toggleAll(); }}
+                style={{ marginLeft: 8, fontSize: 11.5, color: "var(--daust-navy)" }}
+              >
+                {selected.size === contacts.length ? "Clear all" : "Select all"}
+              </a>
+            )}
+          </span>
+          <div
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 9,
+              maxHeight: 150,
+              overflowY: "auto",
+              padding: "4px 0",
+            }}
+          >
+            {contacts.length === 0 && <p className="muted" style={{ padding: "10px 12px", margin: 0 }}>No contacts available to message yet.</p>}
             {contacts.map((c) => (
-              <option key={c.id} value={c.id}>{c.name} — {c.role.replace("_", " ")}</option>
+              <label
+                key={c.id}
+                style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 12px", cursor: "pointer", fontSize: 13, background: selected.has(c.id) ? "var(--bg-tint)" : "transparent" }}
+              >
+                <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} style={{ accentColor: NAVY }} />
+                <span>{c.name}</span>
+                <span className="muted" style={{ fontSize: 11.5, textTransform: "capitalize", marginLeft: "auto" }}>{c.role.replace("_", " ")}</span>
+              </label>
             ))}
-          </select>
+          </div>
         </label>
       )}
+      <label>
+        <span className="muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>Subject</span>
+        <input
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder="Optional subject line"
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)", fontSize: 13.5 }}
+        />
+      </label>
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
@@ -320,10 +491,40 @@ function NewMessage({
         rows={6}
         style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 9, padding: "11px 13px", fontSize: 13.5, resize: "vertical", lineHeight: 1.5 }}
       />
+      <div>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => pickFiles(e.target.files)}
+        />
+        {attachments.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+            {attachments.map((a, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, background: "var(--bg-tint)", borderRadius: 8, padding: "7px 11px" }}>
+                <Paperclip size={13} style={{ flexShrink: 0, color: "var(--fg3)" }} />
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+                <button onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--fg3)", display: "flex" }} aria-label="Remove attachment">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 9, padding: "8px 12px", cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "var(--daust-navy)" }}>
+          <Paperclip size={13} /> Attach files
+        </button>
+      </div>
       {err && <span className="muted" style={{ color: "var(--bad)" }}>{err}</span>}
-      {mode === "individual" && contacts.length === 0 && <span className="muted">No contacts available to message yet.</span>}
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button className="primary" onClick={submit} disabled={busy || !body.trim() || (mode === "course" ? !sectionId : !recipientId)}>{busy ? "Sending…" : "Send"}</button>
+        <button
+          className="primary"
+          onClick={submit}
+          disabled={busy || (mode === "course" ? !sectionId : selected.size === 0) || (!body.trim() && attachments.length === 0)}
+        >
+          {busy ? "Sending…" : `Send${mode === "individual" && selected.size > 1 ? ` (${selected.size})` : ""}`}
+        </button>
       </div>
     </div>
   );

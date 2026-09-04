@@ -1824,13 +1824,14 @@ model ThreadParticipant {
 }
 
 model Message {
-  id        String   @id @default(uuid())
-  threadId  String
-  thread    Thread   @relation(fields: [threadId], references: [id])
-  senderId  String
-  sender    Person   @relation(fields: [senderId], references: [id])
-  body      String
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  threadId    String
+  thread      Thread   @relation(fields: [threadId], references: [id])
+  senderId    String
+  sender      Person   @relation(fields: [senderId], references: [id])
+  body        String
+  attachments Json?    // { url, name, size }[]
+  createdAt   DateTime @default(now())
 
   @@index([threadId])
 }
