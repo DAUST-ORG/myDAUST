@@ -126,17 +126,13 @@ export function PortalShell({
   }, [me, pathname, router]);
 
   // Students must choose their major before using the portal.
-  const [majorChecked, setMajorChecked] = useState(false);
   useEffect(() => {
     if (me?.studentId && !me.mustChangePassword) {
       getMajorStatus()
         .then((s) => {
           if (!s.majorSelectionDone) setShowMajorModal(true);
-          setMajorChecked(true);
         })
-        .catch(() => setMajorChecked(true));
-    } else {
-      setMajorChecked(true);
+        .catch(() => {});
     }
   }, [me]);
 
@@ -147,8 +143,6 @@ export function PortalShell({
         ({ roles: _roles, ...o }) => o,
       )
     : [];
-
-  const blocked = me?.studentId && !me.mustChangePassword && (!majorChecked || showMajorModal);
 
   return (
     <>
@@ -161,7 +155,7 @@ export function PortalShell({
         viewAsOptions={options.length > 1 ? options : undefined}
         profileHref={PROFILE_HREF[effective]}
       >
-        {blocked ? null : children}
+        {children}
       </AppShell>
       <MajorSelectModal
         open={showMajorModal}
