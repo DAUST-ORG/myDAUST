@@ -260,7 +260,7 @@ function validateDraft(
   adjustmentDefinitions: AdjustmentDraft[],
   reason: string,
 ) {
-  if (!reason.trim()) return "A reason is required for administrator review.";
+  if (!reason.trim()) return "A reason is required for Director review.";
   if (reason.trim().length > 1000) {
     return "The review reason must be 1,000 characters or fewer.";
   }
@@ -426,7 +426,7 @@ function validateDraft(
       }
     }
     if (definition.calculation === "manual" && !definition.requiresApproval) {
-      return `${key} is manual and must require approval.`;
+      return `${key} is manual and must require Director approval.`;
     }
   }
   return null;
@@ -716,7 +716,7 @@ function AdjustmentEditor({
               {definition.effect === "discount" ? "Discount" : "Charge"}
             </Badge>
             {definition.requiresApproval && (
-              <Badge tone="navy">Approval required</Badge>
+              <Badge tone="navy">Director approval required</Badge>
             )}
           </span>
         </span>
@@ -859,11 +859,11 @@ function AdjustmentEditor({
           checked={definition.requiresApproval}
           onChange={(requiresApproval) => onChange({ requiresApproval })}
           disabled={disabled || definition.calculation === "manual"}
-          label="Requires approval"
+          label="Requires Director approval"
         />
         {definition.calculation === "manual" && (
           <span className="muted" style={{ fontSize: 11.5 }}>
-            Manual amounts always require approval.
+            Manual amounts always require Director approval.
           </span>
         )}
       </div>
@@ -1144,7 +1144,7 @@ export default function BillingCatalogPage() {
 
       if (result.applied) {
         setNotice(
-          `Catalog revision ${result.request.id} was approved and applied. Refreshing the authoritative catalog…`,
+          "The catalog revision was approved and applied. Refreshing the authoritative catalog…",
         );
         await loadCatalog(selectedYear);
       } else {
@@ -1153,7 +1153,7 @@ export default function BillingCatalogPage() {
           [selectedYear]: result.request.id,
         }));
         setNotice(
-          `Approval request ${result.request.id} was submitted. The approved catalog and student billing remain unchanged until an administrator approves it.`,
+          "The billing catalog proposal was submitted for Director approval. The approved catalog and student billing remain unchanged until the Director approves it.",
         );
       }
     } catch (caught) {
@@ -1217,7 +1217,7 @@ export default function BillingCatalogPage() {
         />
         <span>
           <strong style={{ color: "var(--fg1)" }}>
-            Administrator approval is required.
+            Director approval is required.
           </strong>{" "}
           Saving this screen creates a review request only. Current profiles,
           invoices, Dining access, and Housing assignments do not change until
@@ -1298,7 +1298,7 @@ export default function BillingCatalogPage() {
                 }}
               >
                 {pendingRequestId ? (
-                  <Badge tone="warning">Approval pending</Badge>
+                  <Badge tone="warning">Director approval pending</Badge>
                 ) : dirty ? (
                   <Badge tone="info">Proposed edits</Badge>
                 ) : (
@@ -1398,7 +1398,7 @@ export default function BillingCatalogPage() {
               <EmptyState
                 icon={<SlidersHorizontal size={24} />}
                 title="No service options for this year"
-                note="Begin with the required zero-charge options, then add priced services. Nothing is applied before approval."
+                note="Begin with the required zero-charge options, then add priced services. Nothing is applied before Director approval."
                 action={
                   <Button
                     size="sm"
@@ -1500,7 +1500,7 @@ export default function BillingCatalogPage() {
             >
               <Field
                 label="Reason for this catalog revision"
-                hint="Required. This explanation is included in the administrator's approval record."
+                hint="Required. This explanation is included in the Director's approval record."
               >
                 <Textarea
                   rows={3}
@@ -1543,8 +1543,8 @@ export default function BillingCatalogPage() {
                   {submitting
                     ? "Submitting request…"
                     : pendingRequestId
-                      ? "Approval pending"
-                      : "Request administrator approval"}
+                      ? "Director approval pending"
+                      : "Request Director approval"}
                 </Button>
               </div>
             </div>

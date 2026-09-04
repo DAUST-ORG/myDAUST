@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -20,6 +21,49 @@ import {
 } from "./enrollment-gates.js";
 
 const OVERRIDE_TARGET_TYPE = "Section" as const;
+
+/**
+ * What a blocker *is*, ignoring the live counts it happened to measure.
+ *
+ * `capacity`, `credit_cap` and `standing` carry numbers read at evaluation time
+ * (seats taken, credits enrolled, GPA). Approving one override on a full section
+ * increments the seat counters, so comparing raw payloads would mark every other
+ * queued override on that section stale — the same blocker, different numbers —
+ * and force each student to resubmit in turn.
+ */
+function enrollmentFailureIdentity(failure: EnrollmentGateFailure): string {
+  switch (failure.gate) {
+    case "capacity":
+      return "capacity";
+    case "credit_cap":
+      return `credit_cap:${failure.ceiling}`;
+    case "standing":
+      return `standing:${failure.required}`;
+    case "prerequisite":
+      return `prerequisite:${failure.courses
+        .map((course) => `${course.code}/${course.minGrade ?? ""}`)
+        .sort()
+        .join(",")}`;
+    case "corequisite":
+      return `corequisite:${[...failure.courses].sort().join(",")}`;
+    case "holds":
+      return `holds:${[...failure.kinds].sort().join(",")}`;
+    case "major_restriction":
+      return `major_restriction:${failure.required}`;
+    case "record_status":
+      return `record_status:${failure.status}`;
+    case "add_deadline":
+      return `add_deadline:${failure.closedOn}`;
+    default:
+      // Stored JSON is cast, not parsed: an unrecognised gate still gets a
+      // stable identity rather than silently comparing equal to everything.
+      return JSON.stringify(failure);
+  }
+}
+
+function canonicalEnrollmentFailures(failures: EnrollmentGateFailure[]) {
+  return JSON.stringify(failures.map(enrollmentFailureIdentity).sort());
+}
 
 /**
  * Student-initiated enrollment override flow.
@@ -44,11 +88,14 @@ export class EnrollmentOverrideService {
   /** Build the request: capture current gate failures so the reviewer sees what they
    * are approving against, not just a free-form reason. The entire operation is
    * transactional so the approval request, event, and audit log are consistent. */
-  async request(actor: AuthUser, input: {
-    sectionId: string;
-    reason: string;
-    requestedWaivers: EnrollmentGate[];
-  }) {
+  async request(
+    actor: AuthUser,
+    input: {
+      sectionId: string;
+      reason: string;
+      requestedWaivers: EnrollmentGate[];
+    },
+  ) {
     if (!actor.studentId && !actor.roles.includes("admin")) {
       throw new ForbiddenException("Only a student may submit an override");
     }
@@ -64,7 +111,16 @@ export class EnrollmentOverrideService {
       });
       if (!student) throw new NotFoundException("Student not found");
 
-      const failures = await evaluateEnrollmentGates(tx, studentId, input.sectionId);
+      const failures = await evaluateEnrollmentGates(
+        tx,
+        studentId,
+        input.sectionId,
+      );
+      if (failures.length === 0) {
+        throw new BadRequestException(
+          "No override is needed: this enrollment has no current rule blockers.",
+        );
+      }
 
       // Idempotency: at most one pending request per (student, section). A previous
       // pending request blocks a new submission until the reviewer decides.
@@ -153,32 +209,59 @@ export class EnrollmentOverrideService {
     input: { waivedGates: EnrollmentGate[]; note?: string },
   ) {
     if (!actor.roles.includes("admin")) {
-      throw new ForbiddenException("Only an administrator can approve overrides");
+      throw new ForbiddenException(
+        "Only an administrator can approve overrides",
+      );
     }
     if (!input.waivedGates || input.waivedGates.length === 0) {
       throw new BadRequestException(
         "Pick at least one gate to waive, or reject the request",
       );
     }
-    const result = await this.applyApproval(id, actor, input.waivedGates, input.note);
+    const result = await this.applyApproval(
+      id,
+      actor,
+      input.waivedGates,
+      input.note,
+    );
     // Notify student outside the transaction -- notification failure must not roll
     // back the approval, and emit() swallows errors by design.
-    await this.sendApprovalNotification(id, result.studentId, "override_approved",
-      "Override approved",
-      `Your enrollment override for this section was approved.${input.note ? ` Note: ${input.note}` : ""}`,
-    );
-    return { id: result.id, status: result.status as ApprovalRequestStatus, enrollmentId: result.enrollmentId };
+    if (result.status === "approved") {
+      await this.sendApprovalNotification(
+        id,
+        result.studentId,
+        "override_approved",
+        "Override approved",
+        `Your enrollment override for this section was approved.${input.note ? ` Note: ${input.note}` : ""}`,
+      );
+    }
+    return {
+      id: result.id,
+      status: result.status as ApprovalRequestStatus,
+      enrollmentId: result.enrollmentId,
+      ...(result.status === "stale" ? { reason: result.reason } : {}),
+    };
   }
 
   async reject(id: string, actor: AuthUser, reason: string) {
     if (!actor.roles.includes("admin")) {
-      throw new ForbiddenException("Only an administrator can reject overrides");
+      throw new ForbiddenException(
+        "Only an administrator can reject overrides",
+      );
     }
     if (!reason.trim()) {
       throw new BadRequestException("A rejection reason is required");
     }
-    const result = await this.decideWithoutApply(id, actor.personId, "rejected", reason.trim());
-    await this.sendApprovalNotification(id, result.studentId, "override_rejected",
+    const result = await this.decideWithoutApply(
+      id,
+      actor.personId,
+      "rejected",
+      reason.trim(),
+    );
+    await this.sendApprovalNotification(
+      id,
+      result.studentId,
+      "override_rejected",
       "Override rejected",
       `Your enrollment override request was rejected. Reason: ${reason.trim()}`,
     );
@@ -263,12 +346,28 @@ export class EnrollmentOverrideService {
         );
       }
     }
-    const result = await this.applyApproval(id, actor, input.waivedGates, input.note, true);
-    await this.sendApprovalNotification(id, result.studentId, "override_approved",
-      "Override approved",
-      `Your enrollment override for this section was approved.${input.note ? ` Note: ${input.note}` : ""}`,
+    const result = await this.applyApproval(
+      id,
+      actor,
+      input.waivedGates,
+      input.note,
+      true,
     );
-    return { id: result.id, status: result.status as ApprovalRequestStatus, enrollmentId: result.enrollmentId };
+    if (result.status === "approved") {
+      await this.sendApprovalNotification(
+        id,
+        result.studentId,
+        "override_approved",
+        "Override approved",
+        `Your enrollment override for this section was approved.${input.note ? ` Note: ${input.note}` : ""}`,
+      );
+    }
+    return {
+      id: result.id,
+      status: result.status as ApprovalRequestStatus,
+      enrollmentId: result.enrollmentId,
+      ...(result.status === "stale" ? { reason: result.reason } : {}),
+    };
   }
 
   /** Faculty reject: with section ownership check. */
@@ -325,9 +424,16 @@ export class EnrollmentOverrideService {
           data: { note: reason.trim() },
         },
       });
-      return { id, status: "rejected" as const, studentId: request.requestedById };
+      return {
+        id,
+        status: "rejected" as const,
+        studentId: request.requestedById,
+      };
     });
-    await this.sendApprovalNotification(id, result.studentId, "override_rejected",
+    await this.sendApprovalNotification(
+      id,
+      result.studentId,
+      "override_rejected",
       "Override rejected",
       `Your enrollment override request was rejected. Reason: ${reason.trim()}`,
     );
@@ -350,7 +456,13 @@ export class EnrollmentOverrideService {
       });
       const personId = row?.requestedById ?? fallbackPersonId;
       if (personId) {
-        await this.notifyStudent(personId, kind, title, body, "/student/overrides");
+        await this.notifyStudent(
+          personId,
+          kind,
+          title,
+          body,
+          "/student/overrides",
+        );
       }
     } catch {
       /* notification is best-effort */
@@ -364,9 +476,7 @@ export class EnrollmentOverrideService {
     body: string,
     href?: string,
   ) {
-    await this.notifications.emit([
-      { personId, kind, title, body, href },
-    ]);
+    await this.notifications.emit([{ personId, kind, title, body, href }]);
   }
 
   /** Shared apply logic for admin and faculty approve. Runs inside a transaction
@@ -385,9 +495,7 @@ export class EnrollmentOverrideService {
         throw new BadRequestException("Not an enrollment override request");
       }
       if (request.status !== "pending") {
-        throw new BadRequestException(
-          `Request is already ${request.status}`,
-        );
+        throw new BadRequestException(`Request is already ${request.status}`);
       }
 
       const after = request.afterJson as {
@@ -395,6 +503,49 @@ export class EnrollmentOverrideService {
         sectionId: string;
         requestedWaivers: EnrollmentGate[];
         failures: EnrollmentGateFailure[];
+      };
+      const markStale = async (reason: string) => {
+        const claimed = await tx.approvalRequest.updateMany({
+          where: { id, status: "pending" },
+          data: {
+            status: "stale" satisfies ApprovalRequestStatus,
+            reviewedById: actor.personId,
+            reviewedAt: new Date(),
+            decisionNote: reason,
+          },
+        });
+        if (claimed.count === 0) {
+          const current = await tx.approvalRequest.findUnique({
+            where: { id },
+          });
+          throw new BadRequestException(
+            `Request is already ${current?.status ?? "unknown"}`,
+          );
+        }
+        await tx.approvalEvent.create({
+          data: {
+            requestId: id,
+            action: "stale",
+            actorId: actor.personId,
+            data: { reason } satisfies Prisma.InputJsonValue,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            entity: "EnrollmentOverrideRequest",
+            entityId: id,
+            action: "stale",
+            actorId: actor.personId,
+            data: { reason } satisfies Prisma.InputJsonValue,
+          },
+        });
+        return {
+          id,
+          status: "stale" as const,
+          enrollmentId: undefined,
+          studentId: request.requestedById,
+          reason,
+        };
       };
 
       // Ownership: faculty must teach the section. Admin bypasses.
@@ -408,11 +559,59 @@ export class EnrollmentOverrideService {
         }
       }
 
-      // Claim the pending row BEFORE anything is written. This CAS used to sit at the end
-      // of the transaction, after the capacity bump and the enrollment, so two reviewers
-      // approving the same request could each bump Section.capacity before either claimed
-      // it: capacity +2 for one seat. Claiming first also makes the losing transaction
-      // block here rather than after it has already done the work.
+      // Serialize against racing enrollments the same way enroll() does. Without this row
+      // lock two concurrent overrides read the same seat count, both pass the capacity
+      // gate, and the section is oversold -- the exact case the lock in enroll() exists
+      // to prevent.
+      const lockedSection = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT id FROM "Section" WHERE id = ${after.sectionId} FOR UPDATE`;
+      if (!lockedSection[0]) {
+        return markStale(
+          "The section no longer exists, so this enrollment request cannot be applied.",
+        );
+      }
+
+      const waived = new Set(waivedGates);
+      const validGates = new Set(after.failures.map((f) => f.gate));
+      for (const gate of waived) {
+        if (!validGates.has(gate)) {
+          throw new BadRequestException(
+            `Gate "${gate}" did not block this enrollment, nothing to waive`,
+          );
+        }
+      }
+
+      let freshFailures: EnrollmentGateFailure[];
+      try {
+        freshFailures = await evaluateEnrollmentGates(
+          tx,
+          after.studentId,
+          after.sectionId,
+        );
+      } catch (error) {
+        if (!(error instanceof HttpException)) throw error;
+        return markStale(
+          `The enrollment state changed after this request was submitted: ${error.message}`,
+        );
+      }
+      if (
+        canonicalEnrollmentFailures(freshFailures) !==
+        canonicalEnrollmentFailures(after.failures)
+      ) {
+        const reason =
+          "The enrollment blockers changed after this request was submitted. Review the current enrollment state and submit a new request if an exception is still needed.";
+        return markStale(reason);
+      }
+      const stillBlocking = unwavedFailures(freshFailures, waived);
+      if (stillBlocking.length > 0) {
+        throw new BadRequestException(
+          `Cannot apply: ${stillBlocking.map((g) => g.gate).join(", ")} still blocked after waivers`,
+        );
+      }
+
+      // Claim the pending row after the locked re-evaluation and before any enrollment
+      // or capacity write. A competing reviewer can evaluate, but only one may apply.
       const claimed = await tx.approvalRequest.updateMany({
         where: { id, status: "pending" },
         data: {
@@ -427,37 +626,6 @@ export class EnrollmentOverrideService {
         const current = await tx.approvalRequest.findUnique({ where: { id } });
         throw new BadRequestException(
           `Request is already ${current?.status ?? "unknown"}`,
-        );
-      }
-
-      // Serialize against racing enrollments the same way enroll() does. Without this row
-      // lock two concurrent overrides read the same seat count, both pass the capacity
-      // gate, and the section is oversold -- the exact case the lock in enroll() exists
-      // to prevent.
-      const lockedSection = await tx.$queryRaw<
-        { id: string }[]
-      >`SELECT id FROM "Section" WHERE id = ${after.sectionId} FOR UPDATE`;
-      if (!lockedSection[0]) throw new NotFoundException("Section not found");
-
-      const waived = new Set(waivedGates);
-      const validGates = new Set(after.failures.map((f) => f.gate));
-      for (const gate of waived) {
-        if (!validGates.has(gate)) {
-          throw new BadRequestException(
-            `Gate "${gate}" did not block this enrollment, nothing to waive`,
-          );
-        }
-      }
-
-      const freshFailures = await evaluateEnrollmentGates(
-        tx,
-        after.studentId,
-        after.sectionId,
-      );
-      const stillBlocking = unwavedFailures(freshFailures, waived);
-      if (stillBlocking.length > 0) {
-        throw new BadRequestException(
-          `Cannot apply: ${stillBlocking.map((g) => g.gate).join(", ")} still blocked after waivers`,
         );
       }
 

@@ -289,7 +289,7 @@ export function BillingProfileEditor({
       onSubmitted(
         result.applied
           ? `Billing profile updated for ${student.name}.`
-          : `Billing profile change for ${student.name} was submitted for administrator approval.`,
+          : `Billing profile change for ${student.name} was submitted for Director approval.`,
       );
       onClose();
     } catch (cause) {
@@ -320,7 +320,7 @@ export function BillingProfileEditor({
             disabled={loading || busy || !valid}
             onClick={submit}
           >
-            {busy ? "Submitting…" : "Submit for approval"}
+            {busy ? "Submitting…" : "Submit for Director approval"}
           </Button>
         </>
       }
@@ -470,7 +470,7 @@ export function BillingProfileEditor({
                           </small>
                         </span>
                         {definition.requiresApproval && (
-                          <Badge tone="neutral">Approval</Badge>
+                          <Badge tone="neutral">Director approval</Badge>
                         )}
                       </label>
                     );
@@ -595,7 +595,7 @@ export function BillingProfileEditor({
 
           <Field
             label="Reason for change"
-            hint="The administrator sees this reason with the before-and-after profile."
+            hint="The Director sees this reason with the before-and-after profile."
           >
             <Textarea
               value={reason}

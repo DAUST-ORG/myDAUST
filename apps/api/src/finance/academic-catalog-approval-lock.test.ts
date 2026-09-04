@@ -109,6 +109,7 @@ describe("academic catalog approval locking", () => {
       approvalEvent: { create: vi.fn(async () => ({})) },
     };
     const prisma = {
+      approvalRequest: tx.approvalRequest,
       $transaction: vi.fn(
         async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
       ),
