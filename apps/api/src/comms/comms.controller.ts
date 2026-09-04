@@ -12,19 +12,29 @@ const MessageAttachment = z.object({
 });
 
 // Local zod (the api's own instance) — keeps the ESM/CJS dual-package hazard away from shared.
-const BroadcastInput = z.object({
-  subject: z.string().min(1).max(200).optional(),
-  body: z.string().min(1).max(5000),
-  attachments: z.array(MessageAttachment).max(10).optional(),
-});
+const BroadcastInput = z
+  .object({
+    subject: z.string().min(1).max(200).optional(),
+    body: z.string().max(5000).default(""),
+    attachments: z.array(MessageAttachment).max(10).optional(),
+  })
+  .refine((v) => v.body.trim().length > 0 || (v.attachments?.length ?? 0) > 0, {
+    message: "Message must have some text or an attachment",
+    path: ["body"],
+  });
 
-const AudienceBroadcastInput = z.object({
-  audienceType: z.enum(["individual", "year", "program", "all"]),
-  audienceValue: z.string().max(64).optional(),
-  subject: z.string().min(1).max(200),
-  body: z.string().min(1).max(5000),
-  attachments: z.array(MessageAttachment).max(10).optional(),
-});
+const AudienceBroadcastInput = z
+  .object({
+    audienceType: z.enum(["individual", "year", "program", "all"]),
+    audienceValue: z.string().max(64).optional(),
+    subject: z.string().min(1).max(200),
+    body: z.string().max(5000).default(""),
+    attachments: z.array(MessageAttachment).max(10).optional(),
+  })
+  .refine((v) => v.body.trim().length > 0 || (v.attachments?.length ?? 0) > 0, {
+    message: "Message must have some text or an attachment",
+    path: ["body"],
+  });
 
 @Controller("comms")
 export class CommsController {

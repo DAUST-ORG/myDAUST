@@ -7,21 +7,32 @@ export const MessageAttachment = z.object({
 });
 export type MessageAttachment = z.infer<typeof MessageAttachment>;
 
-export const SendMessageInput = z.object({
-  body: z.string().min(1).max(5000),
-  attachments: z.array(MessageAttachment).max(10).optional(),
-});
+export const SendMessageInput = z
+  .object({
+    body: z.string().max(5000).default(""),
+    attachments: z.array(MessageAttachment).max(10).optional(),
+  })
+  .refine((v) => v.body.trim().length > 0 || (v.attachments?.length ?? 0) > 0, {
+    message: "Message must have some text or an attachment",
+    path: ["body"],
+  });
 export type SendMessageInput = z.infer<typeof SendMessageInput>;
 
-export const StartThreadInput = z.object({
-  recipientId: z.string().uuid().optional(),
-  recipientIds: z.array(z.string().uuid()).min(1).max(100).optional(),
-  subject: z.string().max(200).optional(),
-  body: z.string().min(1).max(5000),
-  attachments: z.array(MessageAttachment).max(10).optional(),
-}).refine((v) => Boolean(v.recipientId) || Boolean(v.recipientIds), {
-  message: "Provide a recipientId or recipientIds",
-});
+export const StartThreadInput = z
+  .object({
+    recipientId: z.string().uuid().optional(),
+    recipientIds: z.array(z.string().uuid()).min(1).max(100).optional(),
+    subject: z.string().max(200).optional(),
+    body: z.string().max(5000).default(""),
+    attachments: z.array(MessageAttachment).max(10).optional(),
+  })
+  .refine((v) => Boolean(v.recipientId) || Boolean(v.recipientIds), {
+    message: "Provide a recipientId or recipientIds",
+  })
+  .refine((v) => v.body.trim().length > 0 || (v.attachments?.length ?? 0) > 0, {
+    message: "Message must have some text or an attachment",
+    path: ["body"],
+  });
 export type StartThreadInput = z.infer<typeof StartThreadInput>;
 
 export const CreateAnnouncementInput = z.object({
