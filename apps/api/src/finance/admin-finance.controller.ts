@@ -478,9 +478,13 @@ export class AdminFinanceController {
     return this.finance.arAging();
   }
 
+  // Stays readable by bursars, but the Director-only legs are stripped for them.
+  // director-overview and every operating-budget route are @Roles("admin"), and
+  // this endpoint re-emits three of directorOverview()'s fields verbatim — which
+  // made it the way around that restriction.
   @Get("reports")
-  reports() {
-    return this.finance.reports();
+  reports(@CurrentUser() user: AuthUser) {
+    return this.finance.reports(user.roles.includes("admin"));
   }
 
   @Get("payments/:id/receipt")
