@@ -24,18 +24,39 @@ import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { AcademicsService } from "./academics.service.js";
 
+const MaterialCategoryInput = z.enum([
+  "syllabus",
+  "lecture_notes",
+  "assignments",
+  "quizzes",
+  "resources",
+]);
+
 const CreateMaterialInput = z.object({
   title: z.string().min(1).max(200),
   kind: z.string().min(1).max(40),
-  category: z
-    .enum(["syllabus", "lecture_notes", "assignments", "quizzes", "resources"])
-    .optional(),
+  category: MaterialCategoryInput.optional(),
+  folderId: z.string().min(1).optional(),
   fileUrl: z.string().min(1).optional(),
   fileName: z.string().min(1).optional(),
 });
 
 const ReorderMaterialsInput = z.object({
+  category: MaterialCategoryInput,
+  folderId: z.string().min(1).nullable(),
   orderedIds: z.array(z.string().min(1)).min(1),
+});
+
+const MaterialFolderNameInput = z.object({
+  name: z.string().trim().min(1).max(80),
+});
+
+const CreateMaterialFolderInput = MaterialFolderNameInput.extend({
+  category: MaterialCategoryInput,
+});
+
+const MoveMaterialInput = z.object({
+  folderId: z.string().min(1).nullable(),
 });
 
 const CreateProgramInput = z.object({
@@ -653,7 +674,12 @@ export class AcademicsController {
     @Body() body: unknown,
   ) {
     const input = UpdateAssignmentInput.parse(body);
-    return this.academics.updateAssignment(assignmentId, user.personId, user.roles.includes("admin"), input);
+    return this.academics.updateAssignment(
+      assignmentId,
+      user.personId,
+      user.roles.includes("admin"),
+      input,
+    );
   }
 
   @Delete("sections/:id/assignments/:assignmentId")
@@ -663,7 +689,11 @@ export class AcademicsController {
     @Param("id") _sectionId: string,
     @Param("assignmentId") assignmentId: string,
   ) {
-    return this.academics.deleteAssignment(assignmentId, user.personId, user.roles.includes("admin"));
+    return this.academics.deleteAssignment(
+      assignmentId,
+      user.personId,
+      user.roles.includes("admin"),
+    );
   }
 
   @Get("assignments/:id/submissions")
@@ -696,6 +726,64 @@ export class AcademicsController {
   }
 
   // --- Course materials + class posts (faculty) ---
+
+  @Get("sections/:id/material-folders")
+  @Roles("faculty", "admin")
+  sectionMaterialFolders(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+  ) {
+    return this.academics.listSectionMaterialFolders(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
+  }
+
+  @Post("sections/:id/material-folders")
+  @Roles("faculty", "admin")
+  createSectionMaterialFolder(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = CreateMaterialFolderInput.parse(body);
+    return this.academics.createSectionMaterialFolder(
+      id,
+      input,
+      user.personId,
+      user.roles.includes("admin"),
+    );
+  }
+
+  @Patch("material-folders/:id")
+  @Roles("faculty", "admin")
+  renameSectionMaterialFolder(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = MaterialFolderNameInput.parse(body);
+    return this.academics.renameSectionMaterialFolder(
+      id,
+      input.name,
+      user.personId,
+      user.roles.includes("admin"),
+    );
+  }
+
+  @Delete("material-folders/:id")
+  @Roles("faculty", "admin")
+  deleteSectionMaterialFolder(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+  ) {
+    return this.academics.deleteSectionMaterialFolder(
+      id,
+      user.personId,
+      user.roles.includes("admin"),
+    );
+  }
 
   @Get("sections/:id/materials")
   @Roles("faculty", "admin")
@@ -736,6 +824,22 @@ export class AcademicsController {
     );
   }
 
+  @Patch("materials/:id/folder")
+  @Roles("faculty", "admin")
+  moveSectionMaterial(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = MoveMaterialInput.parse(body);
+    return this.academics.moveSectionMaterial(
+      id,
+      input.folderId,
+      user.personId,
+      user.roles.includes("admin"),
+    );
+  }
+
   @Delete("materials/:id")
   @Roles("faculty", "admin")
   deleteSectionMaterial(
@@ -759,6 +863,8 @@ export class AcademicsController {
     const input = ReorderMaterialsInput.parse(body);
     return this.academics.reorderSectionMaterials(
       id,
+      input.category,
+      input.folderId,
       input.orderedIds,
       user.personId,
       user.roles.includes("admin"),

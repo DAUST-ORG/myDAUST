@@ -115,6 +115,89 @@ export function parseFinanceDateOnly(value: string, label = "Due date"): Date {
   return parsed;
 }
 
+type ComponentAdjustmentBridgeInput = {
+  id: string;
+  label: string;
+  effect: string;
+  amountXof: number;
+  reason: string | null;
+};
+
+export function invoiceComponentIsSelected(
+  component: { amountXof: number; grossAmountXof: number | null },
+  profileManaged: boolean,
+) {
+  return profileManaged
+    ? (component.grossAmountXof ?? 0) > 0 || component.amountXof > 0
+    : component.amountXof > 0;
+}
+
+/** Human-facing gross-to-net bridge for one invoice component. */
+export function invoiceComponentBillingBridge(
+  component: {
+    amountXof: number;
+    grossAmountXof: number | null;
+    adjustments: readonly ComponentAdjustmentBridgeInput[];
+  },
+  profileManaged: boolean,
+  currentAdjustmentIds: ReadonlySet<string>,
+) {
+  return {
+    grossAmountXof: component.grossAmountXof ?? component.amountXof,
+    netAmountXof: component.amountXof,
+    adjustments: component.adjustments
+      .filter((adjustment) => currentAdjustmentIds.has(adjustment.id))
+      .map((adjustment) => ({
+        id: adjustment.id,
+        label: adjustment.label,
+        effect: adjustment.effect,
+        amountXof: adjustment.amountXof,
+        reason: adjustment.reason,
+      })),
+    // A funded service remains selected at net zero, an adjustment-only charge
+    // remains selected at zero gross, and only a zero-gross/zero-net retired row
+    // is omitted from the active services.
+    selected: invoiceComponentIsSelected(component, profileManaged),
+  };
+}
+
+export function approvedAccountBillingBridge(
+  invoices: readonly {
+    status: string;
+    totalAmount: number;
+    amountPaid: number;
+    billingProfile?: {
+      grossChargesXof: number;
+      netBilledXof: number;
+    } | null;
+  }[],
+  outstandingXof: number,
+) {
+  const approved = invoices.filter((invoice) => invoice.status !== "void");
+  const grossChargesXof = approved.reduce(
+    (total, invoice) =>
+      total +
+      (invoice.billingProfile
+        ? invoice.billingProfile.grossChargesXof
+        : Math.max(0, invoice.totalAmount)),
+    0,
+  );
+  const netBillXof = approved.reduce(
+    (total, invoice) => total + invoice.totalAmount,
+    0,
+  );
+  return {
+    grossChargesXof,
+    adjustmentsXof: netBillXof - grossChargesXof,
+    netBillXof,
+    paidXof: approved.reduce(
+      (total, invoice) => total + Math.max(0, invoice.amountPaid),
+      0,
+    ),
+    outstandingXof,
+  };
+}
+
 /** Roll up already-derived account positions without netting one student's credit against another. */
 function aggregateAccountReport(
   summaries: readonly AccountBalanceSummary[],
@@ -2954,9 +3037,44 @@ export class FinanceService {
     };
   }
 
+  private pendingFinanceChangeLabel(kind: string, afterJson: unknown) {
+    const after =
+      afterJson && typeof afterJson === "object" && !Array.isArray(afterJson)
+        ? (afterJson as Record<string, unknown>)
+        : {};
+    const requestedLabel =
+      typeof after.label === "string" && after.label.trim()
+        ? after.label.trim()
+        : null;
+    switch (kind) {
+      case "billing_profile":
+        return "Annual profile change";
+      case "payment_plan":
+        return ["add_component", "remove_component"].includes(
+          String(after.mode ?? ""),
+        )
+          ? "Annual charge selection"
+          : "Payment plan change";
+      case "custom_charge":
+        return typeof after.description === "string" && after.description.trim()
+          ? `New charge: ${after.description.trim()}`
+          : "New custom charge";
+      case "charge_removal":
+        return "Charge removal";
+      case "discount":
+        return requestedLabel ? `Discount: ${requestedLabel}` : "New discount";
+      case "scholarship":
+        return requestedLabel
+          ? `Scholarship: ${requestedLabel}`
+          : "New scholarship";
+      default:
+        return "Account change";
+    }
+  }
+
   /** All student accounts with derived balances + status. Powers the standalone billing admin. */
   async listStudentAccounts() {
-    const [students, pendingPlanChanges] = await Promise.all([
+    const [students, pendingChanges] = await Promise.all([
       this.prisma.student.findMany({
         orderBy: { studentNo: "asc" },
         include: {
@@ -2968,22 +3086,49 @@ export class FinanceService {
             include: {
               plan: { include: { installments: true } },
               componentOverrides: true,
+              billingProfile: {
+                select: {
+                  id: true,
+                  status: true,
+                  academicYearLabel: true,
+                  grossChargesXof: true,
+                  netBilledXof: true,
+                },
+              },
             },
           },
         },
       }),
       this.prisma.approvalRequest.findMany({
         where: {
-          kind: "payment_plan",
+          kind: {
+            in: [
+              "payment_plan",
+              "billing_profile",
+              "custom_charge",
+              "charge_removal",
+              "discount",
+              "scholarship",
+            ],
+          },
           status: "pending",
-          targetType: "Invoice",
         },
-        select: { targetId: true },
+        select: {
+          id: true,
+          kind: true,
+          targetId: true,
+          reason: true,
+          academicYearLabel: true,
+          createdAt: true,
+          afterJson: true,
+        },
       }),
     ]);
     const pendingPlanInvoiceIds = new Set(
-      pendingPlanChanges.flatMap((request) =>
-        request.targetId ? [request.targetId] : [],
+      pendingChanges.flatMap((request) =>
+        request.kind === "payment_plan" && request.targetId
+          ? [request.targetId]
+          : [],
       ),
     );
     return students.flatMap((s) => {
@@ -3022,6 +3167,34 @@ export class FinanceService {
           : summary.outstandingXof > 0
             ? "due"
             : "paid";
+      const studentPendingChanges = pendingChanges
+        .filter((request) => {
+          const after = request.afterJson as Record<string, unknown>;
+          const targetsStudent =
+            request.targetId === s.id ||
+            after.studentId === s.id ||
+            (Array.isArray(after.studentIds) &&
+              after.studentIds.includes(s.id));
+          const targetsInvoice = s.invoices.some(
+            (invoice) => invoice.id === request.targetId,
+          );
+          return targetsStudent || targetsInvoice;
+        })
+        .map((request) => ({
+          id: request.id,
+          kind: request.kind,
+          label: this.pendingFinanceChangeLabel(
+            request.kind,
+            request.afterJson,
+          ),
+          reason: request.reason,
+          academicYearLabel: request.academicYearLabel,
+          requestedAt: request.createdAt,
+        }));
+      const billingBridge = approvedAccountBillingBridge(
+        s.invoices,
+        summary.outstandingXof,
+      );
       return [
         {
           id: s.id,
@@ -3040,6 +3213,7 @@ export class FinanceService {
           overdue: summary.overdueXof > 0,
           status,
           summary,
+          billingBridge,
           recordStatus: s.recordStatus,
           hasActiveHold: s.holds.length > 0,
           activeHoldCount: s.holds.length,
@@ -3058,6 +3232,10 @@ export class FinanceService {
           feeScheduleRevision: primary?.feeScheduleRevision ?? null,
           planType: primary ? invoicePlanType(primary) : null,
           specialAccount,
+          pendingChanges: studentPendingChanges,
+          profileManaged: s.invoices.some(
+            (invoice) => invoice.billingProfile?.status === "active",
+          ),
         },
       ];
     });
@@ -3071,7 +3249,7 @@ export class FinanceService {
     });
     if (!student) throw new NotFoundException("Student not found");
 
-    const [invoices, activeHolds, pendingPlanChanges, billingProfile] =
+    const [invoices, activeHolds, pendingChanges, billingProfile] =
       await Promise.all([
         this.prisma.invoice.findMany({
           where: { studentId },
@@ -3102,10 +3280,24 @@ export class FinanceService {
             },
             paymentSubmissions: { orderBy: { createdAt: "desc" } },
             components: {
-              include: { allocations: true },
+              include: {
+                allocations: true,
+                adjustments: { orderBy: { createdAt: "asc" } },
+              },
               orderBy: { kind: "asc" },
             },
             componentOverrides: true,
+            adjustments: { orderBy: { createdAt: "asc" } },
+            billingProfile: {
+              select: {
+                id: true,
+                status: true,
+                revision: true,
+                academicYearLabel: true,
+                grossChargesXof: true,
+                netBilledXof: true,
+              },
+            },
           },
         }),
         this.prisma.studentHold.findMany({
@@ -3114,11 +3306,27 @@ export class FinanceService {
         }),
         this.prisma.approvalRequest.findMany({
           where: {
-            kind: "payment_plan",
+            kind: {
+              in: [
+                "payment_plan",
+                "billing_profile",
+                "custom_charge",
+                "charge_removal",
+                "discount",
+                "scholarship",
+              ],
+            },
             status: "pending",
-            targetType: "Invoice",
           },
-          select: { targetId: true },
+          select: {
+            id: true,
+            kind: true,
+            targetId: true,
+            reason: true,
+            academicYearLabel: true,
+            createdAt: true,
+            afterJson: true,
+          },
         }),
         this.billingProfiles.get(studentId),
       ]);
@@ -3155,9 +3363,24 @@ export class FinanceService {
     const derived = derivedInstallmentsById(position);
     const payableTarget = selectOldestPayableTarget(invoices, position);
     const pendingPlanInvoiceIds = new Set(
-      pendingPlanChanges.flatMap((request) =>
-        request.targetId ? [request.targetId] : [],
+      pendingChanges.flatMap((request) =>
+        request.kind === "payment_plan" && request.targetId
+          ? [request.targetId]
+          : [],
       ),
+    );
+    const targetsStudent = (request: (typeof pendingChanges)[number]) => {
+      const after = request.afterJson as Record<string, unknown>;
+      return (
+        request.targetId === studentId ||
+        after.studentId === studentId ||
+        (Array.isArray(after.studentIds) &&
+          after.studentIds.includes(studentId))
+      );
+    };
+    const pendingProfileChanges = pendingChanges.filter(
+      (request) =>
+        request.kind === "billing_profile" && targetsStudent(request),
     );
     const specialAccount = deriveAccountSpecialStatus(
       invoices,
@@ -3183,7 +3406,28 @@ export class FinanceService {
         remainingXof: position.summary.outstandingXof,
       },
       summary: position.summary,
+      billingBridge: approvedAccountBillingBridge(
+        invoices,
+        position.summary.outstandingXof,
+      ),
       billingProfile,
+      pendingChanges: pendingChanges
+        .filter(
+          (request) =>
+            targetsStudent(request) ||
+            invoices.some((invoice) => invoice.id === request.targetId),
+        )
+        .map((request) => ({
+          id: request.id,
+          kind: request.kind,
+          label: this.pendingFinanceChangeLabel(
+            request.kind,
+            request.afterJson,
+          ),
+          reason: request.reason,
+          academicYearLabel: request.academicYearLabel,
+          requestedAt: request.createdAt,
+        })),
       specialAccount,
       payableTarget,
       activeHolds: activeHolds.map((hold) => ({
@@ -3202,6 +3446,28 @@ export class FinanceService {
         const latestCatalog = inv.academicYearLabel
           ? (latestScheduleByYear.get(inv.academicYearLabel)?.components ?? [])
           : [];
+        const profileManaged = inv.billingProfile?.status === "active";
+        const invoiceAdjustments = inv.adjustments ?? [];
+        const adjustmentPrefix = inv.billingProfile
+          ? `billing-profile:${inv.billingProfile.id}:revision:`
+          : null;
+        const currentAdjustmentReference = inv.billingProfile
+          ? `${adjustmentPrefix}${inv.billingProfile.revision}`
+          : null;
+        const hasRevisionTaggedAdjustments =
+          adjustmentPrefix !== null &&
+          invoiceAdjustments.some((adjustment) =>
+            adjustment.sourceReference?.startsWith(adjustmentPrefix),
+          );
+        const currentAdjustmentIds = new Set(
+          invoiceAdjustments
+            .filter(
+              (adjustment) =>
+                !hasRevisionTaggedAdjustments ||
+                adjustment.sourceReference === currentAdjustmentReference,
+            )
+            .map((adjustment) => adjustment.id),
+        );
         type AvailableComponent = {
           id: string | null;
           key: string;
@@ -3227,7 +3493,12 @@ export class FinanceService {
               annualAmountXof: component.annualAmountXof,
               defaultSelected: component.defaultSelected,
               sortOrder: component.sortOrder,
-              selected: (selectedByKey.get(component.key)?.amountXof ?? 0) > 0,
+              selected: selectedByKey.has(component.key)
+                ? invoiceComponentIsSelected(
+                    selectedByKey.get(component.key)!,
+                    profileManaged,
+                  )
+                : false,
               invoiceComponentId: selectedByKey.get(component.key)?.id ?? null,
               allocatedXof: (
                 selectedByKey.get(component.key)?.allocations ?? []
@@ -3247,10 +3518,12 @@ export class FinanceService {
             label: component.label || displayFeeComponentLabel(component.kind),
             description: null,
             costCenterCode: component.costCenterCode,
-            annualAmountXof: component.amountXof,
+            annualAmountXof: profileManaged
+              ? (component.grossAmountXof ?? component.amountXof)
+              : component.amountXof,
             defaultSelected: false,
             sortOrder: 999,
-            selected: true,
+            selected: invoiceComponentIsSelected(component, profileManaged),
             invoiceComponentId: component.id,
             allocatedXof: component.allocations.reduce(
               (sum, allocation) =>
@@ -3269,10 +3542,36 @@ export class FinanceService {
           feeScheduleId: inv.feeScheduleId,
           feeScheduleRevision: inv.feeScheduleRevision,
           planType,
+          profileManaged,
+          billingProfileId: inv.billingProfile?.id ?? null,
           isIndividualPlanOverride: planType === "individual_override",
           hasIndividualComponentOverride:
             (inv.componentOverrides?.length ?? 0) > 0,
           hasPendingPlanChange: pendingPlanInvoiceIds.has(inv.id),
+          pendingChanges: [
+            ...pendingChanges.filter(
+              (request) =>
+                (request.kind === "payment_plan" ||
+                  request.kind === "charge_removal") &&
+                request.targetId === inv.id,
+            ),
+            ...(profileManaged
+              ? pendingProfileChanges.filter(
+                  (request) =>
+                    request.academicYearLabel === inv.academicYearLabel,
+                )
+              : []),
+          ].map((request) => ({
+            id: request.id,
+            kind: request.kind,
+            label: this.pendingFinanceChangeLabel(
+              request.kind,
+              request.afterJson,
+            ),
+            reason: request.reason,
+            academicYearLabel: request.academicYearLabel,
+            requestedAt: request.createdAt,
+          })),
           total: inv.totalAmount,
           paid: inv.amountPaid,
           balance: inv.status === "void" ? 0 : inv.totalAmount - inv.amountPaid,
@@ -3336,8 +3635,12 @@ export class FinanceService {
                 component.label || displayFeeComponentLabel(component.kind),
               costCenterCode: component.costCenterCode,
               amountXof: component.amountXof,
+              ...invoiceComponentBillingBridge(
+                component,
+                profileManaged,
+                currentAdjustmentIds,
+              ),
               allocatedXof,
-              selected: component.amountXof > 0,
               scheduleComponentId: component.scheduleComponentId,
             };
           }),
@@ -4125,7 +4428,7 @@ export class FinanceService {
     void input;
     void actorId;
     throw new BadRequestException(
-      "Expense creation requires an administrator approval request",
+      "Expense creation requires a Director approval request",
     );
   }
 
@@ -4146,7 +4449,7 @@ export class FinanceService {
     void patch;
     void actorId;
     throw new BadRequestException(
-      "Expense corrections require an administrator approval request",
+      "Expense corrections require a Director approval request",
     );
   }
 

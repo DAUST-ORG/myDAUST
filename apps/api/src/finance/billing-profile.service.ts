@@ -665,7 +665,7 @@ export class BillingProfileService {
       }
       if (definition.calculation === "manual" && !definition.requiresApproval) {
         throw new BadRequestException(
-          `${definition.key} is manual and must require approval`,
+          `${definition.key} is manual and must require Director approval`,
         );
       }
     }
@@ -731,6 +731,77 @@ export class BillingProfileService {
     return this.valueFingerprint(state);
   }
 
+  private catalogInputMatchesState(
+    state: Awaited<ReturnType<BillingProfileService["catalogState"]>>,
+    input: BillingCatalogChangeInput,
+  ) {
+    const serviceKey = (row: { kind: string; code: string }) =>
+      `${row.kind}:${row.code}`;
+    const currentServices = new Map(
+      state.serviceOptions.map((option) => [serviceKey(option), option]),
+    );
+    const submittedServiceKeys = new Set(input.serviceOptions.map(serviceKey));
+    for (const submitted of input.serviceOptions) {
+      const current = currentServices.get(serviceKey(submitted));
+      if (
+        !current ||
+        current.label !== submitted.label ||
+        current.description !== (submitted.description ?? null) ||
+        current.calculation !== submitted.calculation ||
+        current.amountXof !== (submitted.amountXof ?? null) ||
+        current.percentageBasisPoints !==
+          (submitted.percentageBasisPoints ?? null) ||
+        current.basisServiceKind !== (submitted.basisServiceKind ?? null) ||
+        current.costCenterCode !== submitted.costCenterCode ||
+        current.refundable !== submitted.refundable ||
+        current.defaultSelected !== submitted.defaultSelected ||
+        current.active !== submitted.active ||
+        current.sortOrder !== submitted.sortOrder
+      ) {
+        return false;
+      }
+    }
+    for (const current of state.serviceOptions) {
+      if (submittedServiceKeys.has(serviceKey(current))) continue;
+      if (current.active || current.defaultSelected) return false;
+    }
+
+    const currentDefinitions = new Map(
+      state.adjustmentDefinitions.map((definition) => [
+        definition.key,
+        definition,
+      ]),
+    );
+    const submittedDefinitionKeys = new Set(
+      input.adjustmentDefinitions.map((definition) => definition.key),
+    );
+    for (const submitted of input.adjustmentDefinitions) {
+      const current = currentDefinitions.get(submitted.key);
+      if (
+        !current ||
+        current.label !== submitted.label ||
+        current.description !== (submitted.description ?? null) ||
+        current.basis !== submitted.basis ||
+        current.calculation !== submitted.calculation ||
+        current.stacking !== submitted.stacking ||
+        current.effect !== submitted.effect ||
+        current.percentageBasisPoints !==
+          (submitted.percentageBasisPoints ?? null) ||
+        current.fixedAmountXof !== (submitted.fixedAmountXof ?? null) ||
+        current.requiresApproval !== submitted.requiresApproval ||
+        current.active !== submitted.active ||
+        current.sortOrder !== submitted.sortOrder
+      ) {
+        return false;
+      }
+    }
+    for (const current of state.adjustmentDefinitions) {
+      if (submittedDefinitionKeys.has(current.key)) continue;
+      if (current.active) return false;
+    }
+    return true;
+  }
+
   private valueFingerprint(value: unknown) {
     const json = JSON.stringify(value, (_key, item: unknown) =>
       item instanceof Date ? item.toISOString() : item,
@@ -768,6 +839,11 @@ export class BillingProfileService {
     ) {
       throw new BadRequestException(
         "The billing catalog changed; refresh it before requesting another update",
+      );
+    }
+    if (this.catalogInputMatchesState(before, input)) {
+      throw new BadRequestException(
+        "No change requested: the billing catalog already has these services and adjustment definitions.",
       );
     }
     const schedule = await this.prisma.feeSchedule.findFirst({
@@ -1354,6 +1430,115 @@ export class BillingProfileService {
         "The billing profile changed; refresh it before requesting another update",
       );
     }
+    if (profile) {
+      const revisionReference = `billing-profile:${profile.id}:revision:${profile.revision}`;
+      const hasRevisionTags = profile.invoiceAdjustments.some((adjustment) =>
+        adjustment.sourceReference?.startsWith(
+          `billing-profile:${profile.id}:revision:`,
+        ),
+      );
+      const currentAdjustmentIds = new Set(
+        profile.invoiceAdjustments
+          .filter(
+            (adjustment) =>
+              !hasRevisionTags ||
+              adjustment.sourceReference === revisionReference,
+          )
+          .map((adjustment) => adjustment.id),
+      );
+      const awardByAdjustmentId = new Map(
+        profile.awards.flatMap((award) =>
+          award.invoiceAdjustmentId &&
+          currentAdjustmentIds.has(award.invoiceAdjustmentId)
+            ? [[award.invoiceAdjustmentId, award] as const]
+            : [],
+        ),
+      );
+      const currentAdjustments = profile.invoiceAdjustments
+        .filter(
+          (adjustment) =>
+            !hasRevisionTags ||
+            adjustment.sourceReference === revisionReference,
+        )
+        .map((adjustment) => ({
+          definitionId: adjustment.definitionId,
+          code: adjustment.code,
+          label: adjustment.label,
+          source: adjustment.source,
+          basis: adjustment.basis,
+          calculation: adjustment.calculation,
+          stacking: adjustment.stacking,
+          effect: adjustment.effect,
+          requiresApproval:
+            awardByAdjustmentId.get(adjustment.id)?.requiresApproval ?? true,
+          basisAmountXof: adjustment.basisAmountXof,
+          percentageBasisPoints: adjustment.percentageBasisPoints,
+          amountXof: adjustment.amountXof,
+          reason: adjustment.reason,
+          isAward: awardByAdjustmentId.has(adjustment.id),
+        }))
+        .sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        );
+      const proposedAdjustments = plan.adjustments
+        .map((adjustment) => ({
+          definitionId: adjustment.definitionId,
+          code: adjustment.code,
+          label: adjustment.label,
+          source: adjustment.source,
+          basis: adjustment.basis,
+          calculation: adjustment.calculation,
+          stacking: adjustment.stacking,
+          effect: adjustment.effect,
+          requiresApproval: adjustment.requiresApproval,
+          basisAmountXof: adjustment.basisAmountXof,
+          percentageBasisPoints: adjustment.percentageBasisPoints,
+          amountXof: adjustment.amountXof,
+          reason: adjustment.reason,
+          isAward: adjustment.isAward,
+        }))
+        .sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        );
+      const currentSelections = profile.selections
+        .map((selection) => ({
+          kind: selection.kind,
+          serviceOptionId: selection.serviceOptionId,
+          optionCode: selection.optionCode,
+          percentageBasisOptionId: selection.percentageBasisOptionId,
+          percentageBasisOptionCode: selection.percentageBasisOptionCode,
+          percentageBasisServiceKind: selection.percentageBasisServiceKind,
+          label: selection.label,
+          amountXof: selection.amountXof,
+          refundable: selection.refundable,
+        }))
+        .sort((left, right) => left.kind.localeCompare(right.kind));
+      const proposedSelections = plan.selections
+        .map((selection) => ({
+          kind: selection.kind,
+          serviceOptionId: selection.serviceOptionId,
+          optionCode: selection.optionCode,
+          percentageBasisOptionId: selection.percentageBasisOptionId,
+          percentageBasisOptionCode: selection.percentageBasisOptionCode,
+          percentageBasisServiceKind: selection.percentageBasisServiceKind,
+          label: selection.label,
+          amountXof: selection.amountXof,
+          refundable: selection.refundable,
+        }))
+        .sort((left, right) => left.kind.localeCompare(right.kind));
+      if (
+        profile.grossChargesXof === plan.grossChargesXof &&
+        profile.netBilledXof === plan.netBilledXof &&
+        JSON.stringify(currentSelections) ===
+          JSON.stringify(proposedSelections) &&
+        JSON.stringify(currentAdjustments) ===
+          JSON.stringify(proposedAdjustments)
+      ) {
+        throw new BadRequestException(
+          "No change requested: the Annual profile already has these services, awards, and adjustments.",
+        );
+      }
+    }
     return {
       before: profile,
       baseRevision,
@@ -1362,6 +1547,29 @@ export class BillingProfileService {
         academicYearLabel: plan.academicYearLabel,
         preparedGrossChargesXof: plan.grossChargesXof,
         preparedNetBilledXof: plan.netBilledXof,
+        preparedSelections: plan.selections.map((selection) => ({
+          kind: selection.kind,
+          optionCode: selection.optionCode,
+          percentageBasisOptionCode: selection.percentageBasisOptionCode,
+          percentageBasisServiceKind: selection.percentageBasisServiceKind,
+          label: selection.label,
+          amountXof: selection.amountXof,
+          refundable: selection.refundable,
+        })),
+        preparedAdjustments: plan.adjustments.map((adjustment) => ({
+          label: adjustment.label,
+          source: adjustment.source,
+          basis: adjustment.basis,
+          calculation: adjustment.calculation,
+          stacking: adjustment.stacking,
+          effect: adjustment.effect,
+          requiresApproval: adjustment.requiresApproval,
+          basisAmountXof: adjustment.basisAmountXof,
+          percentageBasisPoints: adjustment.percentageBasisPoints,
+          amountXof: adjustment.amountXof,
+          reason: adjustment.reason,
+          isAward: adjustment.isAward,
+        })),
         feeScheduleId: plan.feeScheduleId,
         feeScheduleRevision: plan.feeScheduleRevision,
         feeScheduleFingerprintSha256: plan.feeScheduleFingerprintSha256,
@@ -1382,7 +1590,7 @@ export class BillingProfileService {
       where: {
         studentId_academicYearLabel: { studentId, academicYearLabel },
       },
-      select: { revision: true },
+      include: { selections: true, awards: true, invoiceAdjustments: true },
     });
     if ((profile?.revision ?? 0) !== baseRevision) {
       return "The annual billing profile changed after this request was submitted";
@@ -1396,7 +1604,106 @@ export class BillingProfileService {
       change,
       "scholarship",
     );
-    return this.preparedPlanStaleReason(plan, change);
+    const preparedReason = this.preparedPlanStaleReason(plan, change);
+    if (preparedReason || !profile) return preparedReason;
+    const revisionReference = `billing-profile:${profile.id}:revision:${profile.revision}`;
+    const hasRevisionTags = profile.invoiceAdjustments.some((adjustment) =>
+      adjustment.sourceReference?.startsWith(
+        `billing-profile:${profile.id}:revision:`,
+      ),
+    );
+    const normalizedAdjustments = (
+      rows: readonly {
+        definitionId: string | null;
+        code: string;
+        label: string;
+        source: string;
+        basis: string;
+        calculation: string;
+        stacking: string;
+        effect: string;
+        requiresApproval?: boolean;
+        basisAmountXof: number | null;
+        percentageBasisPoints: number | null;
+        amountXof: number;
+        reason: string | null;
+        isAward?: boolean;
+      }[],
+    ) =>
+      rows
+        .map((row) => ({
+          definitionId: row.definitionId,
+          code: row.code,
+          label: row.label,
+          source: row.source,
+          basis: row.basis,
+          calculation: row.calculation,
+          stacking: row.stacking,
+          effect: row.effect,
+          requiresApproval: row.requiresApproval ?? false,
+          basisAmountXof: row.basisAmountXof,
+          percentageBasisPoints: row.percentageBasisPoints,
+          amountXof: row.amountXof,
+          reason: row.reason,
+          isAward: row.isAward ?? false,
+        }))
+        .sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        );
+    const currentSelections = profile.selections
+      .map((selection) => ({
+        kind: selection.kind,
+        serviceOptionId: selection.serviceOptionId,
+        optionCode: selection.optionCode,
+        percentageBasisOptionId: selection.percentageBasisOptionId,
+        percentageBasisOptionCode: selection.percentageBasisOptionCode,
+        percentageBasisServiceKind: selection.percentageBasisServiceKind,
+        label: selection.label,
+        amountXof: selection.amountXof,
+        refundable: selection.refundable,
+      }))
+      .sort((left, right) => left.kind.localeCompare(right.kind));
+    const proposedSelections = plan.selections
+      .map((selection) => ({
+        kind: selection.kind,
+        serviceOptionId: selection.serviceOptionId,
+        optionCode: selection.optionCode,
+        percentageBasisOptionId: selection.percentageBasisOptionId,
+        percentageBasisOptionCode: selection.percentageBasisOptionCode,
+        percentageBasisServiceKind: selection.percentageBasisServiceKind,
+        label: selection.label,
+        amountXof: selection.amountXof,
+        refundable: selection.refundable,
+      }))
+      .sort((left, right) => left.kind.localeCompare(right.kind));
+    const currentRows = profile.invoiceAdjustments.filter(
+      (adjustment) =>
+        !hasRevisionTags || adjustment.sourceReference === revisionReference,
+    );
+    const currentIds = new Set(currentRows.map((adjustment) => adjustment.id));
+    const awardsByAdjustmentId = new Map(
+      profile.awards.flatMap((award) =>
+        award.invoiceAdjustmentId && currentIds.has(award.invoiceAdjustmentId)
+          ? [[award.invoiceAdjustmentId, award] as const]
+          : [],
+      ),
+    );
+    const currentAdjustments = normalizedAdjustments(
+      currentRows.map((adjustment) => ({
+        ...adjustment,
+        requiresApproval:
+          awardsByAdjustmentId.get(adjustment.id)?.requiresApproval ?? true,
+        isAward: awardsByAdjustmentId.has(adjustment.id),
+      })),
+    );
+    const proposedAdjustments = normalizedAdjustments(plan.adjustments);
+    return profile.grossChargesXof === plan.grossChargesXof &&
+      profile.netBilledXof === plan.netBilledXof &&
+      JSON.stringify(currentSelections) ===
+        JSON.stringify(proposedSelections) &&
+      JSON.stringify(currentAdjustments) === JSON.stringify(proposedAdjustments)
+      ? "The Annual profile already has these services, awards, and adjustments; there is no change to apply"
+      : null;
   }
 
   async applyApprovedChange(

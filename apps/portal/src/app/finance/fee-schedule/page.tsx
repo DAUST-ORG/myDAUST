@@ -260,7 +260,7 @@ export default function FeeSchedulePage() {
       setNote(
         result.applied
           ? "Fee revision approved and applied. Standard student totals and payment dates now use this package."
-          : "Fee and payment-schedule revision submitted for administrator approval. Student accounts remain unchanged until approval.",
+          : "Fee and payment-schedule revision submitted for Director approval. Student accounts remain unchanged until Director approval.",
       );
       if (result.applied) load();
     } catch (caught) {
@@ -472,7 +472,7 @@ export default function FeeSchedulePage() {
           <span>
             This is an institution-wide change for{" "}
             <strong>{year || "the active year"}</strong>. A bursar submission
-            requires administrator approval.
+            requires Director approval.
           </span>
         </div>
         {modalError && (
@@ -658,7 +658,7 @@ export default function FeeSchedulePage() {
 
         <Field
           label="Reason for revision"
-          hint="Included in the administrator approval record with the before-and-after fees and dates."
+          hint="Included in the Director approval record with the before-and-after fees and dates."
         >
           <textarea
             value={reason}

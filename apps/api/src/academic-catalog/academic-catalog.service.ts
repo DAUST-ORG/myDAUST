@@ -79,6 +79,28 @@ function json(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
+function approvalContent(value: {
+  yearLabel: string;
+  startsOn: string | null;
+  endsOn: string | null;
+  defaultLevels: unknown;
+  defaultStandingRules: unknown;
+  notYetGradedStanding: unknown;
+  programs: unknown;
+  activateYear: boolean;
+}) {
+  return JSON.stringify({
+    yearLabel: value.yearLabel,
+    startsOn: value.startsOn,
+    endsOn: value.endsOn,
+    defaultLevels: value.defaultLevels,
+    defaultStandingRules: value.defaultStandingRules,
+    notYetGradedStanding: value.notYetGradedStanding,
+    programs: value.programs,
+    activateYear: value.activateYear,
+  });
+}
+
 function levels(value: unknown): AcademicCatalogLevel[] {
   return Array.isArray(value) ? (value as AcademicCatalogLevel[]) : [];
 }
@@ -614,6 +636,14 @@ export class AcademicCatalogService {
           where: { academicYearId, status: "approved" },
           orderBy: { revision: "desc" },
         });
+        if (
+          approved &&
+          approvalContent(this.present(approved)) === approvalContent(parsed)
+        ) {
+          throw new BadRequestException(
+            "No change requested: this academic catalog already matches the approved catalog.",
+          );
+        }
         const snapshot = {
           id: draft.id,
           academicYearId,

@@ -1698,6 +1698,7 @@ model Section {
   enrollments         Enrollment[]
   assignments         Assignment[]
   materials           SectionMaterial[]
+  materialFolders     SectionMaterialFolder[]
   posts               SectionPost[]
   // --- SIS redesign ---
   // Which scale this section is graded on. Null = the institution default (letter).
@@ -2180,20 +2181,38 @@ model FeeItem {
 // --- Track D additions: course materials/posts, SA boards, innovation global tasks. ---
 
 model SectionMaterial {
-  id        String           @id @default(uuid())
+  id        String                 @id @default(uuid())
   sectionId String
-  section   Section          @relation(fields: [sectionId], references: [id])
+  section   Section                @relation(fields: [sectionId], references: [id])
+  folderId  String?
+  folder    SectionMaterialFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
   title     String
-  kind      String           @default("Document") // Document | Slides | Video | Link
+  kind      String                 @default("Document") // Document | Slides | Video | Link
   // Taxonomy the course-materials screens group by.
-  category  MaterialCategory @default(resources)
+  category  MaterialCategory       @default(resources)
   fileUrl   String?
   fileName  String?
-  published Boolean          @default(true)
-  sortOrder Int              @default(0)
-  createdAt DateTime         @default(now())
+  published Boolean                @default(true)
+  sortOrder Int                    @default(0)
+  createdAt DateTime               @default(now())
 
   @@index([sectionId, sortOrder])
+  @@index([folderId, sortOrder])
+}
+
+model SectionMaterialFolder {
+  id             String            @id @default(uuid())
+  sectionId      String
+  section        Section           @relation(fields: [sectionId], references: [id])
+  category       MaterialCategory
+  name           String
+  normalizedName String
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  materials      SectionMaterial[]
+
+  @@unique([sectionId, category, normalizedName])
+  @@index([sectionId, category, name])
 }
 
 model SectionPost {

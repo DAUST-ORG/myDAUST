@@ -133,35 +133,38 @@ function paymentMethodLabel(method: StaffRecordedPaymentMethod): string {
   return method === "wave" ? "Wave" : "Cash";
 }
 
-function BalanceCells({ row }: { row: StudentAccountRow }) {
+function AccountBridge({ row }: { row: StudentAccountRow }) {
   const summary = resolveAccountSummary(row.summary, {
     balanceXof: row.remaining ?? row.remainingXof ?? row.balance,
     billedXof: row.billed,
   });
+  const bridge = row.billingBridge ?? {
+    grossChargesXof: row.billed,
+    adjustmentsXof: 0,
+    netBillXof: row.billed,
+    paidXof: row.paid,
+    outstandingXof: summary.outstandingXof,
+  };
   return (
-    <>
-      <td
-        style={{
-          textAlign: "right",
-          fontWeight: 600,
-          fontVariantNumeric: "tabular-nums",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {formatXof(row.billed)}
-      </td>
-      <td style={{ textAlign: "right" }}>
-        <span style={{ display: "grid", gap: 2, justifyItems: "end" }}>
-          <AccountBalanceText summary={summary} style={{ fontWeight: 700 }} />
-          {summary.standing === "overdue" && (
-            <AccountStatusLine summary={summary} />
-          )}
-        </span>
-      </td>
-      <td style={{ textAlign: "right" }}>
-        <AccountStandingBadge summary={summary} />
-      </td>
-    </>
+    <span
+      style={{
+        display: "grid",
+        gap: 2,
+        justifyItems: "end",
+        fontSize: 11.5,
+        whiteSpace: "nowrap",
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
+      <span>Gross {formatXof(bridge.grossChargesXof)}</span>
+      <span>Adjustments {formatXof(bridge.adjustmentsXof)}</span>
+      <span>Net {formatXof(bridge.netBillXof)}</span>
+      <span>Paid {formatXof(bridge.paidXof)}</span>
+      <strong>Outstanding {formatXof(bridge.outstandingXof)}</strong>
+      {summary.standing === "overdue" && (
+        <AccountStatusLine summary={summary} />
+      )}
+    </span>
   );
 }
 
@@ -403,12 +406,14 @@ export default function FinanceAccounts() {
       if (!invoice) throw new Error("That billing no longer exists.");
       if (invoice.hasPendingPlanChange) {
         throw new Error(
-          "A payment-plan change for this billing is already awaiting administrator approval.",
+          "A payment-plan change for this billing is already awaiting Director approval.",
         );
       }
-      const activeComponents = (invoice.components ?? []).filter(
-        (component) => component.selected && component.amountXof > 0,
-      );
+      const activeComponents = invoice.profileManaged
+        ? []
+        : (invoice.components ?? []).filter(
+            (component) => component.selected && component.amountXof > 0,
+          );
       const componentSplits = new Map(
         activeComponents.map((component) => [
           component.id,
@@ -522,20 +527,27 @@ export default function FinanceAccounts() {
     draft !== null &&
     draft.studentId !== "" &&
     draft.rows.length > 0 &&
-    draft.rows.every(
-      (r) =>
+    draft.rows.every((r) => {
+      const current = draft.invoice?.installments.find(
+        (installment) => installment.id === r.id,
+      );
+      return (
         r.dueDate !== "" &&
-        r.amountXof > 0 &&
         r.amountXof >= (r.amountPaid ?? 0) &&
-        r.components.every((component) => component.amountXof >= 0),
-    ) &&
-    (draft.rows[0]?.components ?? []).every(
-      (component) =>
-        (componentTotals.get(component.invoiceComponentId) ?? 0) > 0 &&
-        (componentTotals.get(component.invoiceComponentId) ?? 0) >=
-          component.allocatedXof,
-    ) &&
-    total > 0 &&
+        (draft.invoice?.profileManaged
+          ? current !== undefined && r.amountXof === current.amountDue
+          : r.amountXof > 0 &&
+            r.components.every((component) => component.amountXof >= 0))
+      );
+    }) &&
+    (draft.invoice?.profileManaged ||
+      (draft.rows[0]?.components ?? []).every(
+        (component) =>
+          (componentTotals.get(component.invoiceComponentId) ?? 0) > 0 &&
+          (componentTotals.get(component.invoiceComponentId) ?? 0) >=
+            component.allocatedXof,
+      )) &&
+    (draft.invoice?.profileManaged || total > 0) &&
     (!draft.invoiceId || requestReason.trim().length > 0);
 
   async function save() {
@@ -553,7 +565,7 @@ export default function FinanceAccounts() {
               dueDate: r.dueDate,
               amountDue: r.amountXof,
               label: r.label,
-              ...(r.components.length
+              ...(!draft.invoice?.profileManaged && r.components.length
                 ? {
                     components: r.components.map((component) => ({
                       invoiceComponentId: component.invoiceComponentId,
@@ -567,7 +579,7 @@ export default function FinanceAccounts() {
         setNote(
           result.applied
             ? "Payment-plan change approved and applied."
-            : "Payment-plan change submitted for administrator approval.",
+            : "Payment-plan change submitted for Director approval.",
         );
       } else {
         const result = await assignStandardPackage(draft.studentId);
@@ -598,7 +610,7 @@ export default function FinanceAccounts() {
       setNote(
         result.applied
           ? "The approved standard plan was restored."
-          : "Restore-to-standard request submitted for administrator approval.",
+          : "Restore-to-standard request submitted for Director approval.",
       );
       setDraft(null);
       load();
@@ -676,8 +688,9 @@ export default function FinanceAccounts() {
                   <th style={{ width: 140 }}>Billing</th>
                   <th>Student</th>
                   <th style={{ width: 230 }}>Plan</th>
-                  <th style={{ textAlign: "right", width: 140 }}>Billed</th>
-                  <th style={{ textAlign: "right", width: 140 }}>Remaining</th>
+                  <th style={{ textAlign: "right", width: 210 }}>
+                    Approved account bridge
+                  </th>
                   <th style={{ textAlign: "right", width: 340 }}>Actions</th>
                 </tr>
               </thead>
@@ -708,7 +721,9 @@ export default function FinanceAccounts() {
                           >
                             <Badge tone="warning">Individual plan</Badge>
                             {r.specialAccount?.hasPendingPlanChange && (
-                              <Badge tone="info">Approval pending</Badge>
+                              <Badge tone="info">
+                                Director approval pending
+                              </Badge>
                             )}
                           </span>
                         ) : r.packageType === "standard_full" ? (
@@ -729,31 +744,45 @@ export default function FinanceAccounts() {
                                 : ""}
                             </span>
                             {r.specialAccount?.hasPendingPlanChange && (
-                              <Badge tone="info">Approval pending</Badge>
+                              <Badge tone="info">
+                                Director approval pending
+                              </Badge>
                             )}
                           </span>
                         ) : r.specialAccount?.isSpecial ? (
                           <Badge tone="warning">Special account</Badge>
                         ) : null}
+                        {(r.pendingChanges?.length ?? 0) > 0 && (
+                          <span
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <Badge tone="info">
+                              {r.pendingChanges!.length} awaiting Director
+                            </Badge>
+                            <span
+                              style={{ color: "var(--fg3)", fontSize: 11.5 }}
+                            >
+                              Awaiting Director approval — current approved
+                              balance remains{" "}
+                              {formatXof(
+                                r.billingBridge?.outstandingXof ??
+                                  r.remaining ??
+                                  r.remainingXof ??
+                                  r.balance,
+                              )}
+                              .
+                            </span>
+                          </span>
+                        )}
                       </span>
                     </td>
-                    <td
-                      style={{
-                        textAlign: "right",
-                        fontWeight: 700,
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {formatXof(r.billed)}
-                    </td>
                     <td style={{ textAlign: "right" }}>
-                      <AccountBalanceText
-                        summary={resolveAccountSummary(r.summary, {
-                          balanceXof: r.remaining ?? r.balance,
-                          billedXof: r.billed,
-                        })}
-                        style={{ fontWeight: 700 }}
-                      />
+                      <AccountBridge row={r} />
                     </td>
                     <td style={{ textAlign: "right" }}>
                       <span
@@ -863,14 +892,7 @@ export default function FinanceAccounts() {
                     onSort={toggle}
                   />
                   <SortTh
-                    label="Billed"
-                    sortKey="billed"
-                    sort={sort}
-                    onSort={toggle}
-                    align="right"
-                  />
-                  <SortTh
-                    label="Remaining"
+                    label="Approved account bridge"
                     sortKey="balance"
                     sort={sort}
                     onSort={toggle}
@@ -920,8 +942,31 @@ export default function FinanceAccounts() {
                                   : "Special account"}
                               </Badge>
                               {r.specialAccount.hasPendingPlanChange && (
-                                <Badge tone="info">Approval pending</Badge>
+                                <Badge tone="info">
+                                  Director approval pending
+                                </Badge>
                               )}
+                            </span>
+                          )}
+                          {(r.pendingChanges?.length ?? 0) > 0 && (
+                            <span
+                              style={{
+                                display: "flex",
+                                gap: 5,
+                                marginTop: 4,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <Badge tone="info">
+                                {r.pendingChanges!.length} awaiting Director
+                              </Badge>
+                              <span
+                                className="muted"
+                                style={{ fontSize: 11.5 }}
+                              >
+                                Awaiting Director approval — current approved
+                                balance remains {formatXof(r.remaining ?? 0)}.
+                              </span>
                             </span>
                           )}
                         </span>
@@ -930,7 +975,17 @@ export default function FinanceAccounts() {
                     <td style={{ fontSize: 12.5, color: "var(--fg2)" }}>
                       {r.program ?? "—"}
                     </td>
-                    <BalanceCells row={r} />
+                    <td style={{ textAlign: "right" }}>
+                      <AccountBridge row={r} />
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <AccountStandingBadge
+                        summary={resolveAccountSummary(r.summary, {
+                          balanceXof: r.remaining ?? r.balance,
+                          billedXof: r.billed,
+                        })}
+                      />
+                    </td>
                     <td style={{ textAlign: "right" }}>
                       <span
                         style={{
@@ -1074,15 +1129,23 @@ export default function FinanceAccounts() {
                     gap: 14,
                   }}
                 >
-                  {[
-                    ["Billed", paymentDraft.account.totals.billed],
-                    ["Paid", paymentDraft.account.totals.paid],
-                    [
-                      "Current payable",
-                      paymentDraft.account.payableTarget?.invoicePayableXof ??
-                        0,
-                    ],
-                  ].map(([label, amount]) => (
+                  {(() => {
+                    const bridge = paymentDraft.account.billingBridge ?? {
+                      grossChargesXof: paymentDraft.account.totals.billed,
+                      adjustmentsXof: 0,
+                      netBillXof: paymentDraft.account.totals.billed,
+                      paidXof: paymentDraft.account.totals.paid,
+                      outstandingXof:
+                        paymentDraft.account.totals.remaining ?? 0,
+                    };
+                    return [
+                      ["Gross charges", bridge.grossChargesXof],
+                      ["Scholarships / adjustments", bridge.adjustmentsXof],
+                      ["Net bill", bridge.netBillXof],
+                      ["Paid", bridge.paidXof],
+                      ["Outstanding", bridge.outstandingXof],
+                    ];
+                  })().map(([label, amount]) => (
                     <div key={String(label)}>
                       <span
                         className="muted"
@@ -1256,7 +1319,9 @@ export default function FinanceAccounts() {
                 {busy
                   ? "Saving…"
                   : draft.invoiceId
-                    ? "Submit individual plan"
+                    ? draft.invoice?.profileManaged
+                      ? "Submit schedule change"
+                      : "Submit individual plan"
                     : "Assign full package"}
               </Button>
             </>
@@ -1264,9 +1329,48 @@ export default function FinanceAccounts() {
         >
           <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>
             {draft.invoiceId
-              ? "Set this student’s tuition, cafeteria, housing, and other selected charges separately for every payment. The four-payment grid becomes an individual plan and no longer inherits global amounts."
-              : "Assign the administrator-approved tuition, housing, and cafeteria package."}
+              ? draft.invoice?.profileManaged
+                ? "This billing is controlled by the Annual Profile. You can change payment labels and due dates here; approved services, awards, installment amounts, and component allocations stay unchanged."
+                : "Set this student’s tuition, cafeteria, housing, and other selected charges separately for every payment. The four-payment grid becomes an individual plan and no longer inherits global amounts."
+              : "Assign the Director-approved tuition, housing, and cafeteria package."}
           </p>
+
+          {(draft.invoice?.pendingChanges?.length ?? 0) > 0 && (
+            <div
+              role="status"
+              style={{
+                display: "grid",
+                gap: 4,
+                padding: 12,
+                marginBottom: 14,
+                border: "1px solid var(--warning-400)",
+                borderRadius: "var(--radius-md)",
+                background: "var(--surface-2)",
+              }}
+            >
+              <strong style={{ fontSize: 13 }}>
+                Awaiting Director approval
+              </strong>
+              {draft.invoice!.pendingChanges!.map((change) => (
+                <span
+                  key={change.id}
+                  className="muted"
+                  style={{ fontSize: 12 }}
+                >
+                  {change.label} — {change.reason}
+                </span>
+              ))}
+              <span className="muted" style={{ fontSize: 12 }}>
+                Awaiting Director approval — current approved balance remains{" "}
+                {formatXof(
+                  draft.invoice!.remaining ??
+                    draft.invoice!.remainingXof ??
+                    draft.invoice!.balance,
+                )}
+                .
+              </span>
+            </div>
+          )}
 
           <div
             style={{
@@ -1342,34 +1446,35 @@ export default function FinanceAccounts() {
               />
             )}
 
-            {draft.planType === "individual_override" && (
-              <div
-                style={{
-                  padding: 12,
-                  border: "1px solid var(--warning-400)",
-                  borderRadius: "var(--radius-md)",
-                  background: "var(--surface-2)",
-                }}
-              >
-                <strong style={{ display: "block", fontSize: 13 }}>
-                  Individual plan override
-                </strong>
-                <p
-                  className="muted"
-                  style={{ margin: "4px 0 9px", fontSize: 12 }}
+            {draft.planType === "individual_override" &&
+              !draft.invoice?.profileManaged && (
+                <div
+                  style={{
+                    padding: 12,
+                    border: "1px solid var(--warning-400)",
+                    borderRadius: "var(--radius-md)",
+                    background: "var(--surface-2)",
+                  }}
                 >
-                  Use the reason below to request the current approved global
-                  dates and amounts for this student.
-                </p>
-                <Button
-                  variant="ghost"
-                  disabled={busy || !requestReason.trim()}
-                  onClick={restoreStandard}
-                >
-                  Restore approved standard plan
-                </Button>
-              </div>
-            )}
+                  <strong style={{ display: "block", fontSize: 13 }}>
+                    Individual plan override
+                  </strong>
+                  <p
+                    className="muted"
+                    style={{ margin: "4px 0 9px", fontSize: 12 }}
+                  >
+                    Use the reason below to request the current approved global
+                    dates and amounts for this student.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    disabled={busy || !requestReason.trim()}
+                    onClick={restoreStandard}
+                  >
+                    Restore approved standard plan
+                  </Button>
+                </div>
+              )}
 
             <div
               style={{
@@ -1399,7 +1504,9 @@ export default function FinanceAccounts() {
                 </span>
                 <span className="muted" style={{ fontSize: 12 }}>
                   {draft.invoiceId
-                    ? "Individual component amounts · each row and column must reconcile"
+                    ? draft.invoice?.profileManaged
+                      ? "Labels and dates only · Annual Profile amounts remain authoritative"
+                      : "Individual component amounts · each row and column must reconcile"
                     : "From the approved global revision"}
                 </span>
               </div>
@@ -1412,6 +1519,7 @@ export default function FinanceAccounts() {
               )}
 
               {draft.invoiceId &&
+              !draft.invoice?.profileManaged &&
               (draft.rows[0]?.components.length ?? 0) > 0 ? (
                 <div style={{ overflowX: "auto", margin: "0 -4px" }}>
                   <table
@@ -1562,25 +1670,38 @@ export default function FinanceAccounts() {
                       marginBottom: 8,
                     }}
                   >
-                    <Input
-                      value={row.label}
-                      onChange={(value) => editRow(index, { label: value })}
-                      disabled={!draft.invoiceId}
-                      placeholder={`Payment ${index + 1}`}
-                    />
-                    <Input
-                      type="date"
-                      value={row.dueDate}
-                      onChange={(value) => editRow(index, { dueDate: value })}
-                      disabled={!draft.invoiceId}
-                    />
-                    <Input
-                      value={row.amountXof}
-                      onChange={() => {}}
-                      disabled
-                      align="right"
-                      inputMode="numeric"
-                    />
+                    <label>
+                      <span className="sr-only">Payment {index + 1} label</span>
+                      <Input
+                        value={row.label}
+                        onChange={(value) => editRow(index, { label: value })}
+                        disabled={!draft.invoiceId}
+                        placeholder={`Payment ${index + 1}`}
+                      />
+                    </label>
+                    <label>
+                      <span className="sr-only">
+                        Payment {index + 1} due date
+                      </span>
+                      <Input
+                        type="date"
+                        value={row.dueDate}
+                        onChange={(value) => editRow(index, { dueDate: value })}
+                        disabled={!draft.invoiceId}
+                      />
+                    </label>
+                    <label>
+                      <span className="sr-only">
+                        Payment {index + 1} approved amount
+                      </span>
+                      <Input
+                        value={row.amountXof}
+                        onChange={() => {}}
+                        disabled
+                        align="right"
+                        inputMode="numeric"
+                      />
+                    </label>
                   </div>
                 ))
               )}
@@ -1606,7 +1727,7 @@ export default function FinanceAccounts() {
             {draft.invoiceId && (
               <Field
                 label="Reason for change"
-                hint="Required for an individual plan and retained in the approval history. Charge selection changes have their own reason above."
+                hint="Required for an individual plan and retained in the Director approval history. Charge selection changes have their own reason above."
               >
                 <textarea
                   value={requestReason}

@@ -37,6 +37,11 @@ import {
   type BillingProfileChangeInput,
 } from "./billing-profile.service.js";
 import { validateCanonicalAcademicCatalog } from "../academic-catalog/academic-catalog.service.js";
+import {
+  buildApprovalPresentation,
+  type ApprovalPresentation,
+  type ApprovalPresentationContext,
+} from "./approval-presentation.js";
 
 export const DIRECTOR_WIDGET_KEYS = [
   "people",
@@ -102,6 +107,9 @@ export type ProtectedChange = {
 };
 
 type StoredApproval = Prisma.ApprovalRequestGetPayload<Record<string, never>>;
+
+/** How many approval rows may resolve their presentation subject at once. */
+const PRESENT_CONCURRENCY = 8;
 
 function canonicalJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalJson);
@@ -207,6 +215,264 @@ export class FinanceApprovalsService {
     throw new Error("Serializable transaction retry limit exhausted");
   }
 
+  private paymentPlanRequestMatchesCurrent(
+    invoice: {
+      totalAmount: number;
+      plan: {
+        installments: {
+          id: string;
+          sequence: number;
+          dueDate: Date;
+          amountDue: number;
+          label: string | null;
+          components: {
+            invoiceComponentId: string;
+            amountDue: number;
+          }[];
+        }[];
+      } | null;
+    },
+    after: Record<string, unknown>,
+  ) {
+    const currentRows = invoice.plan?.installments ?? [];
+    if (currentRows.length === 0 || !Array.isArray(after.installments)) {
+      return false;
+    }
+    const mode = String(after.mode ?? "replace");
+    if (!["create", "update", "replace"].includes(mode)) return false;
+    const requestedRows = after.installments.filter(
+      (value): value is Record<string, unknown> =>
+        value !== null && typeof value === "object" && !Array.isArray(value),
+    );
+    if (requestedRows.length !== after.installments.length) return false;
+
+    type CandidateRow = {
+      id: string | null;
+      sequence: number;
+      dueDate: string;
+      amountDue: number;
+      label: string | null;
+      components: { invoiceComponentId: string; amountXof: number }[];
+    };
+    const componentRows = (
+      value: unknown,
+      fallback: CandidateRow["components"] = [],
+    ) => {
+      if (value === undefined) return fallback;
+      if (!Array.isArray(value)) return [];
+      return value.flatMap((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const component = item as Record<string, unknown>;
+        return [
+          {
+            invoiceComponentId: String(component.invoiceComponentId ?? ""),
+            amountXof: Number(component.amountXof),
+          },
+        ];
+      });
+    };
+    const currentCandidate = (
+      row: (typeof currentRows)[number],
+    ): CandidateRow => ({
+      id: row.id,
+      sequence: row.sequence,
+      dueDate: row.dueDate.toISOString().slice(0, 10),
+      amountDue: row.amountDue,
+      label: row.label,
+      components: row.components.map((component) => ({
+        invoiceComponentId: component.invoiceComponentId,
+        amountXof: component.amountDue,
+      })),
+    });
+    const finalLabel = (value: unknown) => String(value ?? "").trim() || null;
+    let candidateRows: CandidateRow[];
+    if (mode === "create") {
+      candidateRows = requestedRows.map((row) => ({
+        id: null,
+        sequence: Number(row.sequence),
+        dueDate: String(row.dueDate ?? ""),
+        amountDue:
+          row.amount === undefined
+            ? Math.round((invoice.totalAmount * Number(row.percent ?? 0)) / 100)
+            : Number(row.amount),
+        label: null,
+        components: [],
+      }));
+    } else if (mode === "update") {
+      const updates = new Map<string, Record<string, unknown>>();
+      for (const row of requestedRows) {
+        const id = typeof row.id === "string" ? row.id : "";
+        if (!id || updates.has(id)) return false;
+        updates.set(id, row);
+      }
+      if (
+        [...updates.keys()].some(
+          (id) => !currentRows.some((row) => row.id === id),
+        )
+      ) {
+        return false;
+      }
+      candidateRows = currentRows.map((current) => {
+        const base = currentCandidate(current);
+        const update = updates.get(current.id);
+        if (!update) return base;
+        return {
+          id: current.id,
+          sequence: current.sequence,
+          dueDate: String(update.dueDate ?? ""),
+          amountDue: Number(update.amountDue),
+          label:
+            update.label === undefined
+              ? current.label
+              : finalLabel(update.label),
+          components: componentRows(update.components, base.components),
+        };
+      });
+    } else {
+      candidateRows = requestedRows.map((row) => ({
+        id: typeof row.id === "string" ? row.id : null,
+        sequence: Number(row.sequence),
+        dueDate: String(row.dueDate ?? ""),
+        amountDue: Number(row.amountDue),
+        label: finalLabel(row.label),
+        components: componentRows(row.components),
+      }));
+    }
+
+    if (candidateRows.length !== currentRows.length) return false;
+    const currentById = new Map(currentRows.map((row) => [row.id, row]));
+    const currentBySequence = new Map(
+      currentRows.map((row) => [row.sequence, row]),
+    );
+    const matchedIds = new Set<string>();
+    for (const candidate of candidateRows) {
+      const current = candidate.id
+        ? currentById.get(candidate.id)
+        : currentBySequence.get(candidate.sequence);
+      if (
+        !current ||
+        matchedIds.has(current.id) ||
+        current.sequence !== candidate.sequence ||
+        current.dueDate.toISOString().slice(0, 10) !== candidate.dueDate ||
+        current.amountDue !== candidate.amountDue ||
+        current.label !== candidate.label
+      ) {
+        return false;
+      }
+      matchedIds.add(current.id);
+      const currentComponents = new Map(
+        current.components.map((component) => [
+          component.invoiceComponentId,
+          component.amountDue,
+        ]),
+      );
+      if (
+        currentComponents.size !== candidate.components.length ||
+        new Set(
+          candidate.components.map((component) => component.invoiceComponentId),
+        ).size !== candidate.components.length ||
+        candidate.components.some(
+          (component) =>
+            currentComponents.get(component.invoiceComponentId) !==
+            component.amountXof,
+        )
+      ) {
+        return false;
+      }
+    }
+    return matchedIds.size === currentRows.length;
+  }
+
+  private profileManagedPaymentPlanRestriction(
+    invoice: {
+      billingProfile: { status: string } | null;
+      plan: {
+        installments: {
+          id: string;
+          amountDue: number;
+        }[];
+      } | null;
+    },
+    after: Record<string, unknown>,
+  ): string | null {
+    if (invoice.billingProfile?.status !== "active") return null;
+    if (String(after.mode ?? "replace") !== "update") {
+      return "This invoice is controlled by the Annual profile. Only payment labels and due dates can be changed here; use the Annual profile editor for services, awards, and amounts.";
+    }
+    if (!Array.isArray(after.installments) || !invoice.plan) {
+      return "This Annual profile payment plan cannot be changed because its approved installments could not be resolved.";
+    }
+    const currentById = new Map(
+      invoice.plan.installments.map((installment) => [
+        installment.id,
+        installment,
+      ]),
+    );
+    for (const value of after.installments) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return "This Annual profile payment-plan request is invalid.";
+      }
+      const row = value as Record<string, unknown>;
+      const current = currentById.get(String(row.id ?? ""));
+      if (!current) {
+        return "Annual profile installments cannot be added, removed, or reordered here.";
+      }
+      if (row.components !== undefined) {
+        return "Annual profile component allocations cannot be changed from the payment-plan editor.";
+      }
+      if (Number(row.amountDue) !== current.amountDue) {
+        return "Annual profile installment amounts cannot be changed from the payment-plan editor.";
+      }
+    }
+    return null;
+  }
+
+  private billingContext(term: {
+    id: string;
+    name: string;
+    academicYearId: string | null;
+    academicYear: { id: string; label: string } | null;
+  }) {
+    if (!term.academicYearId || !term.academicYear) {
+      throw new BadRequestException(
+        "The active billing term is not linked to an academic year",
+      );
+    }
+    return {
+      termId: term.id,
+      termName: term.name,
+      academicYearId: term.academicYear.id,
+      academicYearLabel: term.academicYear.label,
+    };
+  }
+
+  private async requestBillingContext() {
+    const term = await this.prisma.term.findFirst({
+      where: { academicYear: { status: "active" } },
+      orderBy: [{ startDate: "asc" }, { id: "asc" }],
+      include: { academicYear: true },
+    });
+    if (!term) {
+      throw new BadRequestException("The active academic year has no term");
+    }
+    return this.billingContext(term);
+  }
+
+  private storedBillingContext(after: Record<string, unknown>) {
+    const value = after.billingContext;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    const context = value as Record<string, unknown>;
+    const termId = String(context.termId ?? "");
+    const termName = String(context.termName ?? "");
+    const academicYearId = String(context.academicYearId ?? "");
+    const academicYearLabel = String(context.academicYearLabel ?? "");
+    return termId && termName && academicYearId && academicYearLabel
+      ? { termId, termName, academicYearId, academicYearLabel }
+      : null;
+  }
+
   private async snapshot(change: ProtectedChange) {
     if (
       change.kind === "operating_budget" ||
@@ -238,6 +504,11 @@ export class FinanceApprovalsService {
             })),
         );
       }
+      if (this.feeScheduleRequestMatchesCurrent(schedule, change.after)) {
+        throw new BadRequestException(
+          "No change requested: the fee schedule already has these installments and components.",
+        );
+      }
       return { before: schedule, baseRevision: schedule.revision };
     }
     if (change.kind === "billing_profile") {
@@ -253,6 +524,92 @@ export class FinanceApprovalsService {
       return this.billingProfiles.catalogApprovalSnapshot(
         change.after as BillingCatalogChangeInput,
       );
+    }
+    if (change.kind === "custom_charge") {
+      const studentIds = [
+        ...new Set(
+          Array.isArray(change.after.studentIds)
+            ? change.after.studentIds.filter(
+                (id): id is string => typeof id === "string" && id.length > 0,
+              )
+            : [],
+        ),
+      ];
+      if (studentIds.length === 0) {
+        throw new BadRequestException("Select at least one student to charge");
+      }
+      const costCenterCode = String(
+        change.after.costCenterCode ?? COST_CENTER_TUITION,
+      );
+      const [billingContext, center, students] = await Promise.all([
+        this.requestBillingContext(),
+        this.prisma.costCenter.findUnique({
+          where: { code: costCenterCode },
+          select: { code: true },
+        }),
+        this.prisma.student.findMany({
+          where: { id: { in: studentIds }, recordStatus: "active" },
+          select: { id: true },
+        }),
+      ]);
+      if (!center) throw new BadRequestException("Unknown cost center");
+      if (students.length !== studentIds.length) {
+        throw new BadRequestException(
+          "One or more students are missing or archived",
+        );
+      }
+      return {
+        before: null,
+        baseRevision: 0,
+        after: {
+          ...change.after,
+          ...(!Array.isArray(change.after.installments) && !change.after.dueDate
+            ? { dueDate: toDakarDateKey(new Date()) }
+            : {}),
+          billingContext,
+        },
+      };
+    }
+    if (change.kind === "discount" || change.kind === "scholarship") {
+      const studentId = String(change.after.studentId ?? change.targetId ?? "");
+      if (!studentId) throw new BadRequestException("Missing student target");
+      const costCenterCode = String(
+        change.after.costCenterCode ?? COST_CENTER_TUITION,
+      );
+      const billingContext = await this.requestBillingContext();
+      const [managed, center, student] = await Promise.all([
+        this.prisma.annualBillingProfile.findFirst({
+          where: {
+            studentId,
+            academicYearLabel: billingContext.academicYearLabel,
+            status: "active",
+          },
+          select: { academicYearLabel: true },
+        }),
+        this.prisma.costCenter.findUnique({
+          where: { code: costCenterCode },
+          select: { code: true },
+        }),
+        this.prisma.student.findFirst({
+          where: {
+            id: studentId,
+            recordStatus: { in: ["active", "pending_payment"] },
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (managed) {
+        throw new BadRequestException(
+          `This student's ${managed.academicYearLabel} services and awards are managed by the Annual profile. Propose this change there instead.`,
+        );
+      }
+      if (!center) throw new BadRequestException("Unknown cost center");
+      if (!student) throw new NotFoundException("Billable student not found");
+      return {
+        before: null,
+        baseRevision: 0,
+        after: { ...change.after, billingContext },
+      };
     }
     if (change.kind === "charge_removal" || change.kind === "payment_plan") {
       if (!change.targetId)
@@ -270,9 +627,32 @@ export class FinanceApprovalsService {
           },
           components: true,
           componentOverrides: true,
+          billingProfile: {
+            select: { id: true, status: true, academicYearLabel: true },
+          },
         },
       });
       if (!invoice) throw new NotFoundException("Invoice not found");
+      if (change.kind === "charge_removal" && invoice.status === "void") {
+        throw new BadRequestException(
+          "No change requested: this charge is already removed.",
+        );
+      }
+      if (
+        change.kind === "charge_removal" &&
+        invoice.billingProfile?.status === "active"
+      ) {
+        throw new BadRequestException(
+          "This charge is controlled by the Annual profile and cannot be removed directly.",
+        );
+      }
+      if (change.kind === "payment_plan") {
+        const restriction = this.profileManagedPaymentPlanRestriction(
+          invoice,
+          change.after,
+        );
+        if (restriction) throw new BadRequestException(restriction);
+      }
       let after = change.after;
       if (
         change.kind === "payment_plan" &&
@@ -280,6 +660,11 @@ export class FinanceApprovalsService {
           String(change.after.mode ?? ""),
         )
       ) {
+        if (invoice.billingProfile?.status === "active") {
+          throw new BadRequestException(
+            "This annual invoice is controlled by the Annual profile. Propose service, scholarship, and adjustment changes in the Annual profile editor.",
+          );
+        }
         const componentKey = String(change.after.componentKey ?? "");
         const schedule = invoice.academicYearLabel
           ? await this.prisma.feeSchedule.findFirst({
@@ -305,10 +690,15 @@ export class FinanceApprovalsService {
             override.included,
           ]),
         );
-        overrideByKey.set(
-          componentKey,
-          String(change.after.mode) === "add_component",
-        );
+        const currentlyIncluded =
+          overrideByKey.get(componentKey) ?? component.defaultSelected;
+        const requestedIncluded = String(change.after.mode) === "add_component";
+        if (currentlyIncluded === requestedIncluded) {
+          throw new BadRequestException(
+            `No change requested: ${component.label} is already ${requestedIncluded ? "included" : "not included"}.`,
+          );
+        }
+        overrideByKey.set(componentKey, requestedIncluded);
         feePackageTotalXof(
           schedule.components.filter(
             (row) => overrideByKey.get(row.key) ?? row.defaultSelected,
@@ -327,6 +717,23 @@ export class FinanceApprovalsService {
             defaultSelected: component.defaultSelected,
           },
         };
+      }
+      if (
+        change.kind === "payment_plan" &&
+        String(change.after.mode ?? "replace") === "restore_standard" &&
+        !invoice.paymentPlanOverride
+      ) {
+        throw new BadRequestException(
+          "No change requested: this invoice already uses the approved standard plan.",
+        );
+      }
+      if (
+        change.kind === "payment_plan" &&
+        this.paymentPlanRequestMatchesCurrent(invoice, change.after)
+      ) {
+        throw new BadRequestException(
+          "No change requested: the payment plan already has these dates, labels, amounts, and component allocations.",
+        );
       }
       return { before: invoice, baseRevision: invoice.revision, after };
     }
@@ -360,7 +767,7 @@ export class FinanceApprovalsService {
         });
         if (pending) {
           throw new BadRequestException(
-            "A change for this billing is already awaiting administrator approval",
+            "A change for this billing is already awaiting Director approval",
           );
         }
       }
@@ -370,7 +777,9 @@ export class FinanceApprovalsService {
           status: "pending",
           targetType: change.targetType,
           targetId: change.targetId,
-          academicYearLabel: change.academicYearLabel,
+          academicYearLabel:
+            change.academicYearLabel ??
+            this.storedBillingContext(after)?.academicYearLabel,
           reason:
             change.reason?.trim() ||
             `Requested ${change.kind.replaceAll("_", " ")}`,
@@ -407,7 +816,7 @@ export class FinanceApprovalsService {
         decision = await this.approve(
           request.id,
           actor,
-          "Admin-originated change",
+          "Director-originated change",
         );
       } catch (error) {
         // The submission and self-approval are intentionally separate transactions so
@@ -423,7 +832,7 @@ export class FinanceApprovalsService {
           request.id,
           actor.personId,
           "cancelled",
-          `Admin-originated change was not applied: ${detail}`,
+          `Director-originated change was not applied: ${detail}`,
         );
         throw error;
       }
@@ -441,11 +850,15 @@ export class FinanceApprovalsService {
       });
       return {
         applied: decision.ok === true && decision.status === "approved",
-        request: this.present(applied),
+        request: await this.present(applied),
         result: decision.result ?? null,
       };
     }
-    return { applied: false, request: this.present(request), result: null };
+    return {
+      applied: false,
+      request: await this.present(request),
+      result: null,
+    };
   }
 
   async list(actor: AuthUser, view = "pending", search?: string) {
@@ -507,7 +920,21 @@ export class FinanceApprovalsService {
         events: { orderBy: { createdAt: "asc" } },
       },
     });
-    return rows.map((row) => this.present(row));
+    // present() resolves each row's subject with its own lookups, so the history
+    // view (every request ever recorded) would otherwise fan out to hundreds of
+    // concurrent queries on a single page load. Walk it in bounded batches: the
+    // row set is returned whole, only the fan-out is capped.
+    const presented = [];
+    for (let index = 0; index < rows.length; index += PRESENT_CONCURRENCY) {
+      presented.push(
+        ...(await Promise.all(
+          rows
+            .slice(index, index + PRESENT_CONCURRENCY)
+            .map((row) => this.present(row)),
+        )),
+      );
+    }
+    return presented;
   }
 
   async pendingCount(actor: AuthUser) {
@@ -558,7 +985,266 @@ export class FinanceApprovalsService {
     return this.getDirectorWidgets(personId);
   }
 
-  private present(row: {
+  private async approvalPresentation(row: {
+    kind: ApprovalRequestKind;
+    status: string;
+    targetType: string;
+    targetId: string | null;
+    academicYearLabel: string | null;
+    beforeJson: unknown;
+    afterJson: unknown;
+    events?: unknown[];
+  }): Promise<ApprovalPresentation> {
+    const after =
+      row.afterJson && typeof row.afterJson === "object"
+        ? ({ ...(row.afterJson as Record<string, unknown>) } as Record<
+            string,
+            unknown
+          >)
+        : {};
+    const academicYearLabel = [
+      row.academicYearLabel,
+      after.academicYearLabel,
+      after.yearLabel,
+    ].find(
+      (value): value is string =>
+        typeof value === "string" && value.trim().length > 0,
+    );
+    const academicYearSubject: Partial<Record<ApprovalRequestKind, string>> =
+      academicYearLabel
+        ? {
+            academic_catalog: `${academicYearLabel} academic catalog`,
+            global_fee_schedule: `${academicYearLabel} fee schedule`,
+            billing_catalog: `${academicYearLabel} billing catalog`,
+            operating_budget: `${academicYearLabel} operating budget`,
+          }
+        : {};
+    const context: ApprovalPresentationContext = {
+      subject: academicYearSubject[row.kind] ?? "Approval request",
+    };
+    try {
+      const studentIds = new Set<string>();
+      if (row.targetType === "Student" && row.targetId) {
+        studentIds.add(row.targetId);
+      }
+      if (typeof after.studentId === "string") studentIds.add(after.studentId);
+      if (Array.isArray(after.studentIds)) {
+        for (const id of after.studentIds) {
+          if (typeof id === "string") studentIds.add(id);
+        }
+      }
+      if (
+        [
+          "custom_charge",
+          "discount",
+          "scholarship",
+          "billing_profile",
+          "student_enrollment_override",
+        ].includes(row.kind) &&
+        studentIds.size === 0
+      ) {
+        throw new Error("Approval student subject is missing");
+      }
+
+      if (
+        row.targetId &&
+        (row.targetType === "Invoice" ||
+          row.kind === "payment_plan" ||
+          row.kind === "charge_removal")
+      ) {
+        const invoice = await this.prisma.invoice.findUnique({
+          where: { id: row.targetId },
+          select: {
+            number: true,
+            description: true,
+            studentId: true,
+            components: {
+              select: { id: true, kind: true, label: true },
+            },
+            student: {
+              select: {
+                studentNo: true,
+                person: { select: { firstName: true, lastName: true } },
+              },
+            },
+          },
+        });
+        if (!invoice) {
+          throw new Error("Approval invoice could not be resolved");
+        }
+        {
+          const studentName =
+            `${invoice.student.person.firstName} ${invoice.student.person.lastName}`
+              .replace(/\s+/g, " ")
+              .trim();
+          context.invoiceLabel =
+            invoice.description || invoice.number || "Student charge";
+          context.componentLabels = Object.fromEntries(
+            invoice.components.map((component) => [
+              component.id,
+              component.label || displayFeeComponentLabel(component.kind),
+            ]),
+          );
+          context.subject = `${studentName} · ${invoice.student.studentNo} · ${context.invoiceLabel}`;
+          studentIds.add(invoice.studentId);
+        }
+      }
+
+      if (studentIds.size > 0) {
+        const students = await this.prisma.student.findMany({
+          where: { id: { in: [...studentIds] } },
+          orderBy: { studentNo: "asc" },
+          select: {
+            id: true,
+            studentNo: true,
+            person: { select: { firstName: true, lastName: true } },
+          },
+        });
+        if (students.length !== studentIds.size) {
+          throw new Error("Approval student subjects could not be resolved");
+        }
+        context.studentNames = students.map((student) =>
+          `${student.person.firstName} ${student.person.lastName} · ${student.studentNo}`
+            .replace(/\s+/g, " ")
+            .trim(),
+        );
+        if (
+          context.subject === "Approval request" &&
+          context.studentNames.length > 0
+        ) {
+          context.subject = context.studentNames.join(", ");
+        }
+      }
+
+      if (row.kind === "student_enrollment_override" && row.targetId) {
+        const section = await this.prisma.section.findUnique({
+          where: { id: row.targetId },
+          select: {
+            sectionCode: true,
+            course: { select: { code: true, title: true } },
+          },
+        });
+        if (!section) {
+          throw new Error("Approval section could not be resolved");
+        }
+        context.subject = `${context.studentNames?.[0] ?? "Student"} · ${section.course.code} ${section.course.title} · section ${section.sectionCode}`;
+      }
+
+      if (row.kind === "management_actual") {
+        const before =
+          row.beforeJson && typeof row.beforeJson === "object"
+            ? (row.beforeJson as Record<string, unknown>)
+            : {};
+        const description = String(
+          after.description ??
+            before.description ??
+            after.categoryLabel ??
+            after.categoryKey ??
+            before.managementCategoryKey ??
+            before.categoryKey ??
+            "",
+        ).trim();
+        const academicYear = String(
+          row.academicYearLabel ??
+            after.academicYear ??
+            (before.academicYear && typeof before.academicYear === "object"
+              ? (before.academicYear as Record<string, unknown>).label
+              : "") ??
+            "",
+        ).trim();
+        if (!description || !academicYear) {
+          throw new Error("Management actual subject could not be resolved");
+        }
+        const payee = String(after.payee ?? before.payee ?? "").trim();
+        context.subject = `${description}${payee ? ` · ${payee}` : ""} · ${academicYear}`;
+      }
+
+      if (row.kind === "payment_plan") {
+        const catalog =
+          after.catalogSnapshot && typeof after.catalogSnapshot === "object"
+            ? (after.catalogSnapshot as Record<string, unknown>)
+            : {};
+        context.componentLabel =
+          typeof catalog.label === "string" ? catalog.label : null;
+      }
+
+      if (row.kind === "billing_profile") {
+        const academicYearLabel = String(
+          row.academicYearLabel ?? after.academicYearLabel ?? "",
+        );
+        const optionCodes: Array<["housing" | "cafeteria", string]> = [];
+        if (typeof after.housingOptionCode === "string") {
+          optionCodes.push(["housing", after.housingOptionCode]);
+        }
+        if (typeof after.cafeteriaOptionCode === "string") {
+          optionCodes.push(["cafeteria", after.cafeteriaOptionCode]);
+        }
+        const options = academicYearLabel
+          ? await this.prisma.billingServiceOption.findMany({
+              where: {
+                academicYearLabel,
+                OR: optionCodes.map(([kind, code]) => ({ kind, code })),
+              },
+              select: { kind: true, code: true, label: true },
+            })
+          : [];
+        if (options.length !== optionCodes.length) {
+          throw new Error(
+            "Annual profile service options could not be resolved",
+          );
+        }
+        after.housingOptionLabel =
+          options.find((option) => option.kind === "housing")?.label ??
+          after.housingOptionCode;
+        after.cafeteriaOptionLabel =
+          options.find((option) => option.kind === "cafeteria")?.label ??
+          after.cafeteriaOptionCode;
+        const awardIds = Array.isArray(after.awardDefinitionIds)
+          ? after.awardDefinitionIds.filter(
+              (id): id is string => typeof id === "string",
+            )
+          : [];
+        const definitions = awardIds.length
+          ? await this.prisma.billingAdjustmentDefinition.findMany({
+              where: { id: { in: awardIds } },
+              orderBy: { sortOrder: "asc" },
+              select: { label: true },
+            })
+          : [];
+        if (definitions.length !== new Set(awardIds).size) {
+          throw new Error("Annual profile awards could not be resolved");
+        }
+        const manualLabels = Array.isArray(after.manualAdjustments)
+          ? after.manualAdjustments.flatMap((value) => {
+              if (!value || typeof value !== "object") return [];
+              const label = (value as Record<string, unknown>).label;
+              return typeof label === "string" ? [label] : [];
+            })
+          : [];
+        after.awardSummary =
+          [
+            ...definitions.map((definition) => definition.label),
+            ...manualLabels,
+          ].join(", ") || "None";
+      }
+
+      if (context.subject === "Approval request") {
+        throw new Error("Approval subject could not be resolved");
+      }
+      return buildApprovalPresentation({ ...row, afterJson: after }, context);
+    } catch {
+      return {
+        subject: context.subject,
+        summary: "This request cannot be reviewed safely.",
+        changes: [],
+        canApprove: false,
+        blockingMessage:
+          "The human-readable review details could not be resolved. Reload the request or contact IT; this request cannot be approved as-is.",
+      };
+    }
+  }
+
+  private async present(row: {
     id: string;
     kind: ApprovalRequestKind;
     status: string;
@@ -586,6 +1272,7 @@ export class FinanceApprovalsService {
   }) {
     return {
       ...row,
+      presentation: await this.approvalPresentation(row),
       requester: row.requestedBy
         ? {
             name: `${row.requestedBy.firstName} ${row.requestedBy.lastName}`.trim(),
@@ -611,7 +1298,22 @@ export class FinanceApprovalsService {
 
   async approve(id: string, actor: AuthUser, note?: string) {
     if (!actor.roles.includes("admin")) {
-      throw new ForbiddenException("Only an administrator can approve changes");
+      throw new ForbiddenException("Only a Director can approve changes");
+    }
+    const reviewRequest = await this.prisma.approvalRequest.findUnique({
+      where: { id },
+      include: { events: { orderBy: { createdAt: "asc" } } },
+    });
+    if (!reviewRequest)
+      throw new NotFoundException("Approval request not found");
+    if (reviewRequest.status === "pending") {
+      const presentation = await this.approvalPresentation(reviewRequest);
+      if (!presentation.canApprove) {
+        throw new BadRequestException(
+          presentation.blockingMessage ??
+            "A human-readable review summary is required before approval",
+        );
+      }
     }
     const outcome = await this.transaction(async (tx) => {
       const request = await tx.approvalRequest.findUnique({ where: { id } });
@@ -741,7 +1443,7 @@ export class FinanceApprovalsService {
 
   async reject(id: string, actor: AuthUser, note: string) {
     if (!actor.roles.includes("admin")) {
-      throw new ForbiddenException("Only an administrator can reject changes");
+      throw new ForbiddenException("Only a Director can reject changes");
     }
     if (!note.trim())
       throw new BadRequestException("A rejection reason is required");
@@ -853,10 +1555,20 @@ export class FinanceApprovalsService {
           status: "approved",
         },
         orderBy: { revision: "desc" },
+        include: {
+          rows: { orderBy: { sequence: "asc" } },
+          components: { orderBy: [{ sortOrder: "asc" }, { key: "asc" }] },
+        },
       });
-      return schedule?.revision === request.baseRevision
-        ? null
-        : "The approved fee schedule changed after this request was submitted";
+      if (schedule?.revision !== request.baseRevision) {
+        return "The approved fee schedule changed after this request was submitted";
+      }
+      return this.feeScheduleRequestMatchesCurrent(
+        schedule,
+        request.afterJson as Record<string, unknown>,
+      )
+        ? "The approved fee schedule already matches this request; there is no change to apply"
+        : null;
     }
     if (request.kind === "billing_profile") {
       if (!request.targetId || !request.academicYearLabel) {
@@ -885,14 +1597,159 @@ export class FinanceApprovalsService {
         fingerprint,
       );
     }
+    if (
+      request.kind === "custom_charge" ||
+      request.kind === "discount" ||
+      request.kind === "scholarship"
+    ) {
+      const after = request.afterJson as Record<string, unknown>;
+      const frozen = this.storedBillingContext(after);
+      if (!frozen) {
+        return "The request is missing its reviewed billing term and academic year";
+      }
+      let active;
+      try {
+        active = this.billingContext(await this.activeTerm(tx));
+      } catch (error) {
+        if (error instanceof BadRequestException) {
+          return "The reviewed billing term is no longer active";
+        }
+        throw error;
+      }
+      if (
+        active.termId !== frozen.termId ||
+        active.termName !== frozen.termName ||
+        active.academicYearId !== frozen.academicYearId ||
+        active.academicYearLabel !== frozen.academicYearLabel
+      ) {
+        return `The active billing period changed from ${frozen.termName} · ${frozen.academicYearLabel} to ${active.termName} · ${active.academicYearLabel}`;
+      }
+      const costCenterCode = String(
+        after.costCenterCode ?? COST_CENTER_TUITION,
+      );
+      const center = await tx.costCenter.findUnique({
+        where: { code: costCenterCode },
+        select: { code: true },
+      });
+      if (!center) return "The reviewed cost center no longer exists";
+      if (request.kind === "custom_charge") {
+        const studentIds = [
+          ...new Set(
+            Array.isArray(after.studentIds)
+              ? after.studentIds.filter(
+                  (id): id is string => typeof id === "string" && id.length > 0,
+                )
+              : [],
+          ),
+        ];
+        if (studentIds.length === 0) {
+          return "The charge request no longer identifies any students";
+        }
+        const students = await tx.student.findMany({
+          where: { id: { in: studentIds }, recordStatus: "active" },
+          select: { id: true },
+        });
+        return students.length === studentIds.length
+          ? null
+          : "One or more reviewed students are now missing or archived";
+      }
+      if (request.kind === "discount" || request.kind === "scholarship") {
+        const studentId = String(after.studentId ?? request.targetId ?? "");
+        const student = studentId
+          ? await tx.student.findFirst({
+              where: {
+                id: studentId,
+                recordStatus: { in: ["active", "pending_payment"] },
+              },
+              select: { id: true },
+            })
+          : null;
+        if (!student) return "The reviewed student is now missing or archived";
+        const managed = studentId
+          ? await tx.annualBillingProfile.findFirst({
+              where: {
+                studentId,
+                academicYearLabel: frozen.academicYearLabel,
+                status: "active",
+              },
+              select: { id: true },
+            })
+          : null;
+        if (managed) {
+          return "The Annual profile now controls awards and adjustments for this student";
+        }
+      }
+      return null;
+    }
     if (request.kind === "payment_plan" || request.kind === "charge_removal") {
       const invoice = request.targetId
-        ? await tx.invoice.findUnique({ where: { id: request.targetId } })
+        ? await tx.invoice.findUnique({
+            where: { id: request.targetId },
+            include: {
+              billingProfile: { select: { status: true } },
+              componentOverrides: true,
+              components: true,
+              plan: {
+                include: {
+                  installments: {
+                    orderBy: { sequence: "asc" },
+                    include: { components: true },
+                  },
+                },
+              },
+            },
+          })
         : null;
       if (!invoice) return "The target invoice no longer exists";
-      return invoice.revision === request.baseRevision
-        ? null
-        : "The student billing changed after this request was submitted";
+      if (invoice.revision !== request.baseRevision) {
+        return "The student billing changed after this request was submitted";
+      }
+      if (request.kind === "charge_removal") {
+        if (invoice.billingProfile?.status === "active") {
+          return "The Annual profile now controls this charge";
+        }
+        return invoice.status === "void"
+          ? "The charge was already removed"
+          : null;
+      }
+      const after = request.afterJson as Record<string, unknown>;
+      const mode = String(after.mode ?? "replace");
+      const restriction = this.profileManagedPaymentPlanRestriction(
+        invoice,
+        after,
+      );
+      if (restriction) return restriction;
+      if (mode === "add_component" || mode === "remove_component") {
+        if (invoice.billingProfile?.status === "active") {
+          return "The Annual profile now controls service and award changes for this invoice";
+        }
+        const componentKey = String(after.componentKey ?? "");
+        const snapshot = (after.catalogSnapshot ?? {}) as Record<
+          string,
+          unknown
+        >;
+        const override = invoice.componentOverrides.find(
+          (row) => row.componentKey === componentKey,
+        );
+        const currentlyIncluded =
+          override?.included ?? Boolean(snapshot.defaultSelected);
+        const requestedIncluded = mode === "add_component";
+        if (currentlyIncluded === requestedIncluded) {
+          return `${String(snapshot.label ?? displayFeeComponentLabel(componentKey))} is already ${requestedIncluded ? "included" : "not included"}; there is no change to apply`;
+        }
+      }
+      if (mode === "restore_standard" && !invoice.paymentPlanOverride) {
+        return "The invoice already uses the approved standard plan";
+      }
+      if (
+        this.paymentPlanRequestMatchesCurrent(
+          invoice,
+          request.afterJson as Record<string, unknown>,
+        )
+      ) {
+        return "The approved payment plan already matches this request; there is no change to apply";
+      }
+      return null;
     }
     return null;
   }
@@ -1212,6 +2069,221 @@ export class FinanceApprovalsService {
       amountCafeteriaXof: cafeteria,
       amountFullXof: full,
     };
+  }
+
+  private feeScheduleRequestMatchesCurrent(
+    schedule: {
+      rows: {
+        id: string;
+        label: string;
+        sequence: number;
+        dueOn: Date | null;
+        amountFullXof: number;
+        amountTuitionXof: number;
+        amountHousingXof: number;
+        amountCafeteriaXof: number;
+      }[];
+      components: {
+        id: string;
+        key: string;
+        label: string;
+        description: string | null;
+        costCenterCode: string;
+        annualAmountXof: number;
+        defaultSelected: boolean;
+        sortOrder: number;
+      }[];
+    },
+    after: Record<string, unknown>,
+  ) {
+    if (schedule.rows.length === 0 || schedule.components.length === 0) {
+      // Applying an old component-less schedule upgrades its canonical shape.
+      return false;
+    }
+    let candidateRows: Array<
+      (typeof schedule.rows)[number] &
+        ReturnType<FinanceApprovalsService["normalizedLegacyScheduleRow"]>
+    >;
+    try {
+      if (Array.isArray(after.rows)) {
+        if (after.rows.length !== schedule.rows.length) return false;
+        const requestedById = new Map(
+          after.rows.flatMap((value) => {
+            if (!value || typeof value !== "object" || Array.isArray(value)) {
+              return [];
+            }
+            const row = value as Record<string, unknown>;
+            return [[String(row.id ?? ""), row] as const];
+          }),
+        );
+        if (requestedById.size !== schedule.rows.length) return false;
+        candidateRows = schedule.rows.map((row) => {
+          const requested = requestedById.get(row.id);
+          if (!requested) throw new Error("missing schedule row");
+          return {
+            ...row,
+            ...this.normalizedLegacyScheduleRow(row, requested),
+          };
+        });
+      } else {
+        const rowId = String(after.rowId ?? "");
+        const requested =
+          after.input &&
+          typeof after.input === "object" &&
+          !Array.isArray(after.input)
+            ? (after.input as Record<string, unknown>)
+            : {};
+        const changed = schedule.rows.find((row) => row.id === rowId);
+        if (!changed) return false;
+        candidateRows = schedule.rows.map((row) =>
+          row.id === changed.id
+            ? {
+                ...row,
+                ...this.normalizedLegacyScheduleRow(row, requested),
+              }
+            : row,
+        );
+      }
+    } catch {
+      return false;
+    }
+
+    let candidateComponents: FeeComponentDefinition[];
+    if (Array.isArray(after.components)) {
+      const existingById = new Map(
+        schedule.components.map((component) => [component.id, component]),
+      );
+      const existingByKey = new Map(
+        schedule.components.map((component) => [component.key, component]),
+      );
+      const rawComponents = after.components.flatMap((value) =>
+        value && typeof value === "object" && !Array.isArray(value)
+          ? [value as Record<string, unknown>]
+          : [],
+      );
+      if (rawComponents.length !== after.components.length) return false;
+      const projected: FeeComponentDefinition[] = [];
+      for (const [index, raw] of rawComponents.entries()) {
+        const id = raw.id === undefined ? null : String(raw.id);
+        const requestedKey = String(raw.key ?? "");
+        const existing = id
+          ? existingById.get(id)
+          : existingByKey.get(requestedKey);
+        if (
+          !existing ||
+          (id && requestedKey && requestedKey !== existing.key)
+        ) {
+          return false;
+        }
+        projected.push({
+          id,
+          key: String(raw.key ?? existing.key),
+          label: String(raw.label ?? existing.label),
+          description:
+            raw.description === undefined
+              ? existing.description
+              : raw.description === null
+                ? null
+                : String(raw.description),
+          costCenterCode: String(raw.costCenterCode ?? existing.costCenterCode),
+          annualAmountXof: Number(
+            raw.annualAmountXof ?? existing.annualAmountXof,
+          ),
+          defaultSelected:
+            raw.defaultSelected === undefined
+              ? existing.defaultSelected
+              : Boolean(raw.defaultSelected),
+          sortOrder: Number(raw.sortOrder ?? existing.sortOrder ?? index),
+        });
+      }
+      try {
+        candidateComponents = requireCoreFeeComponents(
+          validateFeeComponents(projected),
+        );
+      } catch {
+        return false;
+      }
+    } else {
+      const annualCoreTotals = new Map([
+        [
+          "tuition",
+          candidateRows.reduce((sum, row) => sum + row.amountTuitionXof, 0),
+        ],
+        [
+          "housing",
+          candidateRows.reduce((sum, row) => sum + row.amountHousingXof, 0),
+        ],
+        [
+          "cafeteria",
+          candidateRows.reduce((sum, row) => sum + row.amountCafeteriaXof, 0),
+        ],
+      ]);
+      candidateComponents = schedule.components.map((component) => ({
+        ...component,
+        annualAmountXof:
+          annualCoreTotals.get(component.key) ?? component.annualAmountXof,
+      }));
+    }
+
+    const currentComponentsByKey = new Map(
+      schedule.components.map((component) => [component.key, component]),
+    );
+    if (
+      candidateComponents.length !== schedule.components.length ||
+      candidateComponents.some((component) => {
+        const current = currentComponentsByKey.get(component.key);
+        return (
+          !current ||
+          current.label !== component.label ||
+          current.description !== (component.description ?? null) ||
+          current.costCenterCode !== component.costCenterCode ||
+          current.annualAmountXof !== component.annualAmountXof ||
+          current.defaultSelected !== component.defaultSelected ||
+          current.sortOrder !== component.sortOrder
+        );
+      })
+    ) {
+      return false;
+    }
+
+    const selected = candidateComponents.filter(
+      (component) => component.defaultSelected,
+    );
+    if (selected.length === 0) return false;
+    let fullAmounts: number[];
+    let tuitionAmounts: number[];
+    let housingAmounts: number[];
+    let cafeteriaAmounts: number[];
+    try {
+      fullAmounts = splitEvenlyXof(
+        feePackageTotalXof(selected),
+        candidateRows.length,
+      );
+      const coreAmounts = (key: string) =>
+        splitEvenlyXof(
+          selected.find((component) => component.key === key)
+            ?.annualAmountXof ?? 0,
+          candidateRows.length,
+        );
+      tuitionAmounts = coreAmounts("tuition");
+      housingAmounts = coreAmounts("housing");
+      cafeteriaAmounts = coreAmounts("cafeteria");
+    } catch {
+      return false;
+    }
+    return candidateRows.every((candidate, index) => {
+      const current = schedule.rows[index];
+      return (
+        current?.id === candidate.id &&
+        current.label === candidate.label &&
+        current.dueOn?.toISOString().slice(0, 10) ===
+          candidate.dueOn?.toISOString().slice(0, 10) &&
+        current.amountFullXof === fullAmounts[index] &&
+        current.amountTuitionXof === tuitionAmounts[index] &&
+        current.amountHousingXof === housingAmounts[index] &&
+        current.amountCafeteriaXof === cafeteriaAmounts[index]
+      );
+    });
   }
 
   private async applyScheduleRevision(
@@ -1826,6 +2898,38 @@ export class FinanceApprovalsService {
     return term;
   }
 
+  private async reviewedBillingTerm(
+    tx: Prisma.TransactionClient,
+    after: Record<string, unknown>,
+  ) {
+    const frozen = this.storedBillingContext(after);
+    if (!frozen) {
+      throw new BadRequestException(
+        "The request is missing its reviewed billing term and academic year",
+      );
+    }
+    const term = await tx.term.findUnique({
+      where: { id: frozen.termId },
+      include: { academicYear: true },
+    });
+    if (!term) {
+      throw new BadRequestException(
+        "The reviewed billing term no longer exists",
+      );
+    }
+    const resolved = this.billingContext(term);
+    if (
+      resolved.termName !== frozen.termName ||
+      resolved.academicYearId !== frozen.academicYearId ||
+      resolved.academicYearLabel !== frozen.academicYearLabel
+    ) {
+      throw new BadRequestException(
+        "The reviewed billing term or academic year changed after submission",
+      );
+    }
+    return term;
+  }
+
   private componentKind(costCenterCode: string) {
     if (costCenterCode === "9100") return "tuition";
     if (costCenterCode === "3700") return "housing";
@@ -1848,7 +2952,7 @@ export class FinanceApprovalsService {
       throw new BadRequestException("Invalid custom charge");
     }
     const [term, center, students] = await Promise.all([
-      this.activeTerm(tx),
+      this.reviewedBillingTerm(tx, after),
       tx.costCenter.findUnique({ where: { code: costCenterCode } }),
       tx.student.findMany({
         where: { id: { in: studentIds }, recordStatus: "active" },
@@ -1972,6 +3076,9 @@ export class FinanceApprovalsService {
         },
         components: { include: { allocations: true } },
         componentOverrides: true,
+        billingProfile: {
+          select: { id: true, status: true, academicYearLabel: true },
+        },
       },
     });
     if (!invoice) throw new NotFoundException("Invoice not found");
@@ -1983,6 +3090,14 @@ export class FinanceApprovalsService {
     if (invoice.packageType === "credit" || invoice.totalAmount < 0) {
       throw new BadRequestException("A credit memo cannot have a payment plan");
     }
+    const profileRestriction = this.profileManagedPaymentPlanRestriction(
+      invoice,
+      after,
+    );
+    if (profileRestriction) {
+      throw new BadRequestException(profileRestriction);
+    }
+    const profileManaged = invoice.billingProfile?.status === "active";
     if (
       String(after.mode ?? "replace") === "restore_standard" &&
       !invoice.academicYearLabel
@@ -1996,6 +3111,11 @@ export class FinanceApprovalsService {
       return this.restoreStandardPaymentPlan(tx, invoice, requesterId);
     }
     if (mode === "add_component" || mode === "remove_component") {
+      if (invoice.billingProfile?.status === "active") {
+        throw new BadRequestException(
+          "This annual invoice is controlled by the Annual profile. Propose service, scholarship, and adjustment changes in the Annual profile editor.",
+        );
+      }
       return this.applyInvoiceComponentSelection(
         tx,
         invoice,
@@ -2150,9 +3270,14 @@ export class FinanceApprovalsService {
             sum + allocation.amountXof - allocation.refundedAmountXof,
           0,
         );
-        if (total <= 0) {
+        if (!profileManaged && total <= 0) {
           throw new BadRequestException(
             `${component.label || displayFeeComponentLabel(component.kind)} must retain a positive annual amount; remove the charge from the package instead`,
+          );
+        }
+        if (profileManaged && total !== component.amountXof) {
+          throw new BadRequestException(
+            `${component.label || displayFeeComponentLabel(component.kind)} is controlled by the Annual profile and cannot be changed from the payment-plan editor`,
           );
         }
         if (total < allocated) {
@@ -2162,7 +3287,11 @@ export class FinanceApprovalsService {
         }
       }
     }
-    if (invoice.packageType === "standard_full" && !hasComponentSchedule) {
+    if (
+      invoice.packageType === "standard_full" &&
+      !hasComponentSchedule &&
+      !profileManaged
+    ) {
       const authoritativeAmounts = splitEvenlyXof(
         invoice.totalAmount,
         rows.length,
@@ -2265,7 +3394,7 @@ export class FinanceApprovalsService {
         : await tx.installment.create({
             data: { planId: plan.id, ...data },
           });
-      if (hasComponentSchedule) {
+      if (hasComponentSchedule && !profileManaged) {
         await tx.installmentComponent.deleteMany({
           where: { installmentId: saved.id },
         });
@@ -2288,7 +3417,7 @@ export class FinanceApprovalsService {
         "Plan total cannot be below the amount already paid",
       );
     }
-    if (hasComponentSchedule) {
+    if (hasComponentSchedule && !profileManaged) {
       for (const component of invoice.components) {
         await tx.invoiceComponent.update({
           where: { id: component.id },
@@ -3032,9 +4161,22 @@ export class FinanceApprovalsService {
         },
       }),
       tx.costCenter.findUnique({ where: { code: costCenterCode } }),
-      this.activeTerm(tx),
+      this.reviewedBillingTerm(tx, after),
     ]);
     if (!student) throw new NotFoundException("Billable student not found");
+    const managedProfile = await tx.annualBillingProfile.findFirst({
+      where: {
+        studentId,
+        academicYearLabel: this.billingContext(term).academicYearLabel,
+        status: "active",
+      },
+      select: { academicYearLabel: true },
+    });
+    if (managedProfile) {
+      throw new BadRequestException(
+        `This student's ${managedProfile.academicYearLabel} awards and adjustments are controlled by the Annual profile.`,
+      );
+    }
     if (!center) throw new BadRequestException("Unknown cost center");
     if (!label || !Number.isSafeInteger(amountXof) || amountXof <= 0) {
       throw new BadRequestException("Invalid account credit");
