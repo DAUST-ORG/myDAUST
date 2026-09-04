@@ -34,6 +34,11 @@ import {
   type RegistrationClosedReason,
   type RegistrationSemester,
 } from "./registration-configuration.js";
+import { CURATED_RECOMMENDATIONS } from "./curated-recommendations.data.js";
+import {
+  buildCuratedRecommendations,
+  curatedCourseCodesFor,
+} from "./curated-recommendations.js";
 import {
   deriveCourseRecommendations,
   earliestIncompleteSameSemester,
@@ -1322,6 +1327,42 @@ export class AcademicsService {
       }
     }
 
+    // The derivation needs an approved programme + curriculum snapshot, which
+    // most students do not yet have (the readiness audit reports
+    // missing_program for 386 of 400 active students), so it returns nothing for
+    // them. Fall back to the academic office's curated plan so those students
+    // still see their courses. Only ever a fallback: a student the derivation
+    // can serve keeps the derived, prerequisite-aware result.
+    let curatedFallbackApplied = false;
+    if (recommendationsEnabled && recommendations.length === 0) {
+      const curatedCodes = curatedCourseCodesFor({
+        studentNo: student.studentNo,
+        termName: term.name,
+        data: CURATED_RECOMMENDATIONS,
+      });
+      if (curatedCodes.length > 0) {
+        // Fetched by code rather than reused from the section rows: a curated
+        // course with no section in this term still belongs on the plan, and
+        // those rows are exactly the ones missing from `rows`.
+        const curatedCourses = await this.prisma.course.findMany({
+          where: { code: { in: curatedCodes } },
+          select: { id: true, code: true, title: true, credits: true },
+        });
+        const curated = buildCuratedRecommendations({
+          studentNo: student.studentNo,
+          termName: term.name,
+          data: CURATED_RECOMMENDATIONS,
+          courses: curatedCourses,
+          sections: rows,
+          enrolledCourseIds,
+        });
+        if (curated.length > 0) {
+          recommendations = curated;
+          curatedFallbackApplied = true;
+        }
+      }
+    }
+
     return {
       term: presentStudentRegistrationTerm(term),
       registration: {
@@ -1331,7 +1372,7 @@ export class AcademicsService {
         recommendationsEnabled,
       },
       recommendationContext: {
-        status: recommendationStatus,
+        status: curatedFallbackApplied ? "ready" : recommendationStatus,
         basis: recommendationBasis,
         targetYearIndex,
         semester,

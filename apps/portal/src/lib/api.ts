@@ -4813,7 +4813,12 @@ export type RecommendationBasis =
   | "student_year_level"
   | "catalog_chronology"
   | "earliest_incomplete_same_semester";
-export type RecommendationKind = "scheduled" | "catch_up" | "prerequisite";
+export type RecommendationKind =
+  | "scheduled"
+  | "catch_up"
+  | "prerequisite"
+  /** The academic office's hand-written plan, served when derivation yields nothing. */
+  | "curated";
 export type RecommendationReadiness = "ready" | "conditional" | "blocked";
 export type RecommendationAvailability =
   "available" | "blocked" | "not_offered";

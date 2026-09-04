@@ -15,7 +15,17 @@ export type RecommendationBasis =
   | "catalog_chronology"
   | "earliest_incomplete_same_semester";
 
-export type RecommendationKind = "scheduled" | "catch_up" | "prerequisite";
+/**
+ * `curated` rows do not come from the approved-curriculum derivation: they are the
+ * academic office's hand-written Fall 2026 plan, surfaced while the derivation
+ * chain is incomplete (386 of 400 active students have no programme, so
+ * deriveCourseRecommendations returns nothing for them).
+ */
+export type RecommendationKind =
+  | "scheduled"
+  | "catch_up"
+  | "prerequisite"
+  | "curated";
 export type RecommendationReadiness = "ready" | "conditional" | "blocked";
 export type RecommendationAvailability =
   "available" | "blocked" | "not_offered";
@@ -193,6 +203,9 @@ export function deriveCourseRecommendations(
       prerequisite: 0,
       catch_up: 1,
       scheduled: 2,
+      // Never produced by this function; curated rows bypass derivation
+      // entirely. Present only to satisfy the exhaustive Record.
+      curated: 3,
     };
     if (existing) {
       if (kindRank[kind] < kindRank[existing.kind]) existing.kind = kind;
@@ -286,6 +299,7 @@ export function deriveCourseRecommendations(
     prerequisite: 0,
     catch_up: 1,
     scheduled: 2,
+    curated: 3,
   };
   const sorted = [...candidates.values()].sort((left, right) => {
     const kind = kindRank[left.kind] - kindRank[right.kind];
