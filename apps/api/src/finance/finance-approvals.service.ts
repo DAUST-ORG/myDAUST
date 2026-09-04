@@ -1152,11 +1152,18 @@ export class FinanceApprovalsService {
               : "") ??
             "",
         ).trim();
-        if (!description || !academicYear) {
+        // A void request snapshots only {mode}, and older ones carry a bare
+        // academicYearId with no label. The description still names what is
+        // being voided, which is what a reviewer needs, so an unresolvable
+        // year is dropped from the subject rather than making the whole
+        // request unreviewable.
+        if (!description) {
           throw new Error("Management actual subject could not be resolved");
         }
         const payee = String(after.payee ?? before.payee ?? "").trim();
-        context.subject = `${description}${payee ? ` · ${payee}` : ""} · ${academicYear}`;
+        context.subject = [description, payee, academicYear]
+          .filter(Boolean)
+          .join(" · ");
       }
 
       if (row.kind === "payment_plan") {
