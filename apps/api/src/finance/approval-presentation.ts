@@ -1694,9 +1694,12 @@ export function buildApprovalPresentation(
 
       if (removing) {
         const expense = mode === "void_expense";
+        // Older void snapshots carry a bare academicYearId and no label. That is
+        // no reason to block review of what is being voided — the amount, date,
+        // category and payee below all still resolve.
         const academicYear = text(
           record(before.academicYear).label,
-          text(before.academicYearLabel),
+          text(before.academicYearLabel, "Not recorded"),
         );
         const categoryRelation = record(
           before.managementCategory ?? before.category,
