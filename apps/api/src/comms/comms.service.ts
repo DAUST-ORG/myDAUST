@@ -15,6 +15,24 @@ import type { AuthUser } from "../auth/current-user.js";
  */
 const SCHOOL_WIDE_CONTACT_ROLES = ["registrar", "bursar", "hr", "it_admin", "admin"];
 
+/**
+ * Roles a student may message: faculty and personnel (every non-student role).
+ * Deliberately an explicit allowlist so a role added later never silently becomes
+ * student-reachable. Students are excluded by construction — there is no `student`
+ * entry here.
+ */
+const STUDENT_CONTACT_ROLES = [
+  "faculty",
+  "registrar",
+  "admissions",
+  "bursar",
+  "dining",
+  "hr",
+  "it_admin",
+  "communications",
+  "admin",
+];
+
 @Injectable()
 export class CommsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -395,15 +413,14 @@ input: {
     const ids = new Set<string>();
 
     if (me.roles.includes("student") && me.student) {
-      const enrollments = await this.prisma.enrollment.findMany({
-        where: {
-          studentId: me.student.id,
-          status: { in: ["enrolled", "completed"] },
-        },
-        include: { section: { select: { instructorId: true } } },
+      // Students reach faculty and personnel only — never other students. The
+      // allowlist excludes the `student` role, so a section-mate can never be messaged
+      // (there is no way into a student's set otherwise).
+      const personnel = await this.prisma.person.findMany({
+        where: { roles: { hasSome: STUDENT_CONTACT_ROLES } },
+        select: { id: true },
       });
-      for (const e of enrollments)
-        if (e.section.instructorId) ids.add(e.section.instructorId);
+      for (const p of personnel) ids.add(p.id);
     }
 
     if (me.roles.includes("faculty")) {
