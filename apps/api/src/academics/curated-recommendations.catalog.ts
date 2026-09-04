@@ -93,6 +93,33 @@ const LABEL_TO_COURSE_CODE: Record<string, string> = {
   "engr proj 1": "ENGR 3521",
 };
 
+/**
+ * Roster names the registrar resolved to a student number by hand.
+ *
+ * Every one of these failed automatic matching for a reason worth recording:
+ * five are archived rather than active (so a search of active students could
+ * never find them), one is a spelling variant the source spells "Fatimatou"
+ * and the system spells "Fatoumata", and one name is carried by two active
+ * students so only a person could say which was meant.
+ *
+ * They are keyed by normalised roster name and resolved BEFORE name matching,
+ * which is what keeps this from becoming fuzzy matching by the back door: each
+ * entry is a decision someone made, not a similarity score.
+ *
+ * Archived students keep their plan here even though they cannot sign in
+ * (validateUser rejects a non-active record), so it is already correct if their
+ * record is reactivated.
+ */
+const REVIEWED_STUDENT_NUMBERS: Record<string, string> = {
+  "seynabou soumare": "F20255SS", // archived
+  "mouhamed cheikhna cheikh saadbou diop": "F20256MCCSD", // archived
+  "fatimatou bintou diop": "F202520FBD", // spelled "Fatoumata" in the system
+  "mouhamet ndiaye": "F202315MN", // archived
+  "awa ba diarra": "F20254ABD", // archived
+  "el hadji habib diop": "F202201EHD", // archived
+  "aminata diop": "S20265AD", // two active students share this name
+};
+
 /** Rows in the roster that are group separators, not people. */
 const GROUP_HEADER_LABELS = new Set([
   "s1",
@@ -126,6 +153,11 @@ export function isEmptyCourseCell(value: string): boolean {
 /** Resolves a roster label to a course code, or null when unmapped. */
 export function courseCodeForLabel(label: string): string | null {
   return LABEL_TO_COURSE_CODE[normalizeCourseLabel(label)] ?? null;
+}
+
+/** The student number a reviewer assigned to a roster name, if any. */
+export function reviewedStudentNumberFor(studentName: string): string | null {
+  return REVIEWED_STUDENT_NUMBERS[normalizeGuardianImportName(studentName)] ?? null;
 }
 
 export function mappedCourseCodes(): string[] {

@@ -30,6 +30,10 @@ export const CURATED_RECOMMENDATIONS: CuratedRecommendationData = {
       "level": "Remedial",
       "courses": []
     },
+    "F20255SS": {
+      "level": "Remedial",
+      "courses": []
+    },
     "S202531PADT": {
       "level": "S1",
       "courses": [
@@ -165,6 +169,16 @@ export const CURATED_RECOMMENDATIONS: CuratedRecommendationData = {
       ]
     },
     "F202526AN": {
+      "level": "S1",
+      "courses": [
+        "MATH 1111",
+        "PHYS 1121",
+        "CHEM 1151",
+        "HSS 1141",
+        "ENGR 1161"
+      ]
+    },
+    "F20256MCCSD": {
       "level": "S1",
       "courses": [
         "MATH 1111",
@@ -485,6 +499,16 @@ export const CURATED_RECOMMENDATIONS: CuratedRecommendationData = {
       ]
     },
     "F202530AD": {
+      "level": "S2",
+      "courses": [
+        "MATH 1211",
+        "PHYS 1221",
+        "CS 1231",
+        "MATH 1241",
+        "ENGR 1261"
+      ]
+    },
+    "S20265AD": {
       "level": "S2",
       "courses": [
         "MATH 1211",
@@ -859,6 +883,16 @@ export const CURATED_RECOMMENDATIONS: CuratedRecommendationData = {
         "EE 2331",
         "HSS 2341",
         "CS 1231",
+        "ENGR 2351"
+      ]
+    },
+    "F202520FBD": {
+      "level": "S3",
+      "courses": [
+        "MATH 2311",
+        "MATH 2361",
+        "EE 2331",
+        "HSS 2341",
         "ENGR 2351"
       ]
     },
@@ -1780,6 +1814,15 @@ export const CURATED_RECOMMENDATIONS: CuratedRecommendationData = {
         "ME 1622"
       ]
     },
+    "F202315MN": {
+      "level": "S6_ME",
+      "courses": [
+        "ME 2931",
+        "ME 1511",
+        "ME 1612",
+        "ME 1622"
+      ]
+    },
     "F202304MT": {
       "level": "S6_ME",
       "courses": [
@@ -1998,6 +2041,16 @@ export const CURATED_RECOMMENDATIONS: CuratedRecommendationData = {
         "ME 1622",
         "ME 2931",
         "ME 2922"
+      ]
+    },
+    "F20254ABD": {
+      "level": "S7_CS",
+      "courses": [
+        "CS 3613",
+        "CS 3542",
+        "CS 4713",
+        "CS 4814",
+        "CS 4212"
       ]
     },
     "F202405TAAG": {
@@ -2296,6 +2349,15 @@ export const CURATED_RECOMMENDATIONS: CuratedRecommendationData = {
       ]
     },
     "F202227CABS": {
+      "level": "S8_CS",
+      "courses": [
+        "CS 4714",
+        "CS 4212",
+        "CS 4713",
+        "CS 4814"
+      ]
+    },
+    "F202201EHD": {
       "level": "S8_CS",
       "courses": [
         "CS 4714",
