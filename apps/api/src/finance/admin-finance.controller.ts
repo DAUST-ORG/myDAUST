@@ -777,6 +777,7 @@ export class AdminFinanceController {
   }
 
   @Get("operating-budget")
+  @Roles("admin")
   operatingBudgetView(@Query("academicYear") academicYear?: string) {
     return this.operatingBudget.getOperatingBudget(
       academicYear ? AcademicYearLabelInput.parse(academicYear) : undefined,
@@ -784,6 +785,7 @@ export class AdminFinanceController {
   }
 
   @Put("operating-budget")
+  @Roles("admin")
   async updateOperatingBudget(
     @CurrentUser() user: AuthUser,
     @Body() body: unknown,
@@ -811,6 +813,7 @@ export class AdminFinanceController {
   }
 
   @Post("operating-budget/forecast")
+  @Roles("admin")
   operatingBudgetForecast(@Body() body: unknown) {
     return this.operatingBudget.forecast(
       OperatingBudgetForecastInput.parse(body),
@@ -818,6 +821,7 @@ export class AdminFinanceController {
   }
 
   @Get("operating-budget/actuals")
+  @Roles("admin")
   operatingBudgetActuals(
     @Query("academicYear") academicYear?: string,
     @Query("kind") kind?: string,
@@ -861,6 +865,7 @@ export class AdminFinanceController {
   }
 
   @Post("operating-budget/manual-income")
+  @Roles("admin")
   async createOperatingBudgetIncome(
     @CurrentUser() user: AuthUser,
     @Body() body: unknown,
@@ -884,6 +889,7 @@ export class AdminFinanceController {
   }
 
   @Post("operating-budget/expenses")
+  @Roles("admin")
   async createOperatingBudgetExpense(
     @CurrentUser() user: AuthUser,
     @Body() body: unknown,
@@ -907,6 +913,7 @@ export class AdminFinanceController {
   }
 
   @Patch("operating-budget/expenses/:id")
+  @Roles("admin")
   async updateOperatingBudgetExpense(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -925,6 +932,7 @@ export class AdminFinanceController {
   }
 
   @Delete("operating-budget/expenses/:id")
+  @Roles("admin")
   voidOperatingBudgetExpense(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -941,6 +949,7 @@ export class AdminFinanceController {
   }
 
   @Post("operating-budget/actual-entries")
+  @Roles("admin")
   async createOperatingBudgetActual(
     @CurrentUser() user: AuthUser,
     @Body() body: unknown,
@@ -961,6 +970,7 @@ export class AdminFinanceController {
   }
 
   @Patch("operating-budget/actual-entries/:id")
+  @Roles("admin")
   async updateOperatingBudgetActual(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -982,6 +992,7 @@ export class AdminFinanceController {
   }
 
   @Delete("operating-budget/actual-entries/:id")
+  @Roles("admin")
   voidOperatingBudgetActual(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -998,6 +1009,7 @@ export class AdminFinanceController {
   }
 
   @Post("operating-budget/adjustments")
+  @Roles("admin")
   async createOperatingBudgetAdjustment(
     @CurrentUser() user: AuthUser,
     @Body() body: unknown,
@@ -1014,6 +1026,7 @@ export class AdminFinanceController {
   }
 
   @Get("director-overview")
+  @Roles("admin")
   directorOverview(@Query("fy") fy?: string) {
     return this.finance.directorOverview(fy ?? "FY2026");
   }
@@ -1024,11 +1037,13 @@ export class AdminFinanceController {
   }
 
   @Get("expenses")
+  @Roles("admin")
   expenses() {
     return this.finance.listExpenses();
   }
 
   @Post("expenses")
+  @Roles("admin")
   async createExpense(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const input = LegacyProtectedExpenseInput.parse(body);
     const academicYear = await this.operatingBudget.resolveAcademicYearLabel(
@@ -1058,6 +1073,7 @@ export class AdminFinanceController {
   }
 
   @Patch("expenses/:id")
+  @Roles("admin")
   async updateExpense(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -1085,6 +1101,7 @@ export class AdminFinanceController {
   }
 
   @Delete("expenses/:id")
+  @Roles("admin")
   deleteExpense(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -1101,6 +1118,7 @@ export class AdminFinanceController {
   }
 
   @Post("budgets")
+  @Roles("admin")
   setBudget(@Body() body: unknown) {
     return this.finance.setBudget(SetBudgetInput.parse(body));
   }

@@ -403,7 +403,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
         reason: "Duplicate request",
         after: { mode: "replace", installments },
       }),
-    ).rejects.toThrow("already awaiting administrator approval");
+    ).rejects.toThrow("already awaiting Director approval");
     await approvals.cancel(first.request.id, bursar, "Test cleanup");
 
     const raced = await Promise.allSettled([

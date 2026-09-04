@@ -1177,6 +1177,8 @@ export interface StudentMaterial {
   title: string;
   kind: string;
   category: string;
+  folderId: string | null;
+  folder: { id: string; name: string; category: string } | null;
   fileUrl: string;
   fileName: string | null;
   createdAt: string;
@@ -2604,6 +2606,9 @@ export interface AccountInvoice {
     updatedAt: string;
   }[];
   hasPendingPlanChange?: boolean;
+  profileManaged?: boolean;
+  billingProfileId?: string | null;
+  pendingChanges?: PendingFinanceChange[];
   total: number;
   paid: number;
   balance: number;
@@ -2632,6 +2637,15 @@ export interface InvoiceFeeComponent {
   label: string;
   costCenterCode: string;
   amountXof: number;
+  grossAmountXof?: number;
+  netAmountXof?: number;
+  adjustments?: {
+    id: string;
+    label: string;
+    effect: "discount" | "charge";
+    amountXof: number;
+    reason?: string | null;
+  }[];
   /** Cash already allocated to this component; removal cannot erase it. */
   allocatedXof: number;
   selected: boolean;
@@ -2661,6 +2675,7 @@ export interface StudentAccount {
     remainingXof?: number;
   };
   summary?: AccountBalanceSummary;
+  billingBridge?: AccountBillingBridge;
   specialAccount?: AccountSpecialStatus;
   /** Selected by the API's due-date-first cash-application algorithm. */
   payableTarget?: {
@@ -2676,7 +2691,31 @@ export interface StudentAccount {
     placedAt: string;
   }[];
   billingProfile?: BillingProfileView | null;
+  pendingChanges?: PendingFinanceChange[];
   invoices: AccountInvoice[];
+}
+
+export interface PendingFinanceChange {
+  id: string;
+  kind:
+    | "payment_plan"
+    | "billing_profile"
+    | "custom_charge"
+    | "charge_removal"
+    | "discount"
+    | "scholarship";
+  label: string;
+  reason: string;
+  academicYearLabel?: string | null;
+  requestedAt: string;
+}
+
+export interface AccountBillingBridge {
+  grossChargesXof: number;
+  adjustmentsXof: number;
+  netBillXof: number;
+  paidXof: number;
+  outstandingXof: number;
 }
 export const getStudentAccount = (studentId: string) =>
   request<StudentAccount>(`/finance/admin/students/${studentId}/account`);
@@ -2731,6 +2770,7 @@ export interface StudentAccountRow {
   remaining?: number;
   remainingXof?: number;
   summary?: AccountBalanceSummary;
+  billingBridge?: AccountBillingBridge;
   openCharges: number;
   overdue: boolean;
   status: string; // paid | due | overdue
@@ -2751,6 +2791,8 @@ export interface StudentAccountRow {
   feeScheduleRevision: number | null;
   planType?: AccountPlanType | null;
   specialAccount?: AccountSpecialStatus;
+  profileManaged?: boolean;
+  pendingChanges?: PendingFinanceChange[];
 }
 export const listStudentAccounts = () =>
   request<StudentAccountRow[]>("/finance/admin/accounts");
@@ -3170,6 +3212,22 @@ export type ApprovalRequestKind =
 export type ApprovalRequestStatus =
   "pending" | "approved" | "rejected" | "cancelled" | "stale";
 
+export interface ApprovalPresentationChange {
+  label: string;
+  type: "create" | "update" | "remove" | "unchanged";
+  previous?: string | null;
+  proposed?: string | null;
+  detail?: string | null;
+}
+
+export interface ApprovalPresentation {
+  subject: string;
+  summary: string;
+  changes: ApprovalPresentationChange[];
+  canApprove: boolean;
+  blockingMessage?: string | null;
+}
+
 export interface ApprovalRequestRow {
   id: string;
   kind: ApprovalRequestKind;
@@ -3189,6 +3247,7 @@ export interface ApprovalRequestRow {
   reviewedAt: string | null;
   appliedAt: string | null;
   events?: unknown[];
+  presentation: ApprovalPresentation;
 }
 
 export const listApprovalRequests = (

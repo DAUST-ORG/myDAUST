@@ -15,6 +15,7 @@ import {
   logout,
 } from "@/lib/api";
 import type { NavGroup } from "./AppShell";
+import { facultyMaterialsHref } from "@/lib/faculty-materials-routing";
 import { PAGE_META } from "@/lib/nav";
 
 interface SearchHit {
@@ -102,7 +103,7 @@ export function Topbar({
             group: "My classes",
             label: `${c.code} — ${c.title}`,
             sub: c.room ?? undefined,
-            href: "/faculty/gradebook",
+            href: facultyMaterialsHref(c.sectionId),
           })),
         );
       } else if (me.roles.includes("student")) {

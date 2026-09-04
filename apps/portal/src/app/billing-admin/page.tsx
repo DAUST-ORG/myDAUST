@@ -41,6 +41,7 @@ import {
   removeCharge,
   replacePaymentPlan,
   restoreStandardPaymentPlan,
+  updatePaymentPlan,
   updateAdminWireConfig,
 } from "@/lib/api";
 import { InvoiceComponentManager } from "@/components/InvoiceComponentManager";
@@ -758,8 +759,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                     "Student",
                     "Program",
                     "Charges",
-                    "Billed",
-                    "Remaining",
+                    "Approved account bridge",
                     "Status",
                     "",
                   ].map((h, i) => (
@@ -767,8 +767,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                       key={h || "act"}
                       style={{
                         ...thStyle,
-                        textAlign:
-                          i === 3 || i === 4 || i === 6 ? "right" : "left",
+                        textAlign: i === 3 || i === 5 ? "right" : "left",
                       }}
                     >
                       {h}
@@ -780,7 +779,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 {rows === null ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={7}
                       style={{
                         padding: 40,
                         textAlign: "center",
@@ -793,7 +792,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 ) : list.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={7}
                       style={{
                         padding: 40,
                         textAlign: "center",
@@ -860,6 +859,16 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                             {s.specialAccount?.isSpecial && (
                               <SpecialAccountPill status={s.specialAccount} />
                             )}
+                            {(s.pendingChanges?.length ?? 0) > 0 && (
+                              <PendingChangesPill
+                                changes={s.pendingChanges!}
+                                outstandingXof={
+                                  s.billingBridge?.outstandingXof ??
+                                  s.remaining ??
+                                  s.balance
+                                }
+                              />
+                            )}
                           </span>
                         </div>
                       </td>
@@ -869,33 +878,8 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                       <td style={{ ...tdStyle, color: "#6c7884" }}>
                         {s.openCharges} open
                       </td>
-                      <td
-                        style={{
-                          ...tdStyle,
-                          fontWeight: 650,
-                          textAlign: "right",
-                          whiteSpace: "nowrap",
-                          fontVariantNumeric: "tabular-nums",
-                        }}
-                      >
-                        {fcfa(s.billed)} FCFA
-                      </td>
                       <td style={{ ...tdStyle, textAlign: "right" }}>
-                        <span
-                          style={{
-                            display: "grid",
-                            gap: 2,
-                            justifyItems: "end",
-                          }}
-                        >
-                          <AccountBalanceText
-                            summary={s.summary}
-                            style={{ fontWeight: 700, whiteSpace: "nowrap" }}
-                          />
-                          {s.summary.standing === "overdue" && (
-                            <AccountStatusLine summary={s.summary} />
-                          )}
-                        </span>
+                        <AccountBridgeSummary account={s} />
                       </td>
                       <td style={tdStyle}>
                         <AccountStandingBadge summary={s.summary} />
@@ -979,7 +963,7 @@ function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             flash(
               res.applied
                 ? "Charge approved and added"
-                : "Charge request submitted for administrator approval",
+                : "Charge request submitted for Director approval",
             );
           }}
         />
@@ -1031,7 +1015,7 @@ function SpecialAccountPill({
   status: NonNullable<StudentAccountRow["specialAccount"]>;
 }) {
   const label = status.hasPendingPlanChange
-    ? "Approval pending"
+    ? "Director approval pending"
     : status.hasIndividualPlan
       ? "Individual plan"
       : "Special account";
@@ -1052,6 +1036,76 @@ function SpecialAccountPill({
       }}
     >
       {label}
+    </span>
+  );
+}
+
+function PendingChangesPill({
+  changes,
+  outstandingXof,
+}: {
+  changes: NonNullable<StudentAccountRow["pendingChanges"]>;
+  outstandingXof: number;
+}) {
+  return (
+    <span
+      title={changes
+        .map((change) => `${change.label}: ${change.reason}`)
+        .join(" · ")}
+      style={{
+        display: "table",
+        marginTop: 4,
+        padding: "2px 7px",
+        borderRadius: 999,
+        background: "#e8f0fb",
+        color: "#234d7d",
+        border: "1px solid #c8d8eb",
+        fontSize: 10.5,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+      }}
+    >
+      Awaiting Director approval — current approved balance remains{" "}
+      {fcfa(outstandingXof)} FCFA
+    </span>
+  );
+}
+
+function AccountBridgeSummary({
+  account,
+}: {
+  account: Pick<
+    StudentAccountRow,
+    "billingBridge" | "billed" | "paid" | "remaining" | "balance" | "summary"
+  >;
+}) {
+  const bridge = account.billingBridge ?? {
+    grossChargesXof: account.billed,
+    adjustmentsXof: 0,
+    netBillXof: account.billed,
+    paidXof: account.paid,
+    outstandingXof:
+      account.remaining ?? account.summary?.outstandingXof ?? account.balance,
+  };
+  return (
+    <span
+      style={{
+        display: "grid",
+        gap: 2,
+        justifyItems: "end",
+        whiteSpace: "nowrap",
+        fontSize: 11.5,
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
+      <span>Gross {fcfa(bridge.grossChargesXof)} FCFA</span>
+      <span>Adjustments {fcfa(bridge.adjustmentsXof)} FCFA</span>
+      <span>Net {fcfa(bridge.netBillXof)} FCFA</span>
+      <span>Paid {fcfa(bridge.paidXof)} FCFA</span>
+      <strong>Outstanding {fcfa(bridge.outstandingXof)} FCFA</strong>
+      {account.summary?.standing === "overdue" && (
+        <AccountStatusLine summary={account.summary} />
+      )}
     </span>
   );
 }
@@ -1230,8 +1284,8 @@ function AddStudentModal({
         />
         <span>
           Creates a real student on the platform and assigns the current
-          administrator-approved tuition, housing, and cafeteria package. Leave
-          the ID blank to auto-generate one.
+          Director-approved tuition, housing, and cafeteria package. Leave the
+          ID blank to auto-generate one.
         </span>
       </div>
       {err && (
@@ -1658,7 +1712,7 @@ function ManageDrawer({
       flash(
         result.applied
           ? "Charge approved and added"
-          : "Charge request submitted for administrator approval",
+          : "Charge request submitted for Director approval",
       );
     } finally {
       setBusy(false);
@@ -1687,7 +1741,7 @@ function ManageDrawer({
           ? wasPaid
             ? "Removal approved — paid amount reversed to account credit"
             : "Removal approved and applied"
-          : "Charge-removal request submitted for administrator approval",
+          : "Charge-removal request submitted for Director approval",
       );
     } finally {
       setBusy(false);
@@ -1860,15 +1914,35 @@ function ManageDrawer({
                 )}
                 <div
                   style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+                    gap: 8,
                     fontSize: 11.5,
                     color: "rgba(255,255,255,.72)",
                     marginTop: 6,
                   }}
                 >
-                  Billed {fcfa(acct.totals.billed)} · Paid{" "}
-                  {fcfa(acct.totals.paid)} · Remaining{" "}
-                  {fcfa(acct.totals.remaining ?? summary?.outstandingXof ?? 0)}{" "}
-                  FCFA
+                  {(() => {
+                    const bridge = acct.billingBridge ?? {
+                      grossChargesXof: acct.totals.billed,
+                      adjustmentsXof: 0,
+                      netBillXof: acct.totals.billed,
+                      paidXof: acct.totals.paid,
+                      outstandingXof:
+                        acct.totals.remaining ?? summary?.outstandingXof ?? 0,
+                    };
+                    return [
+                      ["Gross charges", bridge.grossChargesXof],
+                      ["Scholarships / adjustments", bridge.adjustmentsXof],
+                      ["Net bill", bridge.netBillXof],
+                      ["Paid", bridge.paidXof],
+                      ["Outstanding", bridge.outstandingXof],
+                    ];
+                  })().map(([label, value]) => (
+                    <span key={String(label)}>
+                      {label} <strong>{fcfa(Number(value))} FCFA</strong>
+                    </span>
+                  ))}
                 </div>
                 {acct.specialAccount?.isSpecial && (
                   <div style={{ marginTop: 8 }}>
@@ -1876,6 +1950,41 @@ function ManageDrawer({
                   </div>
                 )}
               </div>
+
+              {(acct.pendingChanges?.length ?? 0) > 0 && (
+                <div
+                  role="status"
+                  style={{
+                    display: "grid",
+                    gap: 5,
+                    margin: "-6px 0 20px",
+                    padding: "11px 12px",
+                    border: "1px solid #c8d8eb",
+                    borderRadius: 10,
+                    background: "#eef4fb",
+                    color: "#234d7d",
+                    fontSize: 12,
+                  }}
+                >
+                  <strong>
+                    Awaiting Director approval — current approved balance
+                    remains{" "}
+                    {fcfa(
+                      acct.billingBridge?.outstandingXof ??
+                        acct.totals.remaining ??
+                        summary?.outstandingXof ??
+                        0,
+                    )}{" "}
+                    FCFA
+                  </strong>
+                  {acct.pendingChanges!.map((change) => (
+                    <span key={change.id}>
+                      {change.label} — {change.reason}
+                    </span>
+                  ))}
+                  <span>Pending requests are listed separately.</span>
+                </div>
+              )}
 
               <SectionKick>Charges on account</SectionKick>
               {acct.invoices.length === 0 ? (
@@ -1952,7 +2061,7 @@ function ManageDrawer({
                                 ? ` · revision ${inv.feeScheduleRevision}`
                                 : ""}
                               {inv.hasPendingPlanChange
-                                ? " · approval pending"
+                                ? " · Director approval pending"
                                 : ""}
                             </div>
                           )}
@@ -2010,7 +2119,7 @@ function ManageDrawer({
                                   }}
                                 >
                                   {inv.hasPendingPlanChange
-                                    ? "Approval pending"
+                                    ? "Director approval pending"
                                     : inv.installments.length
                                       ? "Edit plan"
                                       : "Create plan"}
@@ -2297,7 +2406,7 @@ function ManageDrawer({
               ) : (
                 <>
                   {" "}
-                  — this charge is unpaid and will be voided after administrator
+                  — this charge is unpaid and will be voided after Director
                   approval.
                 </>
               )}
@@ -2424,21 +2533,38 @@ function PlanEditorModal({
         setError("Explain why this payment plan is changing.");
         return;
       }
-      const result = await replacePaymentPlan(
-        invoice.id,
-        rows.map((row, index) => ({
-          id: row.id,
-          sequence: index + 1,
-          dueDate: row.dueDate,
-          amountDue: row.amountDue,
-          label: row.label,
-        })),
-        reason.trim(),
-      );
+      const result = invoice.profileManaged
+        ? await updatePaymentPlan(
+            invoice.id,
+            rows.flatMap((row) =>
+              row.id
+                ? [
+                    {
+                      id: row.id,
+                      dueDate: row.dueDate,
+                      amountDue: row.amountDue,
+                      label: row.label,
+                    },
+                  ]
+                : [],
+            ),
+            reason.trim(),
+          )
+        : await replacePaymentPlan(
+            invoice.id,
+            rows.map((row, index) => ({
+              id: row.id,
+              sequence: index + 1,
+              dueDate: row.dueDate,
+              amountDue: row.amountDue,
+              label: row.label,
+            })),
+            reason.trim(),
+          );
       onSaved(
         result.applied
           ? "Payment-plan change approved and applied"
-          : "Payment-plan change submitted for administrator approval",
+          : "Payment-plan change submitted for Director approval",
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save payment plan.");
@@ -2452,19 +2578,20 @@ function PlanEditorModal({
       onClose={onClose}
     >
       <p style={{ color: "#6c7884", fontSize: 13, marginTop: 0 }}>
-        Annual charges set this student&apos;s total. Component or payment-date
-        exceptions require administrator approval. Component selections retain
-        later global fee amounts; individual payment dates remain separate.
+        {invoice.profileManaged
+          ? "The Annual Profile controls services, awards, and amounts. This editor changes payment labels and dates only."
+          : "Annual charges set this student’s total. Component or payment-date exceptions require Director approval. Component selections retain later global fee amounts; individual payment dates remain separate."}
       </p>
-      {invoice.planType === "individual_override" && (
-        <RestoreStandardPlanForm
-          invoice={invoice}
-          busy={busy}
-          onBusy={setBusy}
-          onSaved={onSaved}
-          onError={setError}
-        />
-      )}
+      {invoice.planType === "individual_override" &&
+        !invoice.profileManaged && (
+          <RestoreStandardPlanForm
+            invoice={invoice}
+            busy={busy}
+            onBusy={setBusy}
+            onSaved={onSaved}
+            onError={setError}
+          />
+        )}
       {invoice.packageType === "standard_full" && (
         <InvoiceComponentManager invoice={invoice} onSubmitted={onSaved} />
       )}
@@ -2478,7 +2605,9 @@ function PlanEditorModal({
       >
         <strong style={{ fontSize: 13 }}>Payment dates</strong>
         <span style={{ color: "#6c7884", fontSize: 11.5 }}>
-          Amounts are calculated from annual charges
+          {invoice.profileManaged
+            ? "Amounts stay fixed by the Annual Profile"
+            : "Amounts are calculated from annual charges"}
         </span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2494,12 +2623,14 @@ function PlanEditorModal({
             <strong>{index + 1}</strong>
             <input
               value={row.label}
+              aria-label={`Payment ${index + 1} label`}
               onChange={(e) => edit(index, { label: e.target.value })}
               style={{ ...inputStyle, margin: 0 }}
             />
             <input
               type="date"
               value={row.dueDate}
+              aria-label={`Payment ${index + 1} due date`}
               onChange={(e) => edit(index, { dueDate: e.target.value })}
               style={{ ...inputStyle, margin: 0 }}
             />
@@ -2515,7 +2646,8 @@ function PlanEditorModal({
                 background: "var(--surface-2)",
               }}
             />
-            {invoice.packageType !== "standard_full" ? (
+            {invoice.packageType !== "standard_full" &&
+            !invoice.profileManaged ? (
               <button
                 onClick={() => remove(index)}
                 disabled={rows.length === 1 || row.amountPaid > 0}
@@ -2539,7 +2671,7 @@ function PlanEditorModal({
           </div>
         ))}
       </div>
-      {invoice.packageType !== "standard_full" && (
+      {invoice.packageType !== "standard_full" && !invoice.profileManaged && (
         <button onClick={add} style={{ ...outlineBtn, marginTop: 12 }}>
           <Plus size={14} /> Add payment date
         </button>
@@ -2609,7 +2741,7 @@ function RestoreStandardPlanForm({
       onSaved(
         result.applied
           ? "Approved standard payment plan restored"
-          : "Restore-to-standard request submitted for administrator approval",
+          : "Restore-to-standard request submitted for Director approval",
       );
     } catch (error) {
       onError(
@@ -2636,7 +2768,7 @@ function RestoreStandardPlanForm({
       </strong>
       <p style={{ margin: "4px 0 9px", color: "#6c7884", fontSize: 12 }}>
         Replace this student&apos;s individual dates and amounts with the
-        current approved package after administrator approval.
+        current approved package after Director approval.
       </p>
       <label style={{ ...fieldLabel, display: "block" }}>
         Reason for restoration

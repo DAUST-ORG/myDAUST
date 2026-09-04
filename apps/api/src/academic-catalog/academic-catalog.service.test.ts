@@ -518,6 +518,74 @@ describe("AcademicCatalogService draft and approval submission", () => {
     );
   });
 
+  it("rejects a draft whose canonical content matches the approved catalog", async () => {
+    const base = {
+      academicYearId: "year-1",
+      yearLabel: "2026–2027",
+      startsOn: new Date("2026-08-20T00:00:00.000Z"),
+      endsOn: new Date("2027-06-30T00:00:00.000Z"),
+      defaultLevels: levels,
+      defaultStandingRules: undefined,
+      notYetGradedStanding: undefined,
+      programConfigurations: [program],
+      reason: "Different explanations do not change canonical content",
+      activateYear: false,
+      createdAt: new Date("2026-09-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-09-01T00:00:00.000Z"),
+      approvedAt: null,
+      approvalRequestId: null,
+    };
+    const draft = {
+      ...base,
+      id: "revision-2",
+      revision: 2,
+      status: "draft",
+    };
+    const approved = {
+      ...base,
+      id: "revision-1",
+      revision: 1,
+      status: "approved",
+      reason: "Original explanation",
+    };
+    const approvalCreate = vi.fn();
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValueOnce([{ id: "year-1" }])
+        .mockResolvedValueOnce([{ id: "revision-2" }]),
+      academicCatalogRevision: {
+        findUnique: vi.fn(async () => draft),
+        findFirst: vi.fn(async () => approved),
+      },
+      program: {
+        findMany: vi.fn(async () => [
+          { id: PROGRAM_ID, code: "BSCS", name: "Computer Science" },
+        ]),
+      },
+      course: {
+        findMany: vi.fn(async () => [
+          { id: COURSE_ID, code: "CS 499", credits: 132 },
+        ]),
+      },
+      approvalRequest: { create: approvalCreate },
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+      ),
+    };
+    const service = new AcademicCatalogService(prisma as never);
+
+    await expect(
+      service.submit("year-1", {
+        personId: "registrar-1",
+        roles: ["registrar"],
+      } as never),
+    ).rejects.toThrow("already matches the approved catalog");
+    expect(approvalCreate).not.toHaveBeenCalled();
+  });
+
   it("fails a draft save if its locked revision is no longer draft", async () => {
     const currentDraft = {
       id: "revision-2",

@@ -242,6 +242,30 @@ export class OperatingBudgetService {
     return createHash("sha256").update(JSON.stringify(content)).digest("hex");
   }
 
+  private budgetApprovalContent(budget: {
+    openingBalanceXof: number | bigint;
+    lines: readonly {
+      categoryKey: string;
+      monthIndex: number;
+      amountXof: number | bigint;
+    }[];
+  }) {
+    return JSON.stringify({
+      openingBalanceXof: String(budget.openingBalanceXof),
+      lines: [...budget.lines]
+        .map((line) => ({
+          categoryKey: line.categoryKey,
+          monthIndex: line.monthIndex,
+          amountXof: String(line.amountXof),
+        }))
+        .sort(
+          (left, right) =>
+            left.categoryKey.localeCompare(right.categoryKey) ||
+            left.monthIndex - right.monthIndex,
+        ),
+    });
+  }
+
   private async actualRecords(
     db: DbClient,
     year: { id: string; label: string },
@@ -750,7 +774,7 @@ export class OperatingBudgetService {
       }
       if (latest?.status === "pending") {
         throw new BadRequestException(
-          "This operating budget is awaiting administrator approval",
+          "This operating budget is awaiting Director approval",
         );
       }
       let budget;
@@ -1370,7 +1394,7 @@ export class OperatingBudgetService {
     });
     if (!budget) {
       throw new BadRequestException(
-        "An administrator-approved operating budget is required before forecasting",
+        "A Director-approved operating budget is required before forecasting",
       );
     }
     if (
@@ -1787,6 +1811,15 @@ export class OperatingBudgetService {
         orderBy: { revision: "desc" },
         include: { lines: true },
       });
+      if (
+        current &&
+        this.budgetApprovalContent(current) ===
+          this.budgetApprovalContent(budget)
+      ) {
+        throw new BadRequestException(
+          "No change requested: this operating budget already matches the approved budget.",
+        );
+      }
       return {
         before: current,
         baseRevision: budget.baseRevision,
@@ -1805,12 +1838,35 @@ export class OperatingBudgetService {
       const expense = change.targetId
         ? await this.prisma.expense.findUnique({
             where: { id: change.targetId },
+            include: { academicYear: { select: { label: true } } },
           })
         : null;
       if (!expense) throw new NotFoundException("Expense not found");
       if (expense.status !== "approved") {
         throw new BadRequestException(
           "Only an approved expense can be changed",
+        );
+      }
+      if (
+        mode === "update_expense" &&
+        expense.academicYearId === String(change.after.academicYearId ?? "") &&
+        (expense.managementCategoryKey ?? "") ===
+          String(change.after.categoryKey ?? "") &&
+        expense.category ===
+          String(
+            change.after.legacyCategory ?? change.after.categoryLabel ?? "",
+          ) &&
+        expense.costCenterCode === String(change.after.costCenterCode ?? "") &&
+        expense.description === String(change.after.description ?? "") &&
+        (expense.payee ?? null) ===
+          (change.after.payee ? String(change.after.payee) : null) &&
+        expense.amount === Number(change.after.amountXof) &&
+        expense.isEstimate === Boolean(change.after.isEstimate) &&
+        expense.incurredOn.toISOString().slice(0, 10) ===
+          String(change.after.occurredOn ?? "")
+      ) {
+        throw new BadRequestException(
+          "No change requested: this expense already has these approved details.",
         );
       }
       return {
@@ -1823,13 +1879,31 @@ export class OperatingBudgetService {
       const entry = change.targetId
         ? await this.prisma.managementActualEntry.findUnique({
             where: { id: change.targetId },
-            include: { category: true },
+            include: {
+              category: true,
+              academicYear: { select: { label: true } },
+            },
           })
         : null;
       if (!entry) throw new NotFoundException("Manual actual entry not found");
       if (entry.status !== "approved") {
         throw new BadRequestException(
           "Only an approved manual actual can be changed",
+        );
+      }
+      if (
+        mode === "update_entry" &&
+        entry.academicYearId === String(change.after.academicYearId ?? "") &&
+        entry.categoryKey === String(change.after.categoryKey ?? "") &&
+        entry.costCenterCode === String(change.after.costCenterCode ?? "") &&
+        toApiXof(entry.amountXof, "Management actual amount") ===
+          Number(change.after.amountXof) &&
+        entry.occurredOn.toISOString().slice(0, 10) ===
+          String(change.after.occurredOn ?? "") &&
+        entry.description === String(change.after.description ?? "")
+      ) {
+        throw new BadRequestException(
+          "No change requested: this manual actual already has these approved details.",
         );
       }
       return {

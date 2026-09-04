@@ -49,19 +49,33 @@ export function InvoiceComponentManager({
   const [error, setError] = useState<string | null>(null);
 
   const catalog = useMemo<CatalogRow[]>(() => {
-    const selectedByKey = new Map(
-      (invoice.components ?? [])
-        .filter((component) => component.selected && component.amountXof > 0)
-        .map((component) => [componentKey(component), component]),
+    const isSelected = (component: InvoiceFeeComponent) =>
+      component.selected &&
+      (invoice.profileManaged
+        ? (component.grossAmountXof ?? 0) > 0 || component.amountXof > 0
+        : component.amountXof > 0);
+    const invoiceByKey = new Map(
+      (invoice.components ?? []).map((component) => [
+        componentKey(component),
+        component,
+      ]),
     );
-    const listed = (invoice.availableComponents ?? []).map((component) => ({
-      ...component,
-      selected: selectedByKey.has(component.key) || component.selected,
-      selectedComponent: selectedByKey.get(component.key),
-    }));
+    const listed = (invoice.availableComponents ?? []).map((component) => {
+      const invoiceComponent = invoiceByKey.get(component.key);
+      return {
+        ...component,
+        selected: invoiceComponent
+          ? isSelected(invoiceComponent)
+          : component.selected,
+        // Keep the immutable invoice snapshot even when a retired profile row
+        // is no longer selected; its displayed gross/net must not fall back to
+        // the latest catalog price.
+        selectedComponent: invoiceComponent,
+      };
+    });
     const listedKeys = new Set(listed.map((component) => component.key));
     for (const component of invoice.components ?? []) {
-      if (!component.selected || component.amountXof <= 0) continue;
+      if (!isSelected(component)) continue;
       const key = componentKey(component);
       if (listedKeys.has(key)) continue;
       listed.push({
@@ -70,7 +84,9 @@ export function InvoiceComponentManager({
         label: component.label,
         description: null,
         costCenterCode: component.costCenterCode,
-        annualAmountXof: component.amountXof,
+        annualAmountXof: invoice.profileManaged
+          ? (component.grossAmountXof ?? component.amountXof)
+          : component.amountXof,
         defaultSelected: false,
         sortOrder: listed.length,
         selected: true,
@@ -85,7 +101,7 @@ export function InvoiceComponentManager({
           (b.sortOrder ?? Number.MAX_SAFE_INTEGER) ||
         a.label.localeCompare(b.label),
     );
-  }, [invoice.availableComponents, invoice.components]);
+  }, [invoice.availableComponents, invoice.components, invoice.profileManaged]);
 
   const componentDataAvailable =
     invoice.components !== undefined ||
@@ -107,6 +123,11 @@ export function InvoiceComponentManager({
         proposal.component.annualAmountXof)
     : 0;
   const proposedTotal = currentTotal + delta;
+  const grossTotal = (invoice.components ?? []).reduce(
+    (sum, component) => sum + (component.grossAmountXof ?? component.amountXof),
+    0,
+  );
+  const adjustmentTotal = currentTotal - grossTotal;
   const installments = [...invoice.installments].sort(
     (a, b) => a.sequence - b.sequence,
   );
@@ -131,7 +152,8 @@ export function InvoiceComponentManager({
     !proposal ||
     !reason.trim() ||
     unsafeRemoval ||
-    invoice.hasPendingPlanChange;
+    invoice.hasPendingPlanChange ||
+    invoice.profileManaged;
 
   function choose(mode: Proposal["mode"], component: CatalogRow) {
     setProposal({ mode, component });
@@ -160,7 +182,7 @@ export function InvoiceComponentManager({
       onSubmitted(
         result.applied
           ? `Component ${verb} approved and applied`
-          : `Component ${verb} submitted for administrator approval`,
+          : `Component ${verb} submitted for Director approval`,
       );
     } catch (caught) {
       setError(
@@ -211,13 +233,69 @@ export function InvoiceComponentManager({
         </div>
       )}
 
-      {invoice.hasPendingPlanChange && (
+      {invoice.profileManaged && (
         <div className="fee-component-pending" role="status">
-          <Badge tone="warning">Approval pending</Badge>
+          <Badge tone="navy">Annual profile</Badge>
           <span>
-            Finish the current request before proposing another account change.
+            This approved annual profile controls services, scholarships, and
+            adjustments. Use the Annual profile editor to propose a change.
           </span>
         </div>
+      )}
+
+      {(invoice.pendingChanges?.length ?? 0) > 0 ? (
+        <div className="fee-component-pending" role="status">
+          <Badge tone="warning">Director approval pending</Badge>
+          <span>
+            Awaiting Director approval — the current approved balance remains{" "}
+            {formatXof(invoice.remainingXof ?? invoice.remaining ?? 0)}.
+          </span>
+        </div>
+      ) : invoice.hasPendingPlanChange ? (
+        <div className="fee-component-pending" role="status">
+          <Badge tone="warning">Director approval pending</Badge>
+          <span>
+            Awaiting Director approval — the current approved balance remains{" "}
+            {formatXof(invoice.remainingXof ?? invoice.remaining ?? 0)}.
+          </span>
+        </div>
+      ) : null}
+
+      {invoice.profileManaged && (
+        <dl
+          aria-label="Approved annual account calculation"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+            gap: 9,
+            margin: 0,
+          }}
+        >
+          {[
+            ["Gross charges", grossTotal],
+            ["Scholarships & adjustments", adjustmentTotal],
+            ["Net billed", currentTotal],
+            ["Paid", invoice.paid],
+            ["Outstanding", invoice.remainingXof ?? invoice.remaining ?? 0],
+          ].map(([label, value]) => (
+            <div
+              key={String(label)}
+              style={{
+                padding: 10,
+                borderRadius: "var(--radius-md)",
+                background: "var(--bg-subtle)",
+              }}
+            >
+              <dt className="muted" style={{ fontSize: 11 }}>
+                {label}
+              </dt>
+              <dd style={{ margin: "3px 0 0", fontWeight: 750 }}>
+                {Number(value) < 0 ? "−" : ""}
+                {formatXof(Math.abs(Number(value)))}
+              </dd>
+            </div>
+          ))}
+        </dl>
       )}
 
       <div className="fee-component-list">
@@ -225,6 +303,9 @@ export function InvoiceComponentManager({
           const amount =
             component.selectedComponent?.amountXof ?? component.annualAmountXof;
           const allocated = component.selectedComponent?.allocatedXof ?? 0;
+          const grossAmount =
+            component.selectedComponent?.grossAmountXof ?? amount;
+          const componentAdjustment = amount - grossAmount;
           const removeBlocked =
             allocated > 0 ||
             currentTotal - amount < invoice.paid ||
@@ -254,31 +335,74 @@ export function InvoiceComponentManager({
                     Protected by payment already received
                   </small>
                 )}
+                {invoice.profileManaged && component.selected && (
+                  <small>
+                    Included · {formatXof(grossAmount)} gross
+                    {(component.selectedComponent?.adjustments ?? []).map(
+                      (adjustment) => (
+                        <span key={adjustment.id}>
+                          {" "}
+                          · {adjustment.label}{" "}
+                          {adjustment.effect === "discount" ? "−" : "+"}
+                          {formatXof(adjustment.amountXof)}
+                        </span>
+                      ),
+                    )}
+                    {componentAdjustment !== 0 &&
+                      (component.selectedComponent?.adjustments?.length ??
+                        0) === 0 && (
+                        <span>
+                          {" "}
+                          · Other approved adjustments{" "}
+                          {componentAdjustment < 0 ? "−" : "+"}
+                          {formatXof(Math.abs(componentAdjustment))}
+                        </span>
+                      )}{" "}
+                    · Net {formatXof(amount)}
+                  </small>
+                )}
               </span>
               <span className="fee-component-money">
-                <strong>{formatXof(amount)}</strong>
+                <strong>
+                  {invoice.profileManaged
+                    ? `${formatXof(grossAmount)} gross`
+                    : formatXof(amount)}
+                </strong>
+                {invoice.profileManaged && componentAdjustment !== 0 && (
+                  <small>
+                    {componentAdjustment < 0 ? "−" : "+"}
+                    {formatXof(Math.abs(componentAdjustment))} adjustments ·{" "}
+                    {formatXof(amount)} net
+                  </small>
+                )}
                 {allocated > 0 && (
                   <small>{formatXof(allocated)} allocated</small>
                 )}
               </span>
-              <Button
-                size="sm"
-                variant={component.selected ? "ghost" : "secondary"}
-                disabled={
-                  invoice.hasPendingPlanChange ||
-                  (component.selected && removeBlocked)
-                }
-                title={
-                  component.selected && removeBlocked
-                    ? "This charge has paid allocations or removing it would put an installment below its paid amount."
-                    : undefined
-                }
-                onClick={() =>
-                  choose(component.selected ? "remove" : "add", component)
-                }
-              >
-                {component.selected ? "Remove" : "Add"}
-              </Button>
+              {invoice.profileManaged ? (
+                <Badge tone={component.selected ? "success" : "neutral"}>
+                  {component.selected ? "Included" : "Not included"}
+                </Badge>
+              ) : (
+                <Button
+                  size="sm"
+                  variant={component.selected ? "ghost" : "secondary"}
+                  disabled={
+                    invoice.hasPendingPlanChange ||
+                    (component.selected && removeBlocked)
+                  }
+                  title={
+                    component.selected && removeBlocked
+                      ? "This charge has paid allocations or removing it would put an installment below its paid amount."
+                      : undefined
+                  }
+                  onClick={() =>
+                    choose(component.selected ? "remove" : "add", component)
+                  }
+                >
+                  {component.selected ? "Remove" : "Add"}
+                </Button>
+              )}
             </div>
           );
         })}
@@ -290,7 +414,7 @@ export function InvoiceComponentManager({
         </p>
       )}
 
-      {proposal && (
+      {proposal && !invoice.profileManaged && (
         <div className="fee-component-proposal">
           <div className="fee-component-proposal-title">
             <span>
@@ -357,7 +481,7 @@ export function InvoiceComponentManager({
 
           <Field
             label="Reason for this student’s exception"
-            hint="The administrator sees this reason with the before-and-after totals."
+            hint="The Director sees this reason with the before-and-after totals."
           >
             <textarea
               value={reason}
@@ -374,7 +498,7 @@ export function InvoiceComponentManager({
               apply.
             </span>
             <Button variant="primary" disabled={cannotSubmit} onClick={submit}>
-              {busy ? "Submitting…" : "Submit for approval"}
+              {busy ? "Submitting…" : "Submit for Director approval"}
             </Button>
           </div>
         </div>

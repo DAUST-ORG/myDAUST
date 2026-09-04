@@ -683,8 +683,8 @@ export default function StudentDiningPage() {
                     planOptions.pendingRequest?.requestedOptionCode,
                 )?.label ?? "another cafeteria option"}
               </strong>{" "}
-              is awaiting administrator approval. You cannot submit another
-              request yet.
+              is awaiting Director approval. You cannot submit another request
+              yet.
             </div>
           )}
           {planLoading && !planOptions && (

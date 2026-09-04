@@ -10,7 +10,7 @@ import {
   listApprovalRequests,
   rejectApprovalRequest,
 } from "@/lib/api";
-import { formatDate, formatXof, formatXofCompact } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import {
   Badge,
   Button,
@@ -30,7 +30,7 @@ const KIND_LABEL: Record<ApprovalRequestRow["kind"], string> = {
   discount: "Discount",
   scholarship: "Scholarship",
   operating_budget: "Operating budget",
-  management_actual: "Management actual",
+  management_actual: "Budget income or expense",
   student_enrollment_override: "Enrollment override",
   billing_profile: "Annual billing profile",
   billing_catalog: "Billing catalog",
@@ -44,286 +44,67 @@ const STATUS_TONE = {
   stale: "error",
 } as const;
 
-type FlatRow = {
-  path: string;
-  before: string;
-  after: string;
-  changed: boolean;
+const ENROLLMENT_GATE_LABEL: Record<string, string> = {
+  prerequisite: "Prerequisite",
+  corequisite: "Corequisite",
+  capacity: "Section capacity",
+  holds: "Student hold",
+  credit_cap: "Credit limit",
+  standing: "Academic standing",
+  major_restriction: "Programme restriction",
+  record_status: "Student record status",
+  add_deadline: "Add deadline",
 };
 
-type SnapshotMetric = {
-  label: string;
-  before: string;
-  after: string;
+const BLOCKED_PRESENTATION: ApprovalRequestRow["presentation"] = {
+  subject: "Approval request",
+  summary: "This request cannot be reviewed safely.",
+  changes: [],
+  canApprove: false,
+  blockingMessage:
+    "The human-readable review details are unavailable. Reload after the API rollout completes or contact IT; approval is disabled.",
 };
 
-const INCOME_CATEGORY_KEYS = new Set([
-  "bursar",
-  "research_grants",
-  "service_contracts",
-  "donations_sponsorships",
-  "scholarships",
-  "others",
-]);
-
-function object(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function text(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "—";
-  return String(value);
-}
-
-function amount(record: Record<string, unknown> | null): number | null {
-  if (!record) return null;
-  const raw = record.amountXof ?? record.amount;
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
-}
-
-function amountText(value: number | null): string {
-  return value === null ? "—" : formatXof(value);
-}
-
-function budgetSnapshot(value: unknown): Record<string, unknown> | null {
-  const root = object(value);
-  return object(root?.draft) ?? root;
-}
-
-function budgetLines(snapshot: Record<string, unknown> | null) {
-  return Array.isArray(snapshot?.lines)
-    ? snapshot.lines
-        .map(object)
-        .filter((line): line is Record<string, unknown> => line !== null)
-    : [];
-}
-
-function budgetTotal(
-  snapshot: Record<string, unknown> | null,
-  kind: "income" | "expense",
-): number {
-  return budgetLines(snapshot).reduce((total, line) => {
-    const key = typeof line.categoryKey === "string" ? line.categoryKey : "";
-    const lineKind = INCOME_CATEGORY_KEYS.has(key) ? "income" : "expense";
-    const value = typeof line.amountXof === "number" ? line.amountXof : 0;
-    return lineKind === kind ? total + value : total;
-  }, 0);
-}
-
-function changedBudgetCells(before: unknown, after: unknown): number {
-  const map = (value: unknown) =>
-    new Map(
-      budgetLines(budgetSnapshot(value)).map((line) => [
-        `${line.categoryKey}:${line.month ?? line.monthIndex}`,
-        line.amountXof,
-      ]),
-    );
-  const left = map(before);
-  const right = map(after);
-  return [...new Set([...left.keys(), ...right.keys()])].filter(
-    (key) => left.get(key) !== right.get(key),
-  ).length;
-}
-
-function requestMetrics(request: ApprovalRequestRow): SnapshotMetric[] | null {
-  if (request.kind === "academic_catalog") {
-    const before = object(request.beforeJson);
-    const after = object(request.afterJson);
-    const defaultLevels = Array.isArray(after?.defaultLevels)
-      ? after.defaultLevels.length
-      : 0;
-    const programs = Array.isArray(after?.programs) ? after.programs : [];
-    const custom = programs.filter(
-      (program) => object(program)?.progressionMode === "custom",
-    ).length;
-    return [
-      {
-        label: "Catalog label",
-        before: text(before?.yearLabel),
-        after: text(after?.yearLabel),
-      },
-      {
-        label: "Revision",
-        before: text(before?.revision),
-        after: text(after?.revision),
-      },
-      { label: "Default levels", before: "—", after: String(defaultLevels) },
-      {
-        label: "Programme configurations",
-        before: "—",
-        after: `${programs.length} total · ${custom} custom`,
-      },
-    ];
+function presentationFor(
+  request: ApprovalRequestRow,
+): ApprovalRequestRow["presentation"] {
+  const candidate = (request as { presentation?: unknown }).presentation;
+  if (
+    !candidate ||
+    typeof candidate !== "object" ||
+    !("subject" in candidate) ||
+    typeof candidate.subject !== "string" ||
+    !("summary" in candidate) ||
+    typeof candidate.summary !== "string" ||
+    !("canApprove" in candidate) ||
+    typeof candidate.canApprove !== "boolean" ||
+    !("changes" in candidate) ||
+    !Array.isArray(candidate.changes)
+  ) {
+    return BLOCKED_PRESENTATION;
   }
-  if (request.kind === "operating_budget") {
-    const before = budgetSnapshot(request.beforeJson);
-    const after = budgetSnapshot(request.afterJson);
-    return [
-      {
-        label: "Opening balance",
-        before: amountText(
-          typeof before?.openingBalanceXof === "number"
-            ? before.openingBalanceXof
-            : null,
-        ),
-        after: amountText(
-          typeof after?.openingBalanceXof === "number"
-            ? after.openingBalanceXof
-            : null,
-        ),
-      },
-      {
-        label: "Planned income",
-        before: amountText(before ? budgetTotal(before, "income") : null),
-        after: amountText(after ? budgetTotal(after, "income") : null),
-      },
-      {
-        label: "Planned expenses",
-        before: amountText(before ? budgetTotal(before, "expense") : null),
-        after: amountText(after ? budgetTotal(after, "expense") : null),
-      },
-      {
-        label: "Monthly cells changed",
-        before: "—",
-        after: String(
-          changedBudgetCells(request.beforeJson, request.afterJson),
-        ),
-      },
-    ];
-  }
-
-  if (request.kind === "management_actual") {
-    const before = object(request.beforeJson);
-    const after = object(request.afterJson);
-    const mode = typeof after?.mode === "string" ? after.mode : "change";
-    if (mode === "void_expense" || mode === "void_entry") {
-      return [
-        {
-          label: "Entry amount",
-          before: amountText(amount(before)),
-          after: "Void entry",
-        },
-        {
-          label: "Category",
-          before: text(before?.categoryLabel ?? before?.categoryKey),
-          after: "Removed from management actuals",
-        },
-      ];
-    }
-    const isAdjustment = mode === "adjustment";
-    return [
-      {
-        label: isAdjustment ? "Reported actual" : "Amount",
-        before: amountText(
-          isAdjustment && typeof after?.baseActualXof === "number"
-            ? after.baseActualXof
-            : amount(before),
-        ),
-        after: amountText(
-          isAdjustment && typeof after?.targetActualXof === "number"
-            ? after.targetActualXof
-            : amount(after),
-        ),
-      },
-      {
-        label: "Category",
-        before: text(before?.categoryLabel ?? before?.categoryKey),
-        after: text(after?.categoryLabel ?? after?.categoryKey),
-      },
-      {
-        label: "Cost center",
-        before: text(before?.costCenterCode),
-        after: text(after?.costCenterCode),
-      },
-      {
-        label: isAdjustment ? "Adjustment month" : "Occurred on",
-        before: text(before?.occurredOn),
-        after: text(after?.month ?? after?.occurredOn),
-      },
-    ];
-  }
-  return null;
+  return candidate as ApprovalRequestRow["presentation"];
 }
 
 function requestPreview(request: ApprovalRequestRow): string | null {
-  if (request.kind === "academic_catalog") {
-    const after = object(request.afterJson);
-    const programmes = Array.isArray(after?.programs)
-      ? after.programs.length
-      : 0;
-    return `${text(after?.yearLabel)} · revision ${text(after?.revision)} · ${programmes} programmes`;
-  }
-  if (request.kind === "operating_budget") {
-    const after = budgetSnapshot(request.afterJson);
-    if (!after) return null;
-    return `${formatXofCompact(budgetTotal(after, "income"))} planned income · ${formatXofCompact(budgetTotal(after, "expense"))} planned expenses`;
-  }
-  if (request.kind === "management_actual") {
-    const after = object(request.afterJson);
-    const before = object(request.beforeJson);
-    const mode = typeof after?.mode === "string" ? after.mode : "";
-    if (mode.startsWith("void"))
-      return `${amountText(amount(before))} entry · void requested`;
-    const shown =
-      typeof after?.targetActualXof === "number"
-        ? after.targetActualXof
-        : amount(after);
-    return `${amountText(shown)} · ${text(after?.categoryLabel ?? after?.categoryKey)}`;
-  }
-  return null;
+  return presentationFor(request).summary || null;
 }
 
-function flatten(value: unknown, prefix = ""): Map<string, string> {
-  const out = new Map<string, string>();
-  const visit = (entry: unknown, path: string) => {
-    if (Array.isArray(entry)) {
-      entry.forEach((item, index) => visit(item, `${path}[${index}]`));
-      if (entry.length === 0) out.set(path || "value", "[]");
-      return;
-    }
-    if (entry && typeof entry === "object") {
-      const pairs = Object.entries(entry as Record<string, unknown>);
-      pairs.forEach(([key, item]) =>
-        visit(item, path ? `${path}.${key}` : key),
-      );
-      if (pairs.length === 0) out.set(path || "value", "{}");
-      return;
-    }
-    out.set(
-      path || "value",
-      entry === null || entry === undefined ? "—" : String(entry),
-    );
-  };
-  visit(value, prefix);
-  return out;
-}
-
-function comparison(request: ApprovalRequestRow): FlatRow[] {
-  const before = flatten(request.beforeJson);
-  const after = flatten(request.afterJson);
-  const normalize = (value: string) =>
-    /^\d{4}-\d{2}-\d{2}T00:00:00(?:\.000)?Z$/.test(value)
-      ? value.slice(0, 10)
-      : value;
-
-  // The stored "before" snapshot intentionally contains immutable database
-  // metadata that is not part of the requested mutation. Compare only proposed
-  // fields so an omitted id/timestamp is never presented as a deletion.
-  return [...after.keys()]
-    .sort()
-    .map((path) => {
-      const oldValue = normalize(before.get(path) ?? "—");
-      const newValue = normalize(after.get(path) ?? "—");
-      return {
-        path,
-        before: oldValue,
-        after: newValue,
-        changed: oldValue !== newValue,
-      };
-    })
-    .filter((row) => row.changed);
+function enrollmentGateOptions(request: ApprovalRequestRow | null) {
+  if (!request || request.kind !== "student_enrollment_override") return [];
+  const failures = (
+    request.afterJson as { failures?: { gate?: unknown }[] } | null
+  )?.failures;
+  if (!Array.isArray(failures)) return [];
+  const facts = presentationFor(request).changes.filter((change) =>
+    change.label.startsWith("Rule failure "),
+  );
+  return failures.flatMap((failure, index) => {
+    const gate = typeof failure.gate === "string" ? failure.gate : "";
+    const label = ENROLLMENT_GATE_LABEL[gate];
+    if (!gate || !label) return [];
+    return [{ gate, label, fact: facts[index]?.proposed ?? label }];
+  });
 }
 
 export function ApprovalRequestList({
@@ -380,8 +161,19 @@ export function ApprovalRequestList({
       const failures = (
         selected.afterJson as { failures?: { gate: string }[] } | null
       )?.failures;
+      const requested = (
+        selected.afterJson as { requestedWaivers?: unknown[] } | null
+      )?.requestedWaivers;
+      const actual = new Set(
+        Array.isArray(failures) ? failures.map((failure) => failure.gate) : [],
+      );
       setWaivedGates(
-        Array.isArray(failures) ? failures.map((f) => f.gate) : [],
+        Array.isArray(requested)
+          ? requested.filter(
+              (gate): gate is string =>
+                typeof gate === "string" && actual.has(gate),
+            )
+          : [],
       );
     } else {
       setWaivedGates([]);
@@ -391,6 +183,13 @@ export function ApprovalRequestList({
 
   async function submitDecision() {
     if (!selected || !decision) return;
+    if (decision === "approve" && !presentationFor(selected).canApprove) {
+      setError(
+        presentationFor(selected).blockingMessage ??
+          "A clear review summary is required before approval.",
+      );
+      return;
+    }
     if (decision === "reject" && !note.trim()) {
       setError("A rejection reason is required.");
       return;
@@ -460,6 +259,7 @@ export function ApprovalRequestList({
           { value: "pending", label: "Pending" },
           { value: "history", label: "History" },
         ];
+  const enrollmentOptions = enrollmentGateOptions(selected);
 
   return (
     <>
@@ -546,8 +346,8 @@ export function ApprovalRequestList({
             }
             note={
               mode === "director"
-                ? "Academic and Finance changes requiring administrator review will appear here."
-                : "Protected changes you submit for administrator approval will appear here."
+                ? "Academic and Finance changes requiring Director review will appear here."
+                : "Protected changes you submit for Director approval will appear here."
             }
           />
         ) : (
@@ -648,6 +448,13 @@ export function ApprovalRequestList({
                   <Button
                     variant="primary"
                     icon={<Check size={15} />}
+                    disabled={!presentationFor(selected).canApprove}
+                    title={
+                      presentationFor(selected).canApprove
+                        ? undefined
+                        : (presentationFor(selected).blockingMessage ??
+                          "A clear review summary is required before approval.")
+                    }
                     onClick={() => start("approve")}
                   >
                     Approve &amp; apply
@@ -679,7 +486,12 @@ export function ApprovalRequestList({
             </Button>
             <Button
               variant={decision === "approve" ? "primary" : "danger"}
-              disabled={busy}
+              disabled={
+                busy ||
+                (decision === "approve" &&
+                  selected?.kind === "student_enrollment_override" &&
+                  waivedGates.length === 0)
+              }
               onClick={submitDecision}
             >
               {busy
@@ -695,9 +507,65 @@ export function ApprovalRequestList({
       >
         <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>
           {decision === "approve"
-            ? "The change is applied transactionally only if the underlying record still matches this request."
+            ? "The change is applied only if the approved record still matches this request."
             : "This decision is permanent and remains in the audit history."}
         </p>
+        {decision === "approve" &&
+          selected?.kind === "student_enrollment_override" && (
+            <fieldset
+              style={{
+                display: "grid",
+                gap: 9,
+                margin: "0 0 16px",
+                padding: 12,
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-md)",
+              }}
+            >
+              <legend style={{ padding: "0 5px", fontWeight: 750 }}>
+                Exceptions to approve
+              </legend>
+              {enrollmentOptions.map((option) => (
+                <label
+                  key={option.gate}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "18px 1fr",
+                    gap: 9,
+                    alignItems: "start",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={waivedGates.includes(option.gate)}
+                    onChange={(event) =>
+                      setWaivedGates((current) =>
+                        event.target.checked
+                          ? [...new Set([...current, option.gate])]
+                          : current.filter((gate) => gate !== option.gate),
+                      )
+                    }
+                    style={{ marginTop: 2 }}
+                  />
+                  <span>
+                    <strong style={{ display: "block", fontSize: 13 }}>
+                      {option.label}
+                    </strong>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {option.fact}
+                    </span>
+                  </span>
+                </label>
+              ))}
+              {enrollmentOptions.length === 0 && (
+                <p role="alert" style={{ margin: 0, color: "var(--danger)" }}>
+                  No reviewable enrollment exceptions were found. Approval is
+                  disabled.
+                </p>
+              )}
+            </fieldset>
+          )}
         <Field
           label={decision === "reject" ? "Reason (required)" : "Decision note"}
         >
@@ -722,9 +590,7 @@ export function ApprovalRequestList({
 }
 
 function RequestDetails({ request }: { request: ApprovalRequestRow }) {
-  const rows = comparison(request);
-  const metrics = requestMetrics(request);
-  const visibleRows = metrics ? rows.slice(0, 120) : rows;
+  const presentation = presentationFor(request);
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div
@@ -740,7 +606,25 @@ function RequestDetails({ request }: { request: ApprovalRequestRow }) {
           value={request.requester?.name ?? request.requester?.email ?? "—"}
         />
         <Detail label="Submitted" value={formatDate(request.createdAt)} />
-        <Detail label="Base revision" value={String(request.baseRevision)} />
+        {request.academicYearLabel && (
+          <Detail label="Academic year" value={request.academicYearLabel} />
+        )}
+      </div>
+      <div>
+        <div
+          className="muted"
+          style={{
+            fontSize: 11.5,
+            textTransform: "uppercase",
+            letterSpacing: ".08em",
+            fontWeight: 700,
+          }}
+        >
+          Applies to
+        </div>
+        <p style={{ margin: "6px 0 0", fontWeight: 700 }}>
+          {presentation.subject}
+        </p>
       </div>
       <div>
         <div
@@ -756,133 +640,111 @@ function RequestDetails({ request }: { request: ApprovalRequestRow }) {
         </div>
         <p style={{ margin: "6px 0 0" }}>{request.reason}</p>
       </div>
-      {metrics && (
-        <section aria-labelledby="approval-summary-title">
-          <div
-            id="approval-summary-title"
-            className="muted"
+      <section aria-labelledby="approval-summary-title">
+        <div
+          id="approval-summary-title"
+          className="muted"
+          style={{
+            marginBottom: 8,
+            fontSize: 11.5,
+            textTransform: "uppercase",
+            letterSpacing: ".08em",
+            fontWeight: 700,
+          }}
+        >
+          Proposed change
+        </div>
+        <p style={{ margin: "0 0 10px", fontWeight: 700 }}>
+          {presentation.summary}
+        </p>
+        {!presentation.canApprove && (
+          <p
+            role="alert"
             style={{
-              marginBottom: 8,
-              fontSize: 11.5,
-              textTransform: "uppercase",
-              letterSpacing: ".08em",
-              fontWeight: 700,
+              margin: "0 0 10px",
+              color: "var(--danger)",
+              background:
+                "color-mix(in srgb, var(--danger) 7%, var(--surface))",
+              borderRadius: "var(--radius-md)",
+              padding: 11,
             }}
           >
-            Decision summary
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: 9,
-            }}
-          >
-            {metrics.map((metric) => (
-              <div
-                key={metric.label}
-                style={{
-                  padding: 11,
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-md)",
-                  background: "var(--surface)",
-                }}
-              >
-                <div
-                  className="muted"
-                  style={{ fontSize: 10.5, fontWeight: 650 }}
-                >
-                  {metric.label}
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr auto 1fr",
-                    alignItems: "center",
-                    gap: 6,
-                    marginTop: 7,
-                    fontSize: 11.5,
-                  }}
-                >
-                  <span
-                    style={{ color: "var(--fg3)", overflowWrap: "anywhere" }}
-                  >
-                    {metric.before}
-                  </span>
-                  <span
-                    aria-label="changes to"
-                    style={{ color: "var(--fg-faint)" }}
-                  >
-                    →
-                  </span>
-                  <strong style={{ overflowWrap: "anywhere" }}>
-                    {metric.after}
-                  </strong>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-      <div style={{ overflowX: "auto" }}>
-        {rows.length === 0 ? (
-          <p className="muted" style={{ margin: 0 }}>
-            No value changes. Approval records an explicit administrator review
-            of the current values.
+            {presentation.blockingMessage ??
+              "A clear review summary is required before approval."}
           </p>
-        ) : (
-          <details open={!metrics}>
-            <summary
+        )}
+        <div style={{ display: "grid", gap: 9 }}>
+          {presentation.changes.map((change, index) => (
+            <div
+              key={`${change.label}:${index}`}
               style={{
-                cursor: "pointer",
-                color: "var(--fg2)",
-                fontSize: 12,
-                fontWeight: 700,
-                padding: "6px 0 10px",
+                padding: 12,
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-md)",
+                background: "var(--surface)",
               }}
             >
-              {metrics ? "Technical field changes" : "Proposed changes only"}
-            </summary>
-            <table>
-              <thead>
-                <tr>
-                  <th>Field</th>
-                  <th>Before</th>
-                  <th>After</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleRows.map((row) => (
-                  <tr key={row.path} style={{ background: "var(--accent-bg)" }}>
-                    <td style={{ fontSize: 11.5, overflowWrap: "anywhere" }}>
-                      {row.path}
-                    </td>
-                    <td style={{ maxWidth: 240, overflowWrap: "anywhere" }}>
-                      {row.before}
-                    </td>
-                    <td
-                      style={{
-                        maxWidth: 240,
-                        overflowWrap: "anywhere",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {row.after}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {visibleRows.length < rows.length && (
-              <p className="muted" style={{ fontSize: 11.5 }}>
-                Showing the first {visibleRows.length} of {rows.length}{" "}
-                technical field changes. The summary above contains the full
-                totals used for this decision.
-              </p>
-            )}
-          </details>
-        )}
-      </div>
+              <div style={{ fontSize: 12, fontWeight: 750 }}>
+                {change.label}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  marginTop: 7,
+                  fontSize: 13,
+                }}
+              >
+                {change.type === "create" ? (
+                  <>
+                    <Badge tone="info">New</Badge>
+                    <ins style={{ textDecoration: "none", fontWeight: 750 }}>
+                      {change.proposed ?? "Added"}
+                    </ins>
+                  </>
+                ) : change.type === "remove" ? (
+                  <>
+                    <span className="muted">Previous:</span>
+                    <del>{change.previous ?? "Existing value"}</del>
+                    <span aria-label="changes to">→</span>
+                    <span className="muted">Proposed:</span>
+                    <ins style={{ textDecoration: "none", fontWeight: 750 }}>
+                      {change.proposed ?? "Removed"}
+                    </ins>
+                  </>
+                ) : change.type === "unchanged" ? (
+                  <>
+                    <Badge tone="neutral">No change</Badge>
+                    <strong>
+                      {change.proposed ?? change.previous ?? "Unchanged"}
+                    </strong>
+                  </>
+                ) : (
+                  <>
+                    <span className="muted">Previous:</span>
+                    <del>{change.previous ?? "Not set"}</del>
+                    <span aria-label="changes to">→</span>
+                    <span className="muted">Proposed:</span>
+                    <ins style={{ textDecoration: "none", fontWeight: 750 }}>
+                      {change.proposed ?? "Not set"}
+                    </ins>
+                  </>
+                )}
+              </div>
+              {change.detail && (
+                <p
+                  className="muted"
+                  style={{ margin: "6px 0 0", fontSize: 11.5 }}
+                >
+                  {change.detail}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
       {request.decisionNote && (
         <div
           style={{ borderLeft: "3px solid var(--daust-navy)", paddingLeft: 12 }}

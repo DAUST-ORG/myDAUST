@@ -6,7 +6,7 @@ import {
   NotFoundException,
   Optional,
 } from "@nestjs/common";
-import type { Prisma } from "@mydaust/db";
+import type { MaterialCategory, Prisma } from "@mydaust/db";
 import { deriveAcademicStanding, type AcademicStanding } from "@mydaust/shared";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -195,6 +195,36 @@ export function isExactMaterialOrder(
     orderedIds.length === existing.size &&
     proposed.size === existing.size &&
     orderedIds.every((id) => existing.has(id))
+  );
+}
+
+const MATERIAL_FOLDER_INVALID_CHARACTERS = /[\/\\\p{C}]/u;
+
+/** Canonical folder label used for both display and case-insensitive uniqueness. */
+export function normalizeMaterialFolderName(value: string): {
+  name: string;
+  normalizedName: string;
+} {
+  const name = value.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  if (name.length < 1 || name.length > 80) {
+    throw new BadRequestException(
+      "Folder name must be between 1 and 80 characters",
+    );
+  }
+  if (MATERIAL_FOLDER_INVALID_CHARACTERS.test(name)) {
+    throw new BadRequestException(
+      "Folder name cannot contain slashes or control characters",
+    );
+  }
+  return { name, normalizedName: name.toLocaleLowerCase("en-US") };
+}
+
+function isPrismaUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
   );
 }
 
@@ -2228,17 +2258,25 @@ export class AcademicsService {
       dueDate?: string;
     },
   ) {
-    const assignment = await this.assertAssignmentOwner(assignmentId, personId, isAdmin);
+    const assignment = await this.assertAssignmentOwner(
+      assignmentId,
+      personId,
+      isAdmin,
+    );
     const updated = await this.prisma.$transaction(async (tx) => {
       const result = await tx.assignment.update({
         where: { id: assignmentId },
         data: {
           ...(input.title !== undefined && { title: input.title }),
-          ...(input.description !== undefined && { description: input.description || null }),
+          ...(input.description !== undefined && {
+            description: input.description || null,
+          }),
           ...(input.type !== undefined && { type: input.type as never }),
           ...(input.maxPoints !== undefined && { maxPoints: input.maxPoints }),
           ...(input.weight !== undefined && { weight: input.weight }),
-          ...(input.dueDate !== undefined && { dueDate: new Date(input.dueDate) }),
+          ...(input.dueDate !== undefined && {
+            dueDate: new Date(input.dueDate),
+          }),
         },
       });
       await tx.auditLog.create({
@@ -2247,7 +2285,13 @@ export class AcademicsService {
           entityId: assignmentId,
           action: "updated",
           actorId: personId,
-          data: { title: result.title, type: result.type, weight: result.weight, maxPoints: result.maxPoints, dueDate: result.dueDate },
+          data: {
+            title: result.title,
+            type: result.type,
+            weight: result.weight,
+            maxPoints: result.maxPoints,
+            dueDate: result.dueDate,
+          },
         },
       });
       return result;
@@ -2261,12 +2305,18 @@ export class AcademicsService {
     personId: string,
     isAdmin: boolean,
   ) {
-    const assignment = await this.assertAssignmentOwner(assignmentId, personId, isAdmin);
+    const assignment = await this.assertAssignmentOwner(
+      assignmentId,
+      personId,
+      isAdmin,
+    );
     const submissionCount = await this.prisma.submission.count({
       where: { assignmentId, status: { in: ["submitted", "graded"] } },
     });
     if (submissionCount > 0) {
-      throw new BadRequestException("Cannot delete an assignment that has already been submitted or graded");
+      throw new BadRequestException(
+        "Cannot delete an assignment that has already been submitted or graded",
+      );
     }
     await this.prisma.$transaction(async (tx) => {
       await tx.submission.deleteMany({ where: { assignmentId } });
@@ -2532,7 +2582,9 @@ export class AcademicsService {
     });
     if (!assignment) throw new NotFoundException("Assignment not found");
     if (new Date() > new Date(assignment.dueDate)) {
-      throw new BadRequestException("This assignment is past its due date and can no longer be submitted");
+      throw new BadRequestException(
+        "This assignment is past its due date and can no longer be submitted",
+      );
     }
     const enrollment = await this.prisma.enrollment.findUnique({
       where: {
@@ -4619,6 +4671,161 @@ export class AcademicsService {
 
   // --- Course materials + class posts (faculty, design: teacher MaterialsTab/PostsTab) ---
 
+  async listSectionMaterialFolders(
+    sectionId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    return this.prisma.sectionMaterialFolder.findMany({
+      where: { sectionId },
+      select: {
+        id: true,
+        sectionId: true,
+        category: true,
+        name: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: [{ category: "asc" }, { normalizedName: "asc" }],
+    });
+  }
+
+  async createSectionMaterialFolder(
+    sectionId: string,
+    input: { name: string; category: MaterialCategory },
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    await this.assertSectionOwner(sectionId, personId, isAdmin);
+    const names = normalizeMaterialFolderName(input.name);
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const folder = await tx.sectionMaterialFolder.create({
+          data: { sectionId, category: input.category, ...names },
+          select: {
+            id: true,
+            sectionId: true,
+            category: true,
+            name: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            entity: "SectionMaterialFolder",
+            entityId: folder.id,
+            action: "created",
+            actorId: personId,
+            data: { sectionId, category: input.category, name: folder.name },
+          },
+        });
+        return folder;
+      });
+    } catch (error) {
+      if (isPrismaUniqueViolation(error)) {
+        throw new ConflictException(
+          `A folder named ${names.name} already exists in this category`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  async renameSectionMaterialFolder(
+    folderId: string,
+    requestedName: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    const existing = await this.prisma.sectionMaterialFolder.findUnique({
+      where: { id: folderId },
+    });
+    if (!existing) throw new NotFoundException("Material folder not found");
+    await this.assertSectionOwner(existing.sectionId, personId, isAdmin);
+    const names = normalizeMaterialFolderName(requestedName);
+    if (
+      existing.name === names.name &&
+      existing.normalizedName === names.normalizedName
+    ) {
+      return {
+        id: existing.id,
+        sectionId: existing.sectionId,
+        category: existing.category,
+        name: existing.name,
+        createdAt: existing.createdAt,
+        updatedAt: existing.updatedAt,
+      };
+    }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const folder = await tx.sectionMaterialFolder.update({
+          where: { id: folderId },
+          data: names,
+          select: {
+            id: true,
+            sectionId: true,
+            category: true,
+            name: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            entity: "SectionMaterialFolder",
+            entityId: folderId,
+            action: "renamed",
+            actorId: personId,
+            data: {
+              before: { name: existing.name },
+              after: { name: folder.name },
+            },
+          },
+        });
+        return folder;
+      });
+    } catch (error) {
+      if (isPrismaUniqueViolation(error)) {
+        throw new ConflictException(
+          `A folder named ${names.name} already exists in this category`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  async deleteSectionMaterialFolder(
+    folderId: string,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    const folder = await this.prisma.sectionMaterialFolder.findUnique({
+      where: { id: folderId },
+    });
+    if (!folder) throw new NotFoundException("Material folder not found");
+    await this.assertSectionOwner(folder.sectionId, personId, isAdmin);
+    const unfiledMaterialCount = await this.prisma.$transaction(async (tx) => {
+      const unfiled = await tx.sectionMaterial.updateMany({
+        where: { folderId },
+        data: { folderId: null },
+      });
+      await tx.sectionMaterialFolder.delete({ where: { id: folderId } });
+      await tx.auditLog.create({
+        data: {
+          entity: "SectionMaterialFolder",
+          entityId: folderId,
+          action: "deleted",
+          actorId: personId,
+          data: { before: folder, unfiledMaterialCount: unfiled.count },
+        },
+      });
+      return unfiled.count;
+    });
+    return { ok: true, unfiledMaterialCount };
+  }
+
   async listSectionMaterials(
     sectionId: string,
     personId: string,
@@ -4627,6 +4834,9 @@ export class AcademicsService {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
     return this.prisma.sectionMaterial.findMany({
       where: { sectionId },
+      include: {
+        folder: { select: { id: true, name: true, category: true } },
+      },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
   }
@@ -4657,6 +4867,9 @@ export class AcademicsService {
     }
     const materials = await this.prisma.sectionMaterial.findMany({
       where: { sectionId, published: true },
+      include: {
+        folder: { select: { id: true, name: true, category: true } },
+      },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
     return materials.filter((m) => Boolean(m.fileUrl));
@@ -4667,7 +4880,8 @@ export class AcademicsService {
     input: {
       title: string;
       kind: string;
-      category?: string;
+      category?: MaterialCategory;
+      folderId?: string;
       fileUrl?: string;
       fileName?: string;
     },
@@ -4675,33 +4889,121 @@ export class AcademicsService {
     isAdmin: boolean,
   ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
+    const category = input.category ?? "resources";
+    const folderId: string | null = input.folderId ?? null;
+    if (folderId) {
+      const folder = await this.prisma.sectionMaterialFolder.findUnique({
+        where: { id: folderId },
+        select: { sectionId: true, category: true },
+      });
+      if (!folder) throw new NotFoundException("Material folder not found");
+      if (folder.sectionId !== sectionId || folder.category !== category) {
+        throw new BadRequestException(
+          "Material folder must belong to this section and category",
+        );
+      }
+    }
     // Append rather than pile everything on 0, or the explicit order the reorder
     // endpoint maintains is undone by the next upload.
-    const last = await this.prisma.sectionMaterial.findFirst({
-      where: { sectionId },
-      orderBy: { sortOrder: "desc" },
-      select: { sortOrder: true },
+    return this.prisma.$transaction(async (tx) => {
+      const last = await tx.sectionMaterial.findFirst({
+        where: { sectionId, category, folderId },
+        orderBy: { sortOrder: "desc" },
+        select: { sortOrder: true },
+      });
+      const material = await tx.sectionMaterial.create({
+        data: {
+          sectionId,
+          folderId,
+          title: input.title,
+          kind: input.kind,
+          category,
+          sortOrder: (last?.sortOrder ?? -1) + 1,
+          fileUrl: input.fileUrl ?? null,
+          fileName: input.fileName ?? null,
+        },
+        include: {
+          folder: { select: { id: true, name: true, category: true } },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          entity: "SectionMaterial",
+          entityId: material.id,
+          action: "created",
+          actorId: personId,
+          data: { sectionId, category, folderId },
+        },
+      });
+      return material;
     });
-    const material = await this.prisma.sectionMaterial.create({
-      data: {
-        sectionId,
-        title: input.title,
-        kind: input.kind,
-        sortOrder: (last?.sortOrder ?? -1) + 1,
-        ...(input.category ? { category: input.category as never } : {}),
-        fileUrl: input.fileUrl ?? null,
-        fileName: input.fileName ?? null,
-      },
+  }
+
+  async moveSectionMaterial(
+    materialId: string,
+    folderId: string | null,
+    personId: string,
+    isAdmin: boolean,
+  ) {
+    const material = await this.prisma.sectionMaterial.findUnique({
+      where: { id: materialId },
     });
-    await this.prisma.auditLog.create({
-      data: {
-        entity: "SectionMaterial",
-        entityId: material.id,
-        action: "created",
-        actorId: personId,
-      },
+    if (!material) throw new NotFoundException("Material not found");
+    await this.assertSectionOwner(material.sectionId, personId, isAdmin);
+    if (folderId) {
+      const folder = await this.prisma.sectionMaterialFolder.findUnique({
+        where: { id: folderId },
+        select: { sectionId: true, category: true },
+      });
+      if (!folder) throw new NotFoundException("Material folder not found");
+      if (
+        folder.sectionId !== material.sectionId ||
+        folder.category !== material.category
+      ) {
+        throw new BadRequestException(
+          "Material folder must belong to this section and category",
+        );
+      }
+    }
+    if (material.folderId === folderId) {
+      return this.prisma.sectionMaterial.findUnique({
+        where: { id: materialId },
+        include: {
+          folder: { select: { id: true, name: true, category: true } },
+        },
+      });
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const last = await tx.sectionMaterial.findFirst({
+        where: {
+          sectionId: material.sectionId,
+          category: material.category,
+          folderId,
+        },
+        orderBy: { sortOrder: "desc" },
+        select: { sortOrder: true },
+      });
+      const updated = await tx.sectionMaterial.update({
+        where: { id: materialId },
+        data: { folderId, sortOrder: (last?.sortOrder ?? -1) + 1 },
+        include: {
+          folder: { select: { id: true, name: true, category: true } },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          entity: "SectionMaterial",
+          entityId: materialId,
+          action: "moved-folder",
+          actorId: personId,
+          data: {
+            before: { folderId: material.folderId },
+            after: { folderId },
+          },
+        },
+      });
+      return updated;
     });
-    return material;
   }
 
   async toggleSectionMaterial(
@@ -4720,6 +5022,9 @@ export class AcademicsService {
       this.prisma.sectionMaterial.update({
         where: { id: materialId },
         data: { published: !material.published },
+        include: {
+          folder: { select: { id: true, name: true, category: true } },
+        },
       }),
       this.prisma.auditLog.create({
         data: {
@@ -4760,19 +5065,33 @@ export class AcademicsService {
 
   async reorderSectionMaterials(
     sectionId: string,
+    category: MaterialCategory,
+    folderId: string | null,
     orderedIds: string[],
     personId: string,
     isAdmin: boolean,
   ) {
     await this.assertSectionOwner(sectionId, personId, isAdmin);
+    if (folderId) {
+      const folder = await this.prisma.sectionMaterialFolder.findUnique({
+        where: { id: folderId },
+        select: { sectionId: true, category: true },
+      });
+      if (!folder) throw new NotFoundException("Material folder not found");
+      if (folder.sectionId !== sectionId || folder.category !== category) {
+        throw new BadRequestException(
+          "Material folder must belong to this section and category",
+        );
+      }
+    }
     const materials = await this.prisma.sectionMaterial.findMany({
-      where: { sectionId },
+      where: { sectionId, category, folderId },
       select: { id: true },
     });
     const existingIds = materials.map((material) => material.id);
     if (!isExactMaterialOrder(orderedIds, existingIds)) {
       throw new BadRequestException(
-        "orderedIds must contain exactly the section's materials, each once",
+        "orderedIds must contain every material in this folder exactly once",
       );
     }
     await this.prisma.$transaction([
@@ -4788,12 +5107,15 @@ export class AcademicsService {
           entityId: sectionId,
           action: "materials-reordered",
           actorId: personId,
-          data: { orderedIds },
+          data: { category, folderId, orderedIds },
         },
       }),
     ]);
     return this.prisma.sectionMaterial.findMany({
       where: { sectionId },
+      include: {
+        folder: { select: { id: true, name: true, category: true } },
+      },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
   }

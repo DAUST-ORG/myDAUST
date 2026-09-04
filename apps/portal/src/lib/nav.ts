@@ -293,6 +293,11 @@ export const DIRECTOR_NAV: PortalNav = {
     g("Executive overview", [
       { href: "/director", label: "Overview", icon: LayoutDashboard },
       {
+        href: "/director/budget",
+        label: "Budgeting & Cashflow",
+        icon: ChartNoAxesCombined,
+      },
+      {
         href: "/director/approvals",
         label: "Approvals",
         icon: ClipboardCheck,
@@ -329,11 +334,6 @@ export const FINANCE_NAV: PortalNav = {
       { href: "/finance", label: "Dashboard", icon: LayoutDashboard },
     ]),
     g("Finance", [
-      {
-        href: "/finance/budget",
-        label: "Budgeting & Cashflow",
-        icon: ChartNoAxesCombined,
-      },
       {
         href: "/finance/fee-schedule",
         label: "Fees & Payment Schedule",
@@ -688,10 +688,6 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Billing Catalog",
     crumb: "Services, scholarships & adjustments · Finance",
   },
-  "/finance/budget": {
-    title: "Budgeting & Cashflow",
-    crumb: "Budget vs actual & cashflow forecast · Finance",
-  },
   "/finance/accounts": {
     title: "Student Accounts",
     crumb: "Student billing accounts · Finance",
@@ -765,6 +761,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/director": {
     title: "Director Overview",
     crumb: "Institutional operations · Administration",
+  },
+  "/director/budget": {
+    title: "Budgeting & Cashflow",
+    crumb: "Budget vs actual & cashflow forecast · Director",
   },
   "/director/approvals": {
     title: "Approvals",

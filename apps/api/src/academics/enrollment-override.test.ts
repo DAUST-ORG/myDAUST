@@ -114,6 +114,10 @@ function makeApprovalTransaction(opts: {
     },
     transcriptEntry: { findMany: vi.fn(async () => []) },
     student: {
+      findUnique: vi.fn(async () => ({
+        id: "student-1",
+        recordStatus: "active",
+      })),
       findUniqueOrThrow: vi.fn(async () => ({
         id: "student-1",
         recordStatus: "active",
@@ -124,6 +128,8 @@ function makeApprovalTransaction(opts: {
     },
     approvalRequest: {
       findUnique: vi.fn(async () => opts.request),
+      findFirst: vi.fn(async () => null),
+      create: vi.fn(async () => ({ id: "approval-new", status: "pending" })),
       update: vi.fn(async () => ({
         ...(opts.request ?? { id: "x" }),
         status: "approved",
@@ -255,7 +261,9 @@ describe("EnrollmentOverrideService.approve", () => {
   });
 
   it("bumps section capacity by 1 when capacity is waived and creates the enrollment", async () => {
-    const { service, tx } = buildServiceWithPending({ freshFailures: [] });
+    const { service, tx } = buildServiceWithPending({
+      freshFailures: [{ gate: "capacity", taken: 30, capacity: 30 }],
+    });
     const result = await service.approve(
       "approval-1",
       adminUser as never,
@@ -269,30 +277,131 @@ describe("EnrollmentOverrideService.approve", () => {
     });
   });
 
-  it("rejects when a non-waived fresh gate now blocks enrollment", async () => {
+  it("still approves when the same gate reports different live counts", async () => {
+    // A queued override must not be invalidated because a sibling override on
+    // the same section was approved first: that bumps taken/capacity, so the
+    // seat blocker reads {31,31} instead of the {30,30} captured at submission.
+    // Same blocker, new numbers. Comparing raw payloads staled every other
+    // student in the queue and forced them to resubmit one at a time.
+    const { service, tx } = buildServiceWithPending({
+      freshFailures: [{ gate: "capacity", taken: 31, capacity: 31 }],
+    });
+    const result = await service.approve(
+      "approval-1",
+      adminUser as never,
+      baseRequestInput,
+    );
+    expect(result).toMatchObject({ id: "approval-1", status: "approved" });
+    const txSection = tx as unknown as { section: { update: FnMock } };
+    expect(txSection.section.update).toHaveBeenCalledWith({
+      where: { id: "section-1" },
+      data: { capacity: { increment: 1 } },
+    });
+  });
+
+  it("still marks stale when a real blocker is added alongside the waived one", async () => {
+    // The identity comparison must keep catching a genuine change of blocker.
+    const { service, tx } = buildServiceWithPending({
+      freshFailures: [
+        { gate: "capacity", taken: 30, capacity: 30 },
+        { gate: "holds", kinds: ["financial"] },
+      ],
+      freshHolds: [{ type: "financial" }],
+    });
+    await expect(
+      service.approve("approval-1", adminUser as never, baseRequestInput),
+    ).resolves.toMatchObject({ status: "stale" });
+    const txSection = tx as unknown as { section: { update: FnMock } };
+    expect(txSection.section.update).not.toHaveBeenCalled();
+  });
+
+  it("marks the request stale when a new gate blocks enrollment", async () => {
     const { service, tx } = buildServiceWithPending({
       freshFailures: [{ gate: "holds", kinds: ["financial"] }],
       freshHolds: [{ type: "financial" }],
     });
     await expect(
       service.approve("approval-1", adminUser as never, baseRequestInput),
-    ).rejects.toThrow(/holds.*still blocked/);
+    ).resolves.toMatchObject({ status: "stale" });
     const txSection = tx as unknown as { section: { update: FnMock } };
     expect(txSection.section.update).not.toHaveBeenCalled();
+  });
+
+  it("marks a capacity waiver stale without increasing capacity when a seat opens", async () => {
+    const { service, tx } = buildServiceWithPending({ freshFailures: [] });
+    await expect(
+      service.approve("approval-1", adminUser as never, baseRequestInput),
+    ).resolves.toMatchObject({ status: "stale" });
+    const transaction = tx as unknown as {
+      section: { update: FnMock };
+      enrollment: { create: FnMock };
+      approvalRequest: { updateMany: FnMock };
+    };
+    expect(transaction.section.update).not.toHaveBeenCalled();
+    expect(transaction.enrollment.create).not.toHaveBeenCalled();
+    expect(transaction.approvalRequest.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "stale" }),
+      }),
+    );
+  });
+
+  it("marks the request stale when a hard enrollment state change now throws", async () => {
+    const { service, tx } = buildServiceWithPending({
+      termEnrollments: [
+        {
+          section: {
+            id: "other-section",
+            courseId: "course-1",
+            course: { id: "course-1", code: "CSC 101", credits: 3 },
+          },
+        },
+      ],
+    });
+    await expect(
+      service.approve("approval-1", adminUser as never, baseRequestInput),
+    ).resolves.toMatchObject({
+      status: "stale",
+      reason: expect.stringContaining("enrollment state changed"),
+    });
+    const transaction = tx as unknown as {
+      section: { update: FnMock };
+      enrollment: { create: FnMock };
+    };
+    expect(transaction.section.update).not.toHaveBeenCalled();
+    expect(transaction.enrollment.create).not.toHaveBeenCalled();
+  });
+
+  it("marks the request stale when the section was deleted", async () => {
+    const { service, tx } = buildServiceWithPending();
+    (tx.$queryRaw as unknown as FnMock).mockResolvedValue([]);
+    await expect(
+      service.approve("approval-1", adminUser as never, baseRequestInput),
+    ).resolves.toMatchObject({
+      status: "stale",
+      reason: expect.stringContaining("section no longer exists"),
+    });
+    const transaction = tx as unknown as {
+      section: { update: FnMock };
+      enrollment: { create: FnMock };
+    };
+    expect(transaction.section.update).not.toHaveBeenCalled();
+    expect(transaction.enrollment.create).not.toHaveBeenCalled();
   });
 
   it("does NOT bump capacity when only prerequisite is waived", async () => {
     requestRow.afterJson = {
       studentId: "student-1",
       sectionId: "section-1",
-      requestedWaivers: ["prerequisite"],
-      failures: [
-        { gate: "prerequisite", courses: [{ code: "CSC 101", minGrade: "C" }] },
-      ],
+      requestedWaivers: ["holds"],
+      failures: [{ gate: "holds", kinds: ["financial"] }],
     };
-    const { service, tx } = buildServiceWithPending();
+    const { service, tx } = buildServiceWithPending({
+      freshFailures: [{ gate: "holds", kinds: ["financial"] }],
+      freshHolds: [{ type: "financial" }],
+    });
     await service.approve("approval-1", adminUser as never, {
-      waivedGates: ["prerequisite"],
+      waivedGates: ["holds"],
     });
     const txSection = tx as unknown as { section: { update: FnMock } };
     expect(txSection.section.update).not.toHaveBeenCalled();
@@ -300,6 +409,39 @@ describe("EnrollmentOverrideService.approve", () => {
       approvalRequest: { update: FnMock; updateMany: FnMock };
     };
     expect(txAr.approvalRequest.updateMany).toHaveBeenCalled();
+  });
+});
+
+describe("EnrollmentOverrideService.request", () => {
+  it("rejects a no-op request when enrollment has no current blockers", async () => {
+    const tx = makeApprovalTransaction({ request: null, freshFailures: [] });
+    const prisma = {
+      $transaction: vi.fn(async (work: (client: TxLike) => Promise<unknown>) =>
+        work(tx),
+      ),
+    };
+    const service = new EnrollmentOverrideService(
+      prisma as never,
+      { emit: vi.fn() } as never,
+    );
+    await expect(
+      service.request(
+        {
+          personId: "student-person-1",
+          studentId: "student-1",
+          roles: ["student"],
+        } as never,
+        {
+          sectionId: "section-1",
+          reason: "Please review",
+          requestedWaivers: ["capacity"],
+        },
+      ),
+    ).rejects.toThrow(/no current rule blockers/i);
+    const approvalRequest = tx.approvalRequest as unknown as {
+      create: FnMock;
+    };
+    expect(approvalRequest.create).not.toHaveBeenCalled();
   });
 });
 
