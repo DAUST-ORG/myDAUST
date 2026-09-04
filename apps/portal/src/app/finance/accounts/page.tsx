@@ -23,7 +23,8 @@ import {
   restoreStandardPaymentPlan,
   updatePaymentPlan,
 } from "@/lib/api";
-import { InvoiceComponentManager } from "@/components/InvoiceComponentManager";
+import { AccountChargeManager } from "@/components/AccountChargeManager";
+
 import { BillingProfileEditor } from "@/components/BillingProfileEditor";
 import { formatXof } from "@/lib/format";
 import {
@@ -1435,9 +1436,11 @@ export default function FinanceAccounts() {
               />
             </Field>
 
-            {draft.invoice?.packageType === "standard_full" && (
-              <InvoiceComponentManager
+            {draft.studentId && (
+              <AccountChargeManager
+                studentId={draft.studentId}
                 invoice={draft.invoice}
+                feePlan={plan}
                 onSubmitted={(message) => {
                   setDraft(null);
                   setNote(message);
