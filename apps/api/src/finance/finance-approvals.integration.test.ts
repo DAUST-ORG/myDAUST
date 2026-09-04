@@ -854,4 +854,67 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
       }),
     ).toBe(1);
   });
+
+  it("bills an approved custom charge once, named, audited, and replay-safe", async () => {
+    const response = await approvals.request(bursar, {
+      kind: "custom_charge",
+      targetType: "Invoice",
+      reason: "Broke a spectrometer lens",
+      after: {
+        studentIds: [studentId],
+        description: "Laboratory replacement fee",
+        amountXof: 25_000,
+        costCenterCode: "9100",
+        installments: [
+          { dueDate: "2026-10-01", amountXof: 10_000, label: "First" },
+          { dueDate: "2026-11-01", amountXof: 15_000 },
+        ],
+      },
+    });
+    expect(response.applied).toBe(false);
+
+    expect(await approvals.approve(response.request.id, admin)).toMatchObject({
+      ok: true,
+      status: "approved",
+    });
+
+    const charges = await prisma.invoice.findMany({
+      where: { studentId, packageType: "custom" },
+      include: {
+        components: true,
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    expect(charges).toHaveLength(1);
+    const charge = charges[0]!;
+    expect(charge.totalAmount).toBe(25_000);
+    expect(charge.description).toBe("Laboratory replacement fee");
+    // The billing number is derived from the approval, not random, so a replay
+    // finds it instead of billing the student twice.
+    expect(charge.number).toContain(
+      response.request.id.replace(/-/g, "").slice(0, 12).toUpperCase(),
+    );
+    expect(charge.components).toHaveLength(1);
+    expect(charge.components[0]!.label).toBe("Laboratory replacement fee");
+    expect(charge.plan!.installments.map((row) => row.amountDue)).toEqual([
+      10_000, 15_000,
+    ]);
+
+    const audits = await prisma.auditLog.findMany({
+      where: { entity: "Invoice", entityId: charge.id },
+    });
+    expect(audits.map((row) => row.action)).toContain("custom-charge-billed");
+
+    // The rail refuses a second decision outright, so the derived number guards
+    // the remaining replay path: the serializable transaction retry in
+    // FinanceApprovalsService.transaction re-runs apply on a P2034 conflict.
+    await expect(approvals.approve(response.request.id, admin)).rejects.toThrow(
+      /already approved/,
+    );
+    expect(
+      await prisma.invoice.count({
+        where: { studentId, packageType: "custom" },
+      }),
+    ).toBe(1);
+  });
 });

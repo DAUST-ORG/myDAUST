@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ForbiddenException,
@@ -1773,7 +1772,12 @@ export class FinanceApprovalsService {
       case "global_fee_schedule":
         return this.applyScheduleRevision(tx, request, after, actorId);
       case "custom_charge":
-        return this.applyCustomCharge(tx, after, request.requestedById);
+        return this.applyCustomCharge(
+          tx,
+          after,
+          request.requestedById,
+          request.id,
+        );
       case "charge_removal":
         return this.applyChargeRemoval(tx, request.targetId!);
       case "payment_plan":
@@ -2948,6 +2952,7 @@ export class FinanceApprovalsService {
     tx: Prisma.TransactionClient,
     after: Record<string, unknown>,
     requesterId: string,
+    requestId: string,
   ) {
     const studentIds = [...new Set(after.studentIds as string[])];
     const amountXof = Number(after.amountXof);
@@ -2963,7 +2968,7 @@ export class FinanceApprovalsService {
       tx.costCenter.findUnique({ where: { code: costCenterCode } }),
       tx.student.findMany({
         where: { id: { in: studentIds }, recordStatus: "active" },
-        select: { id: true },
+        select: { id: true, studentNo: true },
       }),
     ]);
     if (!center) throw new BadRequestException("Unknown cost center");
@@ -2999,10 +3004,35 @@ export class FinanceApprovalsService {
         "Charge installments must reconcile to the billing total",
       );
     }
+    // Invoice.number is unique, so deriving it from the approval request turns a
+    // replayed apply into a no-op instead of billing the student a second time.
+    // A separate request for the same charge still bills again, which is right:
+    // two identical lab fees on one student are a real thing.
+    const numberPrefix = `BILL-${new Date().getUTCFullYear()}-${requestId
+      .replace(/-/g, "")
+      .slice(0, 12)
+      .toUpperCase()}`;
+    let created = 0;
     for (const student of students) {
-      await tx.invoice.create({
+      const number =
+        students.length > 1
+          ? `${numberPrefix}-${student.studentNo}`
+          : numberPrefix;
+      const existing = await tx.invoice.findUnique({
+        where: { number },
+        select: { totalAmount: true },
+      });
+      if (existing) {
+        if (existing.totalAmount !== amountXof) {
+          throw new BadRequestException(
+            `${number} already exists with a different total`,
+          );
+        }
+        continue;
+      }
+      const invoice = await tx.invoice.create({
         data: {
-          number: `BILL-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`,
+          number,
           studentId: student.id,
           termId: term.id,
           totalAmount: amountXof,
@@ -3013,6 +3043,7 @@ export class FinanceApprovalsService {
           components: {
             create: {
               kind: this.componentKind(costCenterCode),
+              label: description.slice(0, 80),
               costCenterCode,
               amountXof,
             },
@@ -3030,8 +3061,24 @@ export class FinanceApprovalsService {
           },
         },
       });
+      await tx.auditLog.create({
+        data: {
+          entity: "Invoice",
+          entityId: invoice.id,
+          action: "custom-charge-billed",
+          actorId: requesterId,
+          data: this.asJson({
+            description,
+            amountXof,
+            costCenterCode,
+            installments: schedule.length,
+            approvalRequestId: requestId,
+          }),
+        },
+      });
+      created += 1;
     }
-    return { created: students.length };
+    return { created };
   }
 
   private async applyChargeRemoval(

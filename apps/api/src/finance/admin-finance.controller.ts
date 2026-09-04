@@ -41,7 +41,7 @@ const CreateStudentInput = z.object({
   programCode: z.string().min(1).max(16).optional(),
 });
 
-const AddChargeInput = z.object({
+export const AddChargeInput = z.object({
   studentIds: z.array(z.string().min(1).max(64)).min(1).max(2000),
   description: z.string().min(1).max(160),
   amountXof: z.number().int().positive().max(100_000_000),
