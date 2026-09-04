@@ -708,7 +708,17 @@ function RecommendationPanel({
   onOverride: (section: RegistrationSection, reason: string) => void;
 }) {
   const context = data.recommendationContext;
-  const contextCopy = recommendationContextCopy(context.status);
+  // Curated rows come from the academic office's written plan, not from the
+  // approved program sequence — claiming otherwise in the header would tell the
+  // student something untrue about where their plan came from.
+  const curated =
+    ready.length + attention.length > 0 &&
+    [...ready, ...attention].every(
+      (recommendation) => recommendation.kind === "curated",
+    );
+  const contextCopy = curated
+    ? "Prepared by the academic office for this term. Your approved program sequence is not yet on file, so these are not derived from it."
+    : recommendationContextCopy(context.status);
   const target =
     context.targetYearIndex && context.semester
       ? `Year ${context.targetYearIndex} · ${context.semester}`
@@ -726,13 +736,15 @@ function RecommendationPanel({
           </span>
           <div>
             <span className={styles.eyebrow}>
-              Director-approved academic catalog
+              {curated
+                ? "Academic office plan"
+                : "Director-approved academic catalog"}
             </span>
             <h2 id="recommendations-heading">Recommended for your plan</h2>
             <p>{contextCopy}</p>
           </div>
         </div>
-        {context.status === "ready" && (
+        {context.status === "ready" && !curated && (
           <div className={styles.contextBadges}>
             {target && <Badge tone="navy">{target}</Badge>}
             {context.catalogLabel && (
@@ -1501,6 +1513,7 @@ function SummaryRow({
 function kindLabel(kind: RegistrationRecommendation["kind"]): string {
   if (kind === "catch_up") return "Catch-up";
   if (kind === "prerequisite") return "Prerequisite";
+  if (kind === "curated") return "Advised";
   return "Scheduled";
 }
 
@@ -1509,6 +1522,7 @@ function kindTone(
 ): "navy" | "info" | "neutral" {
   if (kind === "catch_up") return "neutral";
   if (kind === "prerequisite") return "info";
+  if (kind === "curated") return "info";
   return "navy";
 }
 
