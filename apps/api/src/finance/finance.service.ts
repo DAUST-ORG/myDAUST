@@ -5368,13 +5368,21 @@ export class FinanceService {
     };
   }
 
-  /** Eight canned management reports composed from existing aggregates. */
-  async reports() {
+  /**
+   * Eight canned management reports composed from existing aggregates.
+   *
+   * Three of these legs come straight from directorOverview(), which is
+   * @Roles("admin") on its own route. Non-admin callers get the collections
+   * side only — otherwise this endpoint hands a bursar the budget-vs-actual
+   * and the institutional cash position that the Director-only lock exists
+   * to withhold.
+   */
+  async reports(includeDirectorFigures: boolean) {
     const [summary, aging, payments, director] = await Promise.all([
       this.getCollectionSummary(),
       this.arAging(),
       this.listPayments(),
-      this.directorOverview(),
+      includeDirectorFigures ? this.directorOverview() : null,
     ]);
     const succeeded = payments.filter((p) => p.status === "success");
     const byTerm = new Map<string, number>();
@@ -5389,12 +5397,12 @@ export class FinanceService {
         term,
         amount,
       })),
-      cashByCostCenter: director.centers.filter(
-        (c) => c.revenue > 0 || c.expense > 0,
-      ),
-      budgetVsActual: director.budget,
+      cashByCostCenter: director
+        ? director.centers.filter((c) => c.revenue > 0 || c.expense > 0)
+        : [],
+      budgetVsActual: director ? director.budget : [],
       recentPayments: succeeded.slice(0, 10),
-      totals: director.totals,
+      totals: director ? director.totals : null,
     };
   }
 
