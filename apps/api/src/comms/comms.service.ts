@@ -84,7 +84,12 @@ export class CommsService {
           initials: other
             ? `${other.firstName[0] ?? ""}${other.lastName[0] ?? ""}`
             : "?",
-          preview: last?.body ?? "",
+          preview:
+            last?.attachments &&
+            Array.isArray(last.attachments) &&
+            last.attachments.length > 0
+              ? `📎 ${(last.attachments as { name: string }[]).map((a) => a.name).join(", ")}`
+              : last?.body ?? "",
           time: (last?.createdAt ?? t.updatedAt).toISOString(),
           unread,
         };
@@ -132,15 +137,30 @@ export class CommsService {
         me: m.senderId === personId,
         sender: `${m.sender.firstName} ${m.sender.lastName}`,
         time: m.createdAt.toISOString(),
+        attachments: Array.isArray(m.attachments)
+          ? (m.attachments as { url: string; name: string; size?: number }[])
+          : undefined,
       })),
     };
   }
 
-  async sendMessage(threadId: string, personId: string, body: string) {
+  async sendMessage(
+    threadId: string,
+    personId: string,
+    body: string,
+    attachments?: { url: string; name: string; size?: number }[],
+  ) {
     await this.assertParticipant(threadId, personId);
     const [message] = await this.prisma.$transaction([
       this.prisma.message.create({
-        data: { threadId, senderId: personId, body },
+        data: {
+          threadId,
+          senderId: personId,
+          body,
+          ...(attachments && attachments.length > 0
+            ? { attachments: attachments as unknown as object[] }
+            : {}),
+        },
       }),
       this.prisma.thread.update({
         where: { id: threadId },
@@ -154,39 +174,45 @@ export class CommsService {
     return message;
   }
 
-  /** Start (or reuse) a 1:1 thread with an allowed contact, so conversations don't fragment. */
+/** Start (or reuse) 1:1 threads with allowed contacts, so conversations don't fragment. */
   async startThread(
     personId: string,
-    recipientId: string,
+    recipientIds: string[],
     subject: string | undefined,
     body: string,
+    attachments?: { url: string; name: string; size?: number }[],
   ) {
     const allowed = await this.contacts(personId);
-    if (!allowed.some((c) => c.id === recipientId)) {
-      throw new ForbiddenException("You cannot message this person");
+    const allowedIds = new Set(allowed.map((c) => c.id));
+    for (const id of recipientIds) {
+      if (!allowedIds.has(id)) {
+        throw new ForbiddenException("You cannot message this person");
+      }
     }
 
-    const existing = await this.prisma.thread.findFirst({
-      where: {
-        participants: { every: { personId: { in: [personId, recipientId] } } },
-        AND: [
-          { participants: { some: { personId } } },
-          { participants: { some: { personId: recipientId } } },
-        ],
-      },
-    });
-
-    const thread =
-      existing ??
-      (await this.prisma.thread.create({
-        data: {
-          subject,
-          participants: { create: [{ personId }, { personId: recipientId }] },
+let firstThreadId: string | undefined;
+    for (const recipientId of recipientIds) {
+      const existing = await this.prisma.thread.findFirst({
+        where: {
+          participants: { every: { personId: { in: [personId, recipientId] } } },
+          AND: [
+            { participants: { some: { personId } } },
+            { participants: { some: { personId: recipientId } } },
+          ],
         },
-      }));
-
-    await this.sendMessage(thread.id, personId, body);
-    return { threadId: thread.id };
+      });
+      const thread =
+        existing ??
+        (await this.prisma.thread.create({
+          data: {
+            subject,
+            participants: { create: [{ personId }, { personId: recipientId }] },
+          },
+        }));
+      firstThreadId ??= thread.id;
+      await this.sendMessage(thread.id, personId, body, attachments);
+    }
+    return { threadId: firstThreadId ?? null, sent: recipientIds.length };
   }
 
   /**
@@ -201,6 +227,7 @@ export class CommsService {
     sectionId: string,
     subject: string | undefined,
     body: string,
+    attachments?: { url: string; name: string; size?: number }[],
   ) {
     const section = await this.prisma.section.findUnique({
       where: { id: sectionId },
@@ -221,9 +248,7 @@ export class CommsService {
     }
 
     const recipients = section.enrollments.map((e) => e.student.personId);
-    for (const recipientId of recipients) {
-      await this.startThread(personId, recipientId, subject, body);
-    }
+    await this.startThread(personId, recipients, subject, body, attachments);
     return { sent: recipients.length, course: section.course.code };
   }
 
@@ -236,11 +261,12 @@ export class CommsService {
    */
   async broadcastToAudience(
     personId: string,
-    input: {
+input: {
       audienceType: "individual" | "year" | "program" | "all";
       audienceValue?: string;
       subject: string;
       body: string;
+      attachments?: { url: string; name: string; size?: number }[];
     },
   ) {
     const recipientIds = await this.resolveAudience(
@@ -267,7 +293,7 @@ export class CommsService {
             participants: { create: [{ personId }, { personId: recipientId }] },
           },
         }));
-      await this.sendMessage(thread.id, personId, input.body);
+      await this.sendMessage(thread.id, personId, input.body, input.attachments);
     }
 
     const broadcast = await this.prisma.broadcast.create({

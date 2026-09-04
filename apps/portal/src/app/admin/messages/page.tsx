@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Send, Users } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Paperclip, Send, Users, X } from "lucide-react";
 import {
   Badge,
   Button,
@@ -19,8 +19,10 @@ import {
   getBroadcasts,
   previewBroadcast,
   sendBroadcast,
+  uploadFile,
   type AdminStudentDirectoryRow,
   type BroadcastRow,
+  type MessageAttachment,
 } from "@/lib/api";
 
 type AudienceType = "individual" | "year" | "program" | "all";
@@ -63,10 +65,12 @@ export default function RegistrarMessagesPage() {
   const [programCode, setProgramCode] = useState("all");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
 
   const [sending, setSending] = useState(false);
   const [sentNote, setSentNote] = useState<string | null>(null);
   const [preview, setPreview] = useState<number | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getAdminStudentDirectory().then(setStudents).catch(() => setStudents([]));
@@ -100,8 +104,20 @@ export default function RegistrarMessagesPage() {
 
   const canSend =
     subject.trim().length > 0 &&
-    body.trim().length > 0 &&
+    (body.trim().length > 0 || attachments.length > 0) &&
     (audienceType !== "individual" || studentNo.length > 0);
+
+  async function pickFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setSending(true);
+    setSentNote(null);
+    try {
+      const uploaded = await Promise.all(Array.from(files).map((f) => uploadFile(f)));
+      setAttachments((prev) => [...prev, ...uploaded]);
+    } finally {
+      setSending(false);
+    }
+  }
 
   async function handleSend() {
     if (!canSend || sending) return;
@@ -113,9 +129,11 @@ export default function RegistrarMessagesPage() {
         audienceValue: effective.value,
         subject: subject.trim(),
         body: body.trim(),
+        attachments,
       });
       setSubject("");
       setBody("");
+      setAttachments([]);
       setStudentNo("");
       const rows = await getBroadcasts();
       setBroadcasts(rows);
@@ -221,6 +239,39 @@ export default function RegistrarMessagesPage() {
                 placeholder="Write your message…"
                 style={textareaStyle}
               />
+            </Field>
+
+            <Field label="Attachments">
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                style={{ display: "none" }}
+                onChange={(e) => pickFiles(e.target.files)}
+              />
+              {attachments.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                  {attachments.map((a, i) => (
+                    <div
+                      key={i}
+                      style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, background: "var(--bg-tint)", borderRadius: 8, padding: "7px 11px" }}
+                    >
+                      <Paperclip size={13} style={{ flexShrink: 0, color: "var(--fg3)" }} />
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+                      <button
+                        onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                        style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--fg3)", display: "flex" }}
+                        aria-label="Remove attachment"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={sending} icon={<Paperclip size={14} />}>
+                Attach files
+              </Button>
             </Field>
 
             <Button variant="navy" full icon={<Send size={15} />} disabled={!canSend || sending} onClick={handleSend}>

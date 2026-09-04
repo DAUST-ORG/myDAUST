@@ -1926,6 +1926,11 @@ export const createAnnouncement = (body: {
   });
 
 // --- Messaging ---
+export interface MessageAttachment {
+  url: string;
+  name: string;
+  size?: number;
+}
 export interface ThreadSummary {
   id: string;
   subject: string | null;
@@ -1942,6 +1947,7 @@ export interface ThreadMessage {
   me: boolean;
   sender: string;
   time: string;
+  attachments?: MessageAttachment[];
 }
 export interface ThreadDetail {
   id: string;
@@ -1961,33 +1967,27 @@ export const getThreads = () => request<ThreadSummary[]>("/comms/threads");
 export const getThread = (id: string) =>
   request<ThreadDetail>(`/comms/threads/${id}`);
 export const getContacts = () => request<Contact[]>("/comms/contacts");
-export const sendThreadMessage = (id: string, body: string) =>
+export const sendThreadMessage = (id: string, body: string, attachments?: MessageAttachment[]) =>
   request<{ id: string }>(`/comms/threads/${id}/messages`, {
     method: "POST",
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, attachments }),
   });
-export const startThread = (
-  recipientId: string,
-  body: string,
-  subject?: string,
-) =>
-  request<{ threadId: string }>("/comms/threads", {
+export const startThread = (body: {
+  recipientIds: string[];
+  subject?: string;
+  body: string;
+  attachments?: MessageAttachment[];
+}) =>
+  request<{ threadId: string | null; sent: number }>("/comms/threads", {
     method: "POST",
-    body: JSON.stringify({ recipientId, body, subject }),
+    body: JSON.stringify(body),
   });
 /** Message every enrolled student in one of your own sections, as individual threads. */
-export const broadcastToSection = (
-  sectionId: string,
-  body: string,
-  subject?: string,
-) =>
-  request<{ sent: number; course: string }>(
-    `/comms/sections/${sectionId}/broadcast`,
-    {
-      method: "POST",
-      body: JSON.stringify({ body, subject }),
-    },
-  );
+export const broadcastToSection = (sectionId: string, body: string, subject?: string, attachments?: MessageAttachment[]) =>
+  request<{ sent: number; course: string }>(`/comms/sections/${sectionId}/broadcast`, {
+    method: "POST",
+    body: JSON.stringify({ body, subject, attachments }),
+  });
 
 // --- Campus: events + library ---
 
@@ -5441,6 +5441,7 @@ export const sendBroadcast = (input: {
   audienceValue?: string;
   subject: string;
   body: string;
+  attachments?: MessageAttachment[];
 }) =>
   request<{ id: string; sent: number }>("/comms/broadcasts", {
     method: "POST",
