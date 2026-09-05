@@ -631,6 +631,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Course Sections",
     crumb: "Term sections and registration availability · Administration",
   },
+  "/admin/offerings/": {
+    title: "Section Roster",
+    crumb: "Enrolled students · Administration",
+  },
   "/admin/calendar": {
     title: "Academic Calendar & Terms",
     crumb: "Term configuration · Administration",

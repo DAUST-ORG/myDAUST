@@ -1900,6 +1900,54 @@ export const adminDropEnrollment = (enrollmentId: string) =>
   request(`/academics/admin/enrollments/${enrollmentId}/drop`, {
     method: "POST",
   });
+
+export interface SectionRosterEntry {
+  enrollmentId: string;
+  studentId: string;
+  studentNo: string;
+  name: string;
+  email: string;
+  program: string | null;
+  recordStatus: string;
+  status: "enrolled" | "dropped" | "completed";
+  grade: string | null;
+  enrolledAt: string;
+  /** Server's own reason the row cannot be removed; null when removal is safe. */
+  removalBlockedReason: string | null;
+}
+export interface SectionRoster {
+  section: {
+    id: string;
+    courseCode: string;
+    courseTitle: string;
+    credits: number;
+    sectionCode: string;
+    status: string;
+    capacity: number;
+    seatsTaken: number;
+    days: string;
+    schedule: string;
+    room: string | null;
+    instructor: string | null;
+    termName: string;
+    addDeadline: string | null;
+    dropDeadline: string | null;
+    addDeadlinePassed: boolean;
+    dropDeadlinePassed: boolean;
+  };
+  enrollments: SectionRosterEntry[];
+}
+export const getSectionRoster = (sectionId: string) =>
+  request<SectionRoster>(`/academics/admin/sections/${sectionId}/enrollments`);
+export const addSectionEnrollment = (
+  sectionId: string,
+  studentId: string,
+  reason: string,
+) =>
+  request<{ enrollmentId: string; status: string; waivedGates: string[] }>(
+    `/academics/admin/sections/${sectionId}/enrollments`,
+    { method: "POST", body: JSON.stringify({ studentId, reason }) },
+  );
 export const getAdminPrograms = () =>
   request<AdminPrograms>("/academics/admin/programs");
 
@@ -1967,7 +2015,11 @@ export const getThreads = () => request<ThreadSummary[]>("/comms/threads");
 export const getThread = (id: string) =>
   request<ThreadDetail>(`/comms/threads/${id}`);
 export const getContacts = () => request<Contact[]>("/comms/contacts");
-export const sendThreadMessage = (id: string, body: string, attachments?: MessageAttachment[]) =>
+export const sendThreadMessage = (
+  id: string,
+  body: string,
+  attachments?: MessageAttachment[],
+) =>
   request<{ id: string }>(`/comms/threads/${id}/messages`, {
     method: "POST",
     body: JSON.stringify({ body, attachments }),
@@ -1983,11 +2035,19 @@ export const startThread = (body: {
     body: JSON.stringify(body),
   });
 /** Message every enrolled student in one of your own sections, as individual threads. */
-export const broadcastToSection = (sectionId: string, body: string, subject?: string, attachments?: MessageAttachment[]) =>
-  request<{ sent: number; course: string }>(`/comms/sections/${sectionId}/broadcast`, {
-    method: "POST",
-    body: JSON.stringify({ body, subject, attachments }),
-  });
+export const broadcastToSection = (
+  sectionId: string,
+  body: string,
+  subject?: string,
+  attachments?: MessageAttachment[],
+) =>
+  request<{ sent: number; course: string }>(
+    `/comms/sections/${sectionId}/broadcast`,
+    {
+      method: "POST",
+      body: JSON.stringify({ body, subject, attachments }),
+    },
+  );
 
 // --- Campus: events + library ---
 
