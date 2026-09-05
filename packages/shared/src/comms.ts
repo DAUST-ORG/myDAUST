@@ -1,8 +1,18 @@
 import { z } from "zod";
 
+/**
+ * An attachment url is a capability to render a link inside the portal, so it
+ * is constrained to what POST /uploads actually returns: one path segment under
+ * /uploads. The client resolves a stored path against the API origin but passes
+ * anything already starting with "http" straight through, so an unconstrained
+ * string here lets a sender put an arbitrary external link, under a filename
+ * they choose, into a recipient's inbox.
+ */
+export const UPLOAD_PATH = /^\/uploads\/[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+
 export const MessageAttachment = z.object({
-  url: z.string().min(1),
-  name: z.string().min(1),
+  url: z.string().regex(UPLOAD_PATH, "Attachment url must be an uploaded file"),
+  name: z.string().min(1).max(255),
   size: z.number().int().nonnegative().optional(),
 });
 export type MessageAttachment = z.infer<typeof MessageAttachment>;
