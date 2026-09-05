@@ -1312,3 +1312,20 @@ input {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Two-pane layout that stacks on phones. The generic inline-style collapse
+   below only matches a literal "1fr 1fr", so a track list like
+   `minmax(280px, 1fr) minmax(0, 1.6fr)` slipped past it and computed to
+   `280px 60px` at 390px wide — a 60px column with text breaking mid-word.
+   A class states the intent instead of hoping a substring matches it. */
+.split-2 {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 1.6fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 700px) {
+  .split-2 {
+    grid-template-columns: 1fr;
+  }
+}
