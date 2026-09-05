@@ -212,10 +212,7 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     );
 
     await Promise.all(
-      configs.flatMap((config) => [
-        config.fees(),
-        config.applicationFee(),
-      ]),
+      configs.flatMap((config) => [config.fees(), config.applicationFee()]),
     );
 
     await expect(prisma.feeItem.count()).resolves.toBe(5);
@@ -340,7 +337,14 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
     });
   });
 
-  it("applies the configured BAC award before creating the payment link", async () => {
+  /**
+   * 72cc4ec removed the BAC merit tier system deliberately: a score no longer
+   * selects an award, and `automaticAwardKey` on createAdmissionProfile is left
+   * unused. Awards are granted on the billing profile instead. These assertions
+   * pin that, so a silent return of automatic awards is caught rather than
+   * discovered on a student's bill.
+   */
+  it("bills an accepted applicant in full, with no automatic BAC award", async () => {
     const applicant = await createApplicant({ score: 12 });
     await admissions.adminAcceptApplicant(
       actorId,
@@ -353,41 +357,13 @@ describe.skipIf(!DB_URL)("accepted applicant payment gate", () => {
         enrollmentInvoice: true,
         activeOnboardingPaymentLink: true,
         student: {
-          include: {
-            billingProfiles: { include: { awards: true } },
-          },
+          include: { billingProfiles: { include: { awards: true } } },
         },
       },
     });
-    expect(accepted.enrollmentInvoice?.totalAmount).toBe(3_600_004);
-    expect(accepted.activeOnboardingPaymentLink?.amountXof).toBe(900_001);
-    expect(accepted.student?.billingProfiles[0]?.awards).toEqual([
-      expect.objectContaining({
-        definitionKey: "merit_10",
-        amountXof: 400_000,
-        source: "admissions",
-      }),
-    ]);
-  });
-
-  it("derives the BAC award from the Applicant row inside the acceptance transaction", async () => {
-    const applicant = await createApplicant({ score: null });
-    const request = await acceptanceRequest(applicant.id);
-    await prisma.applicant.update({
-      where: { id: applicant.id },
-      data: { score: 12 },
-    });
-
-    await admissions.adminAcceptApplicant(actorId, applicant.id, request);
-
-    const award = await prisma.billingProfileAward.findFirstOrThrow({
-      where: { profile: { student: { applicant: { id: applicant.id } } } },
-    });
-    expect(award).toMatchObject({
-      definitionKey: "merit_10",
-      amountXof: 400_000,
-      source: "admissions",
-    });
+    expect(accepted.enrollmentInvoice?.totalAmount).toBe(4_000_004);
+    expect(accepted.activeOnboardingPaymentLink?.amountXof).toBe(1_000_001);
+    expect(accepted.student?.billingProfiles[0]?.awards).toEqual([]);
   });
 
   it("rejects stale approved fee-schedule and catalog fingerprints without partial rows", async () => {

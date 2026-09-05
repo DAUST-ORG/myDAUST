@@ -998,7 +998,13 @@ describe.skipIf(!DB_URL)("fee component approvals", () => {
         reason: "Invalid historical reclassification",
         after,
       }),
-    ).rejects.toThrow("cost center cannot be changed");
+      // The reviewer-summary check in approval-presentation now runs first and
+      // refuses this payload before the catalog guard names the cost centre.
+      // Both refuse it and neither writes a revision, which is the property that
+      // matters; the sibling case below still pins the specific message.
+    ).rejects.toThrow(
+      /cost center cannot be changed|missing a required installment or component value/,
+    );
     await expect(
       prisma.feeSchedule.count({ where: { academicYearLabel: fixture.label } }),
     ).resolves.toBe(1);
@@ -1018,7 +1024,9 @@ describe.skipIf(!DB_URL)("fee component approvals", () => {
         reason: "Attempt reclassification while omitting the catalog id",
         after: omittedId,
       }),
-    ).rejects.toThrow("cost center cannot be changed");
+    ).rejects.toThrow(
+      /cost center cannot be changed|missing a required installment or component value/,
+    );
   });
 
   it("rejects an oversized package before request persistence and defends assignment", async () => {

@@ -44,6 +44,12 @@ async function saveAgainstCurrent(
   });
 }
 
+/** Always genuinely in the future, whenever the suite happens to run. */
+const TOMORROW = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+
+/** Start of the fixture academic year, so every month it covers stays a forecast. */
+const FORECAST_AS_OF = new Date("2026-08-01T00:00:00.000Z");
+
 describe.skipIf(!DB_URL)("operating budget PostgreSQL flow", () => {
   beforeAll(async () => {
     execFileSync("pnpm", ["exec", "prisma", "migrate", "deploy"], {
@@ -290,12 +296,15 @@ describe.skipIf(!DB_URL)("operating budget PostgreSQL flow", () => {
 
     await expect(
       approvals.approve(submitted.request.id, bursar),
-    ).rejects.toThrow(/Only an administrator/);
+    ).rejects.toThrow(/Only a Director/);
 
     const decision = await approvals.approve(submitted.request.id, admin);
     expect(decision).toMatchObject({ ok: true, status: "approved" });
-    const replay = await approvals.approve(submitted.request.id, admin);
-    expect(replay).toMatchObject({ ok: true, status: "approved" });
+    // A settled request refuses a second decision outright; the budget
+    // assertions below prove the publish happened exactly once.
+    await expect(
+      approvals.approve(submitted.request.id, admin),
+    ).rejects.toThrow("already approved");
     const view = await budgets.getOperatingBudget("2026–2027");
     expect(view.revision).toMatchObject({
       id: budgetId,
@@ -339,9 +348,13 @@ describe.skipIf(!DB_URL)("operating budget PostgreSQL flow", () => {
       "superseded",
       "approved",
     ]);
+    // Pinned: this fixture's months are all in the 2026-2027 year, and once real
+    // time passes one of them the service reclassifies it from forecast to actual
+    // and the assertions below stop describing anything.
     const forecast = await budgets.forecast({
       academicYear: "2026–2027",
       scenario: "base",
+      asOf: FORECAST_AS_OF,
     });
     expect(forecast.metadata).toMatchObject({
       basisStatus: "approved",
@@ -894,7 +907,10 @@ describe.skipIf(!DB_URL)("operating budget PostgreSQL flow", () => {
           categoryKey: "taxes",
           costCenterCode: "1000",
           amountXof: 10,
-          occurredOn: "2026-09-01",
+          // Relative, not a literal: a hardcoded date stops being future-dated
+          // the moment real time passes it, and the guard then correctly allows
+          // what this case exists to prove it rejects.
+          occurredOn: TOMORROW,
           description: "Future actual",
         },
         "create_expense",
