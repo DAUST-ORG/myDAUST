@@ -178,6 +178,21 @@ export const REGISTRAR_WAIVABLE_GATES: ReadonlySet<EnrollmentGate> = new Set([
   "add_deadline",
 ]);
 
+/**
+ * A curated academic-office plan exempts exactly these gates when the student
+ * self-enrolls — no staff step, silent in the UI, traced in the audit log.
+ * Holds, clash, credit cap, major restriction, duplicates, closed sections,
+ * ended terms and record status still apply. One-time: the enrollment goes
+ * through, but downstream prerequisites still demand transcript grades.
+ */
+export const CURATED_BYPASSABLE_GATES: ReadonlySet<EnrollmentGate> = new Set([
+  "prerequisite",
+  "corequisite",
+  "capacity",
+  "standing",
+  "add_deadline",
+]);
+
 /** Student submits when enroll() rejected them. Stored on ApprovalRequest.afterJson. */
 export const EnrollmentOverrideRequestInput = z.object({
   sectionId: z.string().uuid(),
