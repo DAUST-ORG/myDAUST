@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -48,7 +49,11 @@ const DEFAULT_DINING_SETTINGS: DiningSettingsInput = {
   },
   costPerMealXof: 720,
   weekendOrdering: true,
-  orderCutoff: "11:00",
+  // Ships inert, for the same reason enforcePayment does. Until now the cutoff
+  // was decorative; createOrder enforces it from this release, and 11:00 would
+  // have closed ordering every afternoon the moment this deployed, with no
+  // notice to anyone. The dining office sets a real cutoff when they want one.
+  orderCutoff: "23:59",
   enforcePayment: false,
   blockSecondScan: true,
 };
@@ -812,12 +817,17 @@ export class DiningService {
 
   async adminOrders() {
     // Carts are included, not hidden: an unpaid cart is still a live order the
-    // kitchen may need to see (and the only stage staff may cancel).
+    // kitchen may need to see (and the only stage staff may cancel). Finished
+    // and cancelled orders are not live, and without a bound this board would
+    // return every order ever placed, growing without limit and burying the
+    // ones that need action.
     const orders = await this.prisma.diningOrder.findMany({
       where: {
         student: { recordStatus: "active" },
+        status: { in: ["cart", "paid", "preparing", "ready"] },
       },
       orderBy: { createdAt: "desc" },
+      take: 500,
       include: {
         student: { include: { person: true } },
         items: { include: { menuItem: true } },
@@ -846,6 +856,15 @@ export class DiningService {
     if (!order) throw new NotFoundException("Order not found");
     if (order.status === "cart") {
       throw new BadRequestException("Order is not paid yet");
+    }
+    // Cancelling retires the order's payment attempts, so advancing one would
+    // walk an unpaid order to collected — food handed over against money that
+    // was never taken. The portal offers no button for it; the route is open
+    // to every dining session regardless.
+    if (order.status === "cancelled") {
+      throw new BadRequestException(
+        "This order was cancelled and cannot be prepared",
+      );
     }
 
     const [updated] = await this.prisma.$transaction([
@@ -882,37 +901,55 @@ export class DiningService {
     studentId: string | null,
     actorPersonId: string,
   ) {
-    const order = await this.prisma.diningOrder.findUnique({
-      where: { id: orderId },
-      select: { id: true, studentId: true, status: true },
-    });
-    if (!order) throw new NotFoundException("Order not found");
-    if (studentId !== null && order.studentId !== studentId) {
-      throw new ForbiddenException("Not your order");
-    }
-    if (order.status !== "cart") {
-      throw new BadRequestException("Only unpaid cart orders can be cancelled");
-    }
-    const liveAttempts = await this.prisma.paymentSubmission.findMany({
-      where: {
-        diningOrderId: orderId,
-        status: { in: ["awaiting_proof", "submitted"] },
-      },
-      select: { id: true, paymentId: true },
-    });
-    await this.prisma.$transaction(async (tx) => {
-      await tx.diningOrder.update({
+    // Everything below reads and writes inside one transaction, and the order
+    // flip is conditional on the status it was read at. Finance verifying a
+    // proof concurrently would otherwise commit between the check and the
+    // write, leaving a settled payment attached to a cancelled order and a
+    // verified submission rewritten to cancelled.
+    const liveAttempts = await this.prisma.$transaction(async (tx) => {
+      const order = await tx.diningOrder.findUnique({
         where: { id: orderId },
+        select: { id: true, studentId: true, status: true },
+      });
+      if (!order) throw new NotFoundException("Order not found");
+      if (studentId !== null && order.studentId !== studentId) {
+        throw new ForbiddenException("Not your order");
+      }
+      if (order.status !== "cart") {
+        throw new BadRequestException(
+          "Only unpaid cart orders can be cancelled",
+        );
+      }
+      const attempts = await tx.paymentSubmission.findMany({
+        where: {
+          diningOrderId: orderId,
+          status: { in: ["awaiting_proof", "submitted"] },
+        },
+        select: { id: true, paymentId: true },
+      });
+
+      const claimed = await tx.diningOrder.updateMany({
+        where: { id: orderId, status: "cart" },
         data: { status: "cancelled" },
       });
-      if (liveAttempts.length > 0) {
+      if (claimed.count !== 1) {
+        throw new ConflictException(
+          "This order stopped being a cart while it was being cancelled. Reload and try again.",
+        );
+      }
+      if (attempts.length > 0) {
         // Retired, not rejected: nobody reviewed these. The reason lives on the
-        // audit row below; rejectionReason is reviewer language.
+        // audit row below; rejectionReason is reviewer language. The status
+        // filter is repeated so a proof verified mid-transaction is left alone
+        // rather than rewritten to cancelled.
         await tx.paymentSubmission.updateMany({
-          where: { id: { in: liveAttempts.map((a) => a.id) } },
+          where: {
+            id: { in: attempts.map((a) => a.id) },
+            status: { in: ["awaiting_proof", "submitted"] },
+          },
           data: { status: "cancelled", activeKey: null },
         });
-        const paymentIds = liveAttempts
+        const paymentIds = attempts
           .map((a) => a.paymentId)
           .filter((id): id is string => id !== null);
         if (paymentIds.length > 0) {
@@ -930,13 +967,14 @@ export class DiningService {
           actorId: actorPersonId,
           data: {
             from: "cart",
-            liveAttemptsRetired: liveAttempts.length,
+            liveAttemptsRetired: attempts.length,
             cancelledOwnOrder: studentId !== null,
           },
         },
       });
+      return attempts;
     });
-    return { ok: true };
+    return { ok: true, liveAttemptsRetired: liveAttempts.length };
   }
 
   /**

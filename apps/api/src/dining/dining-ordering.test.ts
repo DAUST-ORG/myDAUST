@@ -15,7 +15,11 @@ const SETTINGS_BASE = {
 };
 
 function dakarClockPlus(minutesAhead: number): string {
-  const total = (dakarMinutesNow(new Date()) + minutesAhead) % 1440;
+  // Clamped, not wrapped. The cutoff is compared as minutes-into-the-day, so a
+  // time that rolls past midnight reads as earlier than now: wrapping made
+  // "two hours from now" mean "closed" whenever the suite ran after 22:00 in
+  // Dakar, failing these tests for a two-hour window every night.
+  const total = Math.min(dakarMinutesNow(new Date()) + minutesAhead, 1439);
   const h = Math.floor(total / 60);
   const m = total % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
@@ -127,16 +131,23 @@ describe("weekend ordering switch and cutoff", () => {
 });
 
 describe("cart cancellation", () => {
-  function cancelPrisma(order: unknown, attempts: unknown[] = []) {
+  // claimed is what the conditional status flip reports back. 0 stands for
+  // "something else moved this order out of cart mid-transaction".
+  function cancelPrisma(order: unknown, attempts: unknown[] = [], claimed = 1) {
     const tx = {
-      diningOrder: { update: vi.fn() },
-      paymentSubmission: { updateMany: vi.fn() },
+      diningOrder: {
+        findUnique: vi.fn().mockResolvedValue(order),
+        updateMany: vi.fn().mockResolvedValue({ count: claimed }),
+        update: vi.fn(),
+      },
+      paymentSubmission: {
+        findMany: vi.fn().mockResolvedValue(attempts),
+        updateMany: vi.fn(),
+      },
       payment: { updateMany: vi.fn() },
       auditLog: { create: vi.fn() },
     };
     const prisma = {
-      diningOrder: { findUnique: vi.fn().mockResolvedValue(order) },
-      paymentSubmission: { findMany: vi.fn().mockResolvedValue(attempts) },
       $transaction: vi.fn((fn: (tx: unknown) => unknown) => fn(tx)),
     };
     return { prisma, tx };
@@ -148,12 +159,15 @@ describe("cart cancellation", () => {
       [{ id: "attempt-1", paymentId: "payment-1" }],
     );
     await service(prisma).cancelOrder("order-1", "student-1", "person-1");
-    expect(tx.diningOrder.update).toHaveBeenCalledWith({
-      where: { id: "order-1" },
+    expect(tx.diningOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: "order-1", status: "cart" },
       data: { status: "cancelled" },
     });
     expect(tx.paymentSubmission.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["attempt-1"] } },
+      where: {
+        id: { in: ["attempt-1"] },
+        status: { in: ["awaiting_proof", "submitted"] },
+      },
       data: { status: "cancelled", activeKey: null },
     });
     expect(tx.payment.updateMany).toHaveBeenCalledWith({
@@ -180,7 +194,7 @@ describe("cart cancellation", () => {
     await expect(
       service(prisma).cancelOrder("order-1", "student-1", "person-1"),
     ).rejects.toThrow("Not your order");
-    expect(tx.diningOrder.update).not.toHaveBeenCalled();
+    expect(tx.diningOrder.updateMany).not.toHaveBeenCalled();
   });
 
   it("refuses to cancel anything past the cart stage — paid orders need Finance", async () => {
@@ -193,7 +207,7 @@ describe("cart cancellation", () => {
       await expect(
         service(prisma).cancelOrder("order-1", "student-1", "person-1"),
       ).rejects.toThrow("Only unpaid cart orders can be cancelled");
-      expect(tx.diningOrder.update).not.toHaveBeenCalled();
+      expect(tx.diningOrder.updateMany).not.toHaveBeenCalled();
     }
   });
 
@@ -204,9 +218,67 @@ describe("cart cancellation", () => {
       status: "cart",
     });
     await service(prisma).cancelOrder("order-1", null, "staff-person");
-    expect(tx.diningOrder.update).toHaveBeenCalledWith({
-      where: { id: "order-1" },
+    expect(tx.diningOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: "order-1", status: "cart" },
       data: { status: "cancelled" },
+    });
+  });
+
+  it("aborts when the order stops being a cart mid-transaction", async () => {
+    // Finance verifying a proof between the read and the write. Without the
+    // conditional flip this cancelled a paid order and rewrote a verified
+    // submission, leaving settled cash attached to a cancelled order.
+    const { prisma, tx } = cancelPrisma(
+      { id: "order-1", studentId: "student-1", status: "cart" },
+      [{ id: "attempt-1", paymentId: "payment-1" }],
+      0,
+    );
+    await expect(
+      service(prisma).cancelOrder("order-1", "student-1", "person-1"),
+    ).rejects.toThrow("stopped being a cart");
+    expect(tx.paymentSubmission.updateMany).not.toHaveBeenCalled();
+    expect(tx.payment.updateMany).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("advancing a paid order", () => {
+  function advancePrisma(status: string) {
+    const prisma = {
+      diningOrder: {
+        findUnique: vi.fn().mockResolvedValue({ id: "order-1", status }),
+        update: vi.fn().mockResolvedValue({ id: "order-1" }),
+      },
+      auditLog: { create: vi.fn() },
+      $transaction: vi.fn(async (ops: unknown[]) => Promise.all(ops)),
+    };
+    return prisma;
+  }
+
+  it("refuses to advance a cancelled order", async () => {
+    // Cancelling retires the order's payment attempts, so advancing one would
+    // hand over food against money that was never taken.
+    const prisma = advancePrisma("cancelled");
+    await expect(
+      service(prisma).advanceOrder("order-1", "preparing", "staff-person"),
+    ).rejects.toThrow("cancelled and cannot be prepared");
+    expect(prisma.diningOrder.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses to advance an unpaid cart", async () => {
+    const prisma = advancePrisma("cart");
+    await expect(
+      service(prisma).advanceOrder("order-1", "preparing", "staff-person"),
+    ).rejects.toThrow("not paid yet");
+    expect(prisma.diningOrder.update).not.toHaveBeenCalled();
+  });
+
+  it("advances a paid order", async () => {
+    const prisma = advancePrisma("paid");
+    await service(prisma).advanceOrder("order-1", "preparing", "staff-person");
+    expect(prisma.diningOrder.update).toHaveBeenCalledWith({
+      where: { id: "order-1" },
+      data: { status: "preparing" },
     });
   });
 });
