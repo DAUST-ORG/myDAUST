@@ -3,7 +3,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { PrismaClient } from "@mydaust/db";
 import { normalizeGuardianImportName } from "@mydaust/shared";
 import { z } from "zod";
-import { courseCodeForLabel } from "./curated-recommendations.catalog.js";
+import {
+  courseCodeForLabel,
+  reviewedStudentNumberFor,
+} from "./curated-recommendations.catalog.js";
 import { parseRosterHtml } from "./curated-recommendations.parser.js";
 
 /**
@@ -72,7 +75,13 @@ async function main() {
     let slots = 0;
 
     for (const row of roster.rows) {
-      const candidates = byName.get(normalizeGuardianImportName(row.student));
+      // A reviewer's decision wins over name matching. These are the rows a
+      // search could not resolve on its own - archived students, a spelling
+      // variant, and one name shared by two people.
+      const reviewed = reviewedStudentNumberFor(row.student);
+      const candidates = reviewed
+        ? [reviewed]
+        : byName.get(normalizeGuardianImportName(row.student));
       if (!candidates) {
         unmatched.push(row.student);
         continue;
