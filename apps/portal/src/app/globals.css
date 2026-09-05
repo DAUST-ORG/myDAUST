@@ -1224,3 +1224,91 @@ input {
     padding: 48px 24px;
   }
 }
+
+/* ---------- Small screens (mobile + narrow tablets) ----------
+   One place for every cross-cutting mobile rule, so a fix here reaches all
+   60+ portal routes instead of one page at a time. */
+
+/* iOS Safari auto-zooms any focused field under 16px and never zooms back
+   out, which reads as "the page jumps". Floor every form control instead of
+   chasing the dozens of inline fontSize: 13-14 declarations page by page.
+   Desktop is untouched; pinch-zoom stays fully available (never maximum-scale). */
+@media (max-width: 768px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+  .page-title {
+    font-size: 24px;
+  }
+  /* Flex children refuse to shrink past content by default (min-width: auto),
+     which pushes the whole page sideways. */
+  .row > * {
+    min-width: 0;
+  }
+}
+
+/* Wide data tables get a horizontal scroll lane instead of breaking the card. */
+@media (max-width: 700px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Opt-in scroll lane for wide tables at any width. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Installment ledger: 4-column grid on desktop, scroll lane on phones. */
+.charges-head,
+.charges-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 2fr) 130px 120px 90px;
+}
+@media (max-width: 600px) {
+  .charges-head {
+    display: none;
+  }
+  .charges-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .charges-row {
+    min-width: 460px;
+  }
+}
+
+/* Form grids collapse to one column on phones, no per-page breakpoints. */
+.form-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 560px) {
+  .form-grid.cols-2 {
+    grid-template-columns: 1fr 1fr;
+  }
+  .form-grid.cols-3 {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  .form-grid.cols-auto {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+}
+
+/* Dozens of screens lay out forms as inline `1fr 1fr` grids. Collapsing them
+   one file at a time is 40 edits for one behavior, and inline styles beat
+   stylesheets — hence the single documented !important. Desktop untouched.
+   Fixed triplets (`1fr 1fr 1fr`, `repeat(3, …)`) collapse the same way. */
+@media (max-width: 600px) {
+  div[style*="1fr 1fr"],
+  div[style*="repeat(3,"] {
+    grid-template-columns: 1fr !important;
+  }
+}
