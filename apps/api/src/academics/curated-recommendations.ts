@@ -37,6 +37,29 @@ export function curatedCourseCodesFor(options: {
 }
 
 /**
+ * Course ids whose curated plan exempts the student from five enrollment
+ * gates (prerequisites incl. minGrade, corequisites, standing requirement,
+ * add deadline, section capacity). Every other gate — holds, clash, credit
+ * cap, major restriction, closed sections, duplicates, term end, record
+ * status — still applies. One-time: this exempts the enrollment, never the
+ * transcript chain, so downstream prerequisites still demand real grades.
+ */
+export function curatedBypassCourseIds(options: {
+  studentNo: string | null | undefined;
+  termName: string;
+  data: CuratedRecommendationData;
+  courseIdByCode: ReadonlyMap<string, string>;
+}): Set<string> {
+  const codes = curatedCourseCodesFor(options);
+  const ids = new Set<string>();
+  for (const code of codes) {
+    const id = options.courseIdByCode.get(code);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
  * Builds recommendation rows from the academic office's curated Fall 2026 plan.
  *
  * These deliberately reuse `RegistrationRecommendation` so the student
