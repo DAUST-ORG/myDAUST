@@ -35,7 +35,10 @@ const MaterialCategoryInput = z.enum([
 
 // Local zod (the api's own instance) — keeps the ESM/CJS dual-package hazard away.
 const AddSectionEnrollmentInput = z.object({
-  studentId: z.string().uuid(),
+  // Not .uuid(): Student.id only defaults to a uuid, and seeded and imported
+  // cohorts carry their own ids. The service resolves the row and 404s on a
+  // miss, so a format check here only rejects legitimate students.
+  studentId: z.string().min(1).max(64),
   // A registrar add waives academic gates, so the record of why is the only
   // thing standing between an exception and an unexplained roster change.
   reason: z.string().trim().min(1).max(500),
