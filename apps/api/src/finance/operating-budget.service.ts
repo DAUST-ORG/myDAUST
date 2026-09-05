@@ -1313,10 +1313,13 @@ export class OperatingBudgetService {
     };
   }
 
-  private async remainingScheduledBursarByMonth(year: {
-    id: string;
-    label: string;
-  }) {
+  private async remainingScheduledBursarByMonth(
+    year: {
+      id: string;
+      label: string;
+    },
+    asOf: Date,
+  ) {
     const students = await this.prisma.student.findMany({
       where: {
         invoices: {
@@ -1367,7 +1370,7 @@ export class OperatingBudgetService {
         const dueMonth = line.dueDate.slice(0, 7);
         const month = scheduledReceivableForecastMonth(
           dueMonth,
-          monthKeyInDakar(new Date()),
+          monthKeyInDakar(asOf),
           months,
         );
         if (!month) continue;
@@ -1385,6 +1388,13 @@ export class OperatingBudgetService {
     scenario: ForecastScenario;
     collectionRatePercent?: number;
     expenseGrowthPercent?: number;
+    /**
+     * The business date the forecast is taken from. Defaults to now; injected by
+     * tests so a fixture's months do not silently flip from forecast to actual as
+     * real time passes it. Mirrors deriveAccountPosition, which never reads the
+     * wall clock itself.
+     */
+    asOf?: Date;
   }) {
     const year = await this.academicYear(this.prisma, input.academicYear);
     const budget = await this.prisma.operatingBudget.findFirst({
@@ -1415,9 +1425,9 @@ export class OperatingBudgetService {
     }
     const [records, scheduledBursarByMonth] = await Promise.all([
       this.actualRecords(this.prisma, year),
-      this.remainingScheduledBursarByMonth(year),
+      this.remainingScheduledBursarByMonth(year, input.asOf ?? new Date()),
     ]);
-    const asOf = new Date();
+    const asOf = input.asOf ?? new Date();
     const result = forecastOperatingBudget({
       label: year.label,
       openingBalanceXof: toApiXof(budget.openingBalanceXof, "Opening balance"),

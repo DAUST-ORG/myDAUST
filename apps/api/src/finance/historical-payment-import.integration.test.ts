@@ -64,6 +64,14 @@ const invocation = () => ({
   actorEmail,
 });
 
+/**
+ * Due dates relative to the run, not literals. A fixed past due date turns a
+ * partially-paid installment into an overdue one as soon as real time passes
+ * it, and the status assertion below then describes the calendar rather than
+ * the import.
+ */
+const DUE_IN_DAYS = (days: number) => new Date(Date.now() + days * 86_400_000);
+
 describe.skipIf(noDb)("historical payment import ledger", () => {
   beforeAll(async () => {
     const url = DB_URL!;
@@ -161,22 +169,22 @@ describe.skipIf(noDb)("historical payment import ledger", () => {
               create: [
                 {
                   sequence: 1,
-                  dueDate: new Date("2026-08-25T00:00:00.000Z"),
+                  dueDate: DUE_IN_DAYS(30),
                   amountDue: 1_071_250,
                 },
                 {
                   sequence: 2,
-                  dueDate: new Date("2026-11-01T00:00:00.000Z"),
+                  dueDate: DUE_IN_DAYS(90),
                   amountDue: 1_071_250,
                 },
                 {
                   sequence: 3,
-                  dueDate: new Date("2027-01-01T00:00:00.000Z"),
+                  dueDate: DUE_IN_DAYS(150),
                   amountDue: 1_071_250,
                 },
                 {
                   sequence: 4,
-                  dueDate: new Date("2027-03-01T00:00:00.000Z"),
+                  dueDate: DUE_IN_DAYS(210),
                   amountDue: 1_071_250,
                 },
               ],

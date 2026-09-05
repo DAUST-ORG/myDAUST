@@ -92,7 +92,9 @@ const proofFile = {
 } satisfies Express.Multer.File;
 
 function inviteToken(message: { html: string }): string {
-  const match = message.html.match(/[?&]token=([^"&<]+)/);
+  // The invite token now rides in the URL fragment, which a browser never sends
+  // to a server, so the credential stays out of access logs and Referer headers.
+  const match = message.html.match(/[?&#]token=([^"&<]+)/);
   if (!match?.[1]) throw new Error("Invite email did not contain a token");
   return decodeURIComponent(match[1]);
 }
