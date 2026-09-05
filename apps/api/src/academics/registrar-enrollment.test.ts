@@ -129,6 +129,28 @@ describe("RegistrarEnrollmentService.enrollStudent", () => {
     ).rejects.toThrow(/section is full.*active hold/s);
   });
 
+  it.each([
+    ["with a grade", "A", /already completed this section with the grade A/],
+    ["without a grade", null, /already completed this section/],
+  ])(
+    "refuses to resurrect a completed enrollment %s",
+    async (_label, grade, expected) => {
+      evaluateEnrollmentGates.mockResolvedValue([]);
+      tx.enrollment.findUnique.mockResolvedValue({
+        id: "enr-done",
+        status: "completed",
+        grade,
+      });
+
+      await expect(
+        service.enrollStudent("sec-1", "stu-1", "actor-1", "why"),
+      ).rejects.toThrow(expected);
+      expect(tx.enrollment.update).not.toHaveBeenCalled();
+      expect(tx.enrollment.create).not.toHaveBeenCalled();
+      expect(tx.auditLog.create).not.toHaveBeenCalled();
+    },
+  );
+
   it("revives a dropped enrollment instead of creating a duplicate", async () => {
     evaluateEnrollmentGates.mockResolvedValue([]);
     tx.enrollment.findUnique.mockResolvedValue({

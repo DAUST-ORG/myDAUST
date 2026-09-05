@@ -151,6 +151,17 @@ export class RegistrarEnrollmentService {
       const existing = await tx.enrollment.findUnique({
         where: { studentId_sectionId: { studentId, sectionId } },
       });
+      // A finished course is not a free seat. evaluateEnrollmentGates only
+      // rejects a live enrollment, so without this a completed row would be
+      // flipped back to enrolled and carry its old grade with it — the same
+      // work the drop guard refuses to hide, resurrected from the other side.
+      if (existing?.status === "completed") {
+        throw new ConflictException(
+          existing.grade
+            ? `This student already completed this section with the grade ${existing.grade}. Clear that grade before re-enrolling them.`
+            : "This student already completed this section.",
+        );
+      }
       const row = existing
         ? await tx.enrollment.update({
             where: { id: existing.id },
