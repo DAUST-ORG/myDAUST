@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import PhoneLandscapeGate from "@/components/PhoneLandscapeGate";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -30,7 +31,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <PhoneLandscapeGate />
+        {children}
+      </body>
     </html>
   );
 }
