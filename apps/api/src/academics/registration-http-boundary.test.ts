@@ -24,6 +24,7 @@ import { RegistrarController } from "../registrar/registrar.controller.js";
 import { RegistrarService } from "../registrar/registrar.service.js";
 import { AcademicsController } from "./academics.controller.js";
 import { AcademicsService } from "./academics.service.js";
+import { RegistrarEnrollmentService } from "./registrar-enrollment.service.js";
 
 const registrationCatalog = vi.fn(async () => ({ source: "catalog" }));
 const enrollBundle = vi.fn(
@@ -67,6 +68,12 @@ Module({
     {
       provide: AcademicsService,
       useValue: { registrationCatalog, enrollBundle },
+    },
+    {
+      // AcademicsController injects it; these routes never reach it, but Nest
+      // resolves every dependency at bootstrap.
+      provide: RegistrarEnrollmentService,
+      useValue: { sectionEnrollments: vi.fn(), enrollStudent: vi.fn() },
     },
     {
       provide: RegistrarService,
