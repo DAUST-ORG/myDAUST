@@ -8,12 +8,20 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
+  type AdjustInventoryInput,
   type AdvanceOrderInput,
+  type CreateInventoryItemInput,
   DiningSettingsInput,
   diningEligibility,
   type DiningVerdict,
+  type MealPeriod,
+  normalizeStudentNumber,
   type ProofPaymentMethod,
+  orderingOpenNow,
+  type SetMenuScheduleInput,
   toDakarDateKey,
+  type UpsertDietaryInput,
+  type UpsertMealBudgetInput,
 } from "@mydaust/shared";
 import { deriveApiAccountPosition } from "../finance/account-position.js";
 import { ENV } from "../config/config.module.js";
@@ -435,14 +443,26 @@ export class DiningService {
   ) {
     await this.requireActiveStudent(studentId);
     if (items.length === 0) throw new BadRequestException("Order is empty");
+    // The Settings "Accept weekend orders" switch and cutoff are enforced here,
+    // not just displayed: without this, closing ordering would change nothing.
+    // Paying for an already-created cart stays allowed — placement is what's gated.
+    const window = orderingOpenNow(await this.settings());
+    if (!window.open)
+      throw new BadRequestException(window.reason ?? "Ordering is closed");
     const menuItems = await this.prisma.menuItem.findMany({
-      where: { id: { in: items.map((i) => i.menuItemId) } },
+      where: { id: { in: items.map((i) => i.menuItemId) }, available: true },
     });
     const byId = new Map(menuItems.map((m) => [m.id, m]));
     let total = 0;
     const orderItems = items.map((i) => {
       const m = byId.get(i.menuItemId);
-      if (!m) throw new BadRequestException("Unknown menu item");
+      // Unknown *or since-disabled* items are rejected: the menu listing hides
+      // unavailable rows, so accepting them here would let a stale page (or a
+      // crafted request) order food the kitchen has taken off.
+      if (!m)
+        throw new BadRequestException(
+          "An item in your cart is no longer available",
+        );
       const qty = Math.max(1, i.qty);
       total += m.priceXof * qty;
       return { menuItemId: m.id, qty, priceXof: m.priceXof };
@@ -791,9 +811,10 @@ export class DiningService {
   }
 
   async adminOrders() {
+    // Carts are included, not hidden: an unpaid cart is still a live order the
+    // kitchen may need to see (and the only stage staff may cancel).
     const orders = await this.prisma.diningOrder.findMany({
       where: {
-        status: { not: "cart" },
         student: { recordStatus: "active" },
       },
       orderBy: { createdAt: "desc" },
@@ -843,6 +864,79 @@ export class DiningService {
       }),
     ]);
     return updated;
+  }
+
+  /**
+   * Cancel an unpaid cart order. Paid orders never pass through here: their cash
+   * is already in the university's account, so unwinding one needs the Finance
+   * refund path, not a status flip. Cancelling also retires the order's live
+   * payment attempts (awaiting proof / submitted) so Finance cannot later verify
+   * a proof for food the kitchen will never make; the verify path additionally
+   * refuses cancelled orders as a second lock.
+   *
+   * `studentId` set = the student cancelling their own cart (ownership checked).
+   * `studentId` null = dining/admin staff cancelling any student's cart.
+   */
+  async cancelOrder(
+    orderId: string,
+    studentId: string | null,
+    actorPersonId: string,
+  ) {
+    const order = await this.prisma.diningOrder.findUnique({
+      where: { id: orderId },
+      select: { id: true, studentId: true, status: true },
+    });
+    if (!order) throw new NotFoundException("Order not found");
+    if (studentId !== null && order.studentId !== studentId) {
+      throw new ForbiddenException("Not your order");
+    }
+    if (order.status !== "cart") {
+      throw new BadRequestException("Only unpaid cart orders can be cancelled");
+    }
+    const liveAttempts = await this.prisma.paymentSubmission.findMany({
+      where: {
+        diningOrderId: orderId,
+        status: { in: ["awaiting_proof", "submitted"] },
+      },
+      select: { id: true, paymentId: true },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.diningOrder.update({
+        where: { id: orderId },
+        data: { status: "cancelled" },
+      });
+      if (liveAttempts.length > 0) {
+        // Retired, not rejected: nobody reviewed these. The reason lives on the
+        // audit row below; rejectionReason is reviewer language.
+        await tx.paymentSubmission.updateMany({
+          where: { id: { in: liveAttempts.map((a) => a.id) } },
+          data: { status: "cancelled", activeKey: null },
+        });
+        const paymentIds = liveAttempts
+          .map((a) => a.paymentId)
+          .filter((id): id is string => id !== null);
+        if (paymentIds.length > 0) {
+          await tx.payment.updateMany({
+            where: { id: { in: paymentIds }, status: "pending" },
+            data: { status: "cancelled" },
+          });
+        }
+      }
+      await tx.auditLog.create({
+        data: {
+          entity: "DiningOrder",
+          entityId: orderId,
+          action: "cancel",
+          actorId: actorPersonId,
+          data: {
+            from: "cart",
+            liveAttemptsRetired: liveAttempts.length,
+            cancelledOwnOrder: studentId !== null,
+          },
+        },
+      });
+    });
+    return { ok: true };
   }
 
   /**
@@ -993,7 +1087,7 @@ export class DiningService {
   async adminStudents() {
     const date = this.dayOnly();
     const academicYearLabel = await this.effectiveAcademicYearLabel();
-    const [plans, scans] = await Promise.all([
+    const [plans, scans, pendingChanges] = await Promise.all([
       this.prisma.mealPlan.findMany({
         where: {
           academicYearLabel,
@@ -1007,8 +1101,46 @@ export class DiningService {
         where: { date, result: "served" },
         _count: true,
       }),
+      // Read-only visibility for the dining office: a student's plan-change
+      // request lives in the Finance approval queue (approved by admin there),
+      // but the dining desk is who the student asks about it. This changes
+      // nothing about who can approve — it only lets dining see it exists.
+      this.prisma.approvalRequest.findMany({
+        where: {
+          kind: "billing_profile",
+          targetType: "Student",
+          status: "pending",
+        },
+        orderBy: { createdAt: "desc" },
+        select: {
+          targetId: true,
+          createdAt: true,
+          afterJson: true,
+        },
+      }),
     ]);
     const scansByStudent = new Map(scans.map((s) => [s.studentId, s._count]));
+    const pendingByStudent = new Map(
+      pendingChanges.map((request) => {
+        const after =
+          request.afterJson &&
+          typeof request.afterJson === "object" &&
+          !Array.isArray(request.afterJson)
+            ? (request.afterJson as Record<string, unknown>)
+            : null;
+        const requestedOptionCode =
+          typeof after?.cafeteriaOptionCode === "string"
+            ? after.cafeteriaOptionCode
+            : null;
+        return [
+          request.targetId,
+          {
+            requestedOptionCode,
+            createdAt: request.createdAt.toISOString(),
+          },
+        ];
+      }),
+    );
     return plans.map((p) => ({
       studentId: p.studentId,
       name: `${p.student.person.firstName} ${p.student.person.lastName}`,
@@ -1018,6 +1150,7 @@ export class DiningService {
       academicYearLabel: p.academicYearLabel,
       term: p.term,
       scansToday: scansByStudent.get(p.studentId) ?? 0,
+      pendingPlanChange: pendingByStudent.get(p.studentId) ?? null,
     }));
   }
 
@@ -1050,7 +1183,13 @@ export class DiningService {
       }),
       this.prisma.diningOrderItem.groupBy({
         by: ["menuItemId"],
-        where: { order: { status: { not: "cart" } } },
+        // Only orders the kitchen will actually make. Cancelled carts never
+        // reach the kitchen, so counting them would inflate top sellers.
+        where: {
+          order: {
+            status: { in: ["paid", "preparing", "ready", "collected"] },
+          },
+        },
         _sum: { qty: true },
         orderBy: { _sum: { qty: "desc" } },
         take: 8,
@@ -1131,5 +1270,390 @@ export class DiningService {
       where: { id },
       data: { available: !item.available },
     });
+  }
+
+  // --- Back office: dietary profiles, inventory, budgets, menu schedule ---
+  //
+  // All write routes are dining/admin and every mutation below writes its audit
+  // row inside the same transaction. Approval authority never moves here: plan
+  // changes stay in the Finance queue, money stays in Finance verify/settle.
+
+  private static dateKey(value: string): Date {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+
+  /** A student's own dietary profile. Read-only for the student. */
+  async myDietary(studentId: string) {
+    await this.requireActiveStudent(studentId);
+    return this.prisma.dietaryProfile.findUnique({ where: { studentId } });
+  }
+
+  async listDietary() {
+    const academicYearLabel = await this.effectiveAcademicYearLabel();
+    const [profiles, plans] = await Promise.all([
+      this.prisma.dietaryProfile.findMany({
+        include: { student: { include: { person: true } } },
+        orderBy: { updatedAt: "desc" },
+      }),
+      this.prisma.mealPlan.findMany({
+        where: { academicYearLabel },
+        select: { studentId: true, type: true },
+      }),
+    ]);
+    const planByStudent = new Map(plans.map((p) => [p.studentId, p.type]));
+    return profiles.map((profile) => ({
+      studentId: profile.studentId,
+      name: `${profile.student.person.firstName} ${profile.student.person.lastName}`,
+      studentNo: profile.student.studentNo,
+      plan: planByStudent.get(profile.studentId) ?? "none",
+      restrictions: profile.restrictions,
+      allergies: profile.allergies,
+      notes: profile.notes,
+      updatedAt: profile.updatedAt,
+    }));
+  }
+
+  async upsertDietary(input: UpsertDietaryInput, actorPersonId: string) {
+    // Exact match on the canonical form. A near-miss is a different student —
+    // attaching a diet to the wrong record is a health defect, not a typo.
+    const student = await this.prisma.student.findUnique({
+      where: { studentNo: normalizeStudentNumber(input.studentNo) },
+      select: { id: true, studentNo: true },
+    });
+    if (!student) throw new NotFoundException("Student not found");
+    const [profile] = await this.prisma.$transaction([
+      this.prisma.dietaryProfile.upsert({
+        where: { studentId: student.id },
+        update: {
+          restrictions: input.restrictions,
+          allergies: input.allergies,
+          notes: input.notes?.trim() ? input.notes.trim() : null,
+          updatedById: actorPersonId,
+        },
+        create: {
+          studentId: student.id,
+          restrictions: input.restrictions,
+          allergies: input.allergies,
+          notes: input.notes?.trim() ? input.notes.trim() : null,
+          updatedById: actorPersonId,
+        },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "DietaryProfile",
+          entityId: student.id,
+          action: "upsert",
+          actorId: actorPersonId,
+          data: {
+            studentNo: student.studentNo,
+            restrictions: input.restrictions,
+            allergies: input.allergies,
+          },
+        },
+      }),
+    ]);
+    return profile;
+  }
+
+  async listInventory() {
+    return this.prisma.inventoryItem.findMany({
+      orderBy: { name: "asc" },
+    });
+  }
+
+  async createInventoryItem(
+    input: CreateInventoryItemInput,
+    actorPersonId: string,
+  ) {
+    const name = input.name.trim();
+    const existing = await this.prisma.inventoryItem.findUnique({
+      where: { name },
+    });
+    if (existing)
+      throw new BadRequestException("An inventory item with this name exists");
+    const [item] = await this.prisma.$transaction([
+      this.prisma.inventoryItem.create({
+        data: {
+          name,
+          unit: input.unit.trim(),
+          reorderLevel: input.reorderLevel,
+          costPerUnitXof: input.costPerUnitXof,
+        },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "InventoryItem",
+          entityId: name,
+          action: "create",
+          actorId: actorPersonId,
+          data: { ...input, name },
+        },
+      }),
+    ]);
+    return item;
+  }
+
+  /**
+   * Move stock and append the ledger row atomically. The ledger is append-only:
+   * corrections are new movements, never edits, so the on-hand figure always
+   * reconciles to the sum of movements from zero.
+   */
+  async adjustInventory(
+    id: string,
+    input: AdjustInventoryInput,
+    actorPersonId: string,
+  ) {
+    const item = await this.prisma.inventoryItem.findUniqueOrThrow({
+      where: { id },
+    });
+    const next = item.qtyOnHand + input.delta;
+    if (next < -1e-9) {
+      throw new BadRequestException(
+        `Adjustment would drive ${item.name} to ${next.toFixed(2)} ${item.unit}`,
+      );
+    }
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.inventoryItem.update({
+        where: { id },
+        data: { qtyOnHand: Math.max(0, next) },
+      }),
+      this.prisma.inventoryMovement.create({
+        data: {
+          itemId: id,
+          delta: input.delta,
+          reason: input.reason.trim(),
+          actorId: actorPersonId,
+        },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "InventoryItem",
+          entityId: id,
+          action: "adjust",
+          actorId: actorPersonId,
+          data: {
+            delta: input.delta,
+            from: item.qtyOnHand,
+            reason: input.reason.trim(),
+          },
+        },
+      }),
+    ]);
+    return updated;
+  }
+
+  async toggleInventoryItem(id: string, actorPersonId: string) {
+    const item = await this.prisma.inventoryItem.findUniqueOrThrow({
+      where: { id },
+    });
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.inventoryItem.update({
+        where: { id },
+        data: { active: !item.active },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "InventoryItem",
+          entityId: id,
+          action: "toggle",
+          actorId: actorPersonId,
+          data: { from: item.active },
+        },
+      }),
+    ]);
+    return updated;
+  }
+
+  async listBudgets(from: string, to: string) {
+    if (from > to) throw new BadRequestException("Budget range is inverted");
+    const start = DiningService.dateKey(from);
+    const end = DiningService.dateKey(to);
+    // The served-side aggregation scans DiningScan per day in range.
+    if ((end.getTime() - start.getTime()) / 86_400_000 > 93) {
+      throw new BadRequestException("Budget range is limited to 93 days");
+    }
+    const [budgets, served] = await Promise.all([
+      this.prisma.mealBudget.findMany({
+        where: { date: { gte: start, lte: end } },
+        orderBy: [{ date: "asc" }, { period: "asc" }],
+      }),
+      this.prisma.diningScan.groupBy({
+        by: ["date", "period"],
+        where: { date: { gte: start, lte: end }, result: "served" },
+        _count: true,
+      }),
+    ]);
+    const servedByKey = new Map(
+      served.map((s) => [
+        `${s.date.toISOString().slice(0, 10)}|${s.period}`,
+        s._count,
+      ]),
+    );
+    return budgets.map((b) => {
+      const key = `${b.date.toISOString().slice(0, 10)}|${b.period}`;
+      const servedCount = servedByKey.get(key) ?? 0;
+      return {
+        id: b.id,
+        date: b.date.toISOString().slice(0, 10),
+        period: b.period,
+        plannedServings: b.plannedServings,
+        costPerServingXof: b.costPerServingXof,
+        plannedCostXof: b.plannedServings * b.costPerServingXof,
+        served: servedCount,
+        actualCostXof: servedCount * b.costPerServingXof,
+        notes: b.notes,
+      };
+    });
+  }
+
+  async upsertBudget(input: UpsertMealBudgetInput, actorPersonId: string) {
+    const date = DiningService.dateKey(input.date);
+    const [budget] = await this.prisma.$transaction([
+      this.prisma.mealBudget.upsert({
+        where: { date_period: { date, period: input.period } },
+        update: {
+          plannedServings: input.plannedServings,
+          costPerServingXof: input.costPerServingXof,
+          notes: input.notes?.trim() ? input.notes.trim() : null,
+        },
+        create: {
+          date,
+          period: input.period,
+          plannedServings: input.plannedServings,
+          costPerServingXof: input.costPerServingXof,
+          notes: input.notes?.trim() ? input.notes.trim() : null,
+          createdById: actorPersonId,
+        },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "MealBudget",
+          entityId: `${input.date}|${input.period}`,
+          action: "upsert",
+          actorId: actorPersonId,
+          data: { ...input },
+        },
+      }),
+    ]);
+    return budget;
+  }
+
+  /**
+   * One week of kitchen plan starting `weekStart` (a Dakar date key), with what
+   * was actually served each service. Served counts come from the same scan
+   * rows the station writes, so plan-vs-actual cannot drift apart by construction.
+   */
+  async weekSchedule(weekStart: string) {
+    const start = DiningService.dateKey(weekStart);
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 6);
+    const [rows, served, items] = await Promise.all([
+      this.prisma.menuSchedule.findMany({
+        where: { date: { gte: start, lte: end } },
+        include: {
+          menuItem: { select: { id: true, name: true, available: true } },
+        },
+        orderBy: [{ date: "asc" }, { period: "asc" }],
+      }),
+      this.prisma.diningScan.groupBy({
+        by: ["date", "period"],
+        where: { date: { gte: start, lte: end }, result: "served" },
+        _count: true,
+      }),
+      this.prisma.menuItem.findMany({
+        where: { available: true },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+    ]);
+    const servedByKey = new Map(
+      served.map((s) => [
+        `${s.date.toISOString().slice(0, 10)}|${s.period}`,
+        s._count,
+      ]),
+    );
+    const days: Array<{
+      date: string;
+      periods: Array<{
+        period: MealPeriod;
+        served: number;
+        items: Array<{
+          menuItemId: string;
+          name: string;
+          available: boolean;
+          plannedQty: number;
+        }>;
+      }>;
+    }> = [];
+    for (let i = 0; i < 7; i += 1) {
+      const day = new Date(start);
+      day.setUTCDate(day.getUTCDate() + i);
+      const key = day.toISOString().slice(0, 10);
+      days.push({
+        date: key,
+        periods: (["breakfast", "lunch", "dinner"] as const).map((period) => ({
+          period,
+          served: servedByKey.get(`${key}|${period}`) ?? 0,
+          items: rows
+            .filter(
+              (r) =>
+                r.date.toISOString().slice(0, 10) === key &&
+                r.period === period,
+            )
+            .map((r) => ({
+              menuItemId: r.menuItemId,
+              name: r.menuItem.name,
+              available: r.menuItem.available,
+              plannedQty: r.plannedQty,
+            })),
+        })),
+      });
+    }
+    return { weekStart: weekStart, days, orderableItems: items };
+  }
+
+  /**
+   * Replace a whole dated service plan in one transaction. Replacement (not
+   * merge) keeps "what the kitchen sees" exactly equal to the last saved plan.
+   */
+  async setSchedule(input: SetMenuScheduleInput, actorPersonId: string) {
+    const date = DiningService.dateKey(input.date);
+    const ids = [...new Set(input.items.map((i) => i.menuItemId))];
+    if (ids.length > 0) {
+      const found = await this.prisma.menuItem.findMany({
+        where: { id: { in: ids } },
+        select: { id: true },
+      });
+      if (found.length !== ids.length) {
+        throw new BadRequestException("A scheduled menu item does not exist");
+      }
+    }
+    await this.prisma.$transaction([
+      this.prisma.menuSchedule.deleteMany({
+        where: { date, period: input.period },
+      }),
+      ...(input.items.length > 0
+        ? [
+            this.prisma.menuSchedule.createMany({
+              data: input.items.map((i) => ({
+                date,
+                period: input.period,
+                menuItemId: i.menuItemId,
+                plannedQty: i.plannedQty,
+              })),
+            }),
+          ]
+        : []),
+      this.prisma.auditLog.create({
+        data: {
+          entity: "MenuSchedule",
+          entityId: `${input.date}|${input.period}`,
+          action: "replace",
+          actorId: actorPersonId,
+          data: { items: input.items },
+        },
+      }),
+    ]);
+    return { ok: true };
   }
 }

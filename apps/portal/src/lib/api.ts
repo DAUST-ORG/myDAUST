@@ -1967,7 +1967,11 @@ export const getThreads = () => request<ThreadSummary[]>("/comms/threads");
 export const getThread = (id: string) =>
   request<ThreadDetail>(`/comms/threads/${id}`);
 export const getContacts = () => request<Contact[]>("/comms/contacts");
-export const sendThreadMessage = (id: string, body: string, attachments?: MessageAttachment[]) =>
+export const sendThreadMessage = (
+  id: string,
+  body: string,
+  attachments?: MessageAttachment[],
+) =>
   request<{ id: string }>(`/comms/threads/${id}/messages`, {
     method: "POST",
     body: JSON.stringify({ body, attachments }),
@@ -1983,11 +1987,19 @@ export const startThread = (body: {
     body: JSON.stringify(body),
   });
 /** Message every enrolled student in one of your own sections, as individual threads. */
-export const broadcastToSection = (sectionId: string, body: string, subject?: string, attachments?: MessageAttachment[]) =>
-  request<{ sent: number; course: string }>(`/comms/sections/${sectionId}/broadcast`, {
-    method: "POST",
-    body: JSON.stringify({ body, subject, attachments }),
-  });
+export const broadcastToSection = (
+  sectionId: string,
+  body: string,
+  subject?: string,
+  attachments?: MessageAttachment[],
+) =>
+  request<{ sent: number; course: string }>(
+    `/comms/sections/${sectionId}/broadcast`,
+    {
+      method: "POST",
+      body: JSON.stringify({ body, subject, attachments }),
+    },
+  );
 
 // --- Campus: events + library ---
 
@@ -2056,6 +2068,10 @@ export const payDiningOrder = (id: string, method: ProofPaymentMethod) =>
   request<PaymentSubmissionSummary>(`/dining/my/orders/${id}/pay`, {
     method: "POST",
     body: JSON.stringify({ method }),
+  });
+export const cancelDiningOrder = (id: string) =>
+  request<{ ok: boolean }>(`/dining/my/orders/${id}/cancel`, {
+    method: "POST",
   });
 
 export type DiningVerdictCode =
@@ -2151,6 +2167,10 @@ export const advanceDiningOrder = (id: string, status: string) =>
     method: "POST",
     body: JSON.stringify({ status }),
   });
+export const cancelAdminDiningOrder = (id: string) =>
+  request<{ ok: boolean }>(`/dining/admin/orders/${id}/cancel`, {
+    method: "POST",
+  });
 export const getDiningSettlement = () =>
   request<{ orders: number; revenue: number; settledTo: string }>(
     "/dining/admin/settlement",
@@ -2180,9 +2200,123 @@ export interface DiningStudent {
   active: boolean;
   term: string;
   scansToday: number;
+  /** Pending Finance plan-change request, if any. Read-only for dining. */
+  pendingPlanChange: {
+    requestedOptionCode: string | null;
+    createdAt: string;
+  } | null;
 }
 export const getDiningStudents = () =>
   request<DiningStudent[]>("/dining/admin/students");
+
+export interface DiningDietaryRow {
+  studentId: string;
+  name: string;
+  studentNo: string;
+  plan: string;
+  restrictions: string[];
+  allergies: string[];
+  notes: string | null;
+  updatedAt: string;
+}
+export const getDiningDietary = () =>
+  request<DiningDietaryRow[]>("/dining/admin/dietary");
+export const upsertDiningDietary = (body: {
+  studentNo: string;
+  restrictions: string[];
+  allergies: string[];
+  notes?: string;
+}) =>
+  request("/dining/admin/dietary", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
+export interface DiningInventoryRow {
+  id: string;
+  name: string;
+  unit: string;
+  qtyOnHand: number;
+  reorderLevel: number;
+  costPerUnitXof: number;
+  active: boolean;
+}
+export const getDiningInventory = () =>
+  request<DiningInventoryRow[]>("/dining/admin/inventory");
+export const createDiningInventoryItem = (body: {
+  name: string;
+  unit?: string;
+  reorderLevel?: number;
+  costPerUnitXof?: number;
+}) =>
+  request("/dining/admin/inventory", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+export const adjustDiningInventory = (
+  id: string,
+  body: { delta: number; reason: string },
+) =>
+  request(`/dining/admin/inventory/${id}/adjust`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+export const toggleDiningInventory = (id: string) =>
+  request(`/dining/admin/inventory/${id}/toggle`, { method: "POST" });
+
+export interface DiningBudgetRow {
+  id: string;
+  date: string;
+  period: string;
+  plannedServings: number;
+  costPerServingXof: number;
+  plannedCostXof: number;
+  served: number;
+  actualCostXof: number;
+  notes: string | null;
+}
+export const getDiningBudgets = (from: string, to: string) =>
+  request<DiningBudgetRow[]>(`/dining/admin/budgets?from=${from}&to=${to}`);
+export const upsertDiningBudget = (body: {
+  date: string;
+  period: string;
+  plannedServings: number;
+  costPerServingXof: number;
+  notes?: string;
+}) =>
+  request("/dining/admin/budgets", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
+export interface DiningScheduleDay {
+  date: string;
+  periods: {
+    period: string;
+    served: number;
+    items: {
+      menuItemId: string;
+      name: string;
+      available: boolean;
+      plannedQty: number;
+    }[];
+  }[];
+}
+export const getDiningSchedule = (week: string) =>
+  request<{
+    weekStart: string;
+    days: DiningScheduleDay[];
+    orderableItems: { id: string; name: string }[];
+  }>(`/dining/admin/schedule?week=${week}`);
+export const setDiningSchedule = (body: {
+  date: string;
+  period: string;
+  items: { menuItemId: string; plannedQty: number }[];
+}) =>
+  request("/dining/admin/schedule", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 
 export interface DiningReports {
   last7days: { date: string; served: number; turnedAway: number }[];

@@ -31,6 +31,7 @@ import {
   MessageSquare,
   Network,
   Newspaper,
+  Package,
   Pill,
   Radio,
   Receipt,
@@ -486,9 +487,8 @@ export const INFIRMARY_NAV: PortalNav = {
 };
 
 /**
- * Dining console. Mirrors the DAUST-dining prototype's eight back-office entries. The
- * scanner is listed here but lives at /station: it is a full-bleed kiosk surface, not a
- * page inside this shell.
+ * Dining console. The scanner is listed here but lives at /station: it is a
+ * full-bleed kiosk surface, not a page inside this shell.
  */
 export const DINING_NAV: PortalNav = {
   label: "Dining Admin",
@@ -503,6 +503,11 @@ export const DINING_NAV: PortalNav = {
       { href: "/dining/students", label: "Students", icon: Users },
       { href: "/dining/orders", label: "Weekend Orders", icon: ShoppingBag },
       { href: "/dining/menus", label: "Menus", icon: ChefHat },
+      { href: "/dining/dietary", label: "Dietary Needs", icon: HeartPulse },
+    ]),
+    g("Kitchen", [
+      { href: "/dining/planning", label: "Meal Planning", icon: CalendarDays },
+      { href: "/dining/inventory", label: "Inventory", icon: Package },
     ]),
     g("Business", [
       { href: "/dining/finances", label: "Finances", icon: Wallet },
@@ -793,6 +798,12 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/dining/students": { title: "Students", crumb: "Meal plans · Dining" },
   "/dining/orders": { title: "Weekend Orders", crumb: "Fulfilment · Dining" },
   "/dining/menus": { title: "Menus", crumb: "Weekend menu · Dining" },
+  "/dining/dietary": { title: "Dietary Needs", crumb: "Profiles · Dining" },
+  "/dining/planning": {
+    title: "Meal Planning",
+    crumb: "Kitchen plan · Dining",
+  },
+  "/dining/inventory": { title: "Inventory", crumb: "Stock · Dining" },
   "/dining/finances": { title: "Finances", crumb: "Cost center 3600 · Dining" },
   "/dining/reports": { title: "Reports", crumb: "Service trends · Dining" },
   "/dining/settings": { title: "Settings", crumb: "Service rules · Dining" },

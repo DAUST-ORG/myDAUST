@@ -34,6 +34,8 @@ const STUDENT_ROUTES = [
   "myOrders",
   "createOrder",
   "payOrder",
+  "cancelMyOrder",
+  "myDietary",
 ];
 const STAFF_ROUTES = [
   "scan",
@@ -43,6 +45,7 @@ const STAFF_ROUTES = [
   "adminStudents",
   "orders",
   "advance",
+  "cancelOrder",
   "adminMenu",
   "createMenuItem",
   "setMenuItemImage",
@@ -53,6 +56,16 @@ const STAFF_ROUTES = [
   "transactions",
   "settings",
   "updateSettings",
+  "listDietary",
+  "upsertDietary",
+  "listInventory",
+  "createInventoryItem",
+  "adjustInventory",
+  "toggleInventoryItem",
+  "listBudgets",
+  "upsertBudget",
+  "weekSchedule",
+  "setSchedule",
 ];
 
 describe("dining is a real role", () => {

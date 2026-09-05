@@ -1,7 +1,10 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { z } from "zod";
 import {
+  AdjustInventoryInput,
   AdvanceOrderInput,
   ChoosePlanInput,
+  CreateInventoryItemInput,
   CreateMenuItemInput,
   CreateOrderInput,
   DiningSettingsInput,
@@ -11,10 +14,21 @@ import {
   ProofPaymentMethod,
   ScanInput,
   SetMenuImageInput,
+  SetMenuScheduleInput,
+  UpsertDietaryInput,
+  UpsertMealBudgetInput,
 } from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { DiningService } from "./dining.service.js";
+
+const BudgetRangeInput = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD"),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD"),
+});
+const WeekInput = z.object({
+  week: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD"),
+});
 
 /**
  * No class-level `@Roles`. `getAllAndOverride([handler, class])` means a class list is
@@ -102,6 +116,13 @@ export class DiningController {
     );
   }
 
+  /** Cancel your own unpaid cart. Paid orders need the Finance refund path. */
+  @Post("my/orders/:id/cancel")
+  @Roles("student")
+  cancelMyOrder(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.dining.cancelOrder(id, user.studentId!, user.personId);
+  }
+
   // --- Scanner station ---
 
   @Post("scan")
@@ -160,6 +181,13 @@ export class DiningController {
       AdvanceOrderInput.parse(body).status,
       user.personId,
     );
+  }
+
+  /** Staff cancel of an unpaid cart. Anything paid stays on the Finance refund path. */
+  @Post("admin/orders/:id/cancel")
+  @Roles("dining", "admin")
+  cancelOrder(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.dining.cancelOrder(id, null, user.personId);
   }
 
   @Get("admin/menu")
@@ -225,6 +253,97 @@ export class DiningController {
   updateSettings(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     return this.dining.updateSettings(
       DiningSettingsInput.parse(body),
+      user.personId,
+    );
+  }
+
+  // --- Back office: dietary, inventory, budgets, schedule ---
+  // Read/write stays inside dining/admin. Approval and money authority never
+  // move here: plan changes approve in Finance, proofs verify in Finance.
+
+  @Get("my/dietary")
+  @Roles("student")
+  myDietary(@CurrentUser() user: AuthUser) {
+    return this.dining.myDietary(user.studentId!);
+  }
+
+  @Get("admin/dietary")
+  @Roles("dining", "admin")
+  listDietary() {
+    return this.dining.listDietary();
+  }
+
+  @Put("admin/dietary")
+  @Roles("dining", "admin")
+  upsertDietary(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.dining.upsertDietary(
+      UpsertDietaryInput.parse(body),
+      user.personId,
+    );
+  }
+
+  @Get("admin/inventory")
+  @Roles("dining", "admin")
+  listInventory() {
+    return this.dining.listInventory();
+  }
+
+  @Post("admin/inventory")
+  @Roles("dining", "admin")
+  createInventoryItem(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.dining.createInventoryItem(
+      CreateInventoryItemInput.parse(body),
+      user.personId,
+    );
+  }
+
+  @Post("admin/inventory/:id/adjust")
+  @Roles("dining", "admin")
+  adjustInventory(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    return this.dining.adjustInventory(
+      id,
+      AdjustInventoryInput.parse(body),
+      user.personId,
+    );
+  }
+
+  @Post("admin/inventory/:id/toggle")
+  @Roles("dining", "admin")
+  toggleInventoryItem(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.dining.toggleInventoryItem(id, user.personId);
+  }
+
+  @Get("admin/budgets")
+  @Roles("dining", "admin")
+  listBudgets(@Query() query: unknown) {
+    const range = BudgetRangeInput.parse(query ?? {});
+    return this.dining.listBudgets(range.from, range.to);
+  }
+
+  @Put("admin/budgets")
+  @Roles("dining", "admin")
+  upsertBudget(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.dining.upsertBudget(
+      UpsertMealBudgetInput.parse(body),
+      user.personId,
+    );
+  }
+
+  @Get("admin/schedule")
+  @Roles("dining", "admin")
+  weekSchedule(@Query() query: unknown) {
+    return this.dining.weekSchedule(WeekInput.parse(query ?? {}).week);
+  }
+
+  @Put("admin/schedule")
+  @Roles("dining", "admin")
+  setSchedule(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    return this.dining.setSchedule(
+      SetMenuScheduleInput.parse(body),
       user.personId,
     );
   }

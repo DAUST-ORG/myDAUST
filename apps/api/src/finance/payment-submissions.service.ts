@@ -802,6 +802,20 @@ export class PaymentSubmissionsService {
         "Only submitted payer proofs can be verified",
       );
     }
+    // Second lock behind order cancellation: cancelling a dining cart retires
+    // its attempts, but a verify already in flight (or a stale admin screen)
+    // must not resurrect the order to paid after the kitchen was told to drop it.
+    if (row.diningOrderId) {
+      const order = await this.prisma.diningOrder.findUnique({
+        where: { id: row.diningOrderId },
+        select: { status: true },
+      });
+      if (!order || order.status !== "cart") {
+        throw new BadRequestException(
+          "The dining order is no longer awaiting payment",
+        );
+      }
+    }
     const transactionReference = input.transactionReference.trim();
     if (!transactionReference)
       throw new BadRequestException("Transaction reference is required");
