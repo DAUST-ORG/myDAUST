@@ -304,6 +304,11 @@ export const FINANCE_NAV: PortalNav = {
         label: "Fees & Payment Schedule",
         icon: Receipt,
       },
+      {
+        href: "/finance/scholarships",
+        label: "Scholarships & Awards",
+        icon: Award,
+      },
       { href: "/finance/accounts", label: "Student Accounts", icon: Wallet },
       {
         href: "/finance/payment-reviews",
@@ -544,6 +549,10 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/finance/fee-schedule": {
     title: "Fees & Payment Schedule",
     crumb: "Annual charges & payment dates · Finance",
+  },
+  "/finance/scholarships": {
+    title: "Scholarships & Awards",
+    crumb: "Award catalog & rates · Finance",
   },
   "/finance/budget": {
     title: "Budgeting & Cashflow",

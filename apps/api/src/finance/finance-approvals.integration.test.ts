@@ -854,4 +854,105 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
       }),
     ).toBe(1);
   });
+
+  it("bills an approved custom charge once, named, audited, and replay-safe", async () => {
+    const response = await approvals.request(bursar, {
+      kind: "custom_charge",
+      targetType: "Invoice",
+      reason: "Broke a spectrometer lens",
+      after: {
+        studentIds: [studentId],
+        description: "Laboratory replacement fee",
+        amountXof: 25_000,
+        costCenterCode: "9100",
+        installments: [
+          { dueDate: "2026-10-01", amountXof: 10_000, label: "First" },
+          { dueDate: "2026-11-01", amountXof: 15_000 },
+        ],
+      },
+    });
+    expect(response.applied).toBe(false);
+
+    const decision = await approvals.approve(response.request.id, admin);
+    expect(decision).toMatchObject({ ok: true, status: "approved" });
+
+    const charges = await prisma.invoice.findMany({
+      where: { studentId, packageType: "custom" },
+      include: {
+        components: true,
+        plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
+      },
+    });
+    expect(charges).toHaveLength(1);
+    const charge = charges[0]!;
+    expect(charge.totalAmount).toBe(25_000);
+    expect(charge.description).toBe("Laboratory replacement fee");
+    // The billing number is derived from the approval, not random, so a replay
+    // finds it instead of billing the student twice.
+    expect(charge.number).toContain(
+      response.request.id.replace(/-/g, "").slice(0, 12).toUpperCase(),
+    );
+    expect(charge.components).toHaveLength(1);
+    expect(charge.components[0]!.label).toBe("Laboratory replacement fee");
+    expect(charge.plan!.installments.map((row) => row.amountDue)).toEqual([
+      10_000, 15_000,
+    ]);
+
+    const audits = await prisma.auditLog.findMany({
+      where: { entity: "Invoice", entityId: charge.id },
+    });
+    expect(audits.map((row) => row.action)).toContain("custom-charge-billed");
+
+    // A second decision on the same request must not bill a second time.
+    await approvals.approve(response.request.id, admin);
+    expect(
+      await prisma.invoice.count({
+        where: { studentId, packageType: "custom" },
+      }),
+    ).toBe(1);
+  });
+
+  it("prices an approved catalog award from the student's own bill", async () => {
+    const schedule = await prisma.feeSchedule.findFirstOrThrow({
+      where: { status: "approved" },
+      orderBy: { revision: "desc" },
+    });
+    await prisma.scholarshipDefinition.create({
+      data: {
+        scheduleId: schedule.id,
+        key: "merit_bien",
+        label: "Mention Bien",
+        basis: "tuition",
+        rateMode: "fixed",
+        pctBps: 1_500,
+        costCenterCode: "9100",
+        active: true,
+        sortOrder: 0,
+      },
+    });
+
+    const response = await approvals.request(bursar, {
+      kind: "scholarship",
+      targetType: "Student",
+      targetId: studentId,
+      reason: "Mention Bien on the 2026 results",
+      after: { studentId, scholarshipKey: "merit_bien" },
+    });
+    expect(await approvals.approve(response.request.id, admin)).toMatchObject({
+      ok: true,
+      status: "approved",
+    });
+
+    const credit = await prisma.invoice.findFirstOrThrow({
+      where: { studentId, packageType: "credit" },
+      orderBy: { createdAt: "desc" },
+    });
+    const invoice = await prisma.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: { components: true },
+    });
+    const tuition = invoice.components.find((row) => row.kind === "tuition")!;
+    expect(credit.totalAmount).toBe(-Math.round(tuition.amountXof * 0.15));
+    expect(credit.description).toBe("Scholarship — Mention Bien");
+  });
 });

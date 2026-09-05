@@ -21,11 +21,14 @@ import { ApprovalsController } from "./approvals.controller.js";
 import { DirectorController } from "./director.controller.js";
 import { FinanceApprovalsService } from "./finance-approvals.service.js";
 import { OperatingBudgetService } from "./operating-budget.service.js";
+import { ScholarshipAdminController } from "./scholarship-admin.controller.js";
+import { ScholarshipAdminService } from "./scholarship-admin.service.js";
 
 @Module({
   controllers: [
     PaymentsController,
     AdminFinanceController,
+    ScholarshipAdminController,
     PublicBillingController,
     ApprovalsController,
     DirectorController,
@@ -41,6 +44,7 @@ import { OperatingBudgetService } from "./operating-budget.service.js";
     PaymentSubmissionsService,
     FinanceApprovalsService,
     OperatingBudgetService,
+    ScholarshipAdminService,
     // PI-SPI remains the automatic request-to-pay rail.
     PiSpiProvider,
     {

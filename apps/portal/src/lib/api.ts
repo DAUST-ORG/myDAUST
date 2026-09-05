@@ -2398,10 +2398,20 @@ export const removeCharge = (invoiceId: string, reason: string) =>
     method: "DELETE",
     body: JSON.stringify({ reason }),
   });
+/**
+ * Two shapes, mirroring `ApplyDiscountInput` in admin-finance.controller.ts. A
+ * catalog award sends only its key (plus a rate when the award is per-student)
+ * and the server resolves label, cost center and amount; a custom discount sends
+ * label and amount. The two files are hand-kept in step because the API's zod is
+ * deliberately not shared (ESM/CJS dual-package hazard).
+ */
 export const applyDiscount = (input: {
   studentId: string;
-  label: string;
-  amountXof: number;
+  scholarshipKey?: string;
+  pctBps?: number;
+  flatXof?: number;
+  label?: string;
+  amountXof?: number;
   kind?: "discount" | "scholarship";
   costCenterCode?: string;
   requestReason: string;
@@ -4182,6 +4192,62 @@ export const replaceFeePlan = (input: {
   }[];
 }) =>
   request<FinanceChangeResult>("/finance/admin/fee-plan", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+
+// --- Scholarship catalog (awards versioned on the same fee schedule as the charges) ---
+// Distinct from the admissions scholarship tiers at /config/scholarships, which map a
+// baccalaureate score to a headline percentage for the applicant-facing offer.
+export type ScholarshipBasis = "tuition" | "package";
+export type ScholarshipRateMode = "fixed" | "per_student";
+
+export interface ScholarshipDefinitionRow {
+  key: string;
+  label: string;
+  description?: string | null;
+  basis: ScholarshipBasis;
+  rateMode: ScholarshipRateMode;
+  /** Basis points; 1500 is 15%. Fixed-rate awards only. */
+  pctBps?: number | null;
+  /** Flat XOF reduction. Fixed-rate awards only. */
+  flatXof?: number | null;
+  costCenterCode: string;
+  active: boolean;
+  sortOrder: number;
+}
+
+export interface ScholarshipCatalog {
+  scholarships: ScholarshipDefinitionRow[];
+  academicYearLabel?: string | null;
+  revision?: number | null;
+  status?: "draft" | "approved" | "superseded" | null;
+}
+
+export const getScholarshipCatalog = (academicYearLabel?: string) =>
+  request<ScholarshipCatalog>(
+    `/finance/admin/scholarships${
+      academicYearLabel ? `?year=${encodeURIComponent(academicYearLabel)}` : ""
+    }`,
+  );
+
+export const replaceScholarshipCatalog = (input: {
+  academicYearLabel?: string;
+  reason: string;
+  scholarships: {
+    key: string;
+    label: string;
+    description?: string;
+    basis: ScholarshipBasis;
+    rateMode: ScholarshipRateMode;
+    pctBps?: number;
+    flatXof?: number;
+    costCenterCode: string;
+    active: boolean;
+    sortOrder: number;
+  }[];
+}) =>
+  request<FinanceChangeResult>("/finance/admin/scholarships", {
     method: "PUT",
     body: JSON.stringify(input),
   });

@@ -1,6 +1,7 @@
 export * from "./money.js";
 export * from "./cost-center.js";
 export * from "./finance.js";
+export * from "./scholarship.js";
 export * from "./roles.js";
 export * from "./users.js";
 export * from "./auth.js";

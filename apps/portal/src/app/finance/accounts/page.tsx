@@ -16,7 +16,7 @@ import {
   restoreStandardPaymentPlan,
   updatePaymentPlan,
 } from "@/lib/api";
-import { InvoiceComponentManager } from "@/components/InvoiceComponentManager";
+import { AccountChargeManager } from "@/components/AccountChargeManager";
 import { formatXof } from "@/lib/format";
 import {
   AccountBalanceText,
@@ -1205,7 +1205,9 @@ export default function FinanceAccounts() {
           <p className="muted" style={{ margin: "0 0 14px", fontSize: 13 }}>
             {draft.invoiceId
               ? "Set this student’s tuition, cafeteria, housing, and other selected charges separately for every payment. The four-payment grid becomes an individual plan and no longer inherits global amounts."
-              : "Assign the administrator-approved tuition, housing, and cafeteria package."}
+              : draft.studentId
+                ? "Assign the administrator-approved tuition, housing, and cafeteria package, or bill this student a charge outside it."
+                : "Assign the administrator-approved tuition, housing, and cafeteria package."}
           </p>
 
           <div
@@ -1271,9 +1273,11 @@ export default function FinanceAccounts() {
               />
             </Field>
 
-            {draft.invoice?.packageType === "standard_full" && (
-              <InvoiceComponentManager
+            {draft.studentId && (
+              <AccountChargeManager
+                studentId={draft.studentId}
                 invoice={draft.invoice}
+                feePlan={plan}
                 onSubmitted={(message) => {
                   setDraft(null);
                   setNote(message);

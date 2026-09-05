@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ForbiddenException,
@@ -26,6 +25,13 @@ import {
   type FeeComponentDefinition,
 } from "./fee-components.js";
 import { OperatingBudgetService } from "./operating-budget.service.js";
+import {
+  validateScholarships,
+  type ScholarshipBasis,
+  type ScholarshipDefinition,
+  type ScholarshipRateMode,
+} from "./scholarship-catalog.js";
+import { resolveStudentCredit } from "./scholarship-credit.js";
 import {
   syncEnrollmentGateInTransaction,
   type EnrollmentActivation,
@@ -97,6 +103,33 @@ type ProtectedChange = {
 
 type StoredApproval = Prisma.ApprovalRequestGetPayload<Record<string, never>>;
 
+/**
+ * Normalizes one catalog entry from either side of the approval — the stored
+ * JSON payload, or the approved schedule row it is carried forward from — into
+ * the shape the shared validator takes. Null and absent both mean "no catalog
+ * rate", which is how a per-student award is stored.
+ */
+function toScholarshipDefinition(
+  raw: Record<string, unknown>,
+): ScholarshipDefinition {
+  return {
+    key: String(raw.key ?? ""),
+    label: String(raw.label ?? ""),
+    description: raw.description == null ? "" : String(raw.description),
+    basis: raw.basis as ScholarshipBasis,
+    rateMode: raw.rateMode as ScholarshipRateMode,
+    pctBps: optionalRate(raw.pctBps),
+    flatXof: optionalRate(raw.flatXof),
+    costCenterCode: String(raw.costCenterCode ?? ""),
+    active: raw.active !== false,
+    sortOrder: Number(raw.sortOrder ?? 0),
+  };
+}
+
+function optionalRate(value: unknown): number | undefined {
+  return value === null || value === undefined ? undefined : Number(value);
+}
+
 @Injectable()
 export class FinanceApprovalsService {
   private readonly operatingBudget: OperatingBudgetService;
@@ -167,6 +200,7 @@ export class FinanceApprovalsService {
         include: {
           rows: { orderBy: { sequence: "asc" } },
           components: { orderBy: [{ sortOrder: "asc" }, { key: "asc" }] },
+          scholarships: { orderBy: [{ sortOrder: "asc" }, { key: "asc" }] },
         },
       });
       if (!schedule)
@@ -800,7 +834,12 @@ export class FinanceApprovalsService {
       case "global_fee_schedule":
         return this.applyScheduleRevision(tx, request, after, actorId);
       case "custom_charge":
-        return this.applyCustomCharge(tx, after, request.requestedById);
+        return this.applyCustomCharge(
+          tx,
+          after,
+          request.requestedById,
+          request.id,
+        );
       case "charge_removal":
         return this.applyChargeRemoval(tx, request.targetId!);
       case "payment_plan":
@@ -1012,11 +1051,18 @@ export class FinanceApprovalsService {
       include: {
         rows: { orderBy: { sequence: "asc" } },
         components: { orderBy: [{ sortOrder: "asc" }, { key: "asc" }] },
+        scholarships: { orderBy: [{ sortOrder: "asc" }, { key: "asc" }] },
       },
     });
     const batchRows = Array.isArray(after.rows)
       ? (after.rows as Record<string, unknown>[])
       : null;
+    // A scholarship-catalog edit rides this same approval kind and touches no
+    // installment, so it supplies neither a batch of rows nor a single rowId.
+    const editsRows =
+      batchRows !== null ||
+      after.rowId !== undefined ||
+      after.input !== undefined;
     let rowValues: typeof current.rows;
     if (batchRows) {
       if (batchRows.length !== current.rows.length) {
@@ -1036,7 +1082,7 @@ export class FinanceApprovalsService {
         }
         return { ...row, ...this.normalizedLegacyScheduleRow(row, input) };
       });
-    } else {
+    } else if (editsRows) {
       const rowId = String(after.rowId ?? request.targetId ?? "");
       const input = (after.input ?? {}) as Record<string, unknown>;
       const changed = current.rows.find((row) => row.id === rowId);
@@ -1047,6 +1093,8 @@ export class FinanceApprovalsService {
       rowValues = current.rows.map((row) =>
         row.id === changed.id ? { ...row, ...replacement } : row,
       );
+    } else {
+      rowValues = current.rows;
     }
     if (rowValues.some((row) => !row.dueOn)) {
       throw new BadRequestException(
@@ -1126,6 +1174,12 @@ export class FinanceApprovalsService {
           }),
         ),
       );
+    } else if (current.components.length > 0 && !editsRows) {
+      // A catalog-only edit re-prices nothing: keep the approved components as
+      // they stand rather than re-deriving them from the installment columns.
+      componentValues = validateFeeComponents(
+        current.components.map((component) => ({ ...component })),
+      );
     } else if (current.components.length > 0) {
       // Compatibility for the former row-amount editor. If it supplied amount
       // columns, translate only the three historical components into annual totals.
@@ -1183,17 +1237,33 @@ export class FinanceApprovalsService {
       );
     }
 
+    // Scholarships live on the same revision as the components. A payload that
+    // does not mention them is a fee edit, and must carry the catalog forward
+    // rather than dropping it when this revision supersedes the current one.
+    const scholarshipValues = Array.isArray(after.scholarships)
+      ? validateScholarships(
+          (after.scholarships as Record<string, unknown>[]).map(
+            toScholarshipDefinition,
+          ),
+        )
+      : current.scholarships.map(toScholarshipDefinition);
+
     const costCenters = await tx.costCenter.findMany({
       where: {
         code: {
-          in: [...new Set(componentValues.map((row) => row.costCenterCode))],
+          in: [
+            ...new Set([
+              ...componentValues.map((row) => row.costCenterCode),
+              ...scholarshipValues.map((row) => row.costCenterCode),
+            ]),
+          ],
         },
       },
       select: { code: true },
     });
     const knownCenters = new Set(costCenters.map((row) => row.code));
-    const unknownCenter = componentValues.find(
-      (component) => !knownCenters.has(component.costCenterCode),
+    const unknownCenter = [...componentValues, ...scholarshipValues].find(
+      (entry) => !knownCenters.has(entry.costCenterCode),
     );
     if (unknownCenter) {
       throw new BadRequestException(
@@ -1427,6 +1497,20 @@ export class FinanceApprovalsService {
             sortOrder: component.sortOrder,
           })),
         },
+        scholarships: {
+          create: scholarshipValues.map((scholarship) => ({
+            key: scholarship.key,
+            label: scholarship.label,
+            description: scholarship.description || null,
+            basis: scholarship.basis,
+            rateMode: scholarship.rateMode,
+            pctBps: scholarship.pctBps ?? null,
+            flatXof: scholarship.flatXof ?? null,
+            costCenterCode: scholarship.costCenterCode,
+            active: scholarship.active,
+            sortOrder: scholarship.sortOrder,
+          })),
+        },
       },
       include: { components: true },
     });
@@ -1614,6 +1698,7 @@ export class FinanceApprovalsService {
     tx: Prisma.TransactionClient,
     after: Record<string, unknown>,
     requesterId: string,
+    requestId: string,
   ) {
     const studentIds = [...new Set(after.studentIds as string[])];
     const amountXof = Number(after.amountXof);
@@ -1629,7 +1714,7 @@ export class FinanceApprovalsService {
       tx.costCenter.findUnique({ where: { code: costCenterCode } }),
       tx.student.findMany({
         where: { id: { in: studentIds }, recordStatus: "active" },
-        select: { id: true },
+        select: { id: true, studentNo: true },
       }),
     ]);
     if (!center) throw new BadRequestException("Unknown cost center");
@@ -1665,10 +1750,35 @@ export class FinanceApprovalsService {
         "Charge installments must reconcile to the billing total",
       );
     }
+    // Invoice.number is unique, so deriving it from the approval request turns a
+    // replayed apply into a no-op instead of billing the student a second time. A
+    // separate request for the same charge still bills again, which is correct:
+    // two identical lab fees on one student are a real thing.
+    const numberPrefix = `BILL-${new Date().getUTCFullYear()}-${requestId
+      .replace(/-/g, "")
+      .slice(0, 12)
+      .toUpperCase()}`;
+    let created = 0;
     for (const student of students) {
-      await tx.invoice.create({
+      const number =
+        students.length > 1
+          ? `${numberPrefix}-${student.studentNo}`
+          : numberPrefix;
+      const existing = await tx.invoice.findUnique({
+        where: { number },
+        select: { totalAmount: true },
+      });
+      if (existing) {
+        if (existing.totalAmount !== amountXof) {
+          throw new BadRequestException(
+            `${number} already exists with a different total`,
+          );
+        }
+        continue;
+      }
+      const invoice = await tx.invoice.create({
         data: {
-          number: `BILL-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`,
+          number,
           studentId: student.id,
           termId: term.id,
           totalAmount: amountXof,
@@ -1679,6 +1789,7 @@ export class FinanceApprovalsService {
           components: {
             create: {
               kind: this.componentKind(costCenterCode),
+              label: description.slice(0, 80),
               costCenterCode,
               amountXof,
             },
@@ -1696,8 +1807,24 @@ export class FinanceApprovalsService {
           },
         },
       });
+      await tx.auditLog.create({
+        data: {
+          entity: "Invoice",
+          entityId: invoice.id,
+          action: "custom-charge-billed",
+          actorId: requesterId,
+          data: this.asJson({
+            description,
+            amountXof,
+            costCenterCode,
+            installments: schedule.length,
+            approvalRequestId: requestId,
+          }),
+        },
+      });
+      created += 1;
     }
-    return { created: students.length };
+    return { created };
   }
 
   private async applyChargeRemoval(
@@ -2792,42 +2919,113 @@ export class FinanceApprovalsService {
     };
   }
 
+  /** Loads what `resolveStudentCredit` needs and delegates the arithmetic to it. */
+  private async resolveCatalogAward(
+    tx: Prisma.TransactionClient,
+    studentId: string,
+    academicYearLabel: string | null,
+    after: Record<string, unknown>,
+  ) {
+    const invoice = await tx.invoice.findFirst({
+      where: {
+        studentId,
+        packageType: "standard_full",
+        status: { not: "void" },
+        ...(academicYearLabel ? { academicYearLabel } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        components: true,
+        feeSchedule: { include: { scholarships: true } },
+      },
+    });
+    if (!invoice) {
+      throw new BadRequestException(
+        "This student has no standard package for the active year; record a custom discount instead",
+      );
+    }
+    const scholarships: ScholarshipDefinition[] = (
+      invoice.feeSchedule?.scholarships ?? []
+    ).map((row) => ({
+      key: row.key,
+      label: row.label,
+      description: row.description ?? "",
+      basis: row.basis as ScholarshipBasis,
+      rateMode: row.rateMode as ScholarshipRateMode,
+      pctBps: row.pctBps ?? undefined,
+      flatXof: row.flatXof ?? undefined,
+      costCenterCode: row.costCenterCode,
+      active: row.active,
+      sortOrder: row.sortOrder,
+    }));
+    return resolveStudentCredit(
+      {
+        key: String(after.scholarshipKey ?? ""),
+        pctBps: after.pctBps === undefined ? undefined : Number(after.pctBps),
+        flatXof:
+          after.flatXof === undefined ? undefined : Number(after.flatXof),
+      },
+      {
+        totalAmount: invoice.totalAmount,
+        components: invoice.components,
+        scholarships,
+      },
+    );
+  }
+
   private async applyCredit(
     tx: Prisma.TransactionClient,
     after: Record<string, unknown>,
     kind: "discount" | "scholarship",
   ) {
     const studentId = String(after.studentId ?? "");
-    const amountXof = Number(after.amountXof);
-    const label = String(after.label ?? "").trim();
-    const costCenterCode = String(after.costCenterCode ?? COST_CENTER_TUITION);
-    const [student, center, term] = await Promise.all([
+    const [student, term] = await Promise.all([
       tx.student.findFirst({
         where: {
           id: studentId,
           recordStatus: { in: ["active", "pending_payment"] },
         },
       }),
-      tx.costCenter.findUnique({ where: { code: costCenterCode } }),
       this.activeTerm(tx),
     ]);
     if (!student) throw new NotFoundException("Billable student not found");
+
+    const credited = after.scholarshipKey
+      ? await this.resolveCatalogAward(
+          tx,
+          studentId,
+          term.academicYear?.label ?? null,
+          after,
+        )
+      : {
+          label: String(after.label ?? "").trim(),
+          costCenterCode: String(after.costCenterCode ?? COST_CENTER_TUITION),
+          amountXof: Number(after.amountXof),
+        };
+
+    const center = await tx.costCenter.findUnique({
+      where: { code: credited.costCenterCode },
+    });
     if (!center) throw new BadRequestException("Unknown cost center");
-    if (!label || !Number.isSafeInteger(amountXof) || amountXof <= 0) {
+    if (
+      !credited.label ||
+      !Number.isSafeInteger(credited.amountXof) ||
+      credited.amountXof <= 0
+    ) {
       throw new BadRequestException("Invalid account credit");
     }
     const credit = await tx.invoice.create({
       data: {
         studentId,
         termId: term.id,
-        totalAmount: -amountXof,
+        totalAmount: -credited.amountXof,
         status: "paid",
-        description: `${kind === "scholarship" ? "Scholarship" : "Discount"} — ${label}`,
-        costCenterCode,
+        description: `${kind === "scholarship" ? "Scholarship" : "Discount"} — ${credited.label}`,
+        costCenterCode: credited.costCenterCode,
         packageType: "credit",
         academicYearLabel: term.academicYear?.label ?? null,
       },
     });
-    return { creditId: credit.id, amountXof };
+    return { creditId: credit.id, amountXof: credited.amountXof };
   }
 }

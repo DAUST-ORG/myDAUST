@@ -41,7 +41,7 @@ const CreateStudentInput = z.object({
   programCode: z.string().min(1).max(16).optional(),
 });
 
-const AddChargeInput = z.object({
+export const AddChargeInput = z.object({
   studentIds: z.array(z.string().min(1).max(64)).min(1).max(2000),
   description: z.string().min(1).max(160),
   amountXof: z.number().int().positive().max(100_000_000),
@@ -62,14 +62,58 @@ const AddChargeInput = z.object({
   requestReason: RequestReason,
 });
 
-const ApplyDiscountInput = z.object({
-  studentId: z.string().min(1).max(64),
-  label: z.string().min(1).max(160),
-  amountXof: z.number().int().positive().max(100_000_000),
-  kind: z.enum(["discount", "scholarship"]).optional(),
-  costCenterCode: z.string().max(8).optional(),
-  requestReason: RequestReason,
-});
+/**
+ * Two shapes in one endpoint. A catalog award names a `ScholarshipDefinition`
+ * and the server resolves its label, cost center and — for a fixed award — its
+ * rate; the proposer never sends the amount. A custom discount stays free-form.
+ */
+export const ApplyDiscountInput = z
+  .object({
+    studentId: z.string().min(1).max(64),
+    scholarshipKey: z
+      .string()
+      .trim()
+      .regex(/^[a-z][a-z0-9_]{0,39}$/)
+      .optional(),
+    pctBps: z.number().int().min(1).max(10_000).optional(),
+    flatXof: z.number().int().positive().max(100_000_000).optional(),
+    label: z.string().min(1).max(160).optional(),
+    amountXof: z.number().int().positive().max(100_000_000).optional(),
+    kind: z.enum(["discount", "scholarship"]).optional(),
+    costCenterCode: z.string().max(8).optional(),
+    requestReason: RequestReason,
+  })
+  .superRefine((value, ctx) => {
+    if (value.scholarshipKey) {
+      if (value.label !== undefined || value.amountXof !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "A catalog award takes its label and amount from the catalog; remove label and amountXof",
+        });
+      }
+      if (value.pctBps !== undefined && value.flatXof !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "A per-student award takes either pctBps or flatXof, not both",
+        });
+      }
+      return;
+    }
+    if (value.pctBps !== undefined || value.flatXof !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "pctBps and flatXof only apply to a catalog award",
+      });
+    }
+    if (!value.label || value.amountXof === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A custom discount needs a label and an amount",
+      });
+    }
+  });
 
 const UpdateFeePlanRowInput = z.object({
   label: z.string().min(1).max(80).optional(),
@@ -517,7 +561,10 @@ export class AdminFinanceController {
   applyDiscount(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const { requestReason, ...input } = ApplyDiscountInput.parse(body);
     return this.approvals.request(user, {
-      kind: input.kind === "scholarship" ? "scholarship" : "discount",
+      kind:
+        input.scholarshipKey || input.kind === "scholarship"
+          ? "scholarship"
+          : "discount",
       targetType: "Student",
       targetId: input.studentId,
       reason: requestReason,

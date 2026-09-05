@@ -13,7 +13,10 @@
     "import:historical-payments": "node dist/finance/historical-payment-import.cli.js",
     "import:legacy-cohort": "node dist/admissions/legacy-cohort-import.cli.js",
     "reconcile:accepted-applicants": "node dist/admissions/accepted-applicant-reconciliation.cli.js",
-    "reconcile:installment-statuses": "node dist/finance/reconcile-installment-statuses.cli.js"
+    "reconcile:installment-statuses": "node dist/finance/reconcile-installment-statuses.cli.js",
+    "billing:plan": "node dist/finance/student-billing-import.cli.js",
+    "billing:apply": "node dist/finance/student-billing-import.apply.cli.js",
+    "import:opening-balances": "node dist/finance/opening-balance-import.cli.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.864.0",
