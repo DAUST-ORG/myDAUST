@@ -1441,6 +1441,16 @@ export default function FinanceAccounts() {
                 studentId={draft.studentId}
                 invoice={draft.invoice}
                 feePlan={plan}
+                onOpenAnnualProfile={() => {
+                  const row = rows?.find((r) => r.id === draft.studentId);
+                  if (!row) return;
+                  setDraft(null);
+                  setProfileStudent({
+                    id: row.id,
+                    name: row.name,
+                    studentNo: row.studentNo,
+                  });
+                }}
                 onSubmitted={(message) => {
                   setDraft(null);
                   setNote(message);

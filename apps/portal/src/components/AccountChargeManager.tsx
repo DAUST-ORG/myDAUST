@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, WalletCards } from "lucide-react";
 import {
   type AccountInvoice,
   type CostCenter,
@@ -68,20 +68,28 @@ function costCenterOptions(centers: CostCenter[], current: string) {
 
 /**
  * Every charge a bursar can put on one student, in one panel: the approved
- * catalog components of the standard package, a free-form one-off charge, and an
- * award from the scholarship catalog. All three submit to the approval rail —
- * nothing here writes to the student's account directly.
+ * catalog components of the standard package, a free-form one-off charge, and a
+ * free-form discount. All three submit to the approval rail — nothing here
+ * writes to the student's account directly.
+ *
+ * Catalog awards are deliberately NOT duplicated here. A BillingAdjustmentDefinition
+ * carries basis, calculation, stacking and effect, and is applied through the
+ * annual billing profile; the credit tab links there rather than growing a second,
+ * weaker award path.
  */
 export function AccountChargeManager({
   studentId,
   invoice,
   feePlan,
   onSubmitted,
+  onOpenAnnualProfile,
 }: {
   studentId: string;
   invoice?: AccountInvoice;
   feePlan?: FeePlan | null;
   onSubmitted: (message: string) => void;
+  /** Hands off to BillingProfileEditor, the canonical home of catalog awards. */
+  onOpenAnnualProfile?: () => void;
 }) {
   const [tab, setTab] = useState<string>(
     invoice?.packageType === "standard_full" ? "package" : "custom",
@@ -175,12 +183,32 @@ export function AccountChargeManager({
       )}
 
       {tab === "credit" && (
-        <CreditForm
-          studentId={studentId}
-          costCenters={costCenters}
-          busy={busy}
-          onSubmit={(input) => submit(() => applyDiscount(input), "Credit")}
-        />
+        <>
+          {onOpenAnnualProfile && (
+            <div className="charge-award-handoff">
+              <span>
+                <strong>Awarding from the catalog?</strong> A scholarship or
+                discount defined in the Billing Catalog carries its own basis,
+                rate and stacking rules, so it is granted on the student&apos;s
+                annual profile rather than as a loose credit.
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<WalletCards size={14} />}
+                onClick={onOpenAnnualProfile}
+              >
+                Annual profile
+              </Button>
+            </div>
+          )}
+          <CreditForm
+            studentId={studentId}
+            costCenters={costCenters}
+            busy={busy}
+            onSubmit={(input) => submit(() => applyDiscount(input), "Credit")}
+          />
+        </>
       )}
     </section>
   );

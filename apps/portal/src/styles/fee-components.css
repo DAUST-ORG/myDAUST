@@ -396,10 +396,9 @@
 }
 .charge-installment-row {
   display: grid;
-  grid-template-columns: minmax(130px, 1fr) minmax(120px, 1fr) minmax(
-      110px,
-      0.8fr
-    ) auto;
+  grid-template-columns:
+    minmax(130px, 1fr) minmax(120px, 1fr) minmax(110px, 0.8fr)
+    auto;
   gap: 8px;
   align-items: center;
 }
@@ -416,4 +415,20 @@
 }
 .charge-installment-foot .mismatch {
   color: var(--danger);
+}
+.charge-award-handoff {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: 11.5px;
+  color: var(--fg2);
+}
+.charge-award-handoff > span {
+  max-width: 62ch;
 }
