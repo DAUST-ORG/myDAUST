@@ -55,7 +55,11 @@ export const UpdateAssignmentInput = z.object({
   type: AssignmentType.optional(),
   maxPoints: z.number().int().positive().max(1000).optional(),
   weight: z.number().int().min(0).max(100).optional(),
-  dueDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
+  dueDate: z
+    .string()
+    .datetime({ offset: true })
+    .or(z.string().date())
+    .optional(),
 });
 export type UpdateAssignmentInput = z.infer<typeof UpdateAssignmentInput>;
 
@@ -104,7 +108,9 @@ export type EnrollmentGate = z.infer<typeof EnrollmentGate>;
 export const EnrollmentGateFailure = z.discriminatedUnion("gate", [
   z.object({
     gate: z.literal("prerequisite"),
-    courses: z.array(z.object({ code: z.string(), minGrade: z.string().nullable() })),
+    courses: z.array(
+      z.object({ code: z.string(), minGrade: z.string().nullable() }),
+    ),
   }),
   z.object({
     gate: z.literal("corequisite"),
@@ -156,6 +162,22 @@ export const FACULTY_WAIVABLE_GATES: ReadonlySet<EnrollmentGate> = new Set([
   "add_deadline",
 ]);
 
+/**
+ * A registrar placing a student on a roster directly waives the academic gates
+ * but not the physical ones. capacity would overfill a room, holds and
+ * record_status are administrative facts the registrar can clear at source
+ * rather than step over, and the hard invariants (timetable clash, duplicate
+ * enrollment, closed section, ended term) are not gates at all — they throw.
+ */
+export const REGISTRAR_WAIVABLE_GATES: ReadonlySet<EnrollmentGate> = new Set([
+  "prerequisite",
+  "corequisite",
+  "credit_cap",
+  "standing",
+  "major_restriction",
+  "add_deadline",
+]);
+
 /** Student submits when enroll() rejected them. Stored on ApprovalRequest.afterJson. */
 export const EnrollmentOverrideRequestInput = z.object({
   sectionId: z.string().uuid(),
@@ -163,19 +185,19 @@ export const EnrollmentOverrideRequestInput = z.object({
     .string()
     .trim()
     .max(500)
-    .refine(
-      (v) => v.split(/\s+/).filter(Boolean).length <= 50,
-      { message: "Maximum 50 words" },
-    )
-    .refine(
-      (v) => v.split(/\s+/).filter(Boolean).length >= 1,
-      { message: "At least 1 word" },
-    ),
+    .refine((v) => v.split(/\s+/).filter(Boolean).length <= 50, {
+      message: "Maximum 50 words",
+    })
+    .refine((v) => v.split(/\s+/).filter(Boolean).length >= 1, {
+      message: "At least 1 word",
+    }),
   /** Gates the student is asking the registrar to waive. The registrar still picks
    * independently on approval; this is a hint, not a constraint. */
   requestedWaivers: z.array(EnrollmentGate).min(1),
 });
-export type EnrollmentOverrideRequestInput = z.infer<typeof EnrollmentOverrideRequestInput>;
+export type EnrollmentOverrideRequestInput = z.infer<
+  typeof EnrollmentOverrideRequestInput
+>;
 
 /** Admin approves by ticking each gate to waive. Capacity waiver auto-bumps section
  * capacity on apply. */
@@ -183,7 +205,9 @@ export const EnrollmentOverrideApproveInput = z.object({
   waivedGates: z.array(EnrollmentGate).min(1),
   note: z.string().trim().max(1000).optional(),
 });
-export type EnrollmentOverrideApproveInput = z.infer<typeof EnrollmentOverrideApproveInput>;
+export type EnrollmentOverrideApproveInput = z.infer<
+  typeof EnrollmentOverrideApproveInput
+>;
 
 /** Faculty approve — same as admin but restricted to FACULTY_WAIVABLE_GATES. */
 export const FacultyOverrideDecideInput = z.object({
@@ -191,4 +215,6 @@ export const FacultyOverrideDecideInput = z.object({
   waivedGates: z.array(EnrollmentGate).min(1).optional(),
   note: z.string().trim().max(1000).optional(),
 });
-export type FacultyOverrideDecideInput = z.infer<typeof FacultyOverrideDecideInput>;
+export type FacultyOverrideDecideInput = z.infer<
+  typeof FacultyOverrideDecideInput
+>;

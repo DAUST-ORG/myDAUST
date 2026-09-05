@@ -23,6 +23,7 @@ import { z } from "zod";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { AcademicsService } from "./academics.service.js";
+import { RegistrarEnrollmentService } from "./registrar-enrollment.service.js";
 
 const MaterialCategoryInput = z.enum([
   "syllabus",
@@ -31,6 +32,17 @@ const MaterialCategoryInput = z.enum([
   "quizzes",
   "resources",
 ]);
+
+// Local zod (the api's own instance) — keeps the ESM/CJS dual-package hazard away.
+const AddSectionEnrollmentInput = z.object({
+  // Not .uuid(): Student.id only defaults to a uuid, and seeded and imported
+  // cohorts carry their own ids. The service resolves the row and 404s on a
+  // miss, so a format check here only rejects legitimate students.
+  studentId: z.string().min(1).max(64),
+  // A registrar add waives academic gates, so the record of why is the only
+  // thing standing between an exception and an unexplained roster change.
+  reason: z.string().trim().min(1).max(500),
+});
 
 const CreateMaterialInput = z.object({
   title: z.string().min(1).max(200),
@@ -230,7 +242,10 @@ const EnrollBundleInput = z
 
 @Controller("academics")
 export class AcademicsController {
-  constructor(private readonly academics: AcademicsService) {}
+  constructor(
+    private readonly academics: AcademicsService,
+    private readonly registrarEnrollment: RegistrarEnrollmentService,
+  ) {}
 
   @Get("current-term")
   currentTerm() {
@@ -405,6 +420,28 @@ export class AcademicsController {
   @Roles("admin", "registrar")
   adminDrop(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.academics.adminDropEnrollment(id, user.personId);
+  }
+
+  @Get("admin/sections/:id/enrollments")
+  @Roles("admin", "registrar")
+  sectionEnrollments(@Param("id") id: string) {
+    return this.registrarEnrollment.sectionEnrollments(id);
+  }
+
+  @Post("admin/sections/:id/enrollments")
+  @Roles("admin", "registrar")
+  addSectionEnrollment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = AddSectionEnrollmentInput.parse(body);
+    return this.registrarEnrollment.enrollStudent(
+      id,
+      input.studentId,
+      user.personId,
+      input.reason,
+    );
   }
 
   @Get("admin/programs")

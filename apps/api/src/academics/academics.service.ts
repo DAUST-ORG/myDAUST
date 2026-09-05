@@ -8,6 +8,10 @@ import {
 } from "@nestjs/common";
 import type { MaterialCategory, Prisma } from "@mydaust/db";
 import { deriveAcademicStanding, type AcademicStanding } from "@mydaust/shared";
+import {
+  DROP_GUARD_INCLUDE,
+  gradedWorkBlockingDrop,
+} from "./enrollment-drop-guard.js";
 import { NotificationsService } from "../notifications/notifications.service.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 import {
@@ -4414,14 +4418,22 @@ export class AcademicsService {
     return this.adminStudentDetail(studentId);
   }
 
-  /** Registrar/admin administrative drop — bypasses the student drop deadline, audited. */
+  /**
+   * Registrar/admin administrative drop — bypasses the student drop deadline,
+   * audited. Refuses once the enrollment carries academic weight: the row is
+   * the parent of the student's attendance, submissions and transcript entry,
+   * so dropping a graded course hides work rather than undoing it.
+   */
   async adminDropEnrollment(enrollmentId: string, actorId: string) {
     const enr = await this.prisma.enrollment.findUnique({
       where: { id: enrollmentId },
+      include: DROP_GUARD_INCLUDE,
     });
     if (!enr) throw new NotFoundException("Enrollment not found");
     if (enr.status !== "enrolled")
       throw new BadRequestException("Not an active enrollment");
+    const blocked = gradedWorkBlockingDrop(enr);
+    if (blocked) throw new ConflictException(blocked);
     const updated = await this.prisma.enrollment.update({
       where: { id: enrollmentId },
       data: { status: "dropped" },
