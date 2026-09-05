@@ -671,6 +671,7 @@ model Student {
   mealPlans                MealPlan[]
   diningOrders             DiningOrder[]
   diningScans              DiningScan[]
+  dietaryProfile           DietaryProfile?
   housingAssignments       HousingAssignment[]
   roommateProfile          RoommateProfile?
   documents                StudentDocument[]
@@ -1925,6 +1926,7 @@ model MenuItem {
   createdAt   DateTime @default(now())
 
   orderItems DiningOrderItem[]
+  schedules  MenuSchedule[]
 }
 
 model DiningOrder {
@@ -1962,10 +1964,76 @@ model DiningScan {
   date      DateTime // date only
   result    ScanResult
   reason    String?
-  createdAt DateTime   @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([studentId, period, date])
   @@index([date, period])
+}
+
+// --- Dining back office: dietary profiles, inventory, meal budgets, menu schedule. ---
+
+model DietaryProfile {
+  id           String   @id @default(uuid())
+  studentId    String   @unique
+  student      Student  @relation(fields: [studentId], references: [id])
+  restrictions String[] @default([])
+  allergies    String[] @default([])
+  notes        String?
+  updatedById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model InventoryItem {
+  id              String              @id @default(uuid())
+  name            String              @unique
+  unit            String              @default("pcs")
+  qtyOnHand       Float               @default(0)
+  reorderLevel    Float               @default(0)
+  costPerUnitXof  Int                 @default(0)
+  active          Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  movements       InventoryMovement[]
+}
+
+model InventoryMovement {
+  id        String        @id @default(uuid())
+  itemId    String
+  item      InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  delta     Float
+  reason    String
+  actorId   String
+  createdAt DateTime      @default(now())
+
+  @@index([itemId])
+}
+
+model MealBudget {
+  id                  String     @id @default(uuid())
+  date                DateTime   @db.Date
+  period              MealPeriod
+  plannedServings     Int
+  costPerServingXof   Int
+  notes               String?
+  createdById         String?
+  createdAt           DateTime   @default(now())
+
+  @@unique([date, period])
+  @@index([date])
+}
+
+model MenuSchedule {
+  id         String     @id @default(uuid())
+  date       DateTime   @db.Date
+  period     MealPeriod
+  menuItemId String
+  menuItem   MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  plannedQty Int        @default(0)
+  createdAt  DateTime   @default(now())
+
+  @@unique([date, period, menuItemId])
+  @@index([date])
 }
 
 // --- Student Affairs: housing, roommate matching, conduct, clubs, co-curricular budget. ---

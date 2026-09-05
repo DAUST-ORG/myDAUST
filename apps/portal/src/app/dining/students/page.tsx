@@ -96,6 +96,7 @@ export default function DiningStudentsPage() {
                   onSort={toggle}
                 />
                 <th>Status</th>
+                <th>Plan change</th>
                 <th>Term</th>
                 <SortTh
                   label="Meals today"
@@ -117,6 +118,23 @@ export default function DiningStudentsPage() {
                       <Badge tone="success">Active</Badge>
                     ) : (
                       <Badge tone="neutral">Inactive</Badge>
+                    )}
+                  </td>
+                  {/* Read-only: the request itself is approved in Finance.
+                      Dining sees it so the desk can answer "where is my request?". */}
+                  <td>
+                    {r.pendingPlanChange ? (
+                      <span
+                        title={`Requested ${new Date(r.pendingPlanChange.createdAt).toLocaleString()} — decided in Finance approvals`}
+                      >
+                        <Badge tone="warning">
+                          {r.pendingPlanChange.requestedOptionCode
+                            ? `→ ${PLAN_LABELS[r.pendingPlanChange.requestedOptionCode] ?? r.pendingPlanChange.requestedOptionCode}`
+                            : "Billing change"}
+                        </Badge>
+                      </span>
+                    ) : (
+                      <span style={{ color: "var(--fg3)" }}>—</span>
                     )}
                   </td>
                   <td style={{ color: "var(--fg3)" }}>{r.term}</td>

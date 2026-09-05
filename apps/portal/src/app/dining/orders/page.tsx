@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   type AdminDiningOrder,
   advanceDiningOrder,
+  cancelAdminDiningOrder,
   getAdminDiningOrders,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
@@ -65,12 +66,25 @@ export default function DiningOrdersPage() {
     }
   }
 
+  /** Staff cancel of an unpaid cart. Paid orders stay on the Finance refund path. */
+  async function cancel(id: string) {
+    setBusy(id);
+    try {
+      await cancelAdminDiningOrder(id);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <>
       <PageHeader
         eyebrow="Dining"
         title="Weekend Orders"
-        subtitle={`${rows.length} orders past the cart stage`}
+        subtitle={`${rows.length} orders, including unpaid carts`}
       />
       <Card pad={false}>
         {error ? (
@@ -120,6 +134,14 @@ export default function DiningOrdersPage() {
                           onClick={() => advance(o.id, next)}
                         >
                           Mark {(STATUS_LABEL[next] ?? next).toLowerCase()}
+                        </Button>
+                      ) : o.status === "cart" ? (
+                        <Button
+                          size="sm"
+                          disabled={busy === o.id}
+                          onClick={() => cancel(o.id)}
+                        >
+                          Cancel cart
                         </Button>
                       ) : (
                         <span style={{ color: "var(--fg3)", fontSize: 12 }}>

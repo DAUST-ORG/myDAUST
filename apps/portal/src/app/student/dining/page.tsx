@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { orderingOpenNow } from "@mydaust/shared";
 import { QrCode } from "@/components/QrCode";
 import {
   type DiningOrder,
@@ -12,6 +13,7 @@ import {
   type MenuItem,
   type PaymentSubmissionSummary,
   type ProofPaymentMethod,
+  cancelDiningOrder,
   changeResumablePaymentMethod,
   chooseMealPlan,
   createDiningOrder,
@@ -120,6 +122,7 @@ export default function StudentDiningPage() {
   const [planLoading, setPlanLoading] = useState(true);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planNotice, setPlanNotice] = useState<string | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
   const [submittingPlan, setSubmittingPlan] = useState<DiningPlanCode | null>(
     null,
   );
@@ -199,12 +202,32 @@ export default function StudentDiningPage() {
       .filter(([, q]) => q > 0)
       .map(([menuItemId, qty]) => ({ menuItemId, qty }));
     if (items.length === 0) return;
-    const { id } = await createDiningOrder(items);
-    setSelectedOrderId(id);
-    setSelectedOrderAmount(cartTotal);
-    setCart({});
-    load();
-    setTab("Weekend orders");
+    setOrderError(null);
+    try {
+      const { id } = await createDiningOrder(items);
+      setSelectedOrderId(id);
+      setSelectedOrderAmount(cartTotal);
+      setCart({});
+      load();
+      setTab("Weekend orders");
+    } catch (cause) {
+      setOrderError(
+        cause instanceof Error ? cause.message : "Could not create the order.",
+      );
+    }
+  }
+
+  async function cancelOrder(id: string) {
+    setOrderError(null);
+    try {
+      await cancelDiningOrder(id);
+      if (selectedOrderId === id) setSelectedOrderId(null);
+      load();
+    } catch (cause) {
+      setOrderError(
+        cause instanceof Error ? cause.message : "Could not cancel the order.",
+      );
+    }
   }
 
   const selectedOrder =
@@ -216,6 +239,14 @@ export default function StudentDiningPage() {
         attempt.diningOrderId === selectedOrderId &&
         ["awaiting_proof", "submitted"].includes(attempt.status),
     ) ?? null;
+
+  // Advisory only — the API re-checks this on every order. Same helper, same clock.
+  const orderingState = today
+    ? orderingOpenNow({
+        weekendOrdering: today.weekendOrdering,
+        orderCutoff: today.orderCutoff,
+      })
+    : null;
 
   async function startOrderPayment(method: ProofPaymentMethod) {
     if (!selectedOrderId) throw new Error("Choose an order");
@@ -482,6 +513,26 @@ export default function StudentDiningPage() {
             <p className="h1" style={{ fontSize: 16 }}>
               Weekend menu
             </p>
+            {today && (
+              <p className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                Order before {today.orderCutoff} Dakar time.
+              </p>
+            )}
+            {orderingState && !orderingState.open && (
+              <div
+                role="status"
+                className="card"
+                style={{
+                  marginTop: 10,
+                  padding: "11px 14px",
+                  borderLeft: "3px solid var(--warning)",
+                  fontSize: 13,
+                }}
+              >
+                {orderingState.reason}. Orders already in your cart stay
+                untouched.
+              </div>
+            )}
             <table>
               <thead>
                 <tr>
@@ -568,11 +619,19 @@ export default function StudentDiningPage() {
             <button
               className="primary"
               onClick={placeOrder}
-              disabled={cartTotal === 0}
+              disabled={
+                cartTotal === 0 ||
+                (orderingState !== null && !orderingState.open)
+              }
               style={{ width: "100%", marginTop: 8 }}
             >
               Create order
             </button>
+            {orderError && (
+              <p role="alert" style={{ color: "var(--danger)", fontSize: 13 }}>
+                {orderError}
+              </p>
+            )}
             {selectedOrderId && paymentAmount > 0 && (
               <div style={{ marginTop: 14 }}>
                 <ProofPaymentPanel
@@ -608,18 +667,29 @@ export default function StudentDiningPage() {
                   {o.items.map((i) => `${i.qty}× ${i.name}`).join(", ")}
                 </div>
                 {o.status === "cart" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedOrderId(o.id);
-                      setSelectedOrderAmount(o.totalXof);
-                    }}
-                    style={{ marginTop: 7 }}
-                  >
-                    {attempts.some((attempt) => attempt.diningOrderId === o.id)
-                      ? "Resume payment"
-                      : "Pay order"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOrderId(o.id);
+                        setSelectedOrderAmount(o.totalXof);
+                      }}
+                      style={{ marginTop: 7 }}
+                    >
+                      {attempts.some(
+                        (attempt) => attempt.diningOrderId === o.id,
+                      )
+                        ? "Resume payment"
+                        : "Pay order"}
+                    </button>{" "}
+                    <button
+                      type="button"
+                      onClick={() => void cancelOrder(o.id)}
+                      style={{ marginTop: 7 }}
+                    >
+                      Cancel order
+                    </button>
+                  </>
                 )}
               </div>
             ))}
@@ -675,16 +745,27 @@ export default function StudentDiningPage() {
                 fontSize: 13,
               }}
             >
-              A change to{" "}
-              <strong>
-                {planOptions.options.find(
+              {(() => {
+                // The blocker can be any pending billing-profile change, not
+                // necessarily a cafeteria one — never name an option nobody asked for.
+                const requested = planOptions.options.find(
                   (option) =>
                     option.code ===
                     planOptions.pendingRequest?.requestedOptionCode,
-                )?.label ?? "another cafeteria option"}
-              </strong>{" "}
-              is awaiting Director approval. You cannot submit another request
-              yet.
+                );
+                return requested ? (
+                  <>
+                    A change to <strong>{requested.label}</strong> is awaiting
+                    administrator approval. You cannot submit another request
+                    yet.
+                  </>
+                ) : (
+                  <>
+                    A billing change is awaiting administrator approval. You
+                    cannot submit another request yet.
+                  </>
+                );
+              })()}
             </div>
           )}
           {planLoading && !planOptions && (

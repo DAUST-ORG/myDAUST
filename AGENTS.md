@@ -665,8 +665,12 @@ recover with `git show 5c25845^:design/daust-dining-design/<file>`):
 | Surface         | Route                                                | Who               |
 | --------------- | ---------------------------------------------------- | ----------------- |
 | Scanner Station | `/station` — full-bleed kiosk, outside `PortalShell` | `dining`, `admin` |
-| Dining console  | `/dining` — 8 pages                                  | `dining`, `admin` |
+| Dining console  | `/dining` — 12 pages                                 | `dining`, `admin` |
 | Student screen  | `/student/dining`                                    | `student`         |
+
+Console pages: Overview, Live Service, Scanner Station (`/dining/scanner`, a console
+mirror — the wall kiosk lives at `/station`), Students, Weekend Orders, Menus,
+Dietary Needs, Meal Planning, Inventory, Finances, Reports, Settings.
 
 **One entrance rule, in one place.** `diningEligibility()` in
 `packages/shared/src/dining-eligibility.ts` decides every verdict, and both the scanner and the
@@ -703,6 +707,33 @@ Weekend orders use the **proof-based** `PaymentSubmission` rail (`source: "dinin
 order stays `cart` until Finance verifies evidence and never reaches the kitchen queue before
 then. The console has no settlement or payout surface: with proof payments the cash is already in
 the university's account, and there is no payout capability to expose.
+
+The Settings ordering switch and cutoff are **enforced, not displayed**: `orderingOpenNow()`
+in `packages/shared/src/dining.ts` (Dakar wall clock vs `orderCutoff`, plus the
+`weekendOrdering` flag) gates `createOrder`, and the student Weekend tab shows the same
+verdict. Paying for an already-created cart stays allowed — placement is what's gated. Only
+`available: true` menu items are orderable; the listing filter and the order lookup agree.
+
+Cancellation is cart-only on both sides: a student cancels their own cart
+(`POST my/orders/:id/cancel`), dining/admin cancels any cart
+(`POST admin/orders/:id/cancel`). Cancelling retires the order's live payment attempts so
+Finance cannot verify them later, and the verify path refuses non-cart dining orders as a
+second lock. Paid orders never pass through here — unwinding one needs the Finance refund
+path. Cancelled carts are excluded from the Reports top-sellers (they never reached the
+kitchen) but stay visible in the console queue.
+
+Plan-change requests approve in the **Finance** approval queue (`kind: "billing_profile"`,
+admin-only) and nowhere else — but the dining Students page shows each student's pending
+request read-only, so the desk can answer "where is my request?". Any pending
+`billing_profile` request (even non-cafeteria) blocks a new cafeteria request; the student
+banner says so generically rather than naming an option nobody asked for.
+
+Back-office models (migration `20260905120000_dining_backoffice`, all dining/admin except
+where noted): `DietaryProfile` (one per student, exact-ID match only, student reads own via
+`GET my/dietary`), `InventoryItem` + append-only `InventoryMovement` (corrections are new
+movements; on-hand must reconcile to the ledger), `MealBudget` (one row per dated service,
+plan-vs-served cost), `MenuSchedule` (whole-service replace per date × period). Every
+mutation audits inside its transaction.
 
 `dayOnly()` is the Dakar calendar date at midnight UTC — the third component of
 `DiningScan @@unique([studentId, period, date])`, i.e. the double-serve guard.
