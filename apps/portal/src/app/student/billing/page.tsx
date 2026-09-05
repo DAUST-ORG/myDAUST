@@ -374,14 +374,7 @@ export default function BillingPage() {
           note="Charges appear here once the bursar issues them."
         />
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(280px, 1fr) minmax(0, 1.6fr)",
-            gap: 18,
-            alignItems: "start",
-          }}
-        >
+        <div className="split-2">
           <div
             style={{
               background: "var(--grad-brand)",
