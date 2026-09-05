@@ -10,6 +10,7 @@ import {
   removeInvoiceFeeComponent,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
+import { componentPriceXof } from "@/lib/invoice-component-pricing";
 import { Badge, Button, Field } from "@/components/ui";
 
 export function splitAnnualAmount(total: number, count: number): number[] {
@@ -118,9 +119,7 @@ export function InvoiceComponentManager({
       )
     : invoice.total;
   const delta = proposal
-    ? (proposal.mode === "add" ? 1 : -1) *
-      (proposal.component.selectedComponent?.amountXof ??
-        proposal.component.annualAmountXof)
+    ? (proposal.mode === "add" ? 1 : -1) * componentPriceXof(proposal.component)
     : 0;
   const proposedTotal = currentTotal + delta;
   const grossTotal = (invoice.components ?? []).reduce(
@@ -300,8 +299,13 @@ export function InvoiceComponentManager({
 
       <div className="fee-component-list">
         {catalog.map((component) => {
-          const amount =
-            component.selectedComponent?.amountXof ?? component.annualAmountXof;
+          // A profile-managed invoice is read-only here and keeps its immutable
+          // snapshot even for retired rows. Where the bursar can act, an
+          // unselected row is priced at what re-adding it would cost.
+          const amount = invoice.profileManaged
+            ? (component.selectedComponent?.amountXof ??
+              component.annualAmountXof)
+            : componentPriceXof(component);
           const allocated = component.selectedComponent?.allocatedXof ?? 0;
           const grossAmount =
             component.selectedComponent?.grossAmountXof ?? amount;
