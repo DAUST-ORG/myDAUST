@@ -27,6 +27,40 @@ let invoiceId: string;
 let studentId: string;
 let originalInstallmentIds: string[];
 
+/**
+ * A plan that genuinely differs from the stored one.
+ *
+ * The service rejects a no-op plan change ("No change requested: the payment
+ * plan already has these dates, labels, amounts, and component allocations"),
+ * so a test whose subject is the approval mechanics rather than the plan
+ * content still has to submit a real edit. Only the LAST installment's due date
+ * moves, which leaves every amount — and therefore every paid-amount floor —
+ * untouched.
+ */
+function shiftedPlan(
+  installments: {
+    id: string;
+    sequence: number;
+    dueDate: Date;
+    amountDue: number;
+    label: string | null;
+  }[],
+  days = 1,
+) {
+  const last = installments.length - 1;
+  return installments.map((row, index) => ({
+    id: row.id,
+    sequence: row.sequence,
+    dueDate: new Date(
+      row.dueDate.getTime() + (index === last ? days * 86_400_000 : 0),
+    )
+      .toISOString()
+      .slice(0, 10),
+    amountDue: row.amountDue,
+    label: row.label,
+  }));
+}
+
 describe.skipIf(!DB_URL)("protected finance approvals", () => {
   beforeAll(async () => {
     execFileSync("pnpm", ["exec", "prisma", "migrate", "deploy"], {
@@ -112,6 +146,9 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
         revision: 1,
         status: "approved",
         approvedAt: new Date(),
+        // restoreStandardPaymentPlan requires approvedById to be set, so a
+        // schedule seeded without a reviewer is invisible to it.
+        approvedById: adminPerson.id,
         reason: "Bootstrap fallback",
         components: {
           create: [
@@ -258,10 +295,11 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
 
     const decision = await approvals.approve(response.request.id, admin);
     expect(decision).toMatchObject({ ok: true, status: "approved" });
-    expect(await approvals.approve(response.request.id, admin)).toMatchObject({
-      ok: true,
-      status: "approved",
-    });
+    // A second decision on a settled request is refused outright rather than
+    // silently re-applying it; the assertions below prove it applied only once.
+    await expect(approvals.approve(response.request.id, admin)).rejects.toThrow(
+      "already approved",
+    );
 
     const invoice = await prisma.invoice.findUniqueOrThrow({
       where: { id: invoiceId },
@@ -368,13 +406,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
         plan: { include: { installments: { orderBy: { sequence: "asc" } } } },
       },
     });
-    const installments = invoice.plan!.installments.map((row) => ({
-      id: row.id,
-      sequence: row.sequence,
-      dueDate: row.dueDate.toISOString().slice(0, 10),
-      amountDue: row.amountDue,
-      label: row.label,
-    }));
+    const installments = shiftedPlan(invoice.plan!.installments);
     const first = await approvals.request(bursar, {
       kind: "payment_plan",
       targetType: "Invoice",
@@ -539,11 +571,16 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
       targetId: invoice.id,
       reason: "Corrected admin plan",
       after: {
+        // Restoring the paid installment's amount alone would leave the plan
+        // identical to the stored one, which the no-op guard rejects, so the
+        // correction also moves the last due date.
         mode: "replace",
-        installments: rows.map((row) => ({
-          ...row,
-          amountDue: row.id === paid.id ? paid.amountDue : row.amountDue,
-        })),
+        installments: shiftedPlan(
+          invoice.plan!.installments.map((row) => ({
+            ...row,
+            amountDue: row.id === paid.id ? paid.amountDue : row.amountDue,
+          })),
+        ),
       },
     });
     expect(corrected).toMatchObject({
@@ -580,13 +617,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
       reason: "Invalid change to a void charge",
       after: {
         mode: "replace",
-        installments: invoice.plan!.installments.map((row) => ({
-          id: row.id,
-          sequence: row.sequence,
-          dueDate: row.dueDate.toISOString().slice(0, 10),
-          amountDue: row.amountDue,
-          label: row.label,
-        })),
+        installments: shiftedPlan(invoice.plan!.installments),
       },
     });
     await expect(approvals.approve(request.request.id, admin)).rejects.toThrow(
@@ -616,13 +647,7 @@ describe.skipIf(!DB_URL)("protected finance approvals", () => {
       reason: "Plan submitted before another billing event",
       after: {
         mode: "replace",
-        installments: invoice.plan!.installments.map((row) => ({
-          id: row.id,
-          sequence: row.sequence,
-          dueDate: row.dueDate.toISOString().slice(0, 10),
-          amountDue: row.amountDue,
-          label: row.label,
-        })),
+        installments: shiftedPlan(invoice.plan!.installments),
       },
     });
     await prisma.invoice.update({
