@@ -291,6 +291,7 @@ describe("finance approval no-op and annual-profile guards", () => {
             totalAmount: 630_000,
             amountPaid: 630_000,
             billingProfile: {
+              status: "active",
               grossChargesXof: 3_605_000,
               netBilledXof: 630_000,
             },
