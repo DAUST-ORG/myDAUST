@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { AlertCircle, Loader2, ShieldCheck } from "lucide-react";
 import { ApiError, startStudentActivation } from "@/lib/api";
 
@@ -169,6 +170,13 @@ export default function ActivateStudentPage() {
             {busy ? "Checking your details…" : "Continue to password setup"}
           </button>
         </form>
+
+        <p
+          className="muted"
+          style={{ fontSize: 12.5, textAlign: "center", marginTop: 18 }}
+        >
+          Already have an account? <Link href="/login">Sign in</Link>
+        </p>
       </section>
     </main>
   );
