@@ -1,13 +1,21 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
-import { CreateAnnouncementInput, SendMessageInput, StartThreadInput } from "@mydaust/shared";
+import {
+  CreateAnnouncementInput,
+  SendMessageInput,
+  StartThreadInput,
+  UPLOAD_PATH,
+} from "@mydaust/shared";
 import { z } from "zod";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Roles } from "../auth/decorators.js";
 import { CommsService } from "./comms.service.js";
 
+// The pattern is shared but the schema is rebuilt on the api's own zod, so a
+// broadcast attachment is held to the same rule as a message attachment
+// without importing a foreign zod instance.
 const MessageAttachment = z.object({
-  url: z.string().min(1),
-  name: z.string().min(1),
+  url: z.string().regex(UPLOAD_PATH, "Attachment url must be an uploaded file"),
+  name: z.string().min(1).max(255),
   size: z.number().int().nonnegative().optional(),
 });
 
@@ -68,29 +76,58 @@ export class CommsController {
   }
 
   @Post("threads/:id/messages")
-  sendMessage(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  sendMessage(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = SendMessageInput.parse(body);
-    return this.comms.sendMessage(id, user.personId, input.body, input.attachments);
+    return this.comms.sendMessage(
+      id,
+      user.personId,
+      input.body,
+      input.attachments,
+    );
   }
 
   @Post("threads")
   startThread(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const input = StartThreadInput.parse(body);
-    const recipientIds = input.recipientIds ?? (input.recipientId ? [input.recipientId] : []);
-    return this.comms.startThread(user.personId, recipientIds, input.subject, input.body, input.attachments);
+    const recipientIds =
+      input.recipientIds ?? (input.recipientId ? [input.recipientId] : []);
+    return this.comms.startThread(
+      user.personId,
+      recipientIds,
+      input.subject,
+      input.body,
+      input.attachments,
+    );
   }
 
   @Post("sections/:id/broadcast")
   @Roles("faculty", "admin", "registrar")
-  broadcast(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: unknown) {
+  broadcast(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
     const input = BroadcastInput.parse(body);
-    return this.comms.broadcastToSection(user.personId, id, input.subject, input.body, input.attachments);
+    return this.comms.broadcastToSection(
+      user.personId,
+      id,
+      input.subject,
+      input.body,
+      input.attachments,
+    );
   }
 
   @Post("broadcasts")
   @Roles("admin", "registrar")
   sendBroadcast(@CurrentUser() user: AuthUser, @Body() body: unknown) {
-    return this.comms.broadcastToAudience(user.personId, AudienceBroadcastInput.parse(body));
+    return this.comms.broadcastToAudience(
+      user.personId,
+      AudienceBroadcastInput.parse(body),
+    );
   }
 
   @Get("broadcasts")
@@ -102,7 +139,8 @@ export class CommsController {
   @Get("broadcasts/preview")
   @Roles("admin", "registrar")
   previewBroadcast(
-    @Query("audienceType") audienceType: "individual" | "year" | "program" | "all",
+    @Query("audienceType")
+    audienceType: "individual" | "year" | "program" | "all",
     @Query("audienceValue") audienceValue?: string,
   ) {
     return this.comms.previewAudience(audienceType, audienceValue);

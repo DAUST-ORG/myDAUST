@@ -167,6 +167,7 @@ export function approvedAccountBillingBridge(
     totalAmount: number;
     amountPaid: number;
     billingProfile?: {
+      status: string;
       grossChargesXof: number;
       netBilledXof: number;
     } | null;
@@ -177,7 +178,11 @@ export function approvedAccountBillingBridge(
   const grossChargesXof = approved.reduce(
     (total, invoice) =>
       total +
-      (invoice.billingProfile
+      // Only an active profile describes what is actually billed. A draft or
+      // archived one still carries its own gross, and counting it here reports
+      // the difference against the invoice total as an approved adjustment —
+      // inventing a discount nobody granted.
+      (invoice.billingProfile?.status === "active"
         ? invoice.billingProfile.grossChargesXof
         : Math.max(0, invoice.totalAmount)),
     0,

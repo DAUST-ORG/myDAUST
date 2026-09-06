@@ -52,6 +52,8 @@ import { StudentGuardians } from "./StudentGuardians";
 import { TranscriptManager } from "./TranscriptManager";
 import { AccountManagement } from "./AccountManagement";
 import { BillingProfileSummary } from "@/components/BillingProfileSummary";
+import { BillingProfileEditor } from "@/components/BillingProfileEditor";
+import { StudentServicesTab } from "./StudentServicesTab";
 
 const ENROLL_BADGE: Record<string, string> = {
   enrolled: "enrolled",
@@ -83,6 +85,7 @@ export default function AdminStudentDetailPage() {
   const [activity, setActivity] = useState<StudentActivity[]>([]);
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState<EditSection | null>(null);
+  const [editingServices, setEditingServices] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [canManageStudent, setCanManageStudent] = useState(false);
   const [standingOpen, setStandingOpen] = useState(false);
@@ -385,6 +388,9 @@ export default function AdminStudentDetailPage() {
             ...(canManageStudent && s.recordStatus !== "pending_payment"
               ? [{ value: "transcript", label: "Transcript" }]
               : []),
+            ...(canManageStudent
+              ? [{ value: "services", label: "Services & housing" }]
+              : []),
             { value: "finance", label: "Finance" },
             { value: "personal", label: "Personal & contact" },
             ...(canManageStudent
@@ -612,6 +618,15 @@ export default function AdminStudentDetailPage() {
           <TranscriptManager studentId={id} />
         )}
 
+      {tab === "services" && canManageStudent && (
+        <StudentServicesTab
+          studentId={id}
+          profile={account?.billingProfile ?? s.billingProfile}
+          canEdit={canManageStudent}
+          onEdit={() => setEditingServices(true)}
+        />
+      )}
+
       {tab === "finance" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <BillingProfileSummary
@@ -671,7 +686,9 @@ export default function AdminStudentDetailPage() {
                 }
               />
               <p className="muted" style={{ fontSize: 12, margin: "14px 0 0" }}>
-                Billing is managed by the Bursar in the Finance portal.
+                Charges and payments are managed by the Bursar in the Finance
+                portal. Housing, cafeteria and insurance are set under{" "}
+                <strong>Services &amp; housing</strong>.
               </p>
             </ProfileCard>
             <ProfileCard title="Payment history" icon={Clock}>
@@ -979,6 +996,18 @@ export default function AdminStudentDetailPage() {
             </p>
           )}
         </ProfileCard>
+      )}
+
+      {editingServices && (
+        <BillingProfileEditor
+          student={{ id, name: s.name, studentNo: s.studentNo }}
+          onClose={() => setEditingServices(false)}
+          onSubmitted={(message) => {
+            setNote(message);
+            setEditingServices(false);
+            load();
+          }}
+        />
       )}
 
       {editing && (

@@ -1160,4 +1160,102 @@ describe.skipIf(!DB_URL)("annual billing profiles", () => {
       adjustments: [],
     });
   });
+
+  it("lets a registrar propose a housing tier, and only a Director apply it", async () => {
+    const approvals = new FinanceApprovalsService(
+      prisma as never,
+      undefined,
+      undefined,
+      service,
+    );
+    const registrar = {
+      personId: actorId,
+      roles: ["registrar"],
+      email: "registrar@test.local",
+      name: "Registrar",
+    } as const;
+    const admin = { ...registrar, roles: ["admin"] } as const;
+
+    const before = await service.get(studentId, "2031-2032");
+    const change = {
+      academicYearLabel: "2031-2032",
+      expectedRevision: before.revision,
+      housingOptionCode: "individual_ac",
+      cafeteriaOptionCode: "full",
+      insuranceSelected: false,
+      cautionSelected: false,
+      awardDefinitionIds: [],
+    };
+
+    const requested = await approvals.request(registrar as never, {
+      kind: "billing_profile",
+      targetType: "Student",
+      targetId: studentId,
+      academicYearLabel: "2031-2032",
+      reason: "Moved into an air-conditioned single and joined the meal plan",
+      after: change,
+    });
+    // A registrar submits; it does not apply. Only an admin self-approves.
+    expect(requested).toMatchObject({
+      applied: false,
+      request: { status: "pending" },
+    });
+    await expect(service.get(studentId, "2031-2032")).resolves.toMatchObject({
+      revision: before.revision,
+    });
+
+    // One open request per student, so the tab must show the pending state
+    // rather than let a second one be composed.
+    await expect(
+      approvals.request(registrar as never, {
+        kind: "billing_profile",
+        targetType: "Student",
+        targetId: studentId,
+        academicYearLabel: "2031-2032",
+        reason: "Second attempt",
+        after: change,
+      }),
+    ).rejects.toThrow(/already awaiting/i);
+
+    await expect(
+      approvals.approve(requested.request.id, admin as never),
+    ).resolves.toMatchObject({ ok: true, status: "approved" });
+
+    const [view, housing, mealPlan] = await Promise.all([
+      service.get(studentId, "2031-2032"),
+      prisma.housingAssignment.findUniqueOrThrow({
+        where: {
+          studentId_academicYearLabel: {
+            studentId,
+            academicYearLabel: "2031-2032",
+          },
+        },
+      }),
+      prisma.mealPlan.findUniqueOrThrow({
+        where: {
+          studentId_academicYearLabel: {
+            studentId,
+            academicYearLabel: "2031-2032",
+          },
+        },
+      }),
+    ]);
+    expect(view).toMatchObject({
+      revision: before.revision + 1,
+      housing: { code: "individual_ac" },
+      cafeteria: { code: "full" },
+      mismatchWarnings: [],
+    });
+    // The operational records follow the billing decision: the room queue points
+    // at the tier that was billed, and the meal plan is switched on.
+    const billedOption = await prisma.billingServiceOption.findFirstOrThrow({
+      where: {
+        academicYearLabel: "2031-2032",
+        kind: "housing",
+        code: "individual_ac",
+      },
+    });
+    expect(housing.billedServiceOptionId).toBe(billedOption.id);
+    expect(mealPlan.active).toBe(true);
+  });
 });
