@@ -1565,6 +1565,7 @@ model Applicant {
   parentEmail                   String?
   allergies                     String?
   source                        String? // how they heard about DAUST
+  sourceDetail                  String? // follow-up: person's name (referral) or site/page (online)
   essay                         String?
   term                          String? // intake term, e.g. "Fall 2026"
   piSpiRequests                 PiSpiRequest[]
