@@ -511,83 +511,81 @@ export default function BillingPage() {
           </div>
 
           <Card pad={false}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(0,2fr) 130px 120px 90px",
-                gap: 12,
-                padding: "12px 18px",
-                borderBottom: "1px solid var(--border)",
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: ".06em",
-                textTransform: "uppercase",
-                color: "var(--fg-faint)",
-              }}
-            >
-              <span>Description</span>
-              <span style={{ textAlign: "right" }}>Amount</span>
-              <span style={{ textAlign: "right" }}>Due</span>
-              <span style={{ textAlign: "right" }}>Status</span>
-            </div>
-            {charges.map((c, i) => {
-              const s = statusStyle(c);
-              return (
-                <div
-                  key={`${c.invoiceId}:${c.id ?? "unscheduled"}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0,2fr) 130px 120px 90px",
-                    gap: 12,
-                    alignItems: "center",
-                    padding: "13px 18px",
-                    borderBottom:
-                      i < charges.length - 1
-                        ? "1px solid var(--divider)"
-                        : undefined,
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>
-                      {c.description}
-                    </div>
-                    <div className="muted" style={{ fontSize: 11.5 }}>
-                      {c.note}
-                    </div>
-                  </div>
-                  <span
+            <div className="charges-scroll">
+              <div
+                className="charges-head"
+                style={{
+                  padding: "12px 18px",
+                  borderBottom: "1px solid var(--border)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: ".06em",
+                  textTransform: "uppercase",
+                  color: "var(--fg-faint)",
+                }}
+              >
+                <span>Description</span>
+                <span style={{ textAlign: "right" }}>Amount</span>
+                <span style={{ textAlign: "right" }}>Due</span>
+                <span style={{ textAlign: "right" }}>Status</span>
+              </div>
+              {charges.map((c, i) => {
+                const s = statusStyle(c);
+                return (
+                  <div
+                    key={`${c.invoiceId}:${c.id ?? "unscheduled"}`}
+                    className="charges-row"
                     style={{
-                      textAlign: "right",
-                      fontSize: 13,
-                      fontVariantNumeric: "tabular-nums",
+                      alignItems: "center",
+                      padding: "13px 18px",
+                      borderBottom:
+                        i < charges.length - 1
+                          ? "1px solid var(--divider)"
+                          : undefined,
                     }}
                   >
-                    {formatXof(c.amount)}
-                  </span>
-                  <span
-                    className="muted"
-                    style={{ textAlign: "right", fontSize: 12.5 }}
-                  >
-                    {c.dueDate ? formatDate(c.dueDate) : "Not scheduled"}
-                  </span>
-                  <span style={{ textAlign: "right" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                        {c.description}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>
+                        {c.note}
+                      </div>
+                    </div>
                     <span
                       style={{
-                        display: "inline-block",
-                        padding: "3px 10px",
-                        borderRadius: "var(--radius-pill)",
-                        fontSize: 11.5,
-                        fontWeight: 700,
-                        background: s.bg,
-                        color: s.fg,
+                        textAlign: "right",
+                        fontSize: 13,
+                        fontVariantNumeric: "tabular-nums",
                       }}
                     >
-                      {s.label}
+                      {formatXof(c.amount)}
                     </span>
-                  </span>
-                </div>
-              );
-            })}
+                    <span
+                      className="muted"
+                      style={{ textAlign: "right", fontSize: 12.5 }}
+                    >
+                      {c.dueDate ? formatDate(c.dueDate) : "Not scheduled"}
+                    </span>
+                    <span style={{ textAlign: "right" }}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          padding: "3px 10px",
+                          borderRadius: "var(--radius-pill)",
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          background: s.bg,
+                          color: s.fg,
+                        }}
+                      >
+                        {s.label}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </Card>
         </div>
       )}

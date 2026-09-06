@@ -37,27 +37,56 @@ function signedWholeXof(value: string): number | null {
   return Number.isSafeInteger(amount) && amount !== 0 ? amount : null;
 }
 
+/**
+ * Never invent a selection.
+ *
+ * Falling back to "none" here used to present a student who is billed for
+ * housing as having none, so an unrelated edit silently proposed removing it.
+ * A caller that knows the student's real state passes it as `fallback`;
+ * otherwise this returns "" and the form stays unsubmittable until a human
+ * chooses, which is the honest outcome.
+ */
 function defaultCode(
   current: string | undefined,
   options: { code: string; label: string }[],
+  fallback?: string,
 ) {
-  if (current && options.some((option) => option.code === current)) {
-    return current;
+  for (const candidate of [current, fallback]) {
+    if (candidate && options.some((option) => option.code === candidate)) {
+      return candidate;
+    }
   }
-  return (
-    options.find((option) => option.code.toLowerCase() === "none")?.code ?? ""
-  );
+  return "";
 }
 
 export function BillingProfileEditor({
   student,
   onClose,
   onSubmitted,
+  fallbackSelection,
 }: {
   student: { id: string; name: string; studentNo: string };
   onClose: () => void;
   onSubmitted: (message: string) => void;
+  /**
+   * What the student is actually billed for, when no annual profile row exists
+   * yet. Most students predate the profile model: their services live only as
+   * charges on the invoice, and without this the form cannot tell "no housing"
+   * from "housing recorded the old way".
+   */
+  fallbackSelection?: {
+    housingCode?: string;
+    cafeteriaCode?: string;
+    insuranceSelected?: boolean;
+    cautionSelected?: boolean;
+  };
 }) {
+  const {
+    housingCode: fallbackHousingCode,
+    cafeteriaCode: fallbackCafeteriaCode,
+    insuranceSelected: fallbackInsuranceSelected,
+    cautionSelected: fallbackCautionSelected,
+  } = fallbackSelection ?? {};
   const [profile, setProfile] = useState<BillingProfileView | null>(null);
   const [options, setOptions] = useState<BillingProfileOptions | null>(null);
   const [housingCode, setHousingCode] = useState("");
@@ -102,10 +131,22 @@ export function BillingProfileEditor({
           cafeteriaOptions: cafeteria,
           awardDefinitions,
         });
-        setHousingCode(defaultCode(current?.housing?.code, housing));
-        setCafeteriaCode(defaultCode(current?.cafeteria?.code, cafeteria));
-        setInsuranceSelected(current?.insurance.selected ?? false);
-        setCautionSelected(current?.caution.selected ?? false);
+        setHousingCode(
+          defaultCode(current?.housing?.code, housing, fallbackHousingCode),
+        );
+        setCafeteriaCode(
+          defaultCode(
+            current?.cafeteria?.code,
+            cafeteria,
+            fallbackCafeteriaCode,
+          ),
+        );
+        setInsuranceSelected(
+          current?.insurance.selected ?? fallbackInsuranceSelected ?? false,
+        );
+        setCautionSelected(
+          current?.caution.selected ?? fallbackCautionSelected ?? false,
+        );
         setAwardIds(
           awardDefinitions
             .filter(
@@ -165,7 +206,13 @@ export function BillingProfileEditor({
     return () => {
       active = false;
     };
-  }, [student.id]);
+  }, [
+    student.id,
+    fallbackHousingCode,
+    fallbackCafeteriaCode,
+    fallbackInsuranceSelected,
+    fallbackCautionSelected,
+  ]);
 
   const parsedManualAdjustments = useMemo(
     () =>
@@ -355,6 +402,14 @@ export function BillingProfileEditor({
           {error && (
             <p className="profile-editor__error" role="alert">
               {error}
+            </p>
+          )}
+
+          {!loading && (!housingCode || !cafeteriaCode) && (
+            <p className="fee-component-error" role="alert">
+              This student&apos;s current services could not be determined, so
+              nothing is preselected below. Choose each one deliberately —
+              submitting a guess here would change what they are billed.
             </p>
           )}
 
