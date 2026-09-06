@@ -4,12 +4,59 @@ import { useCallback, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
 import {
   type ApprovalRequestRow,
+  type BillingProfileOptions,
   type BillingProfileView,
+  type StudentAccount,
+  getBillingProfileOptions,
   listApprovalRequests,
 } from "@/lib/api";
+import { BillingProfileEditor } from "@/components/BillingProfileEditor";
 import { formatDateTime } from "@/lib/format";
 import { BillingProfileSummary } from "@/components/BillingProfileSummary";
 import { Badge, Button, Card } from "@/components/ui";
+import { formatXof } from "@/lib/format";
+
+/**
+ * What the student is actually billed for, read off the invoice.
+ *
+ * Most students predate AnnualBillingProfile: their services exist only as
+ * charges on the standard package, so the profile read returns null and the
+ * editor would otherwise preselect nothing and read as "no housing". Each
+ * charged component is matched back to the catalog option carrying that price,
+ * which is unambiguous today because amounts are distinct within a kind.
+ */
+function deriveSelectionFromInvoice(
+  account: StudentAccount | null | undefined,
+  options: BillingProfileOptions | null,
+) {
+  if (!account || !options) return undefined;
+  const invoice = account.invoices.find(
+    (row) => row.packageType === "standard_full" && row.status !== "void",
+  );
+  if (!invoice) return undefined;
+  const charged = new Map(
+    (invoice.components ?? [])
+      .filter((component) => component.amountXof > 0)
+      .map((component) => [component.kind, component.amountXof]),
+  );
+  const match = (
+    kind: string,
+    candidates: { code: string; amountXof: number }[],
+  ) => {
+    const amount = charged.get(kind);
+    if (amount === undefined) {
+      return candidates.find((option) => option.code === "none")?.code;
+    }
+    return candidates.find((option) => option.amountXof === amount)?.code;
+  };
+  return {
+    housingCode: match("housing", options.housingOptions),
+    cafeteriaCode: match("cafeteria", options.cafeteriaOptions),
+    insuranceSelected: (charged.get("insurance") ?? 0) > 0,
+    cautionSelected: (charged.get("housing_caution") ?? 0) > 0,
+    charged,
+  };
+}
 
 /**
  * The registrar's way into a student's annual services: housing tier, cafeteria
@@ -22,17 +69,23 @@ import { Badge, Button, Card } from "@/components/ui";
  */
 export function StudentServicesTab({
   studentId,
+  student,
+  account,
   profile,
   canEdit,
-  onEdit,
+  onChanged,
 }: {
   studentId: string;
+  student: { id: string; name: string; studentNo: string };
+  account: StudentAccount | null;
   profile: BillingProfileView | null | undefined;
   canEdit: boolean;
-  onEdit: () => void;
+  onChanged: (message: string) => void;
 }) {
   const [pending, setPending] = useState<ApprovalRequestRow | null>(null);
   const [checked, setChecked] = useState(false);
+  const [options, setOptions] = useState<BillingProfileOptions | null>(null);
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(() => {
     let active = true;
@@ -54,6 +107,21 @@ export function StudentServicesTab({
   }, [studentId]);
   useEffect(() => load(), [load]);
 
+  useEffect(() => {
+    let active = true;
+    getBillingProfileOptions()
+      .then((next) => active && setOptions(next))
+      .catch(() => active && setOptions(null));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const derived = deriveSelectionFromInvoice(account, options);
+  // A profile row is authoritative when it exists; otherwise fall back to what
+  // the invoice says the student is actually paying for.
+  const showDerived = !profile && Boolean(derived);
+
   // The rail allows exactly one open billing_profile request per student, so a
   // second one is refused only after the whole form has been filled in. Say so
   // before that happens.
@@ -70,19 +138,47 @@ export function StudentServicesTab({
               size="sm"
               variant="secondary"
               icon={<Pencil size={14} />}
-              disabled={blocked || !checked}
+              disabled={blocked || !checked || !options}
               title={
                 blocked
                   ? "A change for this student is already awaiting Director approval"
                   : undefined
               }
-              onClick={onEdit}
+              onClick={() => setEditing(true)}
             >
               Change services
             </Button>
           ) : undefined
         }
       />
+
+      {showDerived && derived && (
+        <div className="services-derived" role="status">
+          <Badge tone="neutral">From the current bill</Badge>
+          <span>
+            This student has no annual profile record yet, so these are read
+            from the charges already on their bill:{" "}
+            <strong>
+              {[
+                derived.housingCode && derived.housingCode !== "none"
+                  ? (options?.housingOptions.find(
+                      (option) => option.code === derived.housingCode,
+                    )?.label ?? derived.housingCode)
+                  : "no housing",
+                derived.cafeteriaCode && derived.cafeteriaCode !== "none"
+                  ? (options?.cafeteriaOptions.find(
+                      (option) => option.code === derived.cafeteriaCode,
+                    )?.label ?? derived.cafeteriaCode)
+                  : "no cafeteria plan",
+              ].join(" · ")}
+            </strong>
+            {derived.charged.get("housing")
+              ? ` (housing ${formatXof(derived.charged.get("housing")!)})`
+              : ""}
+            . Saving a change creates the record.
+          </span>
+        </div>
+      )}
 
       {blocked && pending && (
         <div className="services-pending" role="status">
@@ -125,6 +221,26 @@ export function StudentServicesTab({
           the request is refused rather than silently lowering a paid charge.
         </p>
       </Card>
+
+      {editing && (
+        <BillingProfileEditor
+          student={student}
+          fallbackSelection={
+            derived && {
+              housingCode: derived.housingCode,
+              cafeteriaCode: derived.cafeteriaCode,
+              insuranceSelected: derived.insuranceSelected,
+              cautionSelected: derived.cautionSelected,
+            }
+          }
+          onClose={() => setEditing(false)}
+          onSubmitted={(message) => {
+            setEditing(false);
+            load();
+            onChanged(message);
+          }}
+        />
+      )}
     </div>
   );
 }
