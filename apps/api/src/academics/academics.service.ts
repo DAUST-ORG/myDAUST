@@ -1156,7 +1156,21 @@ export class AcademicsService {
       0,
     );
 
+    // Curated bypass mirror of enrollSections: the same five gates read as
+    // enrollable here. Per-section, because the catalog cannot see the bundle ΓÇö
+    // a mixed bundle past the deadline can still fail at enroll time, with the
+    // deadline message naming the reason. Silent by design: no waiver marking.
+    const catalogBypassedCourseIds = curatedBypassCourseIds({
+      studentNo: student.studentNo,
+      termName: term.name,
+      data: CURATED_RECOMMENDATIONS,
+      courseIdByCode: new Map(
+        sections.map((s) => [s.course.code, s.courseId] as const),
+      ),
+    });
+
     const rows = sections.map((s) => {
+      const covered = catalogBypassedCourseIds.has(s.courseId);
       const seatsLeft = s.capacity - s._count.enrollments;
       const unmetPrereqs = s.course.prereqRules
         .filter(
@@ -1218,24 +1232,26 @@ export class AcademicsService {
         ? "Already enrolled"
         : closedReason === "term_ended"
           ? "Registration is closed for this term"
-          : closedReason === "add_deadline_passed"
+          : closedReason === "add_deadline_passed" && !covered
             ? `The add period closed on ${term.addDeadline!.toISOString().slice(0, 10)}`
             : holds.length > 0
               ? "Registration is blocked by an active hold"
               : s.status !== "open"
                 ? "This section is closed for registration"
-                : seatsLeft <= 0
+                : seatsLeft <= 0 && !covered
                   ? "Section is full"
-                  : unmetPrereqs.length > 0
+                  : unmetPrereqs.length > 0 && !covered
                     ? `Needs ${unmetPrereqs.join(", ")}`
                     : clash
                       ? `Clashes with ${clash.section.course.code}`
                       : currentCredits + s.course.credits > MAX_CREDITS_PER_TERM
                         ? `Over the ${MAX_CREDITS_PER_TERM}-credit limit`
-                        : (standingReason ?? majorReason);
+                        : standingReason && !covered
+                          ? standingReason
+                          : majorReason;
       const blockedReason =
         hardBlockedReason ??
-        (missingCoreqs.length > 0
+        (missingCoreqs.length > 0 && !covered
           ? `Must be taken with (or after) ${missingCoreqs.join(", ")}`
           : null);
 
