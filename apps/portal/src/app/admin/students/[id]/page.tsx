@@ -52,7 +52,6 @@ import { StudentGuardians } from "./StudentGuardians";
 import { TranscriptManager } from "./TranscriptManager";
 import { AccountManagement } from "./AccountManagement";
 import { BillingProfileSummary } from "@/components/BillingProfileSummary";
-import { BillingProfileEditor } from "@/components/BillingProfileEditor";
 import { StudentServicesTab } from "./StudentServicesTab";
 
 const ENROLL_BADGE: Record<string, string> = {
@@ -85,7 +84,6 @@ export default function AdminStudentDetailPage() {
   const [activity, setActivity] = useState<StudentActivity[]>([]);
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState<EditSection | null>(null);
-  const [editingServices, setEditingServices] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [canManageStudent, setCanManageStudent] = useState(false);
   const [standingOpen, setStandingOpen] = useState(false);
@@ -621,9 +619,14 @@ export default function AdminStudentDetailPage() {
       {tab === "services" && canManageStudent && (
         <StudentServicesTab
           studentId={id}
+          student={{ id, name: s.name, studentNo: s.studentNo }}
+          account={account}
           profile={account?.billingProfile ?? s.billingProfile}
           canEdit={canManageStudent}
-          onEdit={() => setEditingServices(true)}
+          onChanged={(message) => {
+            setNote(message);
+            load();
+          }}
         />
       )}
 
@@ -996,18 +999,6 @@ export default function AdminStudentDetailPage() {
             </p>
           )}
         </ProfileCard>
-      )}
-
-      {editingServices && (
-        <BillingProfileEditor
-          student={{ id, name: s.name, studentNo: s.studentNo }}
-          onClose={() => setEditingServices(false)}
-          onSubmitted={(message) => {
-            setNote(message);
-            setEditingServices(false);
-            load();
-          }}
-        />
       )}
 
       {editing && (
