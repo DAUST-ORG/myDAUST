@@ -5,11 +5,22 @@ import { Roles } from "../auth/decorators.js";
 import { AdmissionsService } from "./admissions.service.js";
 
 // The full application form; only name + email are required to create an entry.
+// Emails are trimmed + lowercased at the boundary; phones must carry an explicit
+// country code so staff never guess the dial prefix. (Local zod instance: the api
+// imports zod's CJS build while shared is ESM, so shared schemas can't be reused here.)
+const sanitizedEmail = z.string().trim().toLowerCase().email();
+const phoneWithCountryCode = z
+  .string()
+  .trim()
+  .max(40)
+  .refine((v) => /^\+\d[\d\s\-.()]{5,38}$/.test(v), {
+    message: "Include the country code, e.g. +221 77 123 45 67",
+  });
 const ApplicantFields = {
   programCode: z.string().max(20).nullish(),
   country: z.string().max(80).nullish(),
   score: z.number().min(0).max(20).nullish(),
-  phone: z.string().max(40).nullish(),
+  phone: phoneWithCountryCode.nullish(),
   dateOfBirth: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -21,10 +32,11 @@ const ApplicantFields = {
   school: z.string().max(160).nullish(),
   priorGpa: z.string().max(40).nullish(),
   parentName: z.string().max(120).nullish(),
-  parentPhone: z.string().max(40).nullish(),
-  parentEmail: z.string().email().nullish(),
+  parentPhone: phoneWithCountryCode.nullish(),
+  parentEmail: z.string().trim().toLowerCase().email().nullish(),
   allergies: z.string().max(300).nullish(),
   source: z.string().max(80).nullish(),
+  sourceDetail: z.string().trim().max(120).nullish(),
   essay: z.string().max(4000).nullish(),
   term: z.string().max(40).nullish(),
 };
@@ -32,14 +44,14 @@ const ApplicantFields = {
 const CreateApplicantInput = z.object({
   firstName: z.string().min(1).max(80),
   lastName: z.string().min(1).max(80),
-  email: z.string().email(),
+  email: sanitizedEmail,
   ...ApplicantFields,
 });
 
 const UpdateApplicantInput = z.object({
   firstName: z.string().min(1).max(80).optional(),
   lastName: z.string().min(1).max(80).optional(),
-  email: z.string().email().optional(),
+  email: sanitizedEmail.optional(),
   ...ApplicantFields,
 });
 

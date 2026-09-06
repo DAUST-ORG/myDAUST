@@ -140,6 +140,7 @@ export interface ApplicantFields {
   parentEmail?: string | null;
   allergies?: string | null;
   source?: string | null;
+  sourceDetail?: string | null;
   essay?: string | null;
   term?: string | null;
 }
@@ -281,6 +282,7 @@ export class AdmissionsService {
       parentEmail: a.parentEmail,
       allergies: a.allergies,
       source: a.source,
+      sourceDetail: a.sourceDetail,
       essay: a.essay,
       term: a.term,
       onboarding,
@@ -422,6 +424,7 @@ export class AdmissionsService {
       parentEmail: set(input.parentEmail),
       allergies: set(input.allergies),
       source: set(input.source),
+      sourceDetail: set(input.sourceDetail),
       essay: set(input.essay),
       term: set(input.term),
     };
