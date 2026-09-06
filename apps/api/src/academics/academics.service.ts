@@ -7,7 +7,11 @@ import {
   Optional,
 } from "@nestjs/common";
 import type { MaterialCategory, Prisma } from "@mydaust/db";
-import { deriveAcademicStanding, type AcademicStanding } from "@mydaust/shared";
+import {
+  deriveAcademicStanding,
+  type AcademicStanding,
+  type EnrollmentGate,
+} from "@mydaust/shared";
 import {
   DROP_GUARD_INCLUDE,
   gradedWorkBlockingDrop,
@@ -41,6 +45,7 @@ import {
 import { CURATED_RECOMMENDATIONS } from "./curated-recommendations.data.js";
 import {
   buildCuratedRecommendations,
+  curatedBypassCourseIds,
   curatedCourseCodesFor,
 } from "./curated-recommendations.js";
 import {
@@ -610,10 +615,59 @@ export class AcademicsService {
         throw new BadRequestException("Registration is closed for this term");
       }
       // Add window: explicit deadline when set, else open until term end.
-      if (term.addDeadline && term.addDeadline.getTime() < Date.now()) {
-        throw new BadRequestException(
-          `The add period for ${term.name} closed on ${term.addDeadline.toISOString().slice(0, 10)}`,
-        );
+      const addDeadline = term.addDeadline;
+      const addDeadlineDay = addDeadline?.toISOString().slice(0, 10);
+
+      // Curated-plan gate bypass: the academic office's hand-written Fall plan
+      // exempts exactly five gates (prerequisites incl. minGrade, corequisites,
+      // standing requirement, add deadline, section capacity) for the courses it
+      // names. Point lookups through the already-mocked findUniqueOrThrow, so
+      // existing tests see no new query surface and no error precedence moves.
+      // One-time: the enrollment goes through, but downstream prerequisites
+      // still demand transcript grades.
+      const bypassCodeById = new Map<string, string>();
+      for (const courseId of new Set(
+        lockedSections.map((section) => section.courseId),
+      )) {
+        const row = await tx.course.findUniqueOrThrow({
+          where: { id: courseId },
+          select: { id: true, code: true },
+        });
+        bypassCodeById.set(row.code, row.id);
+      }
+      const bypassedCourseIds = curatedBypassCourseIds({
+        studentNo: (
+          await tx.student.findUniqueOrThrow({
+            where: { id: studentId },
+            select: { studentNo: true },
+          })
+        ).studentNo,
+        termName: term.name,
+        data: CURATED_RECOMMENDATIONS,
+        courseIdByCode: bypassCodeById,
+      });
+      const bypassedByCourse = new Map<string, EnrollmentGate[]>();
+      const noteBypass = (courseId: string, gate: EnrollmentGate) => {
+        bypassedByCourse.set(courseId, [
+          ...(bypassedByCourse.get(courseId) ?? []),
+          gate,
+        ]);
+      };
+      // Add window: explicit deadline when set, else open until term end.
+      // A mixed bundle still hits the deadline unless every section is covered.
+      if (addDeadline && addDeadline.getTime() < Date.now()) {
+        if (
+          !lockedSections.every((section) =>
+            bypassedCourseIds.has(section.courseId),
+          )
+        ) {
+          throw new BadRequestException(
+            `The add period for ${term.name} closed on ${addDeadlineDay}`,
+          );
+        }
+        for (const section of lockedSections) {
+          noteBypass(section.courseId, "add_deadline");
+        }
       }
 
       const existingBySectionId = new Map<
@@ -638,8 +692,14 @@ export class AcademicsService {
         const taken = await tx.enrollment.count({
           where: { sectionId: section.id, status: "enrolled" },
         });
-        if (taken >= section.capacity) {
+        if (
+          taken >= section.capacity &&
+          !bypassedCourseIds.has(section.courseId)
+        ) {
           throw new ConflictException("Section is full");
+        }
+        if (taken >= section.capacity) {
+          noteBypass(section.courseId, "capacity");
         }
         const full = await tx.section.findUniqueOrThrow({
           where: { id: section.id },
@@ -701,6 +761,10 @@ export class AcademicsService {
 
       for (const section of lockedSections) {
         const course = courseById.get(section.courseId)!;
+        if (bypassedCourseIds.has(section.courseId)) {
+          noteBypass(section.courseId, "prerequisite");
+          continue;
+        }
         const unmet: string[] = [];
         for (const prerequisite of course.prereqRules) {
           if (
@@ -750,6 +814,10 @@ export class AcademicsService {
 
       for (const section of lockedSections) {
         const course = courseById.get(section.courseId)!;
+        if (bypassedCourseIds.has(section.courseId)) {
+          noteBypass(section.courseId, "corequisite");
+          continue;
+        }
         const missingCoreq = course.coreqRules
           .filter(
             (corequisite) =>
@@ -814,14 +882,18 @@ export class AcademicsService {
       for (const section of lockedSections) {
         const course = courseById.get(section.courseId)!;
         if (course.rule?.standingRequired) {
-          const firstWord =
-            course.rule.standingRequired.trim().split(/\s+/)[0] ?? "";
-          const needed = STANDING_RANK[firstWord.toLowerCase()];
-          const yr = student.yearLevel ?? 0;
-          if (needed !== undefined && yr > 0 && yr < needed) {
-            throw new ForbiddenException(
-              `${course.code} requires ${course.rule.standingRequired}`,
-            );
+          if (bypassedCourseIds.has(section.courseId)) {
+            noteBypass(section.courseId, "standing");
+          } else {
+            const firstWord =
+              course.rule.standingRequired.trim().split(/\s+/)[0] ?? "";
+            const needed = STANDING_RANK[firstWord.toLowerCase()];
+            const yr = student.yearLevel ?? 0;
+            if (needed !== undefined && yr > 0 && yr < needed) {
+              throw new ForbiddenException(
+                `${course.code} requires ${course.rule.standingRequired}`,
+              );
+            }
           }
         }
 
@@ -860,14 +932,26 @@ export class AcademicsService {
           : await tx.enrollment.create({
               data: { studentId, sectionId, status: "enrolled" },
             });
+        // Silent to the student by design, traced here: which curated gates
+        // this enrollment skipped, if any. Absent means fully qualified.
+        const bypassed = bypassedByCourse.get(
+          lockedById.get(sectionId)!.courseId,
+        );
         await tx.auditLog.create({
           data: {
             entity: "Enrollment",
             entityId: enrollment.id,
             action: "enrolled",
             actorId: studentId,
-            ...(sectionIds.length > 1
-              ? { data: { bundleSectionIds: sectionIds } }
+            ...(sectionIds.length > 1 || bypassed?.length
+              ? {
+                  data: {
+                    ...(sectionIds.length > 1
+                      ? { bundleSectionIds: sectionIds }
+                      : {}),
+                    ...(bypassed?.length ? { curatedBypass: bypassed } : {}),
+                  },
+                }
               : {}),
           },
         });
@@ -1072,7 +1156,21 @@ export class AcademicsService {
       0,
     );
 
+    // Curated bypass mirror of enrollSections: the same five gates read as
+    // enrollable here. Per-section, because the catalog cannot see the bundle ΓÇö
+    // a mixed bundle past the deadline can still fail at enroll time, with the
+    // deadline message naming the reason. Silent by design: no waiver marking.
+    const catalogBypassedCourseIds = curatedBypassCourseIds({
+      studentNo: student.studentNo,
+      termName: term.name,
+      data: CURATED_RECOMMENDATIONS,
+      courseIdByCode: new Map(
+        sections.map((s) => [s.course.code, s.courseId] as const),
+      ),
+    });
+
     const rows = sections.map((s) => {
+      const covered = catalogBypassedCourseIds.has(s.courseId);
       const seatsLeft = s.capacity - s._count.enrollments;
       const unmetPrereqs = s.course.prereqRules
         .filter(
@@ -1134,24 +1232,26 @@ export class AcademicsService {
         ? "Already enrolled"
         : closedReason === "term_ended"
           ? "Registration is closed for this term"
-          : closedReason === "add_deadline_passed"
+          : closedReason === "add_deadline_passed" && !covered
             ? `The add period closed on ${term.addDeadline!.toISOString().slice(0, 10)}`
             : holds.length > 0
               ? "Registration is blocked by an active hold"
               : s.status !== "open"
                 ? "This section is closed for registration"
-                : seatsLeft <= 0
+                : seatsLeft <= 0 && !covered
                   ? "Section is full"
-                  : unmetPrereqs.length > 0
+                  : unmetPrereqs.length > 0 && !covered
                     ? `Needs ${unmetPrereqs.join(", ")}`
                     : clash
                       ? `Clashes with ${clash.section.course.code}`
                       : currentCredits + s.course.credits > MAX_CREDITS_PER_TERM
                         ? `Over the ${MAX_CREDITS_PER_TERM}-credit limit`
-                        : (standingReason ?? majorReason);
+                        : standingReason && !covered
+                          ? standingReason
+                          : majorReason;
       const blockedReason =
         hardBlockedReason ??
-        (missingCoreqs.length > 0
+        (missingCoreqs.length > 0 && !covered
           ? `Must be taken with (or after) ${missingCoreqs.join(", ")}`
           : null);
 

@@ -389,6 +389,16 @@ term ended, add deadline, duplicate enrollment, capacity, closed section, active
 prerequisites with `minGrade`, corequisites, timetable clash, 30-credit cap, `recordStatus`,
 standing requirement, major restriction.
 
+Curated-plan bypass: a course named by the academic office's hand-curated plan for that
+`studentNo` (`CURATED_RECOMMENDATIONS`, `curatedBypassCourseIds()`) skips exactly five of those
+gates at self-enroll time — prerequisites, corequisites, standing, add deadline, capacity —
+and the catalog reads the same five as enrollable. The other nine still apply, the mixed-bundle
+past-deadline case still fails with the deadline message, and every bypass is traced in the
+enrollment audit row (`curatedBypass: EnrollmentGate[]`, see `CURATED_BYPASSABLE_GATES` in
+`packages/shared/src/academics.ts`). Silent in the UI by deliberate product decision. One-time:
+nothing is written to the transcript chain, so downstream prerequisites still demand real
+`TranscriptEntry` grades.
+
 `registrationCatalog()` — the UX preview — is deliberately **weaker**: it does not preview
 standing, major restriction or corequisites. It is never the gate.
 
