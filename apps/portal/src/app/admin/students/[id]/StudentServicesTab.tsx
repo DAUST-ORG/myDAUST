@@ -127,59 +127,77 @@ export function StudentServicesTab({
   // before that happens.
   const blocked = Boolean(pending);
 
+  const editButton = canEdit ? (
+    <Button
+      size="sm"
+      variant="secondary"
+      icon={<Pencil size={14} />}
+      disabled={blocked || !checked || !options}
+      title={
+        blocked
+          ? "A change for this student is already awaiting Director approval"
+          : undefined
+      }
+      onClick={() => setEditing(true)}
+    >
+      Change services
+    </Button>
+  ) : undefined;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <BillingProfileSummary
-        profile={profile}
-        title="Annual services"
-        action={
-          canEdit ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<Pencil size={14} />}
-              disabled={blocked || !checked || !options}
-              title={
-                blocked
-                  ? "A change for this student is already awaiting Director approval"
-                  : undefined
-              }
-              onClick={() => setEditing(true)}
-            >
-              Change services
-            </Button>
-          ) : undefined
-        }
-      />
-
-      {showDerived && derived && (
-        <div className="services-derived" role="status">
-          <Badge tone="neutral">From the current bill</Badge>
-          <span>
-            This student has no annual profile record yet, so these are read
-            from the charges already on their bill:{" "}
-            <strong>
-              {[
-                derived.housingCode && derived.housingCode !== "none"
-                  ? (options?.housingOptions.find(
-                      (option) => option.code === derived.housingCode,
-                    )?.label ?? derived.housingCode)
-                  : "no housing",
-                derived.cafeteriaCode && derived.cafeteriaCode !== "none"
-                  ? (options?.cafeteriaOptions.find(
-                      (option) => option.code === derived.cafeteriaCode,
-                    )?.label ?? derived.cafeteriaCode)
-                  : "no cafeteria plan",
-              ].join(" · ")}
-            </strong>
-            {derived.charged.get("housing")
-              ? ` (housing ${formatXof(derived.charged.get("housing")!)})`
-              : ""}
-            . Saving a change creates the record.
-          </span>
-        </div>
+      {showDerived && derived ? (
+        <Card title="Annual services" action={editButton}>
+          <div className="services-derived-grid">
+            {[
+              {
+                label: "Housing",
+                option: options?.housingOptions.find(
+                  (row) => row.code === derived.housingCode,
+                ),
+                charged: derived.charged.get("housing") ?? 0,
+              },
+              {
+                label: "Cafeteria",
+                option: options?.cafeteriaOptions.find(
+                  (row) => row.code === derived.cafeteriaCode,
+                ),
+                charged: derived.charged.get("cafeteria") ?? 0,
+              },
+              {
+                label: "Insurance",
+                option: derived.insuranceSelected
+                  ? options?.insuranceOption
+                  : undefined,
+                charged: derived.charged.get("insurance") ?? 0,
+              },
+              {
+                label: "Housing caution",
+                option: derived.cautionSelected
+                  ? options?.cautionOption
+                  : undefined,
+                charged: derived.charged.get("housing_caution") ?? 0,
+              },
+            ].map((row) => (
+              <div key={row.label} className="services-derived-cell">
+                <small>{row.label}</small>
+                <strong>{row.option?.label ?? "None"}</strong>
+                <span>{formatXof(row.charged)}</span>
+              </div>
+            ))}
+          </div>
+          <p className="muted" style={{ margin: "12px 0 0", fontSize: 11.5 }}>
+            Read from the charges already on this student&apos;s bill — they
+            have no annual profile record yet. Saving a change creates one.
+          </p>
+        </Card>
+      ) : (
+        <BillingProfileSummary
+          profile={profile}
+          title="Annual services"
+          action={editButton}
+        />
       )}
-
       {blocked && pending && (
         <div className="services-pending" role="status">
           <Badge tone="warning">Awaiting Director approval</Badge>
