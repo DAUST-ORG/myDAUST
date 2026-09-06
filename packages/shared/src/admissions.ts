@@ -7,18 +7,31 @@ export type ApplicationTrack = z.infer<typeof ApplicationTrack>;
  * Public Apply form (anonymous — no auth). Name + email are the only required fields;
  * the multi-step public workflow fills the rest, feeding the same Applicant pipeline the
  * registrar reads. The server always forces stage "submitted" — none of these can set it.
+ *
+ * Emails are trimmed + lowercased at the boundary; phones must carry an explicit
+ * country code (e.g. +221 77 123 45 67) so staff never guess the dial prefix.
  */
+const sanitizedEmail = z.string().trim().toLowerCase().email();
+const sanitizedOptionalEmail = z.string().trim().toLowerCase().email().nullish();
+const phoneWithCountryCode = z
+  .string()
+  .trim()
+  .max(40)
+  .refine((v) => /^\+\d[\d\s\-.()]{5,38}$/.test(v), {
+    message: "Include the country code, e.g. +221 77 123 45 67",
+  });
+
 export const ApplicationInput = z.object({
   firstName: z.string().min(1).max(80),
   lastName: z.string().min(1).max(80),
-  email: z.string().email(),
+  email: sanitizedEmail,
   programCode: z.string().max(20).nullish(),
   track: ApplicationTrack.default("first-year"),
   // `score` is the 0–20 entrance/BAC score (drives the merit award); `bacScore` kept for back-compat.
   score: z.number().min(0).max(20).nullish(),
   bacScore: z.number().min(0).max(20).optional(),
   country: z.string().max(80).nullish(),
-  phone: z.string().max(40).nullish(),
+  phone: phoneWithCountryCode.nullish(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   gender: z.enum(["Male", "Female", "Homme", "Femme"]).nullish(),
   nationality: z.string().max(80).nullish(),
@@ -27,14 +40,59 @@ export const ApplicationInput = z.object({
   school: z.string().max(160).nullish(),
   priorGpa: z.string().max(40).nullish(),
   parentName: z.string().max(120).nullish(),
-  parentPhone: z.string().max(40).nullish(),
-  parentEmail: z.string().email().nullish(),
+  parentPhone: phoneWithCountryCode.nullish(),
+  parentEmail: sanitizedOptionalEmail,
   allergies: z.string().max(300).nullish(),
   source: z.string().max(80).nullish(),
+  // Conditional follow-up to `source`: a person's name when referred by someone,
+  // the site/page when the applicant found DAUST online. Optional at the API so
+  // older clients and pre-existing rows keep validating; the UIs require it when shown.
+  sourceDetail: z.string().trim().max(120).nullish(),
   essay: z.string().max(4000).nullish(),
   term: z.literal("Fall 2026").nullish(),
 });
 export type ApplicationInput = z.infer<typeof ApplicationInput>;
+
+/**
+ * Which follow-up `sourceDetail` asks for. Matches both English and French stored
+ * labels because the public form historically persisted the displayed (translated) value.
+ */
+export type ReferralDetailKind = "person" | "online" | "other" | null;
+
+const PERSON_REFERRAL_SOURCES = new Set([
+  "Friend / family",
+  "Ami / famille",
+  "Alumni referral",
+  "Recommandation d’un ancien",
+  "Recommandation d'un ancien",
+  "School counselor",
+  "Conseiller scolaire",
+]);
+
+const ONLINE_REFERRAL_SOURCES = new Set([
+  "Website",
+  "Site web",
+  "Social media",
+  "Réseaux sociaux",
+  "DAUST open day",
+  "Journée portes ouvertes DAUST",
+]);
+
+const OTHER_REFERRAL_SOURCES = new Set(["Other", "Autre"]);
+
+export function referralDetailKind(
+  source: string | null | undefined,
+): ReferralDetailKind {
+  if (!source || source.trim() === "") return null;
+  const v = source.trim();
+  if (PERSON_REFERRAL_SOURCES.has(v)) return "person";
+  if (ONLINE_REFERRAL_SOURCES.has(v)) return "online";
+  if (OTHER_REFERRAL_SOURCES.has(v)) return "other";
+  return null;
+}
+
+/** Fee items the admissions office owns (editable outside the finance approval workflow). */
+export const ADMISSIONS_FEE_KEYS = ["application_fee", "insurance"] as const;
 
 // --- Director-editable config contracts ---
 
