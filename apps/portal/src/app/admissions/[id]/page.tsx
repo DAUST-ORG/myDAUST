@@ -39,6 +39,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Avatar, Badge, type BadgeTone, Modal, Tabs } from "@/components/ui";
 import { useAuth } from "@/lib/use-auth";
 import { ApplicationModal, type ProgramOption } from "../ApplicationModal";
+import { NotesPanel } from "./NotesPanel";
 import { ApplicantBillingAcceptanceModal } from "./ApplicantBillingAcceptanceModal";
 import { admissionsWorkspacePath } from "../workspace-path";
 
@@ -539,7 +540,15 @@ export default function ApplicantDetailPage() {
       </div>
 
       {tab === "overview" && (
-        <>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
           <div
             style={{
               display: "grid",
@@ -580,7 +589,6 @@ export default function ApplicantDetailPage() {
                 }
                 v={a.school ?? "—"}
               />
-              <KV k="GPA / average" v={a.priorGpa ?? "—"} />
             </Card>
             <Card title="Parent / guardian">
               <KV k="Name" v={a.parentName ?? "—"} />
@@ -590,10 +598,13 @@ export default function ApplicantDetailPage() {
             <Card title="Health & other">
               <KV k="Allergies" v={a.allergies ?? "—"} />
               <KV k="Heard about DAUST via" v={a.source ?? "—"} />
+              {a.sourceDetail && (
+                <KV k="Referral detail" v={a.sourceDetail} />
+              )}
             </Card>
           </div>
           {a.essay && (
-            <div style={{ marginTop: 16 }}>
+            <div>
               <Card title="Statement of purpose">
                 <p
                   style={{
@@ -608,7 +619,9 @@ export default function ApplicantDetailPage() {
               </Card>
             </div>
           )}
-        </>
+          </div>
+          <NotesPanel applicantId={a.id} />
+        </div>
       )}
 
       {tab === "timeline" && (
@@ -700,12 +713,12 @@ export default function ApplicantDetailPage() {
                 ? a.origin
                 : null,
             school: a.school,
-            priorGpa: a.priorGpa,
             parentName: a.parentName,
             parentPhone: a.parentPhone,
             parentEmail: a.parentEmail,
             allergies: a.allergies,
             source: a.source,
+            sourceDetail: a.sourceDetail,
             essay: a.essay,
           }}
           onClose={() => setEditing(false)}
