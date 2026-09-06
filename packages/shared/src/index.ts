@@ -10,6 +10,7 @@ export * from "./academic-catalog.js";
 export * from "./registration-plan.js";
 export * from "./comms.js";
 export * from "./admissions.js";
+export * from "./countries.js";
 export * from "./dining.js";
 export * from "./dining-eligibility.js";
 export * from "./site-content.js";

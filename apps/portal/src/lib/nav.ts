@@ -428,6 +428,16 @@ export const ADMISSIONS_NAV: PortalNav = {
         badgeKey: "admissions",
       },
       {
+        href: "/admissions/templates",
+        label: "Email Templates",
+        icon: Mail,
+      },
+      {
+        href: "/admissions/fees",
+        label: "Admissions Fees",
+        icon: Receipt,
+      },
+      {
         href: "/admissions/workbook-cutover-attestation",
         label: "Cutover Attestation",
         icon: ShieldCheck,
@@ -566,6 +576,14 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   },
   "/faculty/submissions/": { title: "Submissions", crumb: "Review & grade" },
   "/admissions/[id]/notes": { title: "Notes", crumb: "Applicant · Admissions" },
+  "/admissions/templates": {
+    title: "Email Templates",
+    crumb: "Automated emails · Admissions",
+  },
+  "/admissions/fees": {
+    title: "Admissions Fees",
+    crumb: "Application fee & insurance · Admissions",
+  },
   // student
   "/it/backlog": { title: "IT backlog", crumb: "Issues & requests · IT" },
   "/student": { title: "Dashboard", crumb: "Academic overview · {term}" },

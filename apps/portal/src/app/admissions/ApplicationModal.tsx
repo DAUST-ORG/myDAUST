@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check } from "lucide-react";
+import { COUNTRIES, referralDetailKind } from "@mydaust/shared";
 import {
   type ApplicantInput,
   createApplicant,
@@ -30,12 +31,12 @@ export interface ApplicationInitial {
   city?: string | null;
   origin?: "high-school" | "transfer" | null;
   school?: string | null;
-  priorGpa?: string | null;
   parentName?: string | null;
   parentPhone?: string | null;
   parentEmail?: string | null;
   allergies?: string | null;
   source?: string | null;
+  sourceDetail?: string | null;
   essay?: string | null;
 }
 
@@ -74,13 +75,13 @@ interface FormState {
   country: string;
   origin: "" | "high-school" | "transfer";
   score: string;
-  priorGpa: string;
   school: string;
   parentName: string;
   parentPhone: string;
   parentEmail: string;
   allergies: string;
   source: string;
+  sourceDetail: string;
   essay: string;
 }
 
@@ -100,16 +101,18 @@ function initialForm(i?: ApplicationInitial): FormState {
     country: s(i?.country),
     origin: i?.origin ?? "",
     score: i?.score != null ? String(i.score) : "",
-    priorGpa: s(i?.priorGpa),
     school: s(i?.school),
     parentName: s(i?.parentName),
     parentPhone: s(i?.parentPhone),
     parentEmail: s(i?.parentEmail),
     allergies: s(i?.allergies),
     source: s(i?.source),
+    sourceDetail: s(i?.sourceDetail),
     essay: s(i?.essay),
   };
 }
+
+const sanitizeEmail = (v: string) => v.trim().toLowerCase();
 
 function buildInput(f: FormState): ApplicantInput {
   const nn = (v: string) => (v.trim() === "" ? null : v.trim());
@@ -124,12 +127,13 @@ function buildInput(f: FormState): ApplicantInput {
     city: nn(f.city),
     origin: f.origin === "" ? null : f.origin,
     school: nn(f.school),
-    priorGpa: nn(f.priorGpa),
     parentName: nn(f.parentName),
     parentPhone: nn(f.parentPhone),
-    parentEmail: nn(f.parentEmail),
+    parentEmail:
+      f.parentEmail.trim() === "" ? null : sanitizeEmail(f.parentEmail),
     allergies: nn(f.allergies),
     source: nn(f.source),
+    sourceDetail: nn(f.sourceDetail),
     essay: nn(f.essay),
     term: nn(f.term),
   };
@@ -168,7 +172,7 @@ export function ApplicationModal({
       ...buildInput(form),
       firstName: form.firstName.trim(),
       lastName: form.lastName.trim(),
-      email: form.email.trim(),
+      email: sanitizeEmail(form.email),
     };
   });
   const [busy, setBusy] = useState(false);
@@ -180,6 +184,7 @@ export function ApplicationModal({
   const schoolLabel =
     f.origin === "transfer" ? "Previous university" : "High school name";
   const submitLabel = mode === "edit" ? "Save changes" : "Submit application";
+  const detailKind = referralDetailKind(f.source.trim() === "" ? null : f.source);
 
   async function submit() {
     setErr(null);
@@ -187,12 +192,33 @@ export function ApplicationModal({
       setErr("First name, last name and email are required.");
       return;
     }
+    const phoneOk = (v: string) =>
+      v.trim() === "" || /^\+\d[\d\s\-.()]{5,38}$/.test(v.trim());
+    if (!phoneOk(f.phone) || !phoneOk(f.parentPhone)) {
+      setErr("Phone numbers must include the country code, e.g. +221 77 123 45 67.");
+      return;
+    }
+    if (f.dateOfBirth !== "" && f.dateOfBirth > todayKey()) {
+      setErr("Date of birth cannot be in the future.");
+      return;
+    }
+    if (
+      (detailKind === "person" || detailKind === "online") &&
+      f.sourceDetail.trim() === ""
+    ) {
+      setErr(
+        detailKind === "person"
+          ? "Please give the name of the person who referred you."
+          : "Please tell us which site or page led you to DAUST.",
+      );
+      return;
+    }
     setBusy(true);
     try {
       const base = {
         firstName: f.firstName.trim(),
         lastName: f.lastName.trim(),
-        email: f.email.trim(),
+        email: sanitizeEmail(f.email),
       };
       const input = { ...buildInput(f), ...base };
       const res =
@@ -289,19 +315,19 @@ export function ApplicationModal({
                 onChange={(e) => set("email", e.target.value)}
               />
             </Field>
-            <Field label="Phone">
+            <Field label="Phone" hint="country code required, e.g. +221">
               <input
                 value={f.phone}
                 onChange={(e) => set("phone", e.target.value)}
+                placeholder="+221 77 123 45 67"
               />
             </Field>
           </Grid>
           <Grid cols={2}>
             <Field label="Date of birth">
-              <input
-                type="date"
+              <DobPicker
                 value={f.dateOfBirth}
-                onChange={(e) => set("dateOfBirth", e.target.value)}
+                onChange={(v) => set("dateOfBirth", v)}
               />
             </Field>
             <Field label="Gender">
@@ -317,9 +343,10 @@ export function ApplicationModal({
           </Grid>
           <Grid cols={2}>
             <Field label="Nationality">
-              <input
+              <Select
                 value={f.nationality}
-                onChange={(e) => set("nationality", e.target.value)}
+                onChange={(v) => set("nationality", v)}
+                options={countryOptions(f.nationality)}
               />
             </Field>
             <Field label="City of residence">
@@ -330,9 +357,10 @@ export function ApplicationModal({
             </Field>
           </Grid>
           <Field label="Country">
-            <input
+            <Select
               value={f.country}
-              onChange={(e) => set("country", e.target.value)}
+              onChange={(v) => set("country", v)}
+              options={countryOptions(f.country)}
             />
           </Field>
         </Section>
@@ -350,7 +378,7 @@ export function ApplicationModal({
                 ]}
               />
             </Field>
-            <Field label="Entrance score" hint="0–20, optional">
+            <Field label="Entrance / BAC score" hint="0–20, optional">
               <input
                 type="number"
                 min={0}
@@ -361,20 +389,12 @@ export function ApplicationModal({
               />
             </Field>
           </Grid>
-          <Grid cols={2}>
-            <Field label="GPA / average" hint="e.g. 17/20 or 3.6/4">
-              <input
-                value={f.priorGpa}
-                onChange={(e) => set("priorGpa", e.target.value)}
-              />
-            </Field>
-            <Field label={schoolLabel}>
-              <input
-                value={f.school}
-                onChange={(e) => set("school", e.target.value)}
-              />
-            </Field>
-          </Grid>
+          <Field label={schoolLabel}>
+            <input
+              value={f.school}
+              onChange={(e) => set("school", e.target.value)}
+            />
+          </Field>
         </Section>
 
         <Section label="Parent / guardian">
@@ -385,10 +405,11 @@ export function ApplicationModal({
                 onChange={(e) => set("parentName", e.target.value)}
               />
             </Field>
-            <Field label="Phone">
+            <Field label="Phone" hint="country code required, e.g. +221">
               <input
                 value={f.parentPhone}
                 onChange={(e) => set("parentPhone", e.target.value)}
+                placeholder="+221 77 123 45 67"
               />
             </Field>
           </Grid>
@@ -412,7 +433,11 @@ export function ApplicationModal({
             <Field label="How did you learn about DAUST?">
               <Select
                 value={f.source}
-                onChange={(v) => set("source", v)}
+                onChange={(v) => {
+                  set("source", v);
+                  if (referralDetailKind(v.trim() === "" ? null : v) === null)
+                    set("sourceDetail", "");
+                }}
                 options={[
                   { value: "", label: "—" },
                   ...SOURCE_OPTIONS.map((o) => ({ value: o, label: o })),
@@ -420,6 +445,35 @@ export function ApplicationModal({
               />
             </Field>
           </Grid>
+          {detailKind === "person" && (
+            <Field label="Name of the person who referred you*">
+              <input
+                value={f.sourceDetail}
+                onChange={(e) => set("sourceDetail", e.target.value)}
+                placeholder="Full name"
+                maxLength={120}
+              />
+            </Field>
+          )}
+          {detailKind === "online" && (
+            <Field label="Which site or page?*">
+              <input
+                value={f.sourceDetail}
+                onChange={(e) => set("sourceDetail", e.target.value)}
+                placeholder="e.g. Instagram, Google search"
+                maxLength={120}
+              />
+            </Field>
+          )}
+          {detailKind === "other" && (
+            <Field label="Tell us more (optional)">
+              <input
+                value={f.sourceDetail}
+                onChange={(e) => set("sourceDetail", e.target.value)}
+                maxLength={120}
+              />
+            </Field>
+          )}
           <Field label="Statement of purpose">
             <textarea
               rows={4}
@@ -469,6 +523,100 @@ function Grid({ cols, children }: { cols: number; children: React.ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+/** Stored value is always the English name; a legacy free-text value is kept selectable. */
+function countryOptions(current: string) {
+  const opts = [
+    { value: "", label: "—" },
+    ...COUNTRIES.map((c) => ({ value: c.en, label: c.en })),
+  ];
+  if (current !== "" && !COUNTRIES.some((c) => c.en === current)) {
+    opts.splice(1, 0, { value: current, label: current });
+  }
+  return opts;
+}
+
+function todayKey(): string {
+  const d = new Date();
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/**
+ * Year → month → day dropdowns composing YYYY-MM-DD. Native date inputs bury year
+ * navigation, which is the whole interaction for a birth date; a future date can
+ * never be composed (max year is this year, and submit rejects a future day).
+ */
+function DobPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const thisYear = new Date().getFullYear();
+  const years: number[] = [];
+  for (let y = thisYear; y >= thisYear - 60; y--) years.push(y);
+  // Parts stay local so a half-picked date (year only) is kept on screen while
+  // the form value remains "" — the API takes a full date or nothing.
+  const [parts, setParts] = useState(() => {
+    const [y, m, d] = value === "" ? ["", "", ""] : value.split("-");
+    return { y: y ?? "", m: m ?? "", d: d ?? "" };
+  });
+  const daysInMonth =
+    parts.y !== "" && parts.m !== ""
+      ? new Date(Number(parts.y), Number(parts.m), 0).getDate()
+      : 31;
+
+  function pick(ny: string, nm: string, nd: string) {
+    setParts({ y: ny, m: nm, d: nd });
+    if (ny === "" || nm === "" || nd === "") {
+      onChange("");
+      return;
+    }
+    const dd = Math.min(Number(nd), new Date(Number(ny), Number(nm), 0).getDate());
+    onChange(`${ny}-${nm.padStart(2, "0")}-${`${dd}`.padStart(2, "0")}`);
+  }
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+      <Select
+        ariaLabel="Birth year"
+        value={parts.y}
+        onChange={(v) => pick(v, parts.m, parts.d)}
+        options={[
+          { value: "", label: "Year" },
+          ...years.map((yr) => ({ value: `${yr}`, label: `${yr}` })),
+        ]}
+      />
+      <Select
+        ariaLabel="Birth month"
+        value={parts.m !== "" ? `${Number(parts.m)}` : ""}
+        onChange={(v) => pick(parts.y, v, parts.d)}
+        options={[
+          { value: "", label: "Month" },
+          ...Array.from({ length: 12 }, (_, i) => ({
+            value: `${i + 1}`,
+            label: new Date(2000, i, 1).toLocaleString("en", { month: "short" }),
+          })),
+        ]}
+      />
+      <Select
+        ariaLabel="Birth day"
+        value={parts.d !== "" ? `${Number(parts.d)}` : ""}
+        onChange={(v) => pick(parts.y, parts.m, v)}
+        options={[
+          { value: "", label: "Day" },
+          ...Array.from({ length: daysInMonth }, (_, i) => ({
+            value: `${i + 1}`,
+            label: `${i + 1}`,
+          })),
+        ]}
+      />
     </div>
   );
 }

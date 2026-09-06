@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { COUNTRIES, referralDetailKind } from "@mydaust/shared";
 import { Icon } from "./icons";
 import {
   feePiSpi,
@@ -61,13 +62,13 @@ interface FormState {
   city: string;
   country: string;
   score: string;
-  priorGpa: string;
   school: string;
   parentName: string;
   parentPhone: string;
   parentEmail: string;
   allergies: string;
   source: string;
+  sourceDetail: string;
 }
 
 const EMPTY: FormState = {
@@ -84,13 +85,13 @@ const EMPTY: FormState = {
   city: "",
   country: "",
   score: "",
-  priorGpa: "",
   school: "",
   parentName: "",
   parentPhone: "",
   parentEmail: "",
   allergies: "",
   source: "",
+  sourceDetail: "",
 };
 
 export function ApplyModal({
@@ -167,6 +168,16 @@ export function ApplyModal({
       ? t("Previous university", "Université précédente")
       : t("High school name", "Nom du lycée");
 
+  const detailKind = referralDetailKind(
+    f.source.trim() === "" ? null : f.source,
+  );
+  const phoneOk = (v: string) =>
+    v.trim() === "" || /^\+\d[\d\s\-.()]{5,38}$/.test(v.trim());
+  const todayKey = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, "0")}-${`${d.getDate()}`.padStart(2, "0")}`;
+  };
+
   function next() {
     setErr(null);
     if (
@@ -178,6 +189,45 @@ export function ApplyModal({
           "First name, last name and email are required.",
           "Prénom, nom et e-mail sont obligatoires.",
         ),
+      );
+      return;
+    }
+    if (step === 1 && (!phoneOk(f.phone) || !phoneOk(f.parentPhone))) {
+      // Parent phone lives on step 3, but both share the rule — surface it early.
+      if (!phoneOk(f.phone)) {
+        setErr(
+          t(
+            "Phone must include the country code, e.g. +221 77 123 45 67.",
+            "Le téléphone doit inclure l’indicatif pays, ex. +221 77 123 45 67.",
+          ),
+        );
+        return;
+      }
+    }
+    if (step === 1 && f.dateOfBirth !== "" && f.dateOfBirth > todayKey()) {
+      setErr(
+        t(
+          "Date of birth cannot be in the future.",
+          "La date de naissance ne peut pas être dans le futur.",
+        ),
+      );
+      return;
+    }
+    if (
+      step === 4 &&
+      (detailKind === "person" || detailKind === "online") &&
+      f.sourceDetail.trim() === ""
+    ) {
+      setErr(
+        detailKind === "person"
+          ? t(
+              "Please give the name of the person who referred you.",
+              "Veuillez donner le nom de la personne qui vous a recommandé.",
+            )
+          : t(
+              "Please tell us which site or page led you to DAUST.",
+              "Veuillez indiquer quel site ou page vous a mené à DAUST.",
+            ),
       );
       return;
     }
@@ -202,11 +252,32 @@ export function ApplyModal({
     }
     setBusy(true);
     const nn = (v: string) => (v.trim() === "" ? undefined : v.trim());
+    const em = (v: string) =>
+      v.trim() === "" ? undefined : v.trim().toLowerCase();
+    if (
+      (detailKind === "person" || detailKind === "online") &&
+      f.sourceDetail.trim() === ""
+    ) {
+      setErr(
+        detailKind === "person"
+          ? t(
+              "Please give the name of the person who referred you.",
+              "Veuillez donner le nom de la personne qui vous a recommandé.",
+            )
+          : t(
+              "Please tell us which site or page led you to DAUST.",
+              "Veuillez indiquer quel site ou page vous a mené à DAUST.",
+            ),
+      );
+      setStep(4);
+      setBusy(false);
+      return;
+    }
     try {
       const res = await submitApplication({
         firstName: f.firstName.trim(),
         lastName: f.lastName.trim(),
-        email: f.email.trim(),
+        email: f.email.trim().toLowerCase(),
         track: f.origin === "transfer" ? "transfer" : "first-year",
         programCode: nn(f.programCode),
         term: nn(f.term) as "Fall 2026" | undefined,
@@ -219,13 +290,13 @@ export function ApplyModal({
         city: nn(f.city),
         country: nn(f.country),
         score: f.score.trim() === "" ? undefined : Number(f.score),
-        priorGpa: nn(f.priorGpa),
         school: nn(f.school),
         parentName: nn(f.parentName),
         parentPhone: nn(f.parentPhone),
-        parentEmail: nn(f.parentEmail),
+        parentEmail: em(f.parentEmail),
         allergies: nn(f.allergies),
         source: nn(f.source),
+        sourceDetail: nn(f.sourceDetail),
       });
       setResult(res);
     } catch (e) {
@@ -800,18 +871,30 @@ export function ApplyModal({
                       <input
                         value={f.phone}
                         onChange={(e) => set("phone", e.target.value)}
-                        placeholder="+221 …"
+                        placeholder="+221 77 123 45 67"
                         style={field}
                       />
+                      <span
+                        style={{
+                          fontSize: 11.5,
+                          color: "var(--fg3)",
+                          fontFamily: "var(--font-body)",
+                        }}
+                      >
+                        {t(
+                          "Include the country code.",
+                          "Incluez l’indicatif pays.",
+                        )}
+                      </span>
                     </F>
                   </Row>
                   <Row>
                     <F label={t("Date of birth", "Date de naissance")}>
-                      <input
-                        type="date"
+                      <DobPicker
                         value={f.dateOfBirth}
-                        onChange={(e) => set("dateOfBirth", e.target.value)}
-                        style={field}
+                        onChange={(v) => set("dateOfBirth", v)}
+                        t={t}
+                        fr={fr}
                       />
                     </F>
                     <F label={t("Gender", "Genre")}>
@@ -831,11 +914,18 @@ export function ApplyModal({
                   </Row>
                   <Row>
                     <F label={t("Nationality", "Nationalité")}>
-                      <input
+                      <select
                         value={f.nationality}
                         onChange={(e) => set("nationality", e.target.value)}
-                        style={field}
-                      />
+                        style={{ ...field, background: "#fff" }}
+                      >
+                        <option value=""></option>
+                        {COUNTRIES.map((c) => (
+                          <option key={c.code} value={c.en}>
+                            {fr ? c.fr : c.en}
+                          </option>
+                        ))}
+                      </select>
                     </F>
                     <F label={t("City of residence", "Ville de résidence")}>
                       <input
@@ -846,40 +936,38 @@ export function ApplyModal({
                     </F>
                   </Row>
                   <F label={t("Country", "Pays")}>
-                    <input
+                    <select
                       value={f.country}
                       onChange={(e) => set("country", e.target.value)}
-                      style={field}
-                    />
+                      style={{ ...field, background: "#fff" }}
+                    >
+                      <option value=""></option>
+                      {COUNTRIES.map((c) => (
+                        <option key={c.code} value={c.en}>
+                          {fr ? c.fr : c.en}
+                        </option>
+                      ))}
+                    </select>
                   </F>
                 </Grid>
               )}
 
               {step === 2 && (
                 <Grid>
-                  <Row>
-                    <F
-                      label={t("Entrance / BAC score", "Note BAC / d’entrée")}
-                      hint={t("0–20, optional", "0–20, facultatif")}
-                    >
-                      <input
-                        type="number"
-                        min={0}
-                        max={20}
-                        step="0.01"
-                        value={f.score}
-                        onChange={(e) => set("score", e.target.value)}
-                        style={field}
-                      />
-                    </F>
-                    <F label={t("GPA / average", "Moyenne")} hint="e.g. 17/20">
-                      <input
-                        value={f.priorGpa}
-                        onChange={(e) => set("priorGpa", e.target.value)}
-                        style={field}
-                      />
-                    </F>
-                  </Row>
+                  <F
+                    label={t("Entrance / BAC score", "Note BAC / d’entrée")}
+                    hint={t("0–20, optional", "0–20, facultatif")}
+                  >
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      step="0.01"
+                      value={f.score}
+                      onChange={(e) => set("score", e.target.value)}
+                      style={field}
+                    />
+                  </F>
                   <F label={schoolLabel}>
                     <input
                       value={f.school}
@@ -904,6 +992,7 @@ export function ApplyModal({
                       <input
                         value={f.parentPhone}
                         onChange={(e) => set("parentPhone", e.target.value)}
+                        placeholder="+221 77 123 45 67"
                         style={field}
                       />
                     </F>
@@ -937,7 +1026,17 @@ export function ApplyModal({
                     >
                       <select
                         value={f.source}
-                        onChange={(e) => set("source", e.target.value)}
+                        onChange={(e) => {
+                          set("source", e.target.value);
+                          if (
+                            referralDetailKind(
+                              e.target.value.trim() === ""
+                                ? null
+                                : e.target.value,
+                            ) === null
+                          )
+                            set("sourceDetail", "");
+                        }}
                         style={{ ...field, background: "#fff" }}
                       >
                         <option value=""></option>
@@ -949,6 +1048,48 @@ export function ApplyModal({
                       </select>
                     </F>
                   </Row>
+                  {detailKind === "person" && (
+                    <F
+                      label={t(
+                        "Name of the person who referred you*",
+                        "Nom de la personne qui vous a recommandé*",
+                      )}
+                    >
+                      <input
+                        value={f.sourceDetail}
+                        onChange={(e) => set("sourceDetail", e.target.value)}
+                        placeholder={t("Full name", "Nom complet")}
+                        style={field}
+                      />
+                    </F>
+                  )}
+                  {detailKind === "online" && (
+                    <F
+                      label={t(
+                        "Which site or page?*",
+                        "Quel site ou page ?*",
+                      )}
+                    >
+                      <input
+                        value={f.sourceDetail}
+                        onChange={(e) => set("sourceDetail", e.target.value)}
+                        placeholder={t(
+                          "e.g. Instagram, Google search",
+                          "ex. Instagram, recherche Google",
+                        )}
+                        style={field}
+                      />
+                    </F>
+                  )}
+                  {detailKind === "other" && (
+                    <F label={t("Tell us more", "Dites-nous en plus")}>
+                      <input
+                        value={f.sourceDetail}
+                        onChange={(e) => set("sourceDetail", e.target.value)}
+                        style={field}
+                      />
+                    </F>
+                  )}
                 </Grid>
               )}
 
@@ -994,6 +1135,12 @@ export function ApplyModal({
                     label={t("Guardian", "Tuteur")}
                     value={f.parentName || "N/A"}
                   />
+                  {f.sourceDetail.trim() !== "" && (
+                    <Review
+                      label={t("Referral detail", "Détail recommandation")}
+                      value={f.sourceDetail}
+                    />
+                  )}
                 </div>
               )}
 
@@ -1070,6 +1217,69 @@ export function ApplyModal({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function DobPicker({
+  value,
+  onChange,
+  t,
+  fr,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  t: (en: string, fr: string) => string;
+  fr: boolean;
+}) {
+  const thisYear = new Date().getFullYear();
+  const years: number[] = [];
+  for (let y = thisYear; y >= thisYear - 60; y--) years.push(y);
+  const [py, pm, pd] = value === "" ? ["", "", ""] : value.split("-");
+  const [yy, setYy] = useState(py ?? "");
+  const [mm, setMm] = useState(pm ?? "");
+  const [dd, setDd] = useState(pd ?? "");
+  const daysInMonth =
+    yy !== "" && mm !== "" ? new Date(Number(yy), Number(mm), 0).getDate() : 31;
+
+  function pick(ny: string, nm: string, nd: string) {
+    setYy(ny);
+    setMm(nm);
+    setDd(nd);
+    if (ny === "" || nm === "" || nd === "") {
+      onChange("");
+      return;
+    }
+    const day = Math.min(
+      Number(nd),
+      new Date(Number(ny), Number(nm), 0).getDate(),
+    );
+    onChange(`${ny}-${nm.padStart(2, "0")}-${`${day}`.padStart(2, "0")}`);
+  }
+
+  const sel = { ...field, background: "#fff", padding: "12px 10px" };
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+      <select aria-label={t("Year", "Année")} value={yy} onChange={(e) => pick(e.target.value, mm, dd)} style={sel}>
+        <option value="">{t("Year", "Année")}</option>
+        {years.map((y) => (
+          <option key={y} value={y}>{y}</option>
+        ))}
+      </select>
+      <select aria-label={t("Month", "Mois")} value={mm !== "" ? `${Number(mm)}` : ""} onChange={(e) => pick(yy, e.target.value, dd)} style={sel}>
+        <option value="">{t("Month", "Mois")}</option>
+        {Array.from({ length: 12 }, (_, i) => (
+          <option key={i + 1} value={i + 1}>
+            {new Date(2000, i, 1).toLocaleString(fr ? "fr" : "en", { month: "short" })}
+          </option>
+        ))}
+      </select>
+      <select aria-label={t("Day", "Jour")} value={dd !== "" ? `${Number(dd)}` : ""} onChange={(e) => pick(yy, mm, e.target.value)} style={sel}>
+        <option value="">{t("Day", "Jour")}</option>
+        {Array.from({ length: daysInMonth }, (_, i) => (
+          <option key={i + 1} value={i + 1}>{i + 1}</option>
+        ))}
+      </select>
     </div>
   );
 }

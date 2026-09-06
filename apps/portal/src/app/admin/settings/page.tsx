@@ -32,16 +32,15 @@ function generalRows(currentTerm: string): [string, string][] {
 }
 
 export default function SettingsPage() {
-  // Fees are admin-only writes; a plain registrar views this read-only.
+  // Fees and templates are admin-only writes on this screen; the admissions
+  // office edits its own templates and fees under /admissions.
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isRegistrar, setIsRegistrar] = useState(false);
   const [currentTerm, setCurrentTerm] = useState("—");
 
   const load = useCallback(() => {
     getMe()
       .then((m) => {
         setIsAdmin(m.roles.includes("admin"));
-        setIsRegistrar(m.roles.includes("registrar"));
       })
       .catch(() => {});
   }, []);
@@ -82,7 +81,9 @@ export default function SettingsPage() {
       </div>
 
       <FeesEditor editable={isAdmin} />
-      <EmailTemplatesEditor editable={isAdmin || isRegistrar} />
+      {/* Templates moved to /admissions/templates (admissions office owns them);
+          registrar keeps read access here, only admin can still save from this screen. */}
+      <EmailTemplatesEditor editable={isAdmin} />
 
       {isAdmin && (
         <div className="card">

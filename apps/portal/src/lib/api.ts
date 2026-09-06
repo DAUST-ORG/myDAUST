@@ -4048,6 +4048,7 @@ export interface ApplicantInput {
   parentEmail?: string | null;
   allergies?: string | null;
   source?: string | null;
+  sourceDetail?: string | null;
   essay?: string | null;
   term?: string | null;
 }
@@ -4185,6 +4186,7 @@ export interface ApplicantDetail {
   parentEmail: string | null;
   allergies: string | null;
   source: string | null;
+  sourceDetail: string | null;
   essay: string | null;
   term: string | null;
   onboarding: ApplicantOnboardingView | null;
