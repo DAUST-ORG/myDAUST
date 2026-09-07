@@ -3,9 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   type FeeItem,
+  type PlanPickingConfig,
   getFeeConfig,
   getMe,
+  getPlanPicking,
   updateFeeItem,
+  updatePlanPicking,
 } from "@/lib/api";
 
 const xof = (n: number) => `${n.toLocaleString("en-US")} XOF`;
@@ -19,10 +22,21 @@ export default function AdmissionsFeesPage() {
   const [editKey, setEditKey] = useState<string | null>(null);
   const [amount, setAmount] = useState(0);
   const [note, setNote] = useState<string | null>(null);
+  const [picking, setPicking] = useState<PlanPickingConfig | null>(null);
+  const [pickEnabled, setPickEnabled] = useState(false);
+  const [pickDeadline, setPickDeadline] = useState("");
+  const [pickNote, setPickNote] = useState<string | null>(null);
 
   const load = useCallback(() => {
     getFeeConfig()
       .then((all) => setFees(all.filter((f) => ADMISSIONS_KEYS.includes(f.key))))
+      .catch(() => {});
+    getPlanPicking()
+      .then((p) => {
+        setPicking(p);
+        setPickEnabled(p.enabled);
+        setPickDeadline(p.deadline ?? "");
+      })
       .catch(() => {});
   }, []);
 
@@ -46,6 +60,19 @@ export default function AdmissionsFeesPage() {
     }
   }
 
+  async function savePicking() {
+    try {
+      await updatePlanPicking({
+        enabled: pickEnabled,
+        deadline: pickDeadline === "" ? null : pickDeadline,
+      });
+      setPickNote("Plan-picking window saved.");
+      load();
+    } catch (e) {
+      setPickNote((e as Error).message);
+    }
+  }
+
   if (allowed === null) return <p className="muted">Loading…</p>;
   if (!allowed)
     return <p className="muted">Only the admissions office can edit these fees.</p>;
@@ -58,6 +85,43 @@ export default function AdmissionsFeesPage() {
         Application fee and student insurance — kept apart from system settings and the
         annual Finance package (tuition, housing, cafeteria).
       </p>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <p className="h1" style={{ fontSize: 16 }}>Applicant plan picking</p>
+        <p className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+          Accepted applicants pick their own housing/cafeteria plan from their status
+          page until the deadline. Picks arrive as preferences that staff apply at accept.
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginTop: 12 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={pickEnabled}
+              onChange={(e) => setPickEnabled(e.target.checked)}
+            />
+            Open for picking
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600 }}>
+            Deadline
+            <input
+              type="date"
+              value={pickDeadline}
+              onChange={(e) => setPickDeadline(e.target.value)}
+            />
+          </label>
+          <button className="primary" onClick={savePicking} style={{ fontSize: 12 }}>
+            Save window
+          </button>
+          {pickNote && (
+            <span className="muted" style={{ fontSize: 12 }}>{pickNote}</span>
+          )}
+        </div>
+        {picking && !picking.enabled && (
+          <p className="muted" style={{ fontSize: 12.5, marginBottom: 0 }}>
+            Currently closed — applicants see their saved pick but cannot change it.
+          </p>
+        )}
+      </div>
 
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

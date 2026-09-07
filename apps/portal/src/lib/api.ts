@@ -4164,6 +4164,26 @@ export const sendApplicantStaleNudge = (id: string) =>
     method: "POST",
     body: "{}",
   });
+export interface PlanPickingConfig {
+  enabled: boolean;
+  deadline: string | null;
+}
+export const getPlanPicking = () =>
+  request<PlanPickingConfig>("/config/plan-picking");
+export const updatePlanPicking = (input: PlanPickingConfig) =>
+  request<PlanPickingConfig>("/config/plan-picking", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+export interface ApplicantPlanOptions {
+  academicYearLabel: string;
+  deadline: string | null;
+  open: boolean;
+  housingPreference: string | null;
+  cafeteriaPreference: string | null;
+  housingOptions: { code: string; label: string; amountXof: number }[];
+  cafeteriaOptions: { code: string; label: string; amountXof: number }[];
+}
 export interface ApplicantDetail {
   id: string;
   firstName: string;
@@ -4192,6 +4212,8 @@ export interface ApplicantDetail {
   allergies: string | null;
   source: string | null;
   sourceDetail: string | null;
+  housingPreference: string | null;
+  cafeteriaPreference: string | null;
   essay: string | null;
   term: string | null;
   onboarding: ApplicantOnboardingView | null;
@@ -4267,6 +4289,19 @@ export const getPublicApplicationStatus = (token: string) =>
   request<PublicApplicationStatus>(
     `/applications/status/${encodeURIComponent(token)}`,
     { cache: "no-store" },
+  );
+export const getPublicPlanOptions = (token: string) =>
+  request<ApplicantPlanOptions>(
+    `/applications/preference-options/${encodeURIComponent(token)}`,
+    { cache: "no-store" },
+  );
+export const savePublicPlanPreference = (
+  token: string,
+  input: { housingOptionCode: string; cafeteriaOptionCode: string },
+) =>
+  request<{ housingPreference: string | null; cafeteriaPreference: string | null }>(
+    `/applications/preference/${encodeURIComponent(token)}`,
+    { method: "POST", body: JSON.stringify(input) },
   );
 
 export interface StaffMember {

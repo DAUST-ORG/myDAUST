@@ -656,6 +656,14 @@ export default function ApplicantDetailPage() {
                 k="Entrance score"
                 v={a.score != null ? `${a.score} / 20` : "—"}
               />
+              {(a.housingPreference || a.cafeteriaPreference) && (
+                <KV
+                  k="Plan picked"
+                  v={
+                    `${a.housingPreference ?? "—"} · ${a.cafeteriaPreference ?? "—"}`
+                  }
+                />
+              )}
             </Card>
             <Card title="Personal" action={editAction}>
               <KV k="Full name" v={a.name} />
@@ -755,7 +763,13 @@ export default function ApplicantDetailPage() {
       )}
       {confirmAcceptanceOpen && isAdmin && (
         <ApplicantBillingAcceptanceModal
-          applicant={{ id: a.id, name: a.name, score: a.score }}
+          applicant={{
+            id: a.id,
+            name: a.name,
+            score: a.score,
+            housingPreference: a.housingPreference,
+            cafeteriaPreference: a.cafeteriaPreference,
+          }}
           onClose={() => setConfirmAcceptanceOpen(false)}
           onConfirm={confirmAcceptance}
         />

@@ -22,9 +22,12 @@ import {
 } from "lucide-react";
 import {
   ApiError,
+  type ApplicantPlanOptions,
   type ApplicantProofStatus,
   type PublicApplicationStatus,
   getPublicApplicationStatus,
+  getPublicPlanOptions,
+  savePublicPlanPreference,
 } from "@/lib/api";
 import { formatDate, formatXof } from "@/lib/format";
 import styles from "./status.module.css";
@@ -392,7 +395,96 @@ function StatusView({ data }: { data: PublicApplicationStatus }) {
           </div>
         </aside>
       </div>
+
+      <PlanPicker />
     </article>
+  );
+}
+
+/**
+ * The accepted applicant picks their own housing/cafeteria plan here, up to the
+ * admissions deadline. The pick is a preference — staff apply it into the
+ * billing profile when preparing enrollment, so money never moves from this screen.
+ */
+function PlanPicker() {
+  const { token } = useParams<{ token: string }>();
+  const [options, setOptions] = useState<ApplicantPlanOptions | null>(null);
+  const [housing, setHousing] = useState("");
+  const [cafeteria, setCafeteria] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    getPublicPlanOptions(token)
+      .then((o) => {
+        setOptions(o);
+        setHousing(o.housingPreference ?? "");
+        setCafeteria(o.cafeteriaPreference ?? "");
+      })
+      .catch(() => setOptions(null));
+  }, [token]);
+
+  if (!options || (!options.open && !options.housingPreference)) return null;
+
+  async function save() {
+    if (!housing || !cafeteria || busy) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      await savePublicPlanPreference(token, {
+        housingOptionCode: housing,
+        cafeteriaOptionCode: cafeteria,
+      });
+      setNote("Your plan choice was saved. Admissions will apply it to your enrollment.");
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Could not save your choice.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={styles.planSection} aria-labelledby="plan-heading">
+      <p className={styles.eyebrow}>Housing & cafeteria</p>
+      <h2 id="plan-heading">Choose your plan</h2>
+      <p className={styles.planNote}>
+        {options.open
+          ? options.deadline
+            ? `Pick before ${formatDate(options.deadline)} — you can change your mind until then.`
+            : "Pick your plan — you can change your mind while picking stays open."
+          : "Plan picking is closed. Your saved choice below is what Admissions will use."}
+      </p>
+      <div className={styles.planGrid}>
+        <label className={styles.planField}>
+          Housing
+          <select value={housing} onChange={(e) => setHousing(e.target.value)} disabled={!options.open || busy}>
+            <option value="">— Select —</option>
+            {options.housingOptions.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.label} · {formatXof(o.amountXof)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.planField}>
+          Cafeteria
+          <select value={cafeteria} onChange={(e) => setCafeteria(e.target.value)} disabled={!options.open || busy}>
+            <option value="">— Select —</option>
+            {options.cafeteriaOptions.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.label} · {formatXof(o.amountXof)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {options.open && (
+        <button className={styles.planSave} onClick={save} disabled={!housing || !cafeteria || busy}>
+          {busy ? "Saving…" : "Save my plan"}
+        </button>
+      )}
+      {note && <p className={styles.planNote}>{note}</p>}
+    </section>
   );
 }
 

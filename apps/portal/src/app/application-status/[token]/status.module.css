@@ -666,3 +666,82 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+.planSection {
+  margin-top: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-xl);
+  padding: clamp(20px, 4vw, 32px);
+}
+
+.planSection h2 {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.planNote {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  color: var(--fg2);
+  line-height: 1.6;
+}
+
+.planGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .planGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.planField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg2);
+}
+
+.planField select {
+  padding: 11px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg1);
+  font-size: 14px;
+  font-family: var(--font-body);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.planSave {
+  margin-top: 16px;
+  padding: 12px 26px;
+  border: none;
+  border-radius: 6px;
+  background: var(--daust-orange);
+  color: #fff;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.planSave:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
