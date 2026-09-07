@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookMarked, Pencil, Plus, Trash2 } from "lucide-react";
+import { BookMarked, Network, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   type AdminCourseDetail,
   type AdminPrograms,
@@ -22,10 +24,12 @@ const SEMESTERS = ["fall", "spring", "summer"] as const;
 type Sem = (typeof SEMESTERS)[number];
 
 export default function AdminCoursesPage() {
+  const router = useRouter();
   const [data, setData] = useState<AdminPrograms | null>(null);
   const [termName, setTermName] = useState<string | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
   const [q, setQ] = useState("");
+  const [area, setArea] = useState<"courses" | "programs">("courses");
   const [modal, setModal] = useState<null | "new" | CatalogRow>(null);
   const [removing, setRemoving] = useState<CatalogRow | null>(null);
   const { sort, toggle, apply } = useSort({ key: "code", dir: "asc" });
@@ -65,19 +69,72 @@ export default function AdminCoursesPage() {
     });
   }, [data, q, apply, sectionCounts]);
 
+  const programs = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return (data?.programs ?? []).filter(
+      (p) => !needle || p.code.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle),
+    );
+  }, [data, q]);
+
+  const openCourse = (code: string) =>
+    router.push(`/admin/programs/courses/${encodeURIComponent(code)}`);
+
   return (
     <>
       <PageHeader
         eyebrow="Academic structure"
         title="Course Catalog"
-        subtitle={`Manage course definitions, credits and sections.${termName ? ` Section counts are for ${termName}.` : ""}`}
-        actions={<Button variant="primary" icon={<Plus size={15} />} onClick={() => setModal("new")}>New course</Button>}
+        subtitle={`Courses, programs and curriculum in one place.${termName ? ` Section counts are for ${termName}.` : ""}`}
+        actions={area === "courses" ? <Button variant="primary" icon={<Plus size={15} />} onClick={() => setModal("new")}>New course</Button> : undefined}
       />
 
-      <div style={{ marginBottom: 16 }}>
-        <SearchInput value={q} onChange={setQ} placeholder="Search catalog…" width={300} />
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        {(["courses", "programs"] as const).map((a) => (
+          <button
+            key={a}
+            onClick={() => setArea(a)}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 999,
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+              border: area === a ? "1px solid var(--daust-navy)" : "1px solid var(--border)",
+              background: area === a ? "var(--daust-navy)" : "var(--surface)",
+              color: area === a ? "#fff" : "var(--fg2)",
+            }}
+          >
+            {a === "courses" ? "Courses" : "Programs & Curriculum"}
+          </button>
+        ))}
       </div>
 
+      <div style={{ marginBottom: 16 }}>
+        <SearchInput value={q} onChange={setQ} placeholder={area === "courses" ? "Search catalog…" : "Search programs…"} width={300} />
+      </div>
+
+      {area === "programs" ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+          {programs.map((p) => (
+            <Link
+              key={p.code}
+              href={`/admin/programs/${encodeURIComponent(p.code)}`}
+              className="card"
+              style={{ margin: 0, textDecoration: "none", display: "block" }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Network size={18} color="var(--daust-navy)" />
+                <strong style={{ fontFamily: "ui-monospace, monospace", fontSize: 14 }}>{p.code}</strong>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 13.5, fontWeight: 600 }}>{p.name}</div>
+              <div className="muted" style={{ marginTop: 4, fontSize: 12.5 }}>Overview · courses · curriculum · students →</div>
+            </Link>
+          ))}
+          {programs.length === 0 && (
+            <EmptyState icon={<Network size={26} />} title="No programs match." note="Adjust the search." />
+          )}
+        </div>
+      ) : (
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ minWidth: 860 }}>
@@ -95,7 +152,13 @@ export default function AdminCoursesPage() {
             </thead>
             <tbody>
               {rows.map((c) => (
-                <tr key={c.code} className="sis-row">
+                <tr
+                  key={c.code}
+                  className="sis-row"
+                  onClick={() => openCourse(c.code)}
+                  style={{ cursor: "pointer" }}
+                  title="Open course details, sections and rules"
+                >
                   <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5, fontWeight: 600, color: "var(--daust-navy)" }}>{c.code}</td>
                   <td style={{ fontWeight: 600 }}>{c.title}</td>
                   <td><Badge tone="neutral">{c.department}</Badge></td>
@@ -103,7 +166,7 @@ export default function AdminCoursesPage() {
                   <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--fg3)" }}>{c.prereq ?? "—"}</td>
                   <td style={{ textAlign: "right" }}>{sectionCounts[c.code] ?? "—"}</td>
                   <td><Badge tone={c.status === "draft" ? "warning" : "success"}>{c.status === "draft" ? "Draft" : "Active"}</Badge></td>
-                  <td style={{ textAlign: "right" }}>
+                  <td style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
                     <span style={{ display: "inline-flex", gap: 4, justifyContent: "flex-end" }}>
                       <IconButton label="Edit course" onClick={() => setModal(c)}><Pencil size={15} /></IconButton>
                       <IconButton label="Delete course" tone="danger" onClick={() => setRemoving(c)}><Trash2 size={15} /></IconButton>
@@ -122,6 +185,7 @@ export default function AdminCoursesPage() {
           </table>
         </div>
       </div>
+      )}
 
       {modal && (
         <CourseModal

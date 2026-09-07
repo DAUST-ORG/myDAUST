@@ -257,14 +257,7 @@ export const REGISTRAR_NAV: PortalNav = {
       },
     ]),
     g("Policy & rules", [
-      { href: "/admin/rules", label: "Rule Engine", icon: GitBranch },
       { href: "/admin/grading-schemes", label: "Grading Schemes", icon: Scale },
-      {
-        href: "/admin/grade-approvals",
-        label: "Grade Approvals",
-        icon: ClipboardCheck,
-        badgeKey: "approvals",
-      },
     ]),
     g("Administration", [
       { href: "/admin/housing", label: "Housing", icon: Building2 },
@@ -311,6 +304,12 @@ export const DIRECTOR_NAV: PortalNav = {
       { href: "/director/users", label: "Users", icon: Users },
       { href: "/director/directory", label: "Directory", icon: BookUser },
       { href: "/director/settings", label: "System Settings", icon: Settings },
+      {
+        href: "/director/grade-approvals",
+        label: "Grade Approvals",
+        icon: ClipboardCheck,
+        badgeKey: "approvals",
+      },
     ]),
     g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
@@ -633,17 +632,13 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Academic Calendar & Terms",
     crumb: "Term configuration · Administration",
   },
-  "/admin/rules": {
-    title: "Rule Engine — Prerequisites & Co-requisites",
-    crumb: "Enrollment rule engine · Administration",
-  },
   "/admin/grading-schemes": {
     title: "Grading Scales & Schemes",
     crumb: "Grade scheme configuration · Administration",
   },
-  "/admin/grade-approvals": {
+  "/director/grade-approvals": {
     title: "Grade Approvals",
-    crumb: "Approve submitted grades · Administration",
+    crumb: "Approve submitted grades · Director",
   },
   "/admin/housing": {
     title: "Housing",
