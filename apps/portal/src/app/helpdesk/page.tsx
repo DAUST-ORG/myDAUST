@@ -205,7 +205,29 @@ export default function HelpdeskPage() {
 /** Map a user's home route (from `portalForRoles`) to the matching `PortalKey`
  *  for `PortalShell.portal`. The two encodings share an ordering so a single
  *  prefix walk is enough. */
+const KNOWN_PORTALS = new Set([
+  "director",
+  "registrar",
+  "admissions",
+  "finance",
+  "comms",
+  "faculty",
+  "it",
+  "infirmary",
+  "dining",
+  "parent",
+  "student",
+]);
 function resolvePortalKey(roles: string[]): PortalKey {
+  // Stay in the shell the viewer came from: a registrar clicking Helpdesk keeps
+  // the registrar sidebar instead of bouncing to the director home their admin
+  // role would otherwise resolve to.
+  try {
+    const last = window.localStorage.getItem("mydaust_last_portal");
+    if (last && KNOWN_PORTALS.has(last)) return last as PortalKey;
+  } catch {
+    /* private mode — fall through to role home */
+  }
   const home = portalForRoles(roles).home;
   if (home.startsWith("/director")) return "director";
   if (home.startsWith("/admin")) return "registrar";

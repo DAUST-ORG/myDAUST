@@ -53,9 +53,9 @@ export default function SettingsPage() {
   return (
     <>
       <p className="eyebrow">System</p>
-      <h1 className="page-title">Security & System</h1>
+      <h1 className="page-title">System Settings</h1>
       <p className="muted" style={{ marginTop: -6, marginBottom: 20 }}>
-        Institution configuration, fees and role assignment.
+        Institution configuration and fee references.
       </p>
 
       <div className="card" style={{ marginBottom: 16 }}>

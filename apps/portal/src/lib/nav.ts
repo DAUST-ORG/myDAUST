@@ -268,13 +268,6 @@ export const REGISTRAR_NAV: PortalNav = {
     ]),
     g("Administration", [
       { href: "/admin/housing", label: "Housing", icon: Building2 },
-      { href: "/admin/directory", label: "Directory", icon: BookUser },
-      {
-        href: "/admin/workbook-cutover-attestation",
-        label: "Cutover Attestation",
-        icon: ShieldCheck,
-      },
-      { href: "/admin/settings", label: "Security & System", icon: Settings },
     ]),
     g("Communication", [
       { href: "/admin/messages", label: "Messages", icon: Mail },
@@ -316,11 +309,8 @@ export const DIRECTOR_NAV: PortalNav = {
     ]),
     g("Administration", [
       { href: "/director/users", label: "Users", icon: Users },
-      {
-        href: "/director/workbook-cutover-attestation",
-        label: "Cutover Attestation",
-        icon: ShieldCheck,
-      },
+      { href: "/director/directory", label: "Directory", icon: BookUser },
+      { href: "/director/settings", label: "System Settings", icon: Settings },
     ]),
     g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
   ],
@@ -355,11 +345,6 @@ export const FINANCE_NAV: PortalNav = {
         label: "My Requests",
         icon: ClipboardCheck,
         badgeKey: "approvalRequests",
-      },
-      {
-        href: "/finance/workbook-cutover-attestation",
-        label: "Cutover Attestation",
-        icon: ShieldCheck,
       },
     ]),
     g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
@@ -436,11 +421,6 @@ export const ADMISSIONS_NAV: PortalNav = {
         href: "/admissions/fees",
         label: "Admissions Fees",
         icon: Receipt,
-      },
-      {
-        href: "/admissions/workbook-cutover-attestation",
-        label: "Cutover Attestation",
-        icon: ShieldCheck,
       },
     ]),
     g("Support", [{ href: "/helpdesk", label: "Helpdesk", icon: LifeBuoy }]),
@@ -665,21 +645,17 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
     title: "Grade Approvals",
     crumb: "Approve submitted grades · Administration",
   },
-  "/admin/directory": {
-    title: "Directory",
-    crumb: "Faculty & staff directory · Administration",
-  },
   "/admin/housing": {
     title: "Housing",
     crumb: "Annual room assignments · Administration",
   },
-  "/admin/workbook-cutover-attestation": {
-    title: "Reviewer Attestation",
-    crumb: "Workbook cutover · Administration",
+  "/director/directory": {
+    title: "Directory",
+    crumb: "Faculty & staff directory · Director",
   },
-  "/admin/settings": {
-    title: "Security & System",
-    crumb: "System configuration · Administration",
+  "/director/settings": {
+    title: "System Settings",
+    crumb: "System configuration · Director",
   },
   "/admin/messages": {
     title: "Messages",
@@ -717,10 +693,6 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/finance/payment-reviews": {
     title: "Payment Reviews",
     crumb: "Proof review and payment settings · Finance",
-  },
-  "/finance/workbook-cutover-attestation": {
-    title: "Reviewer Attestation",
-    crumb: "Workbook cutover · Finance",
   },
   // communications (site CMS)
   "/comms": { title: "Dashboard", crumb: "Public website · Communications" },
@@ -791,14 +763,6 @@ export const PAGE_META: Record<string, { title: string; crumb: string }> = {
   "/director/payments": {
     title: "Payment Verifications",
     crumb: "Collections assurance · Administration",
-  },
-  "/director/workbook-cutover-attestation": {
-    title: "Reviewer Attestation",
-    crumb: "Workbook cutover · Administration",
-  },
-  "/admissions/workbook-cutover-attestation": {
-    title: "Reviewer Attestation",
-    crumb: "Workbook cutover · Admissions",
   },
   "/finance/requests": {
     title: "My Requests",
