@@ -4,12 +4,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BedDouble, Building2, History, TriangleAlert } from "lucide-react";
 import {
   type AcademicYearRow,
+  type DormRow,
+  type DormsView,
   type HousingOperationsAssignment,
   type HousingOperationsView,
   assignHousingRoom,
+  createDorm,
+  deleteDormRoom,
   getAcademicYears,
+  getDorms,
   getHousingOperations,
   releaseHousingRoom,
+  saveDormRoom,
+  updateDorm,
 } from "@/lib/api";
 import {
   Badge,
@@ -52,6 +59,7 @@ export default function HousingOperationsPage() {
   const [reason, setReason] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState<"residents" | "dorms">("residents");
 
   useEffect(() => {
     getAcademicYears()
@@ -225,6 +233,29 @@ export default function HousingOperationsPage() {
       )}
 
       {view && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {(["residents", "dorms"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 999,
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: "pointer",
+                border: tab === t ? "1px solid var(--daust-navy)" : "1px solid var(--border)",
+                background: tab === t ? "var(--daust-navy)" : "var(--surface)",
+                color: tab === t ? "#fff" : "var(--fg2)",
+              }}
+            >
+              {t === "residents" ? "Residents" : "Dorms & rooms"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {view && tab === "residents" && (
         <>
           <div
             style={{
@@ -459,19 +490,23 @@ export default function HousingOperationsPage() {
                 </tbody>
               </table>
             </div>
-            {visible.length === 0 && (
-              <EmptyState
-                icon={<BedDouble size={24} />}
-                title={query ? "No matching assignments" : "No housing records"}
-                note={
-                  query
-                    ? "Try another student number, name, hall, or room."
-                    : `No annual housing assignments exist for ${view.academicYearLabel}.`
-                }
-              />
-            )}
-          </Card>
-        </>
+              {visible.length === 0 && (
+                <EmptyState
+                  icon={<BedDouble size={24} />}
+                  title={query ? "No matching assignments" : "No housing records"}
+                  note={
+                    query
+                      ? "Try another student number, name, hall, or room."
+                      : `No annual housing assignments exist for ${view.academicYearLabel}.`
+                  }
+                />
+              )}
+            </Card>
+          </>
+        )}
+
+      {view && tab === "dorms" && (
+        <DormsPanel academicYearLabel={view.academicYearLabel} />
       )}
 
       {loading && !view && (
@@ -596,6 +631,257 @@ export default function HousingOperationsPage() {
                 {actionError}
               </div>
             )}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/**
+ * The dorms themselves: buildings with floors, rooms and bed capacity, plus
+ * live per-room occupancy for the selected year. Resident assignment stays on
+ * the Residents tab; this tab owns the building registry.
+ */
+function DormsPanel({ academicYearLabel }: { academicYearLabel: string }) {
+  const [view, setView] = useState<DormsView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [showHallForm, setShowHallForm] = useState(false);
+  const [editingHall, setEditingHall] = useState<DormRow | null>(null);
+  const [hallName, setHallName] = useState("");
+  const [hallKind, setHallKind] = useState("");
+  const [hallBeds, setHallBeds] = useState("0");
+  const [roomHallId, setRoomHallId] = useState<string | null>(null);
+  const [roomFloor, setRoomFloor] = useState("0");
+  const [roomNo, setRoomNo] = useState("");
+  const [roomCapacity, setRoomCapacity] = useState("2");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setView(await getDorms(academicYearLabel));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not load dorms.");
+    }
+  }, [academicYearLabel]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  function openHallForm(hall?: DormRow) {
+    setEditingHall(hall ?? null);
+    setHallName(hall?.name ?? "");
+    setHallKind(hall?.kind ?? "");
+    setHallBeds(String(hall?.beds ?? 0));
+    setShowHallForm(true);
+    setError(null);
+  }
+
+  async function submitHall() {
+    if (!hallName.trim() || !hallKind.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (editingHall) {
+        await updateDorm(editingHall.id, {
+          name: hallName.trim(),
+          kind: hallKind.trim(),
+          beds: Number(hallBeds) || 0,
+        });
+        setNotice(`Dorm ${hallName.trim()} updated.`);
+      } else {
+        await createDorm({
+          name: hallName.trim(),
+          kind: hallKind.trim(),
+          beds: Number(hallBeds) || 0,
+        });
+        setNotice(`Dorm ${hallName.trim()} added. Add its floors and rooms below.`);
+      }
+      setShowHallForm(false);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the dorm.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitRoom(hallId: string) {
+    if (!roomNo.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await saveDormRoom(hallId, {
+        floor: Number(roomFloor) || 0,
+        roomNo: roomNo.trim(),
+        capacity: Number(roomCapacity) || 1,
+      });
+      setRoomNo("");
+      setRoomHallId(null);
+      setNotice(`Room ${roomNo.trim()} saved.`);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the room.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeRoom(roomId: string, roomNoLabel: string) {
+    if (!confirm(`Delete room ${roomNoLabel}? Only empty rooms can be deleted.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteDormRoom(roomId, academicYearLabel);
+      setNotice(`Room ${roomNoLabel} deleted.`);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete the room.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!view) return <p className="muted">Loading dorms…</p>;
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+        <Button variant="primary" icon={<Building2 size={15} />} onClick={() => openHallForm()}>
+          Add dorm
+        </Button>
+      </div>
+      {error && (
+        <Card>
+          <div role="alert" style={{ color: "var(--danger)" }}>{error}</div>
+        </Card>
+      )}
+      {notice && (
+        <p className="muted" role="status" style={{ fontSize: 13 }}>{notice}</p>
+      )}
+      {view.halls.length === 0 && (
+        <EmptyState
+          icon={<Building2 size={24} />}
+          title="No dorms yet"
+          note="Add the first dorm building, then its floors and rooms."
+        />
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {view.halls.map((hall) => (
+          <Card
+            key={hall.id}
+            title={`${hall.name} · ${hall.kind}`}
+            action={
+              <Button size="sm" variant="outline" onClick={() => openHallForm(hall)}>
+                Edit dorm
+              </Button>
+            }
+          >
+            <p className="muted" style={{ fontSize: 12.5, margin: "0 0 12px" }}>
+              {hall.floors > 0 ? `${hall.floors} floor${hall.floors === 1 ? "" : "s"} · ` : ""}
+              {hall.roomCount} managed room{hall.roomCount === 1 ? "" : "s"} ·{" "}
+              {hall.occupants} of {hall.managedCapacity} managed beds occupied
+              {hall.beds > 0 ? ` · building capacity ${hall.beds}` : ""}
+            </p>
+            {hall.rooms.length === 0 ? (
+              <p className="muted" style={{ fontSize: 13 }}>No rooms registered yet.</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Floor</th>
+                      <th>Room</th>
+                      <th>Beds</th>
+                      <th>Occupants</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: "right" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hall.rooms.map((room) => (
+                      <tr key={room.id}>
+                        <td>{room.floor}</td>
+                        <td style={{ fontWeight: 600 }}>{room.roomNo}</td>
+                        <td>{room.capacity}</td>
+                        <td>{room.occupants}</td>
+                        <td>
+                          <Badge tone={room.full ? "error" : "success"}>
+                            {room.full ? "Full" : "Open"}
+                          </Badge>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy || room.occupants > 0}
+                            title={room.occupants > 0 ? "Occupied rooms cannot be deleted" : "Delete room"}
+                            onClick={() => void removeRoom(room.id, room.roomNo)}
+                          >
+                            Delete
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {roomHallId === hall.id ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, alignItems: "flex-end" }}>
+                <Field label="Floor">
+                  <Input value={roomFloor} onChange={setRoomFloor} placeholder="0" />
+                </Field>
+                <Field label="Room no">
+                  <Input value={roomNo} onChange={setRoomNo} placeholder="e.g. A-12" />
+                </Field>
+                <Field label="Beds">
+                  <Input value={roomCapacity} onChange={setRoomCapacity} placeholder="2" />
+                </Field>
+                <Button variant="navy" size="sm" disabled={busy || !roomNo.trim()} onClick={() => void submitRoom(hall.id)}>
+                  Save room
+                </Button>
+                <Button size="sm" onClick={() => { setRoomHallId(null); setRoomNo(""); }}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 12 }}>
+                <Button size="sm" variant="outline" onClick={() => { setRoomHallId(hall.id); setRoomFloor("0"); setRoomNo(""); setRoomCapacity("2"); }}>
+                  Add room
+                </Button>
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+
+      {showHallForm && (
+        <Modal
+          open
+          onClose={() => !busy && setShowHallForm(false)}
+          title={editingHall ? `Edit dorm · ${editingHall.name}` : "Add dorm"}
+          width={480}
+          footer={
+            <>
+              <Button onClick={() => setShowHallForm(false)} disabled={busy}>Cancel</Button>
+              <Button variant="navy" onClick={() => void submitHall()} disabled={busy || !hallName.trim() || !hallKind.trim()}>
+                {busy ? "Saving…" : editingHall ? "Save dorm" : "Add dorm"}
+              </Button>
+            </>
+          }
+        >
+          <div style={{ display: "grid", gap: 14 }}>
+            <Field label="Dorm name">
+              <Input value={hallName} onChange={setHallName} placeholder="e.g. Baobab Hall" />
+            </Field>
+            <Field label="Kind">
+              <Input value={hallKind} onChange={setHallKind} placeholder="e.g. First-year · Mixed" />
+            </Field>
+            <Field label="Building bed capacity">
+              <Input value={hallBeds} onChange={setHallBeds} placeholder="0" />
+            </Field>
           </div>
         </Modal>
       )}

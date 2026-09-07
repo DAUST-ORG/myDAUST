@@ -5181,6 +5181,61 @@ export const releaseHousingRoom = (
     `/registrar/housing/${encodeURIComponent(assignmentId)}/release`,
     { method: "POST", body: JSON.stringify(input) },
   );
+export interface DormRoomRow {
+  id: string;
+  floor: number;
+  roomNo: string;
+  capacity: number;
+  note: string | null;
+  occupants: number;
+  full: boolean;
+}
+export interface DormRow {
+  id: string;
+  name: string;
+  kind: string;
+  beds: number;
+  color: string;
+  floors: number;
+  roomCount: number;
+  managedCapacity: number;
+  occupants: number;
+  rooms: DormRoomRow[];
+}
+export interface DormsView {
+  academicYearLabel: string;
+  halls: DormRow[];
+}
+export const getDorms = (academicYearLabel?: string) =>
+  request<DormsView>(
+    `/registrar/housing/dorms${academicYearLabel ? `?academicYearLabel=${encodeURIComponent(academicYearLabel)}` : ""}`,
+  );
+export const createDorm = (input: { name: string; kind: string; beds: number; color?: string }) =>
+  request(`/registrar/housing/dorms`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export const updateDorm = (
+  id: string,
+  input: { name?: string; kind?: string; beds?: number; color?: string },
+) =>
+  request(`/registrar/housing/dorms/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+export const saveDormRoom = (
+  hallId: string,
+  input: { floor: number; roomNo: string; capacity: number; note?: string | null },
+) =>
+  request(`/registrar/housing/dorms/${encodeURIComponent(hallId)}/rooms`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export const deleteDormRoom = (roomId: string, academicYearLabel?: string) =>
+  request<{ ok: boolean }>(
+    `/registrar/housing/rooms/${encodeURIComponent(roomId)}${academicYearLabel ? `?academicYearLabel=${encodeURIComponent(academicYearLabel)}` : ""}`,
+    { method: "DELETE" },
+  );
 
 export interface AcademicCatalogRevisionView {
   id: string;
