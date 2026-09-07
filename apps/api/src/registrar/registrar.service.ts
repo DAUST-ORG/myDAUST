@@ -1223,6 +1223,10 @@ export class RegistrarService {
 
   async listTerms() {
     const terms = await this.prisma.term.findMany({
+      // The "2026–2027 annual workbook billing" row is a finance pseudo-term, not
+      // a teaching term: it must never appear on the calendar, in registration
+      // picks, or in section scheduling.
+      where: { NOT: { semester: "Annual" } },
       orderBy: { startDate: "asc" },
       include: { academicYear: true },
     });
@@ -1298,6 +1302,11 @@ export class RegistrarService {
         : null;
       if (input.termId && !term) {
         throw new NotFoundException("Registration term not found");
+      }
+      if (term?.semester === "Annual") {
+        throw new BadRequestException(
+          "The annual billing pseudo-term cannot be a registration term",
+        );
       }
       if (
         input.recommendationsEnabled &&
