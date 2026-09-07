@@ -8,7 +8,6 @@ import {
   BadgeCheck,
   Check,
   CheckCircle2,
-  Clock,
   Copy,
   ExternalLink,
   Flag,
@@ -32,11 +31,12 @@ import {
   getAdminPrograms,
   resendApplicantAcceptanceEmail,
   rotateApplicantOnboardingLink,
+  sendApplicantStaleNudge,
   setApplicantStage,
 } from "@/lib/api";
 import { formatDate, formatDateTime, formatXof } from "@/lib/format";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Avatar, Badge, type BadgeTone, Modal, Tabs } from "@/components/ui";
+import { Avatar, Badge, type BadgeTone, Modal } from "@/components/ui";
 import { useAuth } from "@/lib/use-auth";
 import { ApplicationModal, type ProgramOption } from "../ApplicationModal";
 import { NotesPanel } from "./NotesPanel";
@@ -78,13 +78,14 @@ function nextStage(stage: string): string | null {
   return i >= 0 && i < STAGES.length - 1 ? STAGES[i + 1]! : null;
 }
 
-// A single, non-overlapping forward action per stage (labels lean on the design's
-// Submit-for-review / Admit / Confirm vocabulary without renaming the stored enum).
+// A single, non-overlapping forward action per stage. Interview admits directly —
+// there is no separate "offer" step in the working flow (the server still records
+// the offer instant on the way through so acceptance stays valid).
 const ADVANCE_LABEL: Record<string, string> = {
   submitted: "Submit for review",
   review: "Move to interview",
-  interview: "Make offer",
-  offer: "Mark accepted",
+  interview: "Admit",
+  offer: "Accept…",
 };
 
 export default function ApplicantDetailPage() {
@@ -98,7 +99,6 @@ export default function ApplicantDetailPage() {
   const canManageOnboarding =
     (me?.roles.includes("admin") || me?.roles.includes("registrar")) ?? false;
   const [a, setA] = useState<ApplicantDetail | null>(null);
-  const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState(false);
   const [confirmAcceptanceOpen, setConfirmAcceptanceOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -144,6 +144,66 @@ export default function ApplicantDetailPage() {
           ? e.message
           : "Could not update the application stage.",
       );
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  /** Step back: interview→review, review→submitted, offer→interview, rejected→review. */
+  async function moveBack() {
+    if (!a || busyAction !== null) return;
+    const target =
+      a.stage === "rejected"
+        ? "review"
+        : STAGES[STAGES.indexOf(a.stage) - 1];
+    if (!target) return;
+    await move(target);
+  }
+
+  /**
+   * Admit from interview (or accept from offer): officers record the offer on the
+   * way through, admins land straight in the billing modal.
+   */
+  async function admit() {
+    if (!a || busyAction !== null) return;
+    if (a.stage === "offer") {
+      if (!isAdmin) return;
+      setConfirmAcceptanceOpen(true);
+      return;
+    }
+    setErr(null);
+    setNotice(null);
+    setBusyAction("offer");
+    try {
+      await setApplicantStage(id, "offer");
+      load();
+      if (isAdmin) setConfirmAcceptanceOpen(true);
+    } catch (e) {
+      setErr(
+        e instanceof Error
+          ? e.message
+          : "Could not update the application stage.",
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function nudge() {
+    if (!a || busyAction !== null) return;
+    if (!confirm(`Send the stale-application nudge to ${a.email}?`)) return;
+    setErr(null);
+    setNotice(null);
+    setBusyAction("nudge");
+    try {
+      const { sent } = await sendApplicantStaleNudge(id);
+      setNotice(
+        sent
+          ? "Stale nudge sent."
+          : "Nudge recorded, but email delivery failed.",
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not send the nudge.");
     } finally {
       setBusyAction(null);
     }
@@ -203,16 +263,22 @@ export default function ApplicantDetailPage() {
   if (!a) return <p className="muted">Loading…</p>;
 
   const reachedIdx = a.stage === "rejected" ? -1 : STAGES.indexOf(a.stage);
-  const timeline: [string, boolean][] = [
-    ["Application submitted", true],
-    ["Under academic review", reachedIdx >= 1],
-    ["Interview", reachedIdx >= 2],
-    ["Offer extended", reachedIdx >= 3],
-    [
-      a.stage === "rejected" ? "Application rejected" : "Application accepted",
-      reachedIdx >= 4 || a.stage === "rejected",
-    ],
-  ];
+  const canEdit = !a.onboarding || a.onboarding.status === "not_started";
+  const editAction = canEdit ? (
+    <button
+      onClick={() => setEditing(true)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        fontSize: 12.5,
+        fontWeight: 600,
+        color: "var(--fg3)",
+      }}
+    >
+      <Pencil size={13} /> Edit
+    </button>
+  ) : undefined;
 
   return (
     <>
@@ -265,10 +331,26 @@ export default function ApplicantDetailPage() {
               <Pencil size={15} /> Edit
             </button>
           )}
+          {(reachedIdx > 0 || a.stage === "rejected") &&
+            a.stage !== "accepted" && (
+              <button
+                onClick={moveBack}
+                disabled={busyAction !== null}
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+                title={
+                  a.stage === "rejected"
+                    ? "Reopen the file back into review"
+                    : `Move back to ${STAGE_LABEL[STAGES[reachedIdx - 1]!] ?? "previous"}`
+                }
+              >
+                <ArrowLeft size={15} /> Back
+              </button>
+            )}
           {a.stage !== "rejected" && a.stage !== "accepted" && (
             <>
               <button
                 onClick={() => move("rejected")}
+                disabled={busyAction !== null}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -276,18 +358,26 @@ export default function ApplicantDetailPage() {
                   color: "var(--danger)",
                 }}
               >
-                <X size={15} /> Reject
+                <X size={15} /> Deny
               </button>
-              {nextStage(a.stage) &&
-                (nextStage(a.stage) !== "accepted" || isAdmin) && (
+              {(a.stage === "interview" || a.stage === "offer") && (
+                <button
+                  className="primary"
+                  disabled={busyAction !== null}
+                  onClick={admit}
+                  style={{ display: "flex", alignItems: "center", gap: 6 }}
+                >
+                  <Check size={15} />{" "}
+                  {busyAction ? "Saving…" : (ADVANCE_LABEL[a.stage] ?? "Advance")}
+                </button>
+              )}
+              {a.stage !== "interview" &&
+                a.stage !== "offer" &&
+                nextStage(a.stage) && (
                   <button
                     className="primary"
                     disabled={busyAction !== null}
-                    onClick={() =>
-                      nextStage(a.stage) === "accepted"
-                        ? setConfirmAcceptanceOpen(true)
-                        : move(nextStage(a.stage)!)
-                    }
+                    onClick={() => move(nextStage(a.stage)!)}
                     style={{ display: "flex", alignItems: "center", gap: 6 }}
                   >
                     <Check size={15} />{" "}
@@ -296,6 +386,14 @@ export default function ApplicantDetailPage() {
                       : (ADVANCE_LABEL[a.stage] ?? "Advance")}
                   </button>
                 )}
+              <button
+                onClick={nudge}
+                disabled={busyAction !== null}
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+                title="Email the applicant that their file is going stale"
+              >
+                <Mail size={15} /> Nudge
+              </button>
             </>
           )}
           {isAdmin &&
@@ -528,26 +626,15 @@ export default function ApplicantDetailPage() {
         />
       )}
 
-      <div style={{ marginTop: 22 }}>
-        <Tabs
-          tabs={[
-            { value: "overview", label: "Overview" },
-            { value: "timeline", label: "Timeline" },
-          ]}
-          active={tab}
-          onChange={setTab}
-        />
-      </div>
-
-      {tab === "overview" && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-            gap: 16,
-            alignItems: "start",
-          }}
-        >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+          gap: 16,
+          alignItems: "start",
+          marginTop: 22,
+        }}
+      >
           <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
           <div
             style={{
@@ -557,7 +644,7 @@ export default function ApplicantDetailPage() {
               alignItems: "start",
             }}
           >
-            <Card title="Application">
+            <Card title="Application" action={editAction}>
               <KV k="Application ID" v={a.id.slice(0, 8)} />
               <KV k="Admission term" v={a.term ?? "—"} />
               <KV
@@ -570,7 +657,7 @@ export default function ApplicantDetailPage() {
                 v={a.score != null ? `${a.score} / 20` : "—"}
               />
             </Card>
-            <Card title="Personal">
+            <Card title="Personal" action={editAction}>
               <KV k="Full name" v={a.name} />
               <KV k="Date of birth" v={a.dateOfBirth ?? "—"} />
               <KV k="Gender" v={a.gender ?? "—"} />
@@ -579,7 +666,7 @@ export default function ApplicantDetailPage() {
               <KV k="Email" v={a.email} />
               <KV k="Phone" v={a.phone ?? "—"} />
             </Card>
-            <Card title="Academic background">
+            <Card title="Academic background" action={editAction}>
               <KV k="Applying from" v={a.origin ?? "—"} />
               <KV
                 k={
@@ -590,12 +677,12 @@ export default function ApplicantDetailPage() {
                 v={a.school ?? "—"}
               />
             </Card>
-            <Card title="Parent / guardian">
+            <Card title="Parent / guardian" action={editAction}>
               <KV k="Name" v={a.parentName ?? "—"} />
               <KV k="Phone" v={a.parentPhone ?? "—"} />
               <KV k="Email" v={a.parentEmail ?? "—"} />
             </Card>
-            <Card title="Health & other">
+            <Card title="Health & other" action={editAction}>
               <KV k="Allergies" v={a.allergies ?? "—"} />
               <KV k="Heard about DAUST via" v={a.source ?? "—"} />
               {a.sourceDetail && (
@@ -622,68 +709,6 @@ export default function ApplicantDetailPage() {
           </div>
           <NotesPanel applicantId={a.id} />
         </div>
-      )}
-
-      {tab === "timeline" && (
-        <Card title="Application timeline">
-          {timeline.map(([label, done], i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                gap: 14,
-                paddingBottom: i < timeline.length - 1 ? 16 : 0,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                }}
-              >
-                <span
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: "50%",
-                    background: "var(--bg-subtle)",
-                    border: "1px solid var(--border)",
-                    color: done ? "var(--success)" : "var(--fg3)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  {done ? <CheckCircle2 size={15} /> : <Clock size={15} />}
-                </span>
-                {i < timeline.length - 1 && (
-                  <span
-                    style={{
-                      width: 1,
-                      flex: 1,
-                      minHeight: 16,
-                      background: "var(--border)",
-                      marginTop: 2,
-                    }}
-                  />
-                )}
-              </div>
-              <div
-                style={{
-                  paddingTop: 5,
-                  fontSize: 13.5,
-                  fontWeight: 600,
-                  color: done ? "var(--fg1)" : "var(--fg3)",
-                }}
-              >
-                {label}
-              </div>
-            </div>
-          ))}
-        </Card>
-      )}
 
       {editing && (
         <ApplicationModal
@@ -1461,23 +1486,36 @@ function Stat({
 
 function Card({
   title,
+  action,
   children,
 }: {
   title: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="card" style={{ margin: 0 }}>
-      <h4
+      <div
         style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
           margin: "0 0 12px",
-          fontFamily: "var(--font-display)",
-          fontSize: 14.5,
-          fontWeight: 700,
         }}
       >
-        {title}
-      </h4>
+        <h4
+          style={{
+            margin: 0,
+            fontFamily: "var(--font-display)",
+            fontSize: 14.5,
+            fontWeight: 700,
+          }}
+        >
+          {title}
+        </h4>
+        {action}
+      </div>
       {children}
     </div>
   );
