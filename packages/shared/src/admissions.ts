@@ -94,6 +94,35 @@ export function referralDetailKind(
 /** Fee items the admissions office owns (editable outside the finance approval workflow). */
 export const ADMISSIONS_FEE_KEYS = ["application_fee", "insurance"] as const;
 
+/**
+ * Accepted applicants pick their housing/cafeteria plan themselves, up to a
+ * deadline. The pick is a *preference*: staff apply it into the billing profile
+ * at accept (the modal prefills from it), so money still moves only through the
+ * approval-backed flow.
+ */
+const planOptionCode = z
+  .string()
+  .trim()
+  .regex(/^[a-z][a-z0-9_]{0,39}$/);
+
+export const ApplicantPlanPreferenceInput = z.object({
+  housingOptionCode: planOptionCode,
+  cafeteriaOptionCode: planOptionCode,
+});
+export type ApplicantPlanPreferenceInput = z.infer<
+  typeof ApplicantPlanPreferenceInput
+>;
+
+export const PlanPickingConfigInput = z.object({
+  enabled: z.boolean(),
+  /** ISO date (YYYY-MM-DD); picks close at end of that Dakar day. Null = no deadline. */
+  deadline: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullish(),
+});
+export type PlanPickingConfigInput = z.infer<typeof PlanPickingConfigInput>;
+
 // --- Director-editable config contracts ---
 
 export const UpdateFeeInput = z.object({

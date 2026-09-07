@@ -1,5 +1,5 @@
 import { Body, Controller, ForbiddenException, Get, Param, Patch } from "@nestjs/common";
-import { ADMISSIONS_FEE_KEYS, NotificationRecipientsInput, UpdateFeeInput, EmailTemplatesInput } from "@mydaust/shared";
+import { ADMISSIONS_FEE_KEYS, NotificationRecipientsInput, PlanPickingConfigInput, UpdateFeeInput, EmailTemplatesInput } from "@mydaust/shared";
 import { type AuthUser, CurrentUser } from "../auth/current-user.js";
 import { Public, Roles } from "../auth/decorators.js";
 import { AppConfigService } from "./app-config.service.js";
@@ -62,5 +62,22 @@ export class AppConfigController {
   setEmailTemplates(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const templates = EmailTemplatesInput.parse(body);
     return this.config.setEmailTemplates(templates, user.personId);
+  }
+
+  // Applicant plan-picking window (admissions office owns it).
+  @Get("plan-picking")
+  @Roles("admin", "admissions")
+  planPicking() {
+    return this.config.planPicking();
+  }
+
+  @Patch("plan-picking")
+  @Roles("admin", "admissions")
+  setPlanPicking(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    const { enabled, deadline } = PlanPickingConfigInput.parse(body);
+    return this.config.setPlanPicking(
+      { enabled, deadline: deadline ?? null },
+      user.personId,
+    );
   }
 }

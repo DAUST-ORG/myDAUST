@@ -1566,6 +1566,9 @@ model Applicant {
   allergies                     String?
   source                        String? // how they heard about DAUST
   sourceDetail                  String? // follow-up: person's name (referral) or site/page (online)
+  // Self-picked housing/cafeteria plan (preference until staff apply it at accept).
+  housingPreference             String?
+  cafeteriaPreference           String?
   essay                         String?
   term                          String? // intake term, e.g. "Fall 2026"
   piSpiRequests                 PiSpiRequest[]
