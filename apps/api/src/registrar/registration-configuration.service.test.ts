@@ -140,12 +140,14 @@ describe("RegistrarService registration configuration", () => {
     {
       label: "academic year",
       term: { ...term, academicYearId: null, academicYear: null },
+      pattern: /academic year.*Fall, Spring, or Summer/i,
     },
     {
       label: "supported semester",
       term: { ...term, semester: "Annual" },
+      pattern: /annual billing pseudo-term/i,
     },
-  ])("rejects recommendation enablement without a $label", async ({ term }) => {
+  ])("rejects recommendation enablement without a $label", async ({ term, pattern }) => {
     const tx = {
       $queryRaw: vi.fn(async () => []),
       appSetting: {
@@ -167,7 +169,7 @@ describe("RegistrarService registration configuration", () => {
         recommendationsEnabled: true,
         reason: "Enable recommendations for registration",
       }),
-    ).rejects.toThrow(/academic year.*Fall, Spring, or Summer/i);
+    ).rejects.toThrow(pattern);
     expect(tx.appSetting.upsert).not.toHaveBeenCalled();
     expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
