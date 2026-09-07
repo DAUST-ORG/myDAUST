@@ -471,7 +471,86 @@ export class AdmissionsService {
       });
       return row;
     });
+    // A rejection closes the applicant's file, so the decision email goes out
+    // with the transition (best-effort, like every other applicant email).
+    if (stage === "rejected") {
+      await this.sendStageEmail(updated.id, "rejected", actorId).catch((e) =>
+        this.logger.warn(`rejection email failed: ${String(e)}`),
+      );
+    }
     return updated;
+  }
+
+  /**
+   * Manual "your file is going stale" nudge. There is no automatic stale
+   * detector — an officer decides the file has sat too long and pings the
+   * applicant with the stale template. Audited; never throws on mail failure.
+   */
+  async sendStaleNudge(actorId: string, id: string) {
+    const applicant = await this.prisma.applicant.findUnique({ where: { id } });
+    if (!applicant) throw new NotFoundException("Applicant not found");
+    if (applicant.stage === "rejected" || applicant.stage === "accepted") {
+      throw new BadRequestException(
+        "A closed file cannot be nudged as stale",
+      );
+    }
+    const sent = await this.sendStageEmail(id, "stale", actorId).catch((e) => {
+      this.logger.warn(`stale nudge failed: ${String(e)}`);
+      return false;
+    });
+    return { sent };
+  }
+
+  /**
+   * Sends the rejected/stale template for an applicant. Returns whether the
+   * mailer accepted it; audit-logs the send either way.
+   */
+  private async sendStageEmail(
+    applicantId: string,
+    kind: "rejected" | "stale",
+    actorId: string,
+  ): Promise<boolean> {
+    const applicant = await this.prisma.applicant.findUnique({
+      where: { id: applicantId },
+    });
+    if (!applicant) throw new NotFoundException("Applicant not found");
+    const appFee = await this.appConfig.applicationFee();
+    const templates = await this.appConfig.emailTemplates();
+    const subject = templates[`${kind}Subject`];
+    const body = templates[`${kind}Body`];
+    const cc = templates[`${kind}Cc`]?.length
+      ? templates[`${kind}Cc`]
+      : undefined;
+    const bcc = templates[`${kind}Bcc`]?.length
+      ? templates[`${kind}Bcc`]
+      : undefined;
+    const interpolate = (str: string) =>
+      str
+        .replace(/\{\{firstName\}\}/g, esc(applicant.firstName))
+        .replace(/\{\{lastName\}\}/g, esc(applicant.lastName))
+        .replace(/\{\{appFee\}\}/g, appFee.toLocaleString("en-US"));
+    try {
+      await this.mail.send({
+        to: applicant.email,
+        cc,
+        bcc,
+        subject: interpolate(subject),
+        html: interpolate(body),
+      });
+    } catch (e) {
+      this.logger.warn(`${kind} email failed: ${String(e)}`);
+      return false;
+    }
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Applicant",
+        entityId: applicantId,
+        action:
+          kind === "rejected" ? "rejection-email-sent" : "stale-nudge-sent",
+        actorId,
+      },
+    });
+    return true;
   }
 
   /**

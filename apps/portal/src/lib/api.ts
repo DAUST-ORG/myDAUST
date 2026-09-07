@@ -4159,6 +4159,11 @@ export const resendApplicantAcceptanceEmail = (id: string) =>
     `/admissions/applicants/${id}/acceptance-email/resend`,
     { method: "POST", body: "{}" },
   );
+export const sendApplicantStaleNudge = (id: string) =>
+  request<{ sent: boolean }>(`/admissions/applicants/${id}/stale-nudge`, {
+    method: "POST",
+    body: "{}",
+  });
 export interface ApplicantDetail {
   id: string;
   firstName: string;

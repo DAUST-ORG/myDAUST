@@ -120,6 +120,14 @@ export const EmailTemplatesInput = z.object({
   acceptanceBody: z.string().min(1).max(10000),
   acceptanceCc: z.array(z.string()).optional().default(["admissions@daust.org"]),
   acceptanceBcc: z.array(z.string()).optional().default(["sndao@daust.org"]),
+  rejectedSubject: z.string().min(1).max(200),
+  rejectedBody: z.string().min(1).max(10000),
+  rejectedCc: z.array(z.string()).optional().default(["admissions@daust.org"]),
+  rejectedBcc: z.array(z.string()).optional().default(["sndao@daust.org"]),
+  staleSubject: z.string().min(1).max(200),
+  staleBody: z.string().min(1).max(10000),
+  staleCc: z.array(z.string()).optional().default(["admissions@daust.org"]),
+  staleBcc: z.array(z.string()).optional().default(["sndao@daust.org"]),
 });
 export type EmailTemplatesInput = z.infer<typeof EmailTemplatesInput>;
 
@@ -138,6 +146,20 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplatesInput = {
 <p>Office of Admissions, DAUST</p>`,
   acceptanceCc: ["admissions@daust.org"],
   acceptanceBcc: ["sndao@daust.org"],
+  rejectedSubject: "Update on your DAUST application",
+  rejectedBody: `<h2>Hello {{firstName}},</h2>
+<p>Thank you for your interest in DAUST. After careful review, we are unable to offer you admission for this intake.</p>
+<p>You are welcome to apply again next year. Our admissions team remains available for guidance.</p>
+<p>Office of Admissions, DAUST</p>`,
+  rejectedCc: ["admissions@daust.org"],
+  rejectedBcc: ["sndao@daust.org"],
+  staleSubject: "Your DAUST application needs attention",
+  staleBody: `<h2>Hello {{firstName}},</h2>
+<p>Your application to DAUST has been sitting idle and may be closed soon.</p>
+<p>Please complete the pending steps or reply to this email so our admissions team can keep your file moving.</p>
+<p>Office of Admissions, DAUST</p>`,
+  staleCc: ["admissions@daust.org"],
+  staleBcc: ["sndao@daust.org"],
 };
 
 /** Published cost of attendance (integer XOF; ranges keep min/max). Source: vitrine design. */

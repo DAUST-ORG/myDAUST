@@ -156,6 +156,11 @@ export class AdminAdmissionsController {
     return this.admissions.adminResendAcceptance(user.personId, id);
   }
 
+  @Post("applicants/:id/stale-nudge")
+  staleNudge(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.admissions.sendStaleNudge(user.personId, id);
+  }
+
   @Post("applicants/:id/onboarding-link/rotate")
   // Mints a bearer payment link for the outstanding balance and cancels the previous one.
   @Roles("admin", "registrar")

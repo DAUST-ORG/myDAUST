@@ -16,6 +16,31 @@ const toArray = (str: string) =>
     .filter(Boolean);
 const toStr = (arr?: string[]) => (arr || []).join(", ");
 
+type Kind = "application" | "acceptance" | "rejected" | "stale";
+
+const SECTIONS: { kind: Kind; title: string; note: string }[] = [
+  {
+    kind: "application",
+    title: "Application received email",
+    note: "Sent the moment an application arrives, with the fee payment link.",
+  },
+  {
+    kind: "acceptance",
+    title: "Acceptance email",
+    note: "Sent when an applicant is accepted, with the private status link.",
+  },
+  {
+    kind: "rejected",
+    title: "Rejection email",
+    note: "Sent automatically the moment a file is moved to Rejected.",
+  },
+  {
+    kind: "stale",
+    title: "Stale application nudge",
+    note: "Sent when an officer pings a file that has sat too long (detail page → Send stale nudge).",
+  },
+];
+
 interface Templates {
   applicationSubject: string;
   applicationBody: string;
@@ -25,32 +50,98 @@ interface Templates {
   acceptanceBody: string;
   acceptanceCc: string[];
   acceptanceBcc: string[];
+  rejectedSubject: string;
+  rejectedBody: string;
+  rejectedCc: string[];
+  rejectedBcc: string[];
+  staleSubject: string;
+  staleBody: string;
+  staleCc: string[];
+  staleBcc: string[];
 }
 
-const keyOf = (t: Templates, cc: string, bcc: string, accCc: string, accBcc: string) =>
-  JSON.stringify({ ...t, applicationCc: toArray(cc), applicationBcc: toArray(bcc), acceptanceCc: toArray(accCc), acceptanceBcc: toArray(accBcc) });
+const EMPTY: Templates = {
+  applicationSubject: "",
+  applicationBody: "",
+  applicationCc: [],
+  applicationBcc: [],
+  acceptanceSubject: "",
+  acceptanceBody: "",
+  acceptanceCc: [],
+  acceptanceBcc: [],
+  rejectedSubject: "",
+  rejectedBody: "",
+  rejectedCc: [],
+  rejectedBcc: [],
+  staleSubject: "",
+  staleBody: "",
+  staleCc: [],
+  staleBcc: [],
+};
+
+function snapshot(t: Templates, cc: Record<Kind, { cc: string; bcc: string }>) {
+  return JSON.stringify({
+    ...t,
+    applicationCc: toArray(cc.application.cc),
+    applicationBcc: toArray(cc.application.bcc),
+    acceptanceCc: toArray(cc.acceptance.cc),
+    acceptanceBcc: toArray(cc.acceptance.bcc),
+    rejectedCc: toArray(cc.rejected.cc),
+    rejectedBcc: toArray(cc.rejected.bcc),
+    staleCc: toArray(cc.stale.cc),
+    staleBcc: toArray(cc.stale.bcc),
+  });
+}
+
+function fieldLabel(kind: Kind, field: "Subject" | "Body" | "CC" | "BCC") {
+  const name =
+    kind === "application"
+      ? "Application"
+      : kind === "acceptance"
+        ? "Acceptance"
+        : kind === "rejected"
+          ? "Rejection"
+          : "Stale nudge";
+  return `${name} ${field.toLowerCase()}`;
+}
+
+function diffSummary(before: Templates, after: Templates): { label: string; from: string; to: string }[] {
+  const rows: { label: string; from: string; to: string }[] = [];
+  (Object.keys(EMPTY) as (keyof Templates)[]).forEach((key) => {
+    const m = key.match(/^(application|acceptance|rejected|stale)(Subject|Body|Cc|Bcc)$/);
+    if (!m) return;
+    const kind = m[1] as Kind;
+    const field = (m[2] === "Cc" ? "CC" : m[2] === "Bcc" ? "BCC" : m[2]) as
+      | "Subject"
+      | "Body"
+      | "CC"
+      | "BCC";
+    const a = Array.isArray(before[key]) ? toStr(before[key] as string[]) : (before[key] as string);
+    const b = Array.isArray(after[key]) ? toStr(after[key] as string[]) : (after[key] as string);
+    if (a !== b) rows.push({ label: fieldLabel(kind, field), from: a, to: b });
+  });
+  return rows;
+}
+
+const clip = (s: string, n = 140) =>
+  s.length > n ? `${s.slice(0, n)}…` : s || "—";
 
 export default function AdmissionsTemplatesPage() {
   const [allowed, setAllowed] = useState<boolean | null>(null);
+  const [t, setT] = useState<Templates>(EMPTY);
   const [saved, setSaved] = useState<Templates | null>(null);
-  const [savedCc, setSavedCc] = useState({ appCc: "", appBcc: "", accCc: "", accBcc: "" });
-  const [t, setT] = useState<Templates>({
-    applicationSubject: "",
-    applicationBody: "",
-    applicationCc: [],
-    applicationBcc: [],
-    acceptanceSubject: "",
-    acceptanceBody: "",
-    acceptanceCc: [],
-    acceptanceBcc: [],
+  const [cc, setCc] = useState<Record<Kind, { cc: string; bcc: string }>>({
+    application: { cc: "", bcc: "" },
+    acceptance: { cc: "", bcc: "" },
+    rejected: { cc: "", bcc: "" },
+    stale: { cc: "", bcc: "" },
   });
-  const [appCc, setAppCc] = useState("");
-  const [appBcc, setAppBcc] = useState("");
-  const [accCc, setAccCc] = useState("");
-  const [accBcc, setAccBcc] = useState("");
+  const [savedCc, setSavedCc] = useState(cc);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [showSaved, setShowSaved] = useState(false);
+  const [changes, setChanges] = useState<
+    { label: string; from: string; to: string }[] | null
+  >(null);
 
   useEffect(() => {
     getMe()
@@ -69,48 +160,54 @@ export default function AdmissionsTemplatesPage() {
           acceptanceBody: res.acceptanceBody || "",
           acceptanceCc: res.acceptanceCc || [],
           acceptanceBcc: res.acceptanceBcc || [],
+          rejectedSubject: res.rejectedSubject || "",
+          rejectedBody: res.rejectedBody || "",
+          rejectedCc: res.rejectedCc || [],
+          rejectedBcc: res.rejectedBcc || [],
+          staleSubject: res.staleSubject || "",
+          staleBody: res.staleBody || "",
+          staleCc: res.staleCc || [],
+          staleBcc: res.staleBcc || [],
         };
         setT(next);
         setSaved(next);
-        const cc = {
-          appCc: toStr(res.applicationCc),
-          appBcc: toStr(res.applicationBcc),
-          accCc: toStr(res.acceptanceCc),
-          accBcc: toStr(res.acceptanceBcc),
+        const c: Record<Kind, { cc: string; bcc: string }> = {
+          application: { cc: toStr(res.applicationCc), bcc: toStr(res.applicationBcc) },
+          acceptance: { cc: toStr(res.acceptanceCc), bcc: toStr(res.acceptanceBcc) },
+          rejected: { cc: toStr(res.rejectedCc), bcc: toStr(res.rejectedBcc) },
+          stale: { cc: toStr(res.staleCc), bcc: toStr(res.staleBcc) },
         };
-        setAppCc(cc.appCc);
-        setAppBcc(cc.appBcc);
-        setAccCc(cc.accCc);
-        setAccBcc(cc.accBcc);
-        setSavedCc(cc);
+        setCc(c);
+        setSavedCc(c);
       })
       .catch((e) => setErr((e as Error).message));
   }, []);
 
   const dirty = useMemo(() => {
     if (!saved) return false;
-    return (
-      keyOf(t, appCc, appBcc, accCc, accBcc) !==
-      keyOf(saved, savedCc.appCc, savedCc.appBcc, savedCc.accCc, savedCc.accBcc)
-    );
-  }, [t, saved, savedCc, appCc, appBcc, accCc, accBcc]);
+    return snapshot(t, cc) !== snapshot(saved, savedCc);
+  }, [t, saved, cc, savedCc]);
 
   async function save() {
-    if (!dirty || busy) return;
+    if (!dirty || busy || !saved) return;
     setBusy(true);
     setErr(null);
     try {
       const payload = {
         ...t,
-        applicationCc: toArray(appCc),
-        applicationBcc: toArray(appBcc),
-        acceptanceCc: toArray(accCc),
-        acceptanceBcc: toArray(accBcc),
+        applicationCc: toArray(cc.application.cc),
+        applicationBcc: toArray(cc.application.bcc),
+        acceptanceCc: toArray(cc.acceptance.cc),
+        acceptanceBcc: toArray(cc.acceptance.bcc),
+        rejectedCc: toArray(cc.rejected.cc),
+        rejectedBcc: toArray(cc.rejected.bcc),
+        staleCc: toArray(cc.stale.cc),
+        staleBcc: toArray(cc.stale.bcc),
       };
       await updateEmailTemplates(payload);
-      setSaved({ ...t });
-      setSavedCc({ appCc, appBcc, accCc, accBcc });
-      setShowSaved(true);
+      setChanges(diffSummary(saved, { ...payload }));
+      setSaved({ ...payload });
+      setSavedCc(cc);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not save templates.");
     } finally {
@@ -138,7 +235,7 @@ export default function AdmissionsTemplatesPage() {
         </button>
       </div>
       <p className="muted" style={{ marginTop: -6, marginBottom: 16 }}>
-        Sent automatically when an application arrives and when an applicant is accepted.
+        Sent automatically as applications move through the pipeline.
       </p>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -161,78 +258,74 @@ export default function AdmissionsTemplatesPage() {
         </div>
       )}
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <strong>Application received email</strong>
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-          <input
-            value={t.applicationSubject}
-            onChange={(e) => setT({ ...t, applicationSubject: e.target.value })}
-            style={{ width: "100%" }}
-            placeholder="Subject"
-          />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <label style={{ fontSize: 11, fontWeight: 600 }}>
-              CC (comma-separated)
-              <input value={appCc} onChange={(e) => setAppCc(e.target.value)} style={{ width: "100%", fontSize: 13, marginTop: 2 }} />
-            </label>
-            <label style={{ fontSize: 11, fontWeight: 600 }}>
-              BCC (comma-separated)
-              <input value={appBcc} onChange={(e) => setAppBcc(e.target.value)} style={{ width: "100%", fontSize: 13, marginTop: 2 }} />
-            </label>
+      {SECTIONS.map((s) => (
+        <div className="card" style={{ marginBottom: 16 }} key={s.kind}>
+          <strong>{s.title}</strong>
+          <p className="muted" style={{ fontSize: 12.5, margin: "2px 0 0" }}>{s.note}</p>
+          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+            <input
+              value={t[`${s.kind}Subject`]}
+              onChange={(e) => setT({ ...t, [`${s.kind}Subject`]: e.target.value })}
+              style={{ width: "100%" }}
+              placeholder="Subject"
+            />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <label style={{ fontSize: 11, fontWeight: 600 }}>
+                CC (comma-separated)
+                <input
+                  value={cc[s.kind].cc}
+                  onChange={(e) => setCc({ ...cc, [s.kind]: { ...cc[s.kind], cc: e.target.value } })}
+                  style={{ width: "100%", fontSize: 13, marginTop: 2 }}
+                />
+              </label>
+              <label style={{ fontSize: 11, fontWeight: 600 }}>
+                BCC (comma-separated)
+                <input
+                  value={cc[s.kind].bcc}
+                  onChange={(e) => setCc({ ...cc, [s.kind]: { ...cc[s.kind], bcc: e.target.value } })}
+                  style={{ width: "100%", fontSize: 13, marginTop: 2 }}
+                />
+              </label>
+            </div>
+            <textarea
+              value={t[`${s.kind}Body`]}
+              onChange={(e) => setT({ ...t, [`${s.kind}Body`]: e.target.value })}
+              style={{ width: "100%", height: 140, fontFamily: "monospace" }}
+              placeholder="HTML Body"
+            />
           </div>
-          <textarea
-            value={t.applicationBody}
-            onChange={(e) => setT({ ...t, applicationBody: e.target.value })}
-            style={{ width: "100%", height: 140, fontFamily: "monospace" }}
-            placeholder="HTML Body"
-          />
         </div>
-      </div>
+      ))}
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <strong>Acceptance email</strong>
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-          <input
-            value={t.acceptanceSubject}
-            onChange={(e) => setT({ ...t, acceptanceSubject: e.target.value })}
-            style={{ width: "100%" }}
-            placeholder="Subject"
-          />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <label style={{ fontSize: 11, fontWeight: 600 }}>
-              CC (comma-separated)
-              <input value={accCc} onChange={(e) => setAccCc(e.target.value)} style={{ width: "100%", fontSize: 13, marginTop: 2 }} />
-            </label>
-            <label style={{ fontSize: 11, fontWeight: 600 }}>
-              BCC (comma-separated)
-              <input value={accBcc} onChange={(e) => setAccBcc(e.target.value)} style={{ width: "100%", fontSize: 13, marginTop: 2 }} />
-            </label>
-          </div>
-          <textarea
-            value={t.acceptanceBody}
-            onChange={(e) => setT({ ...t, acceptanceBody: e.target.value })}
-            style={{ width: "100%", height: 140, fontFamily: "monospace" }}
-            placeholder="HTML Body"
-          />
-        </div>
-      </div>
-
-      {showSaved && (
+      {changes && (
         <Modal
           open
-          onClose={() => setShowSaved(false)}
+          onClose={() => setChanges(null)}
           title="Templates saved"
-          width={420}
+          width={560}
           footer={
-            <button className="primary" onClick={() => setShowSaved(false)}>
+            <button className="primary" onClick={() => setChanges(null)}>
               Done
             </button>
           }
         >
-          <p style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+          <p style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, marginTop: 0 }}>
             <MailCheck size={18} style={{ color: "var(--success)" }} />
-            New applications and acceptances will use the updated emails.
+            {changes.length} field{changes.length === 1 ? "" : "s"} changed:
           </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 320, overflowY: "auto" }}>
+            {changes.map((c) => (
+              <div key={c.label} style={{ fontSize: 13 }}>
+                <strong>{c.label}</strong>
+                <div style={{ color: "var(--danger)", textDecoration: "line-through", wordBreak: "break-word" }}>
+                  {clip(c.from)}
+                </div>
+                <div style={{ color: "var(--success)", wordBreak: "break-word" }}>
+                  → {clip(c.to, 400)}
+                </div>
+              </div>
+            ))}
+          </div>
         </Modal>
       )}
     </>
