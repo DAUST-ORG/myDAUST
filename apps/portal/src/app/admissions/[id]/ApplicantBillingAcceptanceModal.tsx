@@ -15,13 +15,20 @@ export function ApplicantBillingAcceptanceModal({
   onClose,
   onConfirm,
 }: {
-  applicant: { id: string; name: string; score: number | null };
+  applicant: {
+    id: string;
+    name: string;
+    score: number | null;
+    housingPreference?: string | null;
+    cafeteriaPreference?: string | null;
+  };
   onClose: () => void;
   onConfirm: (billingProfile: ApplicantBillingProfileInput) => Promise<void>;
 }) {
   const [options, setOptions] = useState<BillingProfileOptions | null>(null);
-  const [housingCode, setHousingCode] = useState("");
-  const [cafeteriaCode, setCafeteriaCode] = useState("");
+  // Prefill from the applicant's own pick when it is still a live option.
+  const [housingCode, setHousingCode] = useState(applicant.housingPreference ?? "");
+  const [cafeteriaCode, setCafeteriaCode] = useState(applicant.cafeteriaPreference ?? "");
   const [insuranceSelected, setInsuranceSelected] = useState(false);
   const [cautionSelected, setCautionSelected] = useState(false);
   const [error, setError] = useState<string | null>(null);

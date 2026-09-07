@@ -119,6 +119,18 @@ export function PortalShell({
       .catch(() => {});
   }, []);
 
+  // Remember where the viewer actually works so cross-portal screens (helpdesk)
+  // can keep them in the same shell instead of bouncing to their role home.
+  useEffect(() => {
+    if (me) {
+      try {
+        window.localStorage.setItem("mydaust_last_portal", effective);
+      } catch {
+        /* private mode — shell choice just won't stick */
+      }
+    }
+  }, [me, effective]);
+
   // A temp-password account must change it before using the app.
   useEffect(() => {
     if (me?.mustChangePassword && pathname !== "/change-password")

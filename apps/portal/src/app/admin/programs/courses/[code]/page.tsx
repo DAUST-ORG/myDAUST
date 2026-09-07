@@ -6,16 +6,20 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, CalendarClock, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   type AdminCourseDetail,
+  type CourseRuleRow,
   type CourseSection,
   type StaffMember,
   createSection,
   deleteSection,
   getAdminCourseDetail,
+  getCourseRules,
   getStaff,
+  setCourseRequisites,
+  setCourseRule,
   updateCourse,
   updateSection,
 } from "@/lib/api";
-import { Field, Modal, Select } from "@/components/ui";
+import { Field, Modal, Select, Toggle } from "@/components/ui";
 
 const DAY_TOKENS = ["M", "T", "W", "Th", "F"];
 function parseDayString(s: string): string[] {
@@ -50,7 +54,7 @@ export default function CourseDetailPage() {
   return (
     <>
       <div style={{ marginBottom: 18 }}>
-        <Link href="/admin/programs" style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--fg3)", fontWeight: 600, fontSize: 13.5 }}>
+        <Link href="/admin/courses" style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--fg3)", fontWeight: 600, fontSize: 13.5 }}>
           <ArrowLeft size={16} /> Course catalog
         </Link>
       </div>
@@ -60,7 +64,10 @@ export default function CourseDetailPage() {
       <p className="muted" style={{ marginTop: -2, marginBottom: 22 }}>{c.title}</p>
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 380px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        <CatalogForm course={c} onSaved={load} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+          <CatalogForm course={c} onSaved={load} />
+          <EnrollmentRules courseId={c.id} courseCode={c.code} allCourses={c.allCourses} />
+        </div>
 
         <div className="card" style={{ margin: 0, padding: 0, overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 18px", borderBottom: "1px solid var(--divider)" }}>
@@ -111,19 +118,39 @@ function CatalogForm({ course, onSaved }: { course: AdminCourseDetail; onSaved: 
   const [title, setTitle] = useState(course.title);
   const [credits, setCredits] = useState(String(course.credits));
   const [departmentId, setDepartmentId] = useState(course.departmentId);
+  const [status, setStatus] = useState(course.status === "draft" ? "draft" : "active");
+  const [description, setDescription] = useState(course.description ?? "");
+  const [semesters, setSemesters] = useState<string[]>(course.semestersOffered);
   const [prereqs, setPrereqs] = useState<string[]>(course.prerequisites.map((p) => p.code));
+  const [coreqs, setCoreqs] = useState<string[]>(course.corequisites.map((p) => p.code));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  function togglePrereq(code: string) {
-    setPrereqs((p) => (p.includes(code) ? p.filter((x) => x !== code) : [...p, code]));
+  function toggle(list: string[], code: string) {
+    return list.includes(code) ? list.filter((x) => x !== code) : [...list, code];
+  }
+  function toggleSemester(s: string) {
+    setSemesters((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
   }
 
   async function save() {
     setMsg(null);
+    if (!title.trim()) {
+      setMsg("Title is required.");
+      return;
+    }
     setBusy(true);
     try {
-      await updateCourse(course.code, { title: title.trim(), credits: Number(credits) || course.credits, departmentId, prerequisiteCodes: prereqs });
+      await updateCourse(course.code, {
+        title: title.trim(),
+        credits: Number(credits) || course.credits,
+        departmentId,
+        status: status as "active" | "draft",
+        description: description.trim() || null,
+        semestersOffered: semesters as ("fall" | "spring" | "summer")[],
+        prerequisiteCodes: prereqs,
+        corequisiteCodes: coreqs,
+      });
       setMsg("Saved");
       onSaved();
     } catch (e) {
@@ -133,30 +160,198 @@ function CatalogForm({ course, onSaved }: { course: AdminCourseDetail; onSaved: 
     }
   }
 
+  function CheckList({
+    options,
+    selected,
+    onToggle,
+  }: {
+    options: { code: string; title: string }[];
+    selected: string[];
+    onToggle: (code: string) => void;
+  }) {
+    return (
+      <div style={{ maxHeight: 150, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 10, padding: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+        {options.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>No other courses.</span>}
+        {options.map((oc) => (
+          <label key={oc.code} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, cursor: "pointer" }}>
+            <input type="checkbox" checked={selected.includes(oc.code)} onChange={() => onToggle(oc.code)} style={{ width: 15, height: 15 }} />
+            <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>{oc.code}</span>
+            <span className="muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{oc.title}</span>
+          </label>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="card" style={{ margin: 0 }}>
       <h4 style={{ margin: "0 0 14px", fontFamily: "var(--font-display)", fontSize: 14.5, fontWeight: 700 }}>Course details</h4>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <Field label="Code"><input value={course.code} readOnly style={{ background: "var(--bg-subtle)", color: "var(--fg3)" }} /></Field>
         <Field label="Title"><input value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
-        <Field label="Credits"><input type="number" min={1} max={30} value={credits} onChange={(e) => setCredits(e.target.value)} /></Field>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="Credits"><input type="number" min={1} max={30} value={credits} onChange={(e) => setCredits(e.target.value)} /></Field>
+          <Field label="Status">
+            <Select
+              value={status}
+              onChange={(v) => setStatus(v)}
+              options={[{ value: "active", label: "Active" }, { value: "draft", label: "Draft" }]}
+            />
+          </Field>
+        </div>
         <Field label="Department">
           <Select value={departmentId} onChange={setDepartmentId} options={course.departments.map((d) => ({ value: d.id, label: d.name }))} />
         </Field>
-        <Field label="Prerequisites" hint={prereqs.length ? `${prereqs.length} selected` : "None"}>
-          <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 10, padding: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-            {course.allCourses.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>No other courses.</span>}
-            {course.allCourses.map((oc) => (
-              <label key={oc.code} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, cursor: "pointer" }}>
-                <input type="checkbox" checked={prereqs.includes(oc.code)} onChange={() => togglePrereq(oc.code)} style={{ width: 15, height: 15 }} />
-                <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>{oc.code}</span>
-                <span className="muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{oc.title}</span>
-              </label>
+        <Field label="Semesters offered">
+          <div style={{ display: "flex", gap: 6 }}>
+            {["fall", "spring", "summer"].map((s) => (
+              <button
+                key={s}
+                onClick={() => toggleSemester(s)}
+                style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: `1px solid ${semesters.includes(s) ? "var(--daust-navy)" : "var(--border)"}`, background: semesters.includes(s) ? "var(--bg-tint)" : "var(--surface)", color: semesters.includes(s) ? "var(--daust-navy)" : "var(--fg2)", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}
+              >
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
             ))}
           </div>
         </Field>
+        <Field label="Description">
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="Short course description…" style={{ width: "100%", padding: "9px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--fg1)", fontSize: 13.5, fontFamily: "var(--font-body)", resize: "vertical" }} />
+        </Field>
+        <Field label="Prerequisites" hint={prereqs.length ? `${prereqs.length} selected — grades below` : "None"}>
+          <CheckList options={course.allCourses} selected={prereqs} onToggle={(code) => setPrereqs((p) => toggle(p, code))} />
+        </Field>
+        <Field label="Corequisites" hint={coreqs.length ? `${coreqs.length} selected` : "None"}>
+          <CheckList options={course.allCourses} selected={coreqs} onToggle={(code) => setCoreqs((p) => toggle(p, code))} />
+        </Field>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button className="primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save changes"}</button>
+          {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const MIN_GRADES = ["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D"] as const;
+
+/**
+ * The registration rules for this course, folded in from the retired rule-engine
+ * screen: standing, major restriction, capacity, per-prerequisite min grades and
+ * corequisites. Enforced server-side at enrolment.
+ */
+function EnrollmentRules({
+  courseId,
+  courseCode,
+  allCourses,
+}: {
+  courseId: string;
+  courseCode: string;
+  allCourses: { code: string; title: string }[];
+}) {
+  const [rule, setRule] = useState<CourseRuleRow | null>(null);
+  const [standing, setStanding] = useState("");
+  const [major, setMajor] = useState("");
+  const [capacity, setCapacity] = useState("");
+  const [waitlist, setWaitlist] = useState(false);
+  const [grades, setGrades] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    getCourseRules()
+      .then((rows) => {
+        const row = rows.find((r) => r.courseId === courseId) ?? null;
+        setRule(row);
+        setStanding(row?.standingRequired ?? "");
+        setMajor(row?.majorRestriction ?? "");
+        setCapacity(row?.capacity === null || row?.capacity === undefined ? "" : String(row.capacity));
+        setWaitlist(row?.waitlistEnabled ?? false);
+        const g: Record<string, string> = {};
+        (row?.prerequisites ?? []).forEach((p) => {
+          g[p.code] = p.minGrade ?? "";
+        });
+        setGrades(g);
+      })
+      .catch(() => setMsg("Could not load enrollment rules."));
+  }, [courseId]);
+
+  async function save() {
+    setMsg(null);
+    setBusy(true);
+    try {
+      await setCourseRule(courseId, {
+        standingRequired: standing.trim() || null,
+        majorRestriction: major.trim() || null,
+        capacity: capacity.trim() === "" ? null : Number(capacity),
+        waitlistEnabled: waitlist,
+      });
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Could not save rule settings.");
+      setBusy(false);
+      return;
+    }
+    try {
+      await setCourseRequisites(courseId, {
+        prerequisites: (rule?.prerequisites ?? []).map((p) => ({
+          code: p.code,
+          minGrade: grades[p.code] || null,
+        })),
+        corequisites: rule?.corequisites ?? [],
+      });
+      setMsg("Saved — enforced at enrolment.");
+    } catch (e) {
+      setMsg(
+        e instanceof Error
+          ? `Rule settings saved, but grades did not: ${e.message}`
+          : "Rule settings saved, but grades did not save.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card" style={{ margin: 0 }}>
+      <h4 style={{ margin: "0 0 4px", fontFamily: "var(--font-display)", fontSize: 14.5, fontWeight: 700 }}>Enrollment rules</h4>
+      <p className="muted" style={{ fontSize: 12.5, margin: "0 0 14px" }}>
+        Gates checked at self-enrolment for {courseCode}. Prerequisites themselves are picked above; set any min grade here.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="Standing required" hint="Optional">
+            <input value={standing} onChange={(e) => setStanding(e.target.value)} placeholder="e.g. good" />
+          </Field>
+          <Field label="Major restriction" hint="Optional">
+            <input value={major} onChange={(e) => setMajor(e.target.value)} placeholder="e.g. BSCS" />
+          </Field>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="Capacity" hint="Optional">
+            <input type="number" min={1} value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="No cap" />
+          </Field>
+          <Field label="Waitlist">
+            <Toggle checked={waitlist} onChange={setWaitlist} />
+          </Field>
+        </div>
+        {(rule?.prerequisites ?? []).length > 0 && (
+          <Field label="Minimum grade per prerequisite">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(rule?.prerequisites ?? []).map((p) => (
+                <div key={p.code} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 600, fontSize: 12.5, minWidth: 90 }}>{p.code}</span>
+                  <Select
+                    value={grades[p.code] ?? ""}
+                    onChange={(v) => setGrades((g) => ({ ...g, [p.code]: v }))}
+                    options={[{ value: "", label: "Any pass" }, ...MIN_GRADES.map((m) => ({ value: m, label: m }))]}
+                  />
+                </div>
+              ))}
+            </div>
+          </Field>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className="primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save rules"}</button>
           {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
         </div>
       </div>

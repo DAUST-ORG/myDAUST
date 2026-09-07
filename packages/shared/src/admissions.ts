@@ -7,18 +7,31 @@ export type ApplicationTrack = z.infer<typeof ApplicationTrack>;
  * Public Apply form (anonymous — no auth). Name + email are the only required fields;
  * the multi-step public workflow fills the rest, feeding the same Applicant pipeline the
  * registrar reads. The server always forces stage "submitted" — none of these can set it.
+ *
+ * Emails are trimmed + lowercased at the boundary; phones must carry an explicit
+ * country code (e.g. +221 77 123 45 67) so staff never guess the dial prefix.
  */
+const sanitizedEmail = z.string().trim().toLowerCase().email();
+const sanitizedOptionalEmail = z.string().trim().toLowerCase().email().nullish();
+const phoneWithCountryCode = z
+  .string()
+  .trim()
+  .max(40)
+  .refine((v) => /^\+\d[\d\s\-.()]{5,38}$/.test(v), {
+    message: "Include the country code, e.g. +221 77 123 45 67",
+  });
+
 export const ApplicationInput = z.object({
   firstName: z.string().min(1).max(80),
   lastName: z.string().min(1).max(80),
-  email: z.string().email(),
+  email: sanitizedEmail,
   programCode: z.string().max(20).nullish(),
   track: ApplicationTrack.default("first-year"),
   // `score` is the 0–20 entrance/BAC score (drives the merit award); `bacScore` kept for back-compat.
   score: z.number().min(0).max(20).nullish(),
   bacScore: z.number().min(0).max(20).optional(),
   country: z.string().max(80).nullish(),
-  phone: z.string().max(40).nullish(),
+  phone: phoneWithCountryCode.nullish(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   gender: z.enum(["Male", "Female", "Homme", "Femme"]).nullish(),
   nationality: z.string().max(80).nullish(),
@@ -27,14 +40,88 @@ export const ApplicationInput = z.object({
   school: z.string().max(160).nullish(),
   priorGpa: z.string().max(40).nullish(),
   parentName: z.string().max(120).nullish(),
-  parentPhone: z.string().max(40).nullish(),
-  parentEmail: z.string().email().nullish(),
+  parentPhone: phoneWithCountryCode.nullish(),
+  parentEmail: sanitizedOptionalEmail,
   allergies: z.string().max(300).nullish(),
   source: z.string().max(80).nullish(),
+  // Conditional follow-up to `source`: a person's name when referred by someone,
+  // the site/page when the applicant found DAUST online. Optional at the API so
+  // older clients and pre-existing rows keep validating; the UIs require it when shown.
+  sourceDetail: z.string().trim().max(120).nullish(),
   essay: z.string().max(4000).nullish(),
   term: z.literal("Fall 2026").nullish(),
 });
 export type ApplicationInput = z.infer<typeof ApplicationInput>;
+
+/**
+ * Which follow-up `sourceDetail` asks for. Matches both English and French stored
+ * labels because the public form historically persisted the displayed (translated) value.
+ */
+export type ReferralDetailKind = "person" | "online" | "other" | null;
+
+const PERSON_REFERRAL_SOURCES = new Set([
+  "Friend / family",
+  "Ami / famille",
+  "Alumni referral",
+  "Recommandation d’un ancien",
+  "Recommandation d'un ancien",
+  "School counselor",
+  "Conseiller scolaire",
+]);
+
+const ONLINE_REFERRAL_SOURCES = new Set([
+  "Website",
+  "Site web",
+  "Social media",
+  "Réseaux sociaux",
+  "DAUST open day",
+  "Journée portes ouvertes DAUST",
+]);
+
+const OTHER_REFERRAL_SOURCES = new Set(["Other", "Autre"]);
+
+export function referralDetailKind(
+  source: string | null | undefined,
+): ReferralDetailKind {
+  if (!source || source.trim() === "") return null;
+  const v = source.trim();
+  if (PERSON_REFERRAL_SOURCES.has(v)) return "person";
+  if (ONLINE_REFERRAL_SOURCES.has(v)) return "online";
+  if (OTHER_REFERRAL_SOURCES.has(v)) return "other";
+  return null;
+}
+
+/** Fee items the admissions office owns (editable outside the finance approval workflow). */
+export const ADMISSIONS_FEE_KEYS = ["application_fee", "insurance"] as const;
+
+/**
+ * Accepted applicants pick their housing/cafeteria plan themselves, up to a
+ * deadline. The pick is a *preference*: staff apply it into the billing profile
+ * at accept (the modal prefills from it), so money still moves only through the
+ * approval-backed flow.
+ */
+const planOptionCode = z
+  .string()
+  .trim()
+  .regex(/^[a-z][a-z0-9_]{0,39}$/);
+
+export const ApplicantPlanPreferenceInput = z.object({
+  housingOptionCode: planOptionCode,
+  cafeteriaOptionCode: planOptionCode,
+});
+export type ApplicantPlanPreferenceInput = z.infer<
+  typeof ApplicantPlanPreferenceInput
+>;
+
+export const PlanPickingConfigInput = z.object({
+  enabled: z.boolean(),
+  /** ISO date (YYYY-MM-DD); picks close at end of that Dakar day. Null = no deadline. */
+  deadline: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullish(),
+});
+export type PlanPickingConfigInput = z.infer<typeof PlanPickingConfigInput>;
 
 // --- Director-editable config contracts ---
 
@@ -62,6 +149,14 @@ export const EmailTemplatesInput = z.object({
   acceptanceBody: z.string().min(1).max(10000),
   acceptanceCc: z.array(z.string()).optional().default(["admissions@daust.org"]),
   acceptanceBcc: z.array(z.string()).optional().default(["sndao@daust.org"]),
+  rejectedSubject: z.string().min(1).max(200),
+  rejectedBody: z.string().min(1).max(10000),
+  rejectedCc: z.array(z.string()).optional().default(["admissions@daust.org"]),
+  rejectedBcc: z.array(z.string()).optional().default(["sndao@daust.org"]),
+  staleSubject: z.string().min(1).max(200),
+  staleBody: z.string().min(1).max(10000),
+  staleCc: z.array(z.string()).optional().default(["admissions@daust.org"]),
+  staleBcc: z.array(z.string()).optional().default(["sndao@daust.org"]),
 });
 export type EmailTemplatesInput = z.infer<typeof EmailTemplatesInput>;
 
@@ -80,6 +175,20 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplatesInput = {
 <p>Office of Admissions, DAUST</p>`,
   acceptanceCc: ["admissions@daust.org"],
   acceptanceBcc: ["sndao@daust.org"],
+  rejectedSubject: "Update on your DAUST application",
+  rejectedBody: `<h2>Hello {{firstName}},</h2>
+<p>Thank you for your interest in DAUST. After careful review, we are unable to offer you admission for this intake.</p>
+<p>You are welcome to apply again next year. Our admissions team remains available for guidance.</p>
+<p>Office of Admissions, DAUST</p>`,
+  rejectedCc: ["admissions@daust.org"],
+  rejectedBcc: ["sndao@daust.org"],
+  staleSubject: "Your DAUST application needs attention",
+  staleBody: `<h2>Hello {{firstName}},</h2>
+<p>Your application to DAUST has been sitting idle and may be closed soon.</p>
+<p>Please complete the pending steps or reply to this email so our admissions team can keep your file moving.</p>
+<p>Office of Admissions, DAUST</p>`,
+  staleCc: ["admissions@daust.org"],
+  staleBcc: ["sndao@daust.org"],
 };
 
 /** Published cost of attendance (integer XOF; ranges keep min/max). Source: vitrine design. */

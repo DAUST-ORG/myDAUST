@@ -140,6 +140,7 @@ export interface ApplicantFields {
   parentEmail?: string | null;
   allergies?: string | null;
   source?: string | null;
+  sourceDetail?: string | null;
   essay?: string | null;
   term?: string | null;
 }
@@ -281,6 +282,9 @@ export class AdmissionsService {
       parentEmail: a.parentEmail,
       allergies: a.allergies,
       source: a.source,
+      sourceDetail: a.sourceDetail,
+      housingPreference: a.housingPreference,
+      cafeteriaPreference: a.cafeteriaPreference,
       essay: a.essay,
       term: a.term,
       onboarding,
@@ -317,6 +321,109 @@ export class AdmissionsService {
       );
     }
     return options;
+  }
+
+  /** Public capability read: the applicant's own plan options + current pick. */
+  async applicantPlanPreferenceOptions(token: string) {
+    const applicant = await this.applicantFromStatusToken(token);
+    const resolved = await this.serializable(async (tx) =>
+      this.resolveAdmissionAcademicYear(
+        tx,
+        applicant.term,
+        applicant.admissionAcademicYearId ?? undefined,
+      ),
+    );
+    const options = await this.billingProfiles.options(resolved.label);
+    const picking = await this.appConfig.planPicking();
+    return {
+      academicYearLabel: resolved.label,
+      deadline: picking.deadline,
+      open: this.planPickingOpen(picking),
+      housingPreference: applicant.housingPreference,
+      cafeteriaPreference: applicant.cafeteriaPreference,
+      housingOptions: options.housingOptions
+        .filter((o) => o.active)
+        .map((o) => ({ code: o.code, label: o.label, amountXof: o.amountXof })),
+      cafeteriaOptions: options.cafeteriaOptions
+        .filter((o) => o.active)
+        .map((o) => ({ code: o.code, label: o.label, amountXof: o.amountXof })),
+    };
+  }
+
+  /** Public capability write: the applicant's own housing/cafeteria pick. */
+  async saveApplicantPlanPreference(
+    token: string,
+    input: { housingOptionCode: string; cafeteriaOptionCode: string },
+  ) {
+    const applicant = await this.applicantFromStatusToken(token);
+    const picking = await this.appConfig.planPicking();
+    if (!this.planPickingOpen(picking)) {
+      throw new BadRequestException(
+        picking.enabled
+          ? "Plan picking is closed for this intake"
+          : "Plan picking is not open",
+      );
+    }
+    const resolved = await this.serializable(async (tx) =>
+      this.resolveAdmissionAcademicYear(
+        tx,
+        applicant.term,
+        applicant.admissionAcademicYearId ?? undefined,
+      ),
+    );
+    const options = await this.billingProfiles.options(resolved.label);
+    const housingCodes = new Set(
+      options.housingOptions.filter((o) => o.active).map((o) => o.code),
+    );
+    const cafeteriaCodes = new Set(
+      options.cafeteriaOptions.filter((o) => o.active).map((o) => o.code),
+    );
+    if (!housingCodes.has(input.housingOptionCode)) {
+      throw new BadRequestException("Unknown housing option for this intake");
+    }
+    if (!cafeteriaCodes.has(input.cafeteriaOptionCode)) {
+      throw new BadRequestException("Unknown cafeteria option for this intake");
+    }
+    const updated = await this.prisma.applicant.update({
+      where: { id: applicant.id },
+      data: {
+        housingPreference: input.housingOptionCode,
+        cafeteriaPreference: input.cafeteriaOptionCode,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Applicant",
+        entityId: applicant.id,
+        action: "plan-preference-saved",
+        actorId: applicant.id,
+        data: {
+          housingPreference: input.housingOptionCode,
+          cafeteriaPreference: input.cafeteriaOptionCode,
+        },
+      },
+    });
+    return {
+      housingPreference: updated.housingPreference,
+      cafeteriaPreference: updated.cafeteriaPreference,
+    };
+  }
+
+  private planPickingOpen(picking: { enabled: boolean; deadline: string | null }) {
+    if (!picking.enabled) return false;
+    if (!picking.deadline) return true;
+    return toDakarDateKey(new Date()) <= picking.deadline;
+  }
+
+  private async applicantFromStatusToken(token: string) {
+    if (!token || token.length < 32) {
+      throw new NotFoundException("Application status link not found");
+    }
+    const applicant = await this.prisma.applicant.findUnique({
+      where: { statusTokenHash: hashCapability(token) },
+    });
+    if (!applicant) throw new NotFoundException("Application status link not found");
+    return applicant;
   }
 
   private static readonly STAGES = [
@@ -422,6 +529,7 @@ export class AdmissionsService {
       parentEmail: set(input.parentEmail),
       allergies: set(input.allergies),
       source: set(input.source),
+      sourceDetail: set(input.sourceDetail),
       essay: set(input.essay),
       term: set(input.term),
     };
@@ -468,7 +576,86 @@ export class AdmissionsService {
       });
       return row;
     });
+    // A rejection closes the applicant's file, so the decision email goes out
+    // with the transition (best-effort, like every other applicant email).
+    if (stage === "rejected") {
+      await this.sendStageEmail(updated.id, "rejected", actorId).catch((e) =>
+        this.logger.warn(`rejection email failed: ${String(e)}`),
+      );
+    }
     return updated;
+  }
+
+  /**
+   * Manual "your file is going stale" nudge. There is no automatic stale
+   * detector — an officer decides the file has sat too long and pings the
+   * applicant with the stale template. Audited; never throws on mail failure.
+   */
+  async sendStaleNudge(actorId: string, id: string) {
+    const applicant = await this.prisma.applicant.findUnique({ where: { id } });
+    if (!applicant) throw new NotFoundException("Applicant not found");
+    if (applicant.stage === "rejected" || applicant.stage === "accepted") {
+      throw new BadRequestException(
+        "A closed file cannot be nudged as stale",
+      );
+    }
+    const sent = await this.sendStageEmail(id, "stale", actorId).catch((e) => {
+      this.logger.warn(`stale nudge failed: ${String(e)}`);
+      return false;
+    });
+    return { sent };
+  }
+
+  /**
+   * Sends the rejected/stale template for an applicant. Returns whether the
+   * mailer accepted it; audit-logs the send either way.
+   */
+  private async sendStageEmail(
+    applicantId: string,
+    kind: "rejected" | "stale",
+    actorId: string,
+  ): Promise<boolean> {
+    const applicant = await this.prisma.applicant.findUnique({
+      where: { id: applicantId },
+    });
+    if (!applicant) throw new NotFoundException("Applicant not found");
+    const appFee = await this.appConfig.applicationFee();
+    const templates = await this.appConfig.emailTemplates();
+    const subject = templates[`${kind}Subject`];
+    const body = templates[`${kind}Body`];
+    const cc = templates[`${kind}Cc`]?.length
+      ? templates[`${kind}Cc`]
+      : undefined;
+    const bcc = templates[`${kind}Bcc`]?.length
+      ? templates[`${kind}Bcc`]
+      : undefined;
+    const interpolate = (str: string) =>
+      str
+        .replace(/\{\{firstName\}\}/g, esc(applicant.firstName))
+        .replace(/\{\{lastName\}\}/g, esc(applicant.lastName))
+        .replace(/\{\{appFee\}\}/g, appFee.toLocaleString("en-US"));
+    try {
+      await this.mail.send({
+        to: applicant.email,
+        cc,
+        bcc,
+        subject: interpolate(subject),
+        html: interpolate(body),
+      });
+    } catch (e) {
+      this.logger.warn(`${kind} email failed: ${String(e)}`);
+      return false;
+    }
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Applicant",
+        entityId: applicantId,
+        action:
+          kind === "rejected" ? "rejection-email-sent" : "stale-nudge-sent",
+        actorId,
+      },
+    });
+    return true;
   }
 
   /**

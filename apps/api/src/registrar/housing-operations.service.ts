@@ -597,4 +597,167 @@ export class HousingOperationsService {
       });
     });
   }
+
+  // --- Dorm registry -------------------------------------------------------
+
+  /** Every dorm with its managed rooms and live per-room occupancy for the year. */
+  async listDorms(academicYearLabel?: string) {
+    const year = await this.yearLabel(academicYearLabel);
+    const halls = await this.prisma.hall.findMany({
+      orderBy: { name: "asc" },
+      include: { rooms: { orderBy: [{ floor: "asc" }, { roomNo: "asc" }] } },
+    });
+    const assignments = await this.prisma.housingAssignment.findMany({
+      where: { academicYearLabel: year, status: "assigned" },
+      select: { hallId: true, room: true },
+    });
+    const occupantsByRoom = new Map<string, number>();
+    for (const a of assignments) {
+      const key = annualRoomKey(a.hallId, a.room);
+      if (key) occupantsByRoom.set(key, (occupantsByRoom.get(key) ?? 0) + 1);
+    }
+    return {
+      academicYearLabel: year,
+      halls: halls.map((hall) => {
+        const rooms = hall.rooms.map((room) => {
+          const occupants =
+            occupantsByRoom.get(`${hall.id}:${normalizedRoom(room.roomNo)}`) ?? 0;
+          return {
+            id: room.id,
+            floor: room.floor,
+            roomNo: room.roomNo,
+            capacity: room.capacity,
+            note: room.note,
+            occupants,
+            full: occupants >= room.capacity,
+          };
+        });
+        const capacity = rooms.reduce((sum, r) => sum + r.capacity, 0);
+        const occupants = rooms.reduce((sum, r) => sum + r.occupants, 0);
+        return {
+          id: hall.id,
+          name: hall.name,
+          kind: hall.kind,
+          beds: hall.beds,
+          color: hall.color,
+          floors: rooms.length ? Math.max(...rooms.map((r) => r.floor)) + 1 : 0,
+          roomCount: rooms.length,
+          managedCapacity: capacity,
+          occupants,
+          rooms,
+        };
+      }),
+    };
+  }
+
+  async createHall(
+    actorId: string,
+    input: { name: string; kind: string; beds: number; color?: string },
+  ) {
+    const hall = await this.prisma.hall.create({
+      data: {
+        name: input.name,
+        kind: input.kind,
+        beds: input.beds,
+        ...(input.color ? { color: input.color } : {}),
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Hall",
+        entityId: hall.id,
+        action: "dorm-created",
+        actorId,
+        data: { name: hall.name, kind: hall.kind, beds: hall.beds },
+      },
+    });
+    return hall;
+  }
+
+  async updateHall(
+    actorId: string,
+    id: string,
+    input: { name?: string; kind?: string; beds?: number; color?: string },
+  ) {
+    const hall = await this.prisma.hall.findUnique({ where: { id } });
+    if (!hall) throw new NotFoundException("Dorm not found");
+    const updated = await this.prisma.hall.update({ where: { id }, data: input });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "Hall",
+        entityId: id,
+        action: "dorm-updated",
+        actorId,
+        data: { from: hall, to: input },
+      },
+    });
+    return updated;
+  }
+
+  async upsertRoom(
+    actorId: string,
+    hallId: string,
+    input: { floor: number; roomNo: string; capacity: number; note?: string | null },
+  ) {
+    const hall = await this.prisma.hall.findUnique({ where: { id: hallId } });
+    if (!hall) throw new NotFoundException("Dorm not found");
+    const room = await this.prisma.dormRoom.upsert({
+      where: { hallId_roomNo: { hallId, roomNo: input.roomNo } },
+      create: {
+        hallId,
+        floor: input.floor,
+        roomNo: input.roomNo,
+        capacity: input.capacity,
+        note: input.note ?? null,
+      },
+      update: {
+        floor: input.floor,
+        capacity: input.capacity,
+        note: input.note ?? null,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "DormRoom",
+        entityId: room.id,
+        action: "dorm-room-saved",
+        actorId,
+        data: { hallId, ...input },
+      },
+    });
+    return room;
+  }
+
+  async deleteRoom(actorId: string, roomId: string, academicYearLabel?: string) {
+    const room = await this.prisma.dormRoom.findUnique({
+      where: { id: roomId },
+      include: { hall: true },
+    });
+    if (!room) throw new NotFoundException("Room not found");
+    const year = await this.yearLabel(academicYearLabel);
+    const occupants = await this.prisma.housingAssignment.count({
+      where: {
+        academicYearLabel: year,
+        status: "assigned",
+        hallId: room.hallId,
+        room: { equals: room.roomNo, mode: "insensitive" },
+      },
+    });
+    if (occupants > 0) {
+      throw new BadRequestException(
+        `Room ${room.roomNo} still houses ${occupants} resident(s) for ${year}`,
+      );
+    }
+    await this.prisma.dormRoom.delete({ where: { id: roomId } });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "DormRoom",
+        entityId: roomId,
+        action: "dorm-room-deleted",
+        actorId,
+        data: { hallId: room.hallId, roomNo: room.roomNo, academicYearLabel: year },
+      },
+    });
+    return { ok: true };
+  }
 }

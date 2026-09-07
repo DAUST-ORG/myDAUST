@@ -1545,9 +1545,13 @@ export class AcademicsService {
     });
 
     const total = categories.reduce((s, c) => s + c.required, 0);
-    const completedCredits = categories.reduce((s, c) => s + c.done, 0);
-    const inProgress = categories.reduce((s, c) => s + c.inProgress, 0);
+    // Headline completion is the deduped transcript total, not the sum of capped
+    // category buckets: capping drops genuine excess credit, and one course landing
+    // in two buckets (declared vs department-fallback category) counted it twice.
+    // Categories keep their capped per-bucket display; the totals stay honest.
     const transcriptSummary = summarizeTranscriptRows(transcriptEntries);
+    const completedCredits = transcriptSummary.completedCredits;
+    const inProgress = categories.reduce((s, c) => s + c.inProgress, 0);
     const academicProgress = await this.catalogs.progress({
       programId: student.programId,
       catalogYearId: student.catalogYearId,

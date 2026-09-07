@@ -1565,6 +1565,10 @@ model Applicant {
   parentEmail                   String?
   allergies                     String?
   source                        String? // how they heard about DAUST
+  sourceDetail                  String? // follow-up: person's name (referral) or site/page (online)
+  // Self-picked housing/cafeteria plan (preference until staff apply it at accept).
+  housingPreference             String?
+  cafeteriaPreference           String?
   essay                         String?
   term                          String? // intake term, e.g. "Fall 2026"
   piSpiRequests                 PiSpiRequest[]
@@ -1998,6 +2002,23 @@ model Hall {
   color       String              @default("#153b6a")
   assignments HousingAssignment[]
   tickets     MaintenanceTicket[]
+  rooms       DormRoom[]
+}
+
+/// Managed rooms inside a dorm: floors, room numbers and bed capacity. Resident
+/// assignments keep a free-text `room` (legacy rows predate this registry), so a
+/// managed room is matched to occupants by normalized hall + room number.
+model DormRoom {
+  id       String  @id @default(uuid())
+  hallId   String
+  hall     Hall    @relation(fields: [hallId], references: [id], onDelete: Cascade)
+  floor    Int
+  roomNo   String
+  capacity Int
+  note     String?
+
+  @@unique([hallId, roomNo])
+  @@index([hallId, floor])
 }
 
 model HousingAssignment {

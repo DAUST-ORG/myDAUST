@@ -151,6 +151,20 @@ export default function RegistrarMessagesPage() {
     [students],
   );
 
+  // The directory is hundreds of rows: filter-as-you-type instead of a raw long list.
+  const [studentQuery, setStudentQuery] = useState("");
+  const filteredStudentOptions = useMemo(() => {
+    const q = studentQuery.trim().toLowerCase();
+    if (q === "") return studentOptions.slice(0, 50);
+    return [
+      { value: "", label: "— Select student —" },
+      ...students
+        .filter((s) => `${s.name} ${s.studentNo}`.toLowerCase().includes(q))
+        .slice(0, 50)
+        .map((s) => ({ value: s.studentNo, label: `${s.name} · ${s.studentNo}` })),
+    ];
+  }, [students, studentQuery, studentOptions]);
+
   const programOptions = useMemo(
     () => [
       { value: "all", label: "All programs" },
@@ -195,7 +209,13 @@ export default function RegistrarMessagesPage() {
 
             {audienceType === "individual" && (
               <Field label="Student">
-                <Select value={studentNo} onChange={setStudentNo} options={studentOptions} style={selectStyle} />
+                <input
+                  value={studentQuery}
+                  onChange={(e) => setStudentQuery(e.target.value)}
+                  placeholder="Search by name or student number…"
+                  style={{ ...selectStyle, marginBottom: 8 }}
+                />
+                <Select value={studentNo} onChange={setStudentNo} options={filteredStudentOptions} style={selectStyle} />
               </Field>
             )}
 

@@ -189,6 +189,44 @@ export class AppConfigService {
     return templates;
   }
 
+  // --- Applicant plan picking (AppSetting singleton) ---
+  private static readonly PLAN_PICKING_KEY = "admissions.plan_picking";
+
+  async planPicking(): Promise<{ enabled: boolean; deadline: string | null }> {
+    const row = await this.prisma.appSetting.findUnique({
+      where: { key: AppConfigService.PLAN_PICKING_KEY },
+    });
+    const val = row?.valueJson as
+      | { enabled?: boolean; deadline?: string | null }
+      | null
+      | undefined;
+    return {
+      enabled: val?.enabled ?? false,
+      deadline: val?.deadline ?? null,
+    };
+  }
+
+  async setPlanPicking(
+    config: { enabled: boolean; deadline: string | null },
+    actorId: string,
+  ) {
+    await this.prisma.appSetting.upsert({
+      where: { key: AppConfigService.PLAN_PICKING_KEY },
+      create: { key: AppConfigService.PLAN_PICKING_KEY, valueJson: config },
+      update: { valueJson: config },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        entity: "AppSetting",
+        entityId: AppConfigService.PLAN_PICKING_KEY,
+        action: "plan-picking-updated",
+        actorId,
+        data: config,
+      },
+    });
+    return config;
+  }
+
   /** Current application fee (fixed amount) for checkout + revenue derivation. */
   async applicationFee(): Promise<number> {
     await this.ensureSeeded();

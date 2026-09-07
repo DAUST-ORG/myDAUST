@@ -7,7 +7,7 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
-import { ApplicationInput, ProofPaymentMethod } from "@mydaust/shared";
+import { ApplicationInput, ApplicantPlanPreferenceInput, ProofPaymentMethod } from "@mydaust/shared";
 import { z } from "zod";
 import { Public } from "../auth/decorators.js";
 import { BillThrottleGuard } from "../finance/bill-throttle.guard.js";
@@ -50,6 +50,35 @@ export class AdmissionsController {
   @Post(":id/fee-checkout")
   feeCheckout(@Param("id") id: string, @Body() body: unknown) {
     return this.admissions.feeCheckout(id, FeeProofInput.parse(body).method);
+  }
+
+  /** Public capability: the applicant's own housing/cafeteria options. */
+  @Public()
+  @Get("preference-options/:token")
+  @UseGuards(BillThrottleGuard)
+  @Header("Cache-Control", "no-store, max-age=0")
+  @Header("Pragma", "no-cache")
+  @Header("Expires", "0")
+  @Header("Referrer-Policy", "no-referrer")
+  @Header("X-Robots-Tag", "noindex, nofollow")
+  preferenceOptions(@Param("token") token: string) {
+    return this.admissions.applicantPlanPreferenceOptions(token);
+  }
+
+  /** Public capability: save the applicant's own housing/cafeteria pick. */
+  @Public()
+  @Post("preference/:token")
+  @UseGuards(BillThrottleGuard)
+  @Header("Cache-Control", "no-store, max-age=0")
+  @Header("Pragma", "no-cache")
+  @Header("Expires", "0")
+  @Header("Referrer-Policy", "no-referrer")
+  @Header("X-Robots-Tag", "noindex, nofollow")
+  savePreference(@Param("token") token: string, @Body() body: unknown) {
+    return this.admissions.saveApplicantPlanPreference(
+      token,
+      ApplicantPlanPreferenceInput.parse(body),
+    );
   }
 
   /** Public: pay the application fee over PI-SPI instead of the hosted checkout. */

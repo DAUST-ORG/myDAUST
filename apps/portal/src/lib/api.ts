@@ -4048,6 +4048,7 @@ export interface ApplicantInput {
   parentEmail?: string | null;
   allergies?: string | null;
   source?: string | null;
+  sourceDetail?: string | null;
   essay?: string | null;
   term?: string | null;
 }
@@ -4158,6 +4159,31 @@ export const resendApplicantAcceptanceEmail = (id: string) =>
     `/admissions/applicants/${id}/acceptance-email/resend`,
     { method: "POST", body: "{}" },
   );
+export const sendApplicantStaleNudge = (id: string) =>
+  request<{ sent: boolean }>(`/admissions/applicants/${id}/stale-nudge`, {
+    method: "POST",
+    body: "{}",
+  });
+export interface PlanPickingConfig {
+  enabled: boolean;
+  deadline: string | null;
+}
+export const getPlanPicking = () =>
+  request<PlanPickingConfig>("/config/plan-picking");
+export const updatePlanPicking = (input: PlanPickingConfig) =>
+  request<PlanPickingConfig>("/config/plan-picking", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+export interface ApplicantPlanOptions {
+  academicYearLabel: string;
+  deadline: string | null;
+  open: boolean;
+  housingPreference: string | null;
+  cafeteriaPreference: string | null;
+  housingOptions: { code: string; label: string; amountXof: number }[];
+  cafeteriaOptions: { code: string; label: string; amountXof: number }[];
+}
 export interface ApplicantDetail {
   id: string;
   firstName: string;
@@ -4185,6 +4211,9 @@ export interface ApplicantDetail {
   parentEmail: string | null;
   allergies: string | null;
   source: string | null;
+  sourceDetail: string | null;
+  housingPreference: string | null;
+  cafeteriaPreference: string | null;
   essay: string | null;
   term: string | null;
   onboarding: ApplicantOnboardingView | null;
@@ -4260,6 +4289,19 @@ export const getPublicApplicationStatus = (token: string) =>
   request<PublicApplicationStatus>(
     `/applications/status/${encodeURIComponent(token)}`,
     { cache: "no-store" },
+  );
+export const getPublicPlanOptions = (token: string) =>
+  request<ApplicantPlanOptions>(
+    `/applications/preference-options/${encodeURIComponent(token)}`,
+    { cache: "no-store" },
+  );
+export const savePublicPlanPreference = (
+  token: string,
+  input: { housingOptionCode: string; cafeteriaOptionCode: string },
+) =>
+  request<{ housingPreference: string | null; cafeteriaPreference: string | null }>(
+    `/applications/preference/${encodeURIComponent(token)}`,
+    { method: "POST", body: JSON.stringify(input) },
   );
 
 export interface StaffMember {
@@ -5138,6 +5180,61 @@ export const releaseHousingRoom = (
   request<HousingOperationsAssignment>(
     `/registrar/housing/${encodeURIComponent(assignmentId)}/release`,
     { method: "POST", body: JSON.stringify(input) },
+  );
+export interface DormRoomRow {
+  id: string;
+  floor: number;
+  roomNo: string;
+  capacity: number;
+  note: string | null;
+  occupants: number;
+  full: boolean;
+}
+export interface DormRow {
+  id: string;
+  name: string;
+  kind: string;
+  beds: number;
+  color: string;
+  floors: number;
+  roomCount: number;
+  managedCapacity: number;
+  occupants: number;
+  rooms: DormRoomRow[];
+}
+export interface DormsView {
+  academicYearLabel: string;
+  halls: DormRow[];
+}
+export const getDorms = (academicYearLabel?: string) =>
+  request<DormsView>(
+    `/registrar/housing/dorms${academicYearLabel ? `?academicYearLabel=${encodeURIComponent(academicYearLabel)}` : ""}`,
+  );
+export const createDorm = (input: { name: string; kind: string; beds: number; color?: string }) =>
+  request(`/registrar/housing/dorms`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export const updateDorm = (
+  id: string,
+  input: { name?: string; kind?: string; beds?: number; color?: string },
+) =>
+  request(`/registrar/housing/dorms/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+export const saveDormRoom = (
+  hallId: string,
+  input: { floor: number; roomNo: string; capacity: number; note?: string | null },
+) =>
+  request(`/registrar/housing/dorms/${encodeURIComponent(hallId)}/rooms`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export const deleteDormRoom = (roomId: string, academicYearLabel?: string) =>
+  request<{ ok: boolean }>(
+    `/registrar/housing/rooms/${encodeURIComponent(roomId)}${academicYearLabel ? `?academicYearLabel=${encodeURIComponent(academicYearLabel)}` : ""}`,
+    { method: "DELETE" },
   );
 
 export interface AcademicCatalogRevisionView {

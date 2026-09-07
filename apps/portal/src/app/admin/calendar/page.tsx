@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -113,6 +113,28 @@ function updateRegistrationConfiguration(input: {
 /** Date inputs need yyyy-mm-dd; API values may arrive as full ISO timestamps. */
 function toDateInput(value: string | null): string {
   return value ? value.slice(0, 10) : "";
+}
+
+/** Group events under month banners (e.g. November 2026) for a scannable calendar. */
+function monthGroups(rows: CalendarEventRow[]): {
+  key: string;
+  label: string;
+  events: CalendarEventRow[];
+}[] {
+  const groups = new Map<string, { label: string; events: CalendarEventRow[] }>();
+  const sorted = [...rows].sort((a, b) => a.startsOn.localeCompare(b.startsOn));
+  for (const e of sorted) {
+    const key = e.startsOn.slice(0, 7);
+    const label = new Date(`${key}-02T00:00:00Z`).toLocaleString("en", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    const group = groups.get(key) ?? { label, events: [] };
+    group.events.push(e);
+    groups.set(key, group);
+  }
+  return [...groups.entries()].map(([key, g]) => ({ key, ...g }));
 }
 
 function termBadge(status: string | null): { tone: BadgeTone; label: string } {
@@ -740,44 +762,63 @@ export default function AcademicCalendarPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((e) => (
-                  <tr key={e.id} className="sis-row">
-                    <td style={{ whiteSpace: "nowrap" }}>
-                      {formatDate(e.startsOn)}
-                      {e.endsOn && (
-                        <span className="muted"> – {formatDate(e.endsOn)}</span>
-                      )}
-                    </td>
-                    <td style={{ fontWeight: 600 }}>{e.title}</td>
-                    <td>
-                      <Badge tone="neutral">{e.type}</Badge>
-                    </td>
-                    <td className="muted">{e.note ?? "—"}</td>
-                    <td>
-                      <span
+                {monthGroups(rows).map((group) => (
+                  <Fragment key={group.key}>
+                    <tr>
+                      <td
+                        colSpan={5}
                         style={{
-                          display: "inline-flex",
-                          gap: 6,
-                          justifyContent: "flex-end",
-                          width: "100%",
+                          background: "var(--bg-subtle)",
+                          fontWeight: 700,
+                          fontSize: 12.5,
+                          color: "var(--daust-navy)",
+                          letterSpacing: ".04em",
+                          textTransform: "uppercase",
                         }}
                       >
-                        <IconButton
-                          label="Edit event"
-                          onClick={() => openEditEvent(e)}
-                        >
-                          <Pencil size={15} />
-                        </IconButton>
-                        <IconButton
-                          label="Delete event"
-                          tone="danger"
-                          onClick={() => setRemoving(e)}
-                        >
-                          <Trash2 size={15} />
-                        </IconButton>
-                      </span>
-                    </td>
-                  </tr>
+                        {group.label}
+                      </td>
+                    </tr>
+                    {group.events.map((e) => (
+                      <tr key={e.id} className="sis-row">
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {formatDate(e.startsOn)}
+                          {e.endsOn && (
+                            <span className="muted"> – {formatDate(e.endsOn)}</span>
+                          )}
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{e.title}</td>
+                        <td>
+                          <Badge tone="neutral">{e.type}</Badge>
+                        </td>
+                        <td className="muted">{e.note ?? "—"}</td>
+                        <td>
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              gap: 6,
+                              justifyContent: "flex-end",
+                              width: "100%",
+                            }}
+                          >
+                            <IconButton
+                              label="Edit event"
+                              onClick={() => openEditEvent(e)}
+                            >
+                              <Pencil size={15} />
+                            </IconButton>
+                            <IconButton
+                              label="Delete event"
+                              tone="danger"
+                              onClick={() => setRemoving(e)}
+                            >
+                              <Trash2 size={15} />
+                            </IconButton>
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
